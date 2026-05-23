@@ -77,7 +77,10 @@ describe("status websocket", () => {
     });
     expect(put.status).toBe(204);
 
-    await expect(message).resolves.toMatchObject({ state: "playingQuestion" });
+    await expect(message).resolves.toMatchObject({
+      kind: "status",
+      status: { state: "playingQuestion" },
+    });
     ws.close();
     await closeServer(server);
   });

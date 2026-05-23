@@ -285,6 +285,11 @@ const publicV1Route = (path: string, method: string): boolean => {
   // `/v1/status` GET remains public for read-only realtime state for now; PUT is protected by phone API-token middleware.
   if (method === "GET" && path === "/v1/status") return true;
   if (method === "PUT" && path === "/v1/status") return true;
+  // Booth → API observability endpoints use bearer-token auth; the per-route
+  // middleware enforces it. They must bypass requireOperator() because the
+  // booth has no operator cookie.
+  if (method === "POST" && path === "/v1/events") return true;
+  if (method === "PUT" && path === "/v1/system") return true;
   if (method === "GET" && path === "/v1/questions/random") return true;
   if (method === "POST" && path === "/v1/messages") return true;
   if (method === "POST" && /^\/v1\/messages\/[^/]+\/complete$/.test(path)) return true;

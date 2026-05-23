@@ -16,9 +16,12 @@ import { AuthConfigurationError, resolveAuthConfig } from "./lib/config.js";
 import { requireOperator, type AuthVariables } from "./lib/session.js";
 import apiTokensRouter from "./routes/api-tokens.js";
 import { authRoutes } from "./routes/auth.js";
+import { eventsRouter } from "./routes/events.js";
 import { messagesRouter } from "./routes/messages.js";
 import { questionsRouter } from "./routes/questions.js";
+import { sessionsRouter } from "./routes/sessions.js";
 import { statusRouter } from "./routes/status.js";
+import { systemRouter } from "./routes/system.js";
 import { uploadsRouter } from "./routes/uploads.js";
 import { attachStatusWebSocket, wsRouter } from "./routes/ws.js";
 
@@ -57,6 +60,9 @@ export const createApp = (): Hono<{ Variables: AuthVariables }> => {
   app.route("/v1/questions", questionsRouter);
   app.route("/v1/messages", messagesRouter);
   app.route("/v1/status", statusRouter);
+  app.route("/v1/events", eventsRouter);
+  app.route("/v1/sessions", sessionsRouter);
+  app.route("/v1/system", systemRouter);
   app.route("/v1/uploads", uploadsRouter);
   app.route("/v1/ws", wsRouter);
 

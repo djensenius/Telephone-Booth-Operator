@@ -1,5 +1,11 @@
-import type { BoothStatusSnapshot, File, Message, Question } from "@prisma/client";
-import type { Message as MessagePayload, Question as QuestionPayload } from "@telephone-booth-operator/shared";
+import type { BoothEvent as PrismaBoothEvent, BoothStatusSnapshot, CallSession as PrismaCallSession, File, Message, Question } from "@prisma/client";
+import type {
+  BoothEventRecord,
+  CallOutcome,
+  CallSession as CallSessionPayload,
+  Message as MessagePayload,
+  Question as QuestionPayload,
+} from "@telephone-booth-operator/shared";
 import type { BoothStatusEvent } from "./broadcaster.js";
 import { generateSasUrl } from "./azure-blob.js";
 
@@ -44,4 +50,29 @@ export const defaultStatus = (): BoothStatusEvent => ({
   currentQuestionId: null,
   currentMessageId: null,
   lastError: null,
+});
+
+export const serializeBoothEvent = (event: PrismaBoothEvent): BoothEventRecord => ({
+  id: event.id,
+  eventId: event.eventId,
+  boothId: event.boothId,
+  bootId: event.bootId,
+  type: event.type as BoothEventRecord["type"],
+  occurredAt: iso(event.occurredAt),
+  receivedAt: iso(event.receivedAt),
+  sessionId: event.sessionId,
+  recordingId: event.recordingId,
+  payload: event.payload,
+});
+
+export const serializeCallSession = (session: PrismaCallSession): CallSessionPayload => ({
+  id: session.id,
+  boothId: session.boothId,
+  bootId: session.bootId,
+  startedAt: iso(session.startedAt),
+  endedAt: session.endedAt ? iso(session.endedAt) : null,
+  digitsDialed: session.digitsDialed,
+  outcome: session.outcome as CallOutcome | null,
+  recordingId: session.recordingId,
+  durationMs: session.durationMs,
 });

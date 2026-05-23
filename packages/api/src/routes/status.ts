@@ -2,7 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import { StatusUpdateSchema } from "@telephone-booth-operator/shared";
 import { Hono } from "hono";
 import { z } from "zod";
-import { statusBroadcaster } from "../lib/broadcaster.js";
+import { wsBroadcaster } from "../lib/broadcaster.js";
 import { db } from "../lib/db.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 import { defaultStatus, serializeStatus } from "../lib/serializers.js";
@@ -34,7 +34,7 @@ statusRouter.put("/", requireApiToken(), zValidator("json", StatusUpdateSchema),
       updatedAt: update.updatedAt ? new Date(update.updatedAt) : new Date(),
     },
   });
-  statusBroadcaster.broadcast(serializeStatus(snapshot));
+  wsBroadcaster.broadcast({ kind: "status", status: serializeStatus(snapshot) });
   return c.body(null, 204);
 });
 
