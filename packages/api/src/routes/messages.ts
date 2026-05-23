@@ -2,10 +2,11 @@ import { zValidator } from "@hono/zod-validator";
 import { MessageCreateSchema, MessageStatusSchema } from "@telephone-booth-operator/shared";
 import { Hono } from "hono";
 import { z } from "zod";
+import { kickPipelineForMessage, runModeration, runTranscription } from "../lib/ai/pipeline.js";
 import { generateSasUrl, headBlob } from "../lib/azure-blob.js";
 import { db } from "../lib/db.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
-import { serializeMessage } from "../lib/serializers.js";
+import { serializeMessage, serializeModeration, serializeTranscription } from "../lib/serializers.js";
 import type { AuthVariables } from "../lib/session.js";
 
 const listQuerySchema = z.object({
@@ -27,18 +28,29 @@ messagesRouter.get("/", zValidator("query", listQuerySchema), async (c) => {
       ...(status ? { status } : {}),
       ...(since ? { createdAt: { gte: new Date(since) } } : {}),
     },
-    include: { audio: true },
+    include: {
+      audio: true,
+      transcriptions: { orderBy: { createdAt: "desc" }, take: 1 },
+      moderations: { orderBy: { createdAt: "desc" }, take: 1 },
+    },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit,
   });
-  return c.json({ items: messages.map(serializeMessage) });
+  return c.json({ items: messages.map((message) => serializeMessage(message as never)) });
 });
 
 messagesRouter.get("/:id", zValidator("param", idParamSchema), async (c) => {
   const { id } = c.req.valid("param");
-  const message = await db.message.findUnique({ where: { id }, include: { audio: true } });
+  const message = await db.message.findUnique({
+    where: { id },
+    include: {
+      audio: true,
+      transcriptions: { orderBy: { createdAt: "desc" }, take: 1 },
+      moderations: { orderBy: { createdAt: "desc" }, take: 1 },
+    },
+  });
   if (!message) return c.json({ error: "not_found" }, 404);
-  return c.json(serializeMessage(message));
+  return c.json(serializeMessage(message as never));
 });
 
 messagesRouter.delete("/:id", zValidator("param", idParamSchema), async (c) => {
@@ -107,5 +119,49 @@ messagesRouter.post("/:id/complete", requireApiToken(), zValidator("param", idPa
     where: { id },
     data: { status: "received", receivedAt },
   });
+  // Fire-and-forget. The pipeline catches its own errors and updates the
+  // DB asynchronously; the booth's `/complete` call does not wait on AI.
+  kickPipelineForMessage(updated.id);
   return c.json({ id: updated.id, status: "received", receivedAt: receivedAt.toISOString() });
+});
+
+messagesRouter.get("/:id/transcriptions", zValidator("param", idParamSchema), async (c) => {
+  const { id } = c.req.valid("param");
+  const message = await db.message.findUnique({ where: { id }, select: { id: true } });
+  if (!message) return c.json({ error: "not_found" }, 404);
+  const items = await db.transcription.findMany({
+    where: { messageId: id },
+    orderBy: { createdAt: "desc" },
+  });
+  return c.json({ items: items.map(serializeTranscription) });
+});
+
+messagesRouter.post("/:id/transcribe", zValidator("param", idParamSchema), async (c) => {
+  const { id } = c.req.valid("param");
+  const message = await db.message.findUnique({ where: { id }, select: { id: true } });
+  if (!message) return c.json({ error: "not_found" }, 404);
+  const user = c.get("user") as { id: string } | undefined;
+  const transcriptionId = await runTranscription({
+    messageId: id,
+    requestedByUserId: user?.id ?? null,
+  });
+  if (!transcriptionId) return c.json({ error: "not_found" }, 404);
+  const row = await db.transcription.findUnique({ where: { id: transcriptionId } });
+  if (!row) return c.json({ error: "not_found" }, 404);
+  return c.json(serializeTranscription(row), 202);
+});
+
+messagesRouter.post("/:id/moderate", zValidator("param", idParamSchema), async (c) => {
+  const { id } = c.req.valid("param");
+  const message = await db.message.findUnique({ where: { id }, select: { id: true } });
+  if (!message) return c.json({ error: "not_found" }, 404);
+  const user = c.get("user") as { id: string } | undefined;
+  const moderationId = await runModeration({
+    messageId: id,
+    requestedByUserId: user?.id ?? null,
+  });
+  if (!moderationId) return c.json({ error: "no_succeeded_transcription" }, 409);
+  const row = await db.moderation.findUnique({ where: { id: moderationId } });
+  if (!row) return c.json({ error: "not_found" }, 404);
+  return c.json(serializeModeration(row), 202);
 });

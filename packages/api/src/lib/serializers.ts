@@ -1,10 +1,22 @@
-import type { BoothEvent as PrismaBoothEvent, BoothStatusSnapshot, CallSession as PrismaCallSession, File, Message, Question } from "@prisma/client";
 import type {
+  BoothEvent as PrismaBoothEvent,
+  BoothStatusSnapshot,
+  CallSession as PrismaCallSession,
+  File,
+  Message,
+  Moderation as PrismaModeration,
+  Question,
+  Transcription as PrismaTranscription,
+} from "@prisma/client";
+import type {
+  AiProvider,
   BoothEventRecord,
   CallOutcome,
   CallSession as CallSessionPayload,
   Message as MessagePayload,
+  Moderation as ModerationPayload,
   Question as QuestionPayload,
+  Transcription as TranscriptionPayload,
 } from "@telephone-booth-operator/shared";
 import type { BoothStatusEvent } from "./broadcaster.js";
 import { generateSasUrl } from "./azure-blob.js";
@@ -26,15 +38,73 @@ export const serializeQuestion = (question: WithAudio<Question>): QuestionPayloa
   audio: audioRef(question.audio),
 });
 
-export const serializeMessage = (message: WithAudio<Message>): MessagePayload => ({
-  id: message.id,
-  status: message.status,
-  questionId: message.questionId,
-  notes: message.notes,
-  createdAt: iso(message.createdAt),
-  receivedAt: message.receivedAt ? iso(message.receivedAt) : null,
-  audio: audioRef(message.audio),
+export const serializeTranscription = (row: PrismaTranscription): TranscriptionPayload => ({
+  id: row.id,
+  messageId: row.messageId,
+  provider: row.provider as AiProvider,
+  model: row.model,
+  status: row.status,
+  text: row.text,
+  language: row.language,
+  durationMs: row.durationMs,
+  latencyMs: row.latencyMs,
+  error: row.error,
+  requestedById: row.requestedById,
+  createdAt: iso(row.createdAt),
+  completedAt: row.completedAt ? iso(row.completedAt) : null,
 });
+
+const isCategoriesMap = (raw: unknown): raw is Record<string, number> => {
+  if (typeof raw !== "object" || raw === null) return false;
+  for (const value of Object.values(raw as Record<string, unknown>)) {
+    if (typeof value !== "number") return false;
+  }
+  return true;
+};
+
+export const serializeModeration = (row: PrismaModeration): ModerationPayload => ({
+  id: row.id,
+  messageId: row.messageId,
+  transcriptionId: row.transcriptionId,
+  provider: row.provider as AiProvider,
+  model: row.model,
+  status: row.status,
+  flagged: row.flagged,
+  recommendation: row.recommendation ?? null,
+  maxScore: row.maxScore,
+  categories: isCategoriesMap(row.categories) ? row.categories : null,
+  reasonSummary: row.reasonSummary,
+  latencyMs: row.latencyMs,
+  error: row.error,
+  requestedById: row.requestedById,
+  createdAt: iso(row.createdAt),
+  completedAt: row.completedAt ? iso(row.completedAt) : null,
+});
+
+export type WithAi<T> = T & {
+  transcriptions?: PrismaTranscription[];
+  moderations?: PrismaModeration[];
+};
+
+export const serializeMessage = (message: WithAudio<WithAi<Message>>): MessagePayload => {
+  const latestTranscription = (message.transcriptions ?? [])
+    .slice()
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+  const latestModeration = (message.moderations ?? [])
+    .slice()
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+  return {
+    id: message.id,
+    status: message.status,
+    questionId: message.questionId,
+    notes: message.notes,
+    createdAt: iso(message.createdAt),
+    receivedAt: message.receivedAt ? iso(message.receivedAt) : null,
+    audio: audioRef(message.audio),
+    latestTranscription: latestTranscription ? serializeTranscription(latestTranscription) : null,
+    latestModeration: latestModeration ? serializeModeration(latestModeration) : null,
+  };
+};
 
 export const serializeStatus = (snapshot: BoothStatusSnapshot): BoothStatusEvent => ({
   state: snapshot.state,

@@ -31,6 +31,18 @@ enum BoothState {
   error
 }
 
+enum TranscriptionStatus {
+  pending
+  succeeded
+  failed
+}
+
+enum ModerationRecommendation {
+  approve
+  review
+  reject
+}
+
 model Question {
   id        String    @id @default(uuid()) @db.Uuid
   prompt    String    @unique
@@ -42,18 +54,20 @@ model Question {
 }
 
 model Message {
-  id          String        @id @default(uuid()) @db.Uuid
-  status      MessageStatus @default(pending)
-  notes       String?
-  questionId  String?       @db.Uuid
-  question    Question?     @relation(fields: [questionId], references: [id])
-  audioId     String        @unique @db.Uuid
-  audio       File          @relation(fields: [audioId], references: [id])
-  createdAt   DateTime      @default(now())
-  receivedAt  DateTime?
-  decidedAt   DateTime?
-  decidedById String?
-  decidedBy   OperatorUser? @relation(fields: [decidedById], references: [id])
+  id             String          @id @default(uuid()) @db.Uuid
+  status         MessageStatus   @default(pending)
+  notes          String?
+  questionId     String?         @db.Uuid
+  question       Question?       @relation(fields: [questionId], references: [id])
+  audioId        String          @unique @db.Uuid
+  audio          File            @relation(fields: [audioId], references: [id])
+  createdAt      DateTime        @default(now())
+  receivedAt     DateTime?
+  decidedAt      DateTime?
+  decidedById    String?
+  decidedBy      OperatorUser?   @relation(fields: [decidedById], references: [id])
+  transcriptions Transcription[]
+  moderations    Moderation[]
 
   @@index([status, createdAt])
 }
@@ -133,18 +147,20 @@ model CallSession {
 // Operator humans authenticated via OIDC (Authentik by default).
 // Row is created lazily on first successful login.
 model OperatorUser {
-  id          String            @id // Historical internal ID; currently mirrors OIDC `sub`.
-  oidcSub     String            @unique
-  email       String            @unique
-  name        String
-  groups      Json? // raw groups claim at last login
-  picture     String?
-  firstSeenAt DateTime          @default(now())
-  lastSeenAt  DateTime          @default(now())
-  lastLoginAt DateTime?
-  apiTokens   ApiToken[]
-  decisions   Message[]
-  sessions    OperatorSession[]
+  id                      String            @id // Historical internal ID; currently mirrors OIDC `sub`.
+  oidcSub                 String            @unique
+  email                   String            @unique
+  name                    String
+  groups                  Json? // raw groups claim at last login
+  picture                 String?
+  firstSeenAt             DateTime          @default(now())
+  lastSeenAt              DateTime          @default(now())
+  lastLoginAt             DateTime?
+  apiTokens               ApiToken[]
+  decisions               Message[]
+  sessions                OperatorSession[]
+  requestedTranscriptions Transcription[]   @relation("TranscriptionRequester")
+  requestedModerations    Moderation[]      @relation("ModerationRequester")
 }
 
 model OperatorSession {
@@ -182,4 +198,60 @@ model ApiToken {
   @@index([lookupId])
   @@index([revokedAt, expiresAt])
   @@index([createdByUserId, createdAt])
+}
+
+// AI transcription attempts. Each re-run inserts a new row (never overwrites
+// a previous attempt) so the operator UI can show full history per message.
+// Individual rows are updated in-place through their lifecycle:
+// pending → succeeded | failed. `provider` and `model` are free-form strings
+// so adding new providers does not require a migration. Current values are
+// "openai", "mac_app", and "disabled".
+model Transcription {
+  id            String              @id @default(uuid()) @db.Uuid
+  messageId     String              @db.Uuid
+  message       Message             @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  provider      String
+  model         String?
+  status        TranscriptionStatus @default(pending)
+  text          String?
+  language      String?
+  durationMs    Int?
+  latencyMs     Int?
+  error         String?
+  requestedById String?
+  requestedBy   OperatorUser?       @relation("TranscriptionRequester", fields: [requestedById], references: [id])
+  createdAt     DateTime            @default(now())
+  completedAt   DateTime?
+  moderations   Moderation[]
+
+  @@index([messageId, createdAt])
+  @@index([status, createdAt])
+}
+
+// AI moderation attempts. Linked to the `Transcription` row whose text was
+// moderated so we can correlate. We reuse `TranscriptionStatus` for the row
+// lifecycle (pending → succeeded | failed).
+model Moderation {
+  id              String                    @id @default(uuid()) @db.Uuid
+  messageId       String                    @db.Uuid
+  message         Message                   @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  transcriptionId String?                   @db.Uuid
+  transcription   Transcription?            @relation(fields: [transcriptionId], references: [id], onDelete: SetNull)
+  provider        String
+  model           String?
+  status          TranscriptionStatus       @default(pending)
+  flagged         Boolean?
+  recommendation  ModerationRecommendation?
+  maxScore        Float?
+  categories      Json?
+  reasonSummary   String?
+  latencyMs       Int?
+  error           String?
+  requestedById   String?
+  requestedBy     OperatorUser?             @relation("ModerationRequester", fields: [requestedById], references: [id])
+  createdAt       DateTime                  @default(now())
+  completedAt     DateTime?
+
+  @@index([messageId, createdAt])
+  @@index([recommendation, createdAt])
 }

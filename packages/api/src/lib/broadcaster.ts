@@ -1,4 +1,4 @@
-import type { BoothSystemSnapshot } from "@telephone-booth-operator/shared";
+import type { BoothSystemSnapshot, Message } from "@telephone-booth-operator/shared";
 
 export type BoothStatusEvent = {
   state: "idle" | "dialTone" | "dialing" | "playingQuestion" | "beep" | "recording" | "uploading" | "playingMessage" | "playingInstructions" | "error";
@@ -9,10 +9,11 @@ export type BoothStatusEvent = {
 };
 
 // Discriminated union mirroring `@telephone-booth-operator/shared`
-// `WsEnvelopeSchema`. The status WS broadcasts both kinds.
+// `WsEnvelopeSchema`. The status WS broadcasts all three kinds.
 export type WsEnvelope =
   | { kind: "status"; status: BoothStatusEvent }
-  | { kind: "system"; boothId: string; snapshot: BoothSystemSnapshot; receivedAt: string };
+  | { kind: "system"; boothId: string; snapshot: BoothSystemSnapshot; receivedAt: string }
+  | { kind: "message"; message: Message };
 
 type Subscriber<T> = (event: T) => void;
 

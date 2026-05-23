@@ -30,6 +30,58 @@ export const AudioRefSchema = z.object({
 });
 export type AudioRef = z.infer<typeof AudioRefSchema>;
 
+// -----------------------------------------------------------------------------
+// AI: transcription + moderation. See docs/transcription-providers.md.
+// -----------------------------------------------------------------------------
+export const TranscriptionStatusSchema = z.enum(["pending", "succeeded", "failed"]);
+export type TranscriptionStatus = z.infer<typeof TranscriptionStatusSchema>;
+
+export const ModerationRecommendationSchema = z.enum(["approve", "review", "reject"]);
+export type ModerationRecommendation = z.infer<typeof ModerationRecommendationSchema>;
+
+export const AiProviderSchema = z.enum(["openai", "mac_app", "disabled"]);
+export type AiProvider = z.infer<typeof AiProviderSchema>;
+
+export const TranscriptionSchema = z.object({
+  id: z.string().uuid(),
+  messageId: z.string().uuid(),
+  provider: AiProviderSchema,
+  model: z.string().nullable(),
+  status: TranscriptionStatusSchema,
+  text: z.string().nullable(),
+  language: z.string().nullable(),
+  durationMs: z.number().int().nonnegative().nullable(),
+  latencyMs: z.number().int().nonnegative().nullable(),
+  error: z.string().nullable(),
+  requestedById: z.string().nullable(),
+  createdAt: z.string().datetime(),
+  completedAt: z.string().datetime().nullable(),
+});
+export type Transcription = z.infer<typeof TranscriptionSchema>;
+
+export const TranscriptionListSchema = z.object({ items: z.array(TranscriptionSchema) });
+export type TranscriptionList = z.infer<typeof TranscriptionListSchema>;
+
+export const ModerationSchema = z.object({
+  id: z.string().uuid(),
+  messageId: z.string().uuid(),
+  transcriptionId: z.string().uuid().nullable(),
+  provider: AiProviderSchema,
+  model: z.string().nullable(),
+  status: TranscriptionStatusSchema,
+  flagged: z.boolean().nullable(),
+  recommendation: ModerationRecommendationSchema.nullable(),
+  maxScore: z.number().min(0).max(1).nullable(),
+  categories: z.record(z.number()).nullable(),
+  reasonSummary: z.string().nullable(),
+  latencyMs: z.number().int().nonnegative().nullable(),
+  error: z.string().nullable(),
+  requestedById: z.string().nullable(),
+  createdAt: z.string().datetime(),
+  completedAt: z.string().datetime().nullable(),
+});
+export type Moderation = z.infer<typeof ModerationSchema>;
+
 export const BoothStatusSchema = z.object({
   state: BoothStateSchema,
   updatedAt: z.string().datetime(),
@@ -66,6 +118,8 @@ export const MessageSchema = z.object({
   createdAt: z.string().datetime(),
   receivedAt: z.string().datetime().nullable().optional(),
   audio: AudioRefSchema,
+  latestTranscription: TranscriptionSchema.nullable().optional(),
+  latestModeration: ModerationSchema.nullable().optional(),
 });
 export type Message = z.infer<typeof MessageSchema>;
 
@@ -329,6 +383,10 @@ export const WsEnvelopeSchema = z.discriminatedUnion("kind", [
     boothId: z.string(),
     snapshot: BoothSystemSnapshotSchema,
     receivedAt: z.string().datetime(),
+  }),
+  z.object({
+    kind: z.literal("message"),
+    message: MessageSchema,
   }),
 ]);
 export type WsEnvelope = z.infer<typeof WsEnvelopeSchema>;
