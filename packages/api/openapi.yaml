@@ -350,12 +350,206 @@ paths:
   /v1/ws/status:
     get:
       summary: WebSocket — operator UI subscribes to live status push.
+      description: |
+        Operator UIs subscribe over WebSocket; the server fans out a
+        discriminated `{kind:"status"|"system", ...}` envelope. The
+        connection is dropped with code 1009 if outbound buffering exceeds
+        ~1 MiB (slow consumer guard).
       tags: [status]
       security:
         - operatorSession: []
       responses:
         '101': { description: switching protocols }
         '426': { description: upgrade required }
+
+  /v1/events:
+    post:
+      summary: Bulk-ingest booth observability events (idempotent).
+      description: |
+        Booth → API. Events are deduplicated on `(boothId, eventId)`. Lazily
+        creates a `CallSession` when `call_started` / `call_ended` events
+        arrive.
+      tags: [events]
+      security:
+        - apiToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [events]
+              properties:
+                events:
+                  type: array
+                  items: { $ref: '#/components/schemas/BoothEvent' }
+                  minItems: 1
+                  maxItems: 500
+      responses:
+        '200':
+          description: batch accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accepted, duplicates]
+                properties:
+                  accepted: { type: integer, minimum: 0 }
+                  duplicates: { type: integer, minimum: 0 }
+        '400': { description: invalid batch (too large or malformed) }
+        '401': { description: missing or invalid API token }
+    get:
+      summary: List booth events (cursor-paginated).
+      tags: [events]
+      security:
+        - operatorSession: []
+      parameters:
+        - name: boothId
+          in: query
+          schema: { type: string }
+        - name: since
+          in: query
+          schema: { type: string, format: date-time }
+        - name: until
+          in: query
+          schema: { type: string, format: date-time }
+        - name: type
+          in: query
+          schema:
+            oneOf:
+              - { type: string }
+              - { type: array, items: { type: string } }
+        - name: sessionId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        '200':
+          description: events page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/BoothEventRecord' }
+                  nextCursor:
+                    type: [string, 'null']
+
+  /v1/events/stream:
+    get:
+      summary: Server-Sent Events live tail of booth events.
+      description: |
+        Cookie-only auth (no Bearer token). The same-origin operator UI
+        consumes this with `new EventSource(url, { withCredentials: true })`.
+      tags: [events]
+      security:
+        - operatorSession: []
+      parameters:
+        - { name: boothId, in: query, schema: { type: string } }
+        - { name: sessionId, in: query, schema: { type: string, format: uuid } }
+        - name: type
+          in: query
+          schema:
+            oneOf:
+              - { type: string }
+              - { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: SSE stream (text/event-stream)
+          content:
+            text/event-stream: {}
+
+  /v1/sessions:
+    get:
+      summary: List call sessions (cursor-paginated).
+      tags: [sessions]
+      security:
+        - operatorSession: []
+      parameters:
+        - { name: boothId, in: query, schema: { type: string } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        '200':
+          description: sessions page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/CallSession' }
+                  nextCursor:
+                    type: [string, 'null']
+
+  /v1/sessions/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Get a single call session with its ordered events.
+      tags: [sessions]
+      security:
+        - operatorSession: []
+      responses:
+        '200':
+          description: session detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CallSessionDetail' }
+        '404': { description: not found }
+
+  /v1/system:
+    put:
+      summary: Push the latest live system snapshot from a booth.
+      description: |
+        Booth → API. The operator caches the snapshot in-memory per booth
+        and broadcasts a `{kind:"system",...}` envelope on the status WS.
+        Historical metrics are owned by VictoriaMetrics (scraped via vmagent),
+        so this endpoint does **not** persist to Postgres.
+      tags: [system]
+      security:
+        - apiToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [boothId, snapshot]
+              properties:
+                boothId: { type: string }
+                snapshot: { $ref: '#/components/schemas/BoothSystemSnapshot' }
+      responses:
+        '204': { description: snapshot accepted }
+        '401': { description: missing or invalid API token }
+
+  /v1/system/current:
+    get:
+      summary: Get the latest cached system snapshot for one or all booths.
+      tags: [system]
+      security:
+        - operatorSession: []
+      parameters:
+        - name: boothId
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: snapshot or list of snapshots
+        '404': { description: no snapshot cached for the given booth }
 
 components:
   securitySchemes:
@@ -539,3 +733,101 @@ components:
       properties:
         date: { type: string }
         count: { type: integer, minimum: 0 }
+    BoothEventType:
+      type: string
+      enum:
+        - call_started
+        - call_ended
+        - digit_dialed
+        - state_transition
+        - recording_started
+        - recording_stopped
+        - upload_started
+        - upload_completed
+        - upload_failed
+        - gpio_edge
+        - audio_device_change
+        - operator_request
+        - operator_response
+        - error
+        - log
+        - system_sample
+    CallOutcome:
+      type: string
+      enum:
+        - hung_up_before_dial
+        - hung_up_during_prompt
+        - hung_up_during_recording
+        - hung_up_during_upload
+        - recording_completed
+        - recording_failed
+        - upload_failed
+        - operator_error
+        - aborted
+    BoothEvent:
+      type: object
+      required: [eventId, boothId, bootId, type, occurredAt]
+      properties:
+        eventId: { type: string, minLength: 1, maxLength: 128 }
+        boothId: { type: string, minLength: 1, maxLength: 64 }
+        bootId: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/BoothEventType' }
+        occurredAt: { type: string, format: date-time }
+        sessionId: { anyOf: [{ type: string, format: uuid }, { type: 'null' }] }
+        recordingId: { anyOf: [{ type: string }, { type: 'null' }] }
+        payload: {}
+    BoothEventRecord:
+      allOf:
+        - $ref: '#/components/schemas/BoothEvent'
+        - type: object
+          required: [id, receivedAt]
+          properties:
+            id: { type: string }
+            receivedAt: { type: string, format: date-time }
+    CallSession:
+      type: object
+      required: [id, boothId, bootId, startedAt, endedAt, digitsDialed, outcome, recordingId, durationMs]
+      properties:
+        id: { type: string, format: uuid }
+        boothId: { type: string }
+        bootId: { type: string, format: uuid }
+        startedAt: { type: string, format: date-time }
+        endedAt: { anyOf: [{ type: string, format: date-time }, { type: 'null' }] }
+        digitsDialed: { anyOf: [{ type: string }, { type: 'null' }] }
+        outcome:
+          anyOf:
+            - $ref: '#/components/schemas/CallOutcome'
+            - { type: 'null' }
+        recordingId: { anyOf: [{ type: string }, { type: 'null' }] }
+        durationMs: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }] }
+    CallSessionDetail:
+      allOf:
+        - $ref: '#/components/schemas/CallSession'
+        - type: object
+          required: [events]
+          properties:
+            events:
+              type: array
+              items: { $ref: '#/components/schemas/BoothEventRecord' }
+    BoothSystemSnapshot:
+      type: object
+      description: |
+        Forward-compatible snapshot of host vitals. All non-required fields
+        are nullable; unknown extra fields are allowed.
+      additionalProperties: true
+      required: [boothId, capturedAt]
+      properties:
+        boothId: { type: string }
+        capturedAt: { type: string, format: date-time }
+        uptimeSeconds: { type: [number, 'null'] }
+        cpuTemperatureCelsius: { type: [number, 'null'] }
+        cpuUsageRatio: { type: [number, 'null'] }
+        loadAverage1m: { type: [number, 'null'] }
+        loadAverage5m: { type: [number, 'null'] }
+        loadAverage15m: { type: [number, 'null'] }
+        memoryUsedBytes: { type: [number, 'null'] }
+        memoryTotalBytes: { type: [number, 'null'] }
+        tailscaleConnected: { type: [boolean, 'null'] }
+        throttlingFlags:
+          type: [array, 'null']
+          items: { type: string }

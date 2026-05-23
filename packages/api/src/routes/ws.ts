@@ -4,7 +4,7 @@ import type { IncomingMessage } from "node:http";
 import { randomUUID } from "node:crypto";
 import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer } from "ws";
-import { statusBroadcaster } from "../lib/broadcaster.js";
+import { wsBroadcaster } from "../lib/broadcaster.js";
 import { readSessionFromCookieHeader, type AuthVariables } from "../lib/session.js";
 
 export const wsRouter = new Hono<{ Variables: AuthVariables }>();
@@ -12,6 +12,11 @@ export const wsRouter = new Hono<{ Variables: AuthVariables }>();
 wsRouter.get("/status", (c) => c.json({ error: "upgrade_required" }, 426));
 
 type LiveSocket = WebSocket & { isAlive?: boolean; clientId?: string };
+
+// Per-client outbound backpressure cap. When the buffered amount exceeds
+// this, the slow consumer is dropped with code 1009 ("message too big") so
+// one stuck client can't pin the whole broadcaster.
+const MAX_BUFFERED_BYTES = 1_048_576; // 1 MiB
 
 const isStatusWsPath = (request: IncomingMessage): boolean => {
   const host = request.headers.host ?? "localhost";
@@ -44,10 +49,15 @@ export const attachStatusWebSocket = (server: ServerType): void => {
       ws.isAlive = true;
     });
     ws.on("close", () => {
-      if (ws.clientId) statusBroadcaster.unsubscribe(ws.clientId);
+      if (ws.clientId) wsBroadcaster.unsubscribe(ws.clientId);
     });
-    statusBroadcaster.subscribe(ws.clientId, (status) => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(status));
+    wsBroadcaster.subscribe(ws.clientId, (envelope) => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      if (ws.bufferedAmount > MAX_BUFFERED_BYTES) {
+        ws.close(1009, "operator slow consumer");
+        return;
+      }
+      ws.send(JSON.stringify(envelope));
     });
   });
 

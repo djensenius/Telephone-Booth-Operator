@@ -49,12 +49,39 @@ type FakeSession = {
   lastSeenAt: Date;
 };
 
+export type FakeBoothEvent = {
+  id: string;
+  eventId: string;
+  boothId: string;
+  bootId: string;
+  type: string;
+  occurredAt: Date;
+  receivedAt: Date;
+  sessionId: string | null;
+  recordingId: string | null;
+  payload: unknown;
+};
+
+export type FakeCallSession = {
+  id: string;
+  boothId: string;
+  bootId: string;
+  startedAt: Date;
+  endedAt: Date | null;
+  digitsDialed: string | null;
+  outcome: string | null;
+  recordingId: string | null;
+  durationMs: number | null;
+};
+
 export const store = {
   files: new Map<string, FakeFile>(),
   questions: new Map<string, FakeQuestion>(),
   messages: new Map<string, FakeMessage>(),
   statuses: [] as FakeStatus[],
   sessions: new Map<string, FakeSession>(),
+  boothEvents: [] as FakeBoothEvent[],
+  callSessions: new Map<string, FakeCallSession>(),
 };
 
 const cloneDate = (date: Date): Date => new Date(date.getTime());
@@ -115,6 +142,8 @@ export const resetFakeDb = (): void => {
   store.messages.clear();
   store.statuses.length = 0;
   store.sessions.clear();
+  store.boothEvents.length = 0;
+  store.callSessions.clear();
 };
 
 export const fakeDb = {
@@ -245,4 +274,156 @@ export const fakeDb = {
       return include?.user ? updated : { ...updated, user: undefined };
     },
   },
+  boothEvent: {
+    createMany: async ({
+      data,
+      skipDuplicates,
+    }: {
+      data: Array<Omit<FakeBoothEvent, "id" | "receivedAt">>;
+      skipDuplicates?: boolean;
+    }) => {
+      let count = 0;
+      for (const row of data) {
+        const dup = store.boothEvents.some(
+          (event) => event.boothId === row.boothId && event.eventId === row.eventId,
+        );
+        if (dup && skipDuplicates) continue;
+        if (dup) throw new Error("duplicate event");
+        store.boothEvents.push({
+          id: randomUUID(),
+          receivedAt: new Date(),
+          ...row,
+        });
+        count += 1;
+      }
+      return { count };
+    },
+    findMany: async ({
+      where = {},
+      orderBy,
+      take,
+    }: {
+      where?: Record<string, unknown>;
+      orderBy?: unknown;
+      take?: number;
+    }) => {
+      const matchesEvent = (event: FakeBoothEvent): boolean => matchesWhere(event, where);
+      let events = store.boothEvents.filter(matchesEvent);
+      events = sortBoothEvents(events, orderBy);
+      if (typeof take === "number") events = events.slice(0, take);
+      return events;
+    },
+  },
+  callSession: {
+    findUnique: async ({ where }: { where: { id: string } }) => store.callSessions.get(where.id) ?? null,
+    findMany: async ({
+      where = {},
+      orderBy,
+      take,
+    }: {
+      where?: Record<string, unknown>;
+      orderBy?: unknown;
+      take?: number;
+    }) => {
+      let sessions = [...store.callSessions.values()].filter((session) => matchesWhere(session, where));
+      sessions = sortCallSessions(sessions, orderBy);
+      if (typeof take === "number") sessions = sessions.slice(0, take);
+      return sessions;
+    },
+    upsert: async ({
+      where,
+      create,
+      update,
+    }: {
+      where: { id: string };
+      create: FakeCallSession;
+      update: Partial<FakeCallSession>;
+    }) => {
+      const existing = store.callSessions.get(where.id);
+      if (!existing) {
+        const created: FakeCallSession = { ...create };
+        store.callSessions.set(where.id, created);
+        return created;
+      }
+      const merged: FakeCallSession = { ...existing, ...update };
+      store.callSessions.set(where.id, merged);
+      return merged;
+    },
+  },
+};
+
+const matchesWhere = (record: Record<string, unknown>, where: Record<string, unknown>): boolean => {
+  for (const [key, raw] of Object.entries(where)) {
+    if (key === "OR" && Array.isArray(raw)) {
+      const ok = raw.some((branch) => matchesWhere(record, branch as Record<string, unknown>));
+      if (!ok) return false;
+      continue;
+    }
+    const value = record[key];
+    if (raw === null || raw === undefined) {
+      if (value !== raw) return false;
+      continue;
+    }
+    if (typeof raw === "object") {
+      const filter = raw as Record<string, unknown>;
+      if ("in" in filter) {
+        if (!Array.isArray(filter.in) || !(filter.in as unknown[]).includes(value)) return false;
+      }
+      if ("gte" in filter && value !== undefined && value !== null) {
+        if (compareValues(value, filter.gte) < 0) return false;
+      }
+      if ("lte" in filter && value !== undefined && value !== null) {
+        if (compareValues(value, filter.lte) > 0) return false;
+      }
+      if ("lt" in filter && value !== undefined && value !== null) {
+        if (compareValues(value, filter.lt) >= 0) return false;
+      }
+      if ("gt" in filter && value !== undefined && value !== null) {
+        if (compareValues(value, filter.gt) <= 0) return false;
+      }
+    } else {
+      if (value !== raw) return false;
+    }
+  }
+  return true;
+};
+
+const compareValues = (a: unknown, b: unknown): number => {
+  if (a instanceof Date && b instanceof Date) return a.getTime() - b.getTime();
+  if (a instanceof Date && typeof b === "string") return a.getTime() - new Date(b).getTime();
+  if (typeof a === "string" && typeof b === "string") return a < b ? -1 : a > b ? 1 : 0;
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  return 0;
+};
+
+const sortBoothEvents = (events: FakeBoothEvent[], orderBy: unknown): FakeBoothEvent[] => {
+  const orders = Array.isArray(orderBy) ? orderBy : orderBy ? [orderBy] : [];
+  return [...events].sort((a, b) => {
+    for (const order of orders) {
+      const entries = Object.entries(order as Record<string, "asc" | "desc">);
+      for (const [key, dir] of entries) {
+        const av = (a as unknown as Record<string, unknown>)[key];
+        const bv = (b as unknown as Record<string, unknown>)[key];
+        const cmp = compareValues(av, bv);
+        if (cmp !== 0) return dir === "asc" ? cmp : -cmp;
+      }
+    }
+    return 0;
+  });
+};
+
+const sortCallSessions = (sessions: FakeCallSession[], orderBy: unknown): FakeCallSession[] => {
+  const orders = Array.isArray(orderBy) ? orderBy : orderBy ? [orderBy] : [];
+  return [...sessions].sort((a, b) => {
+    for (const order of orders) {
+      const entries = Object.entries(order as Record<string, "asc" | "desc">);
+      for (const [key, dir] of entries) {
+        const av = (a as unknown as Record<string, unknown>)[key];
+        const bv = (b as unknown as Record<string, unknown>)[key];
+        const cmp = compareValues(av, bv);
+        if (cmp !== 0) return dir === "asc" ? cmp : -cmp;
+      }
+    }
+    return 0;
+  });
 };
