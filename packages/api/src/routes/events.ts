@@ -112,31 +112,27 @@ eventsRouter.get(
         ...(until ? { lte: new Date(until) } : {}),
       };
     }
-    let cursorClause: { receivedAt_id: { receivedAt: Date; id: string } } | undefined;
     if (cursor) {
       const decoded = decodeCursor(cursor);
       if (!decoded) return c.json({ error: "invalid_cursor" }, 400);
       // We can't use Prisma's `cursor` for a composite non-primary index, so
       // emit a tuple comparison via raw `where` instead.
       where.OR = [
-        { receivedAt: { lt: new Date(decoded.receivedAt) } },
+        { receivedAt: { lt: new Date(decoded.timestamp) } },
         {
-          receivedAt: new Date(decoded.receivedAt),
+          receivedAt: new Date(decoded.timestamp),
           id: { lt: decoded.id },
         },
       ];
-      cursorClause = undefined;
     }
     const rows = (await db.boothEvent.findMany({
       where,
       orderBy: [{ receivedAt: "desc" }, { id: "desc" }],
       take: limit + 1,
     }));
-    // Suppress unused-var lint while keeping the comment for future readers.
-    void cursorClause;
     const items = rows.slice(0, limit).map(serializeBoothEvent);
     const nextCursor = rows.length > limit && items.length > 0
-      ? encodeCursor({ receivedAt: items[items.length - 1]!.receivedAt, id: items[items.length - 1]!.id })
+      ? encodeCursor({ timestamp: items[items.length - 1]!.receivedAt, id: items[items.length - 1]!.id })
       : null;
     return c.json({ items, nextCursor });
   },

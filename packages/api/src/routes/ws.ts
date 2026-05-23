@@ -11,7 +11,7 @@ export const wsRouter = new Hono<{ Variables: AuthVariables }>();
 
 wsRouter.get("/status", (c) => c.json({ error: "upgrade_required" }, 426));
 
-type LiveSocket = WebSocket & { isAlive?: boolean; clientId?: string; outboundQueue?: number };
+type LiveSocket = WebSocket & { isAlive?: boolean; clientId?: string };
 
 // Per-client outbound backpressure cap. When the buffered amount exceeds
 // this, the slow consumer is dropped with code 1009 ("message too big") so

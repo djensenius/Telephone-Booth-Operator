@@ -26,8 +26,8 @@ sessionsRouter.get(
       const decoded = decodeCursor(cursor);
       if (!decoded) return c.json({ error: "invalid_cursor" }, 400);
       where.OR = [
-        { startedAt: { lt: new Date(decoded.receivedAt) } },
-        { startedAt: new Date(decoded.receivedAt), id: { lt: decoded.id } },
+        { startedAt: { lt: new Date(decoded.timestamp) } },
+        { startedAt: new Date(decoded.timestamp), id: { lt: decoded.id } },
       ];
     }
     const rows = (await db.callSession.findMany({
@@ -37,7 +37,7 @@ sessionsRouter.get(
     }));
     const items = rows.slice(0, limit).map(serializeCallSession);
     const nextCursor = rows.length > limit && items.length > 0
-      ? encodeCursor({ receivedAt: items[items.length - 1]!.startedAt, id: items[items.length - 1]!.id })
+      ? encodeCursor({ timestamp: items[items.length - 1]!.startedAt, id: items[items.length - 1]!.id })
       : null;
     return c.json({ items, nextCursor });
   },
