@@ -115,6 +115,7 @@ export const store = {
   messages: new Map<string, FakeMessage>(),
   statuses: [] as FakeStatus[],
   sessions: new Map<string, FakeSession>(),
+  users: new Map<string, Record<string, unknown>>(),
   boothEvents: [] as FakeBoothEvent[],
   callSessions: new Map<string, FakeCallSession>(),
   transcriptions: new Map<string, FakeTranscription>(),
@@ -173,12 +174,70 @@ export const seedSession = (): FakeSession => {
   return session;
 };
 
+export const seedQuestion = (overrides: Partial<FakeQuestion> = {}): FakeQuestion => {
+  const question: FakeQuestion = {
+    id: overrides.id ?? randomUUID(),
+    prompt: overrides.prompt ?? `prompt-${randomUUID().slice(0, 6)}`,
+    audioId: overrides.audioId ?? seedFile().id,
+    createdAt: overrides.createdAt ?? new Date(),
+    retiredAt: overrides.retiredAt ?? null,
+  };
+  store.questions.set(question.id, question);
+  return question;
+};
+
+export const seedMessage = (overrides: Partial<FakeMessage> = {}): FakeMessage => {
+  const message: FakeMessage = {
+    id: overrides.id ?? randomUUID(),
+    status: overrides.status ?? "pending",
+    notes: overrides.notes ?? null,
+    questionId: overrides.questionId ?? null,
+    audioId: overrides.audioId ?? seedFile().id,
+    createdAt: overrides.createdAt ?? new Date(),
+    receivedAt: overrides.receivedAt ?? null,
+    decidedAt: overrides.decidedAt ?? null,
+    decidedById: overrides.decidedById ?? null,
+  };
+  store.messages.set(message.id, message);
+  return message;
+};
+
+export const seedStatus = (overrides: Partial<FakeStatus> = {}): FakeStatus => {
+  const status: FakeStatus = {
+    id: store.statuses.length + 1,
+    state: overrides.state ?? "idle",
+    currentQuestionId: overrides.currentQuestionId ?? null,
+    currentMessageId: overrides.currentMessageId ?? null,
+    lastError: overrides.lastError ?? null,
+    updatedAt: overrides.updatedAt ?? new Date(),
+  };
+  store.statuses.push(status);
+  return status;
+};
+
+export const seedCallSession = (overrides: Partial<FakeCallSession> = {}): FakeCallSession => {
+  const session: FakeCallSession = {
+    id: overrides.id ?? randomUUID(),
+    boothId: overrides.boothId ?? "booth-1",
+    bootId: overrides.bootId ?? "boot-1",
+    startedAt: overrides.startedAt ?? new Date(),
+    endedAt: overrides.endedAt ?? null,
+    digitsDialed: overrides.digitsDialed ?? null,
+    outcome: overrides.outcome ?? null,
+    recordingId: overrides.recordingId ?? null,
+    durationMs: overrides.durationMs ?? null,
+  };
+  store.callSessions.set(session.id, session);
+  return session;
+};
+
 export const resetFakeDb = (): void => {
   store.files.clear();
   store.questions.clear();
   store.messages.clear();
   store.statuses.length = 0;
   store.sessions.clear();
+  store.users.clear();
   store.boothEvents.length = 0;
   store.callSessions.clear();
   store.transcriptions.clear();
@@ -216,6 +275,27 @@ const attachAi = (message: FakeMessage, include?: { audio?: boolean; transcripti
 };
 
 export const fakeDb = {
+  operatorUser: {
+    upsert: async ({
+      where,
+      create,
+      update,
+    }: {
+      where: { oidcSub: string };
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => {
+      const existing = store.users.get(where.oidcSub);
+      if (!existing) {
+        const next = { ...create };
+        store.users.set(where.oidcSub, next);
+        return next;
+      }
+      const merged = { ...existing, ...update };
+      store.users.set(where.oidcSub, merged);
+      return merged;
+    },
+  },
   file: {
     findUnique: async ({ where }: { where: { id?: string; sha256?: string; blobKey?: string } }) => {
       if (where.id) return store.files.get(where.id) ?? null;
@@ -323,6 +403,22 @@ export const fakeDb = {
       if (!existing) throw new Error("message not found");
       store.messages.delete(where.id);
       return existing;
+    },
+    findFirst: async ({ orderBy, select }: { orderBy?: { createdAt?: "asc" | "desc" }; select?: { id?: boolean } } = {}) => {
+      const order = orderBy?.createdAt ?? "desc";
+      const messages = [...store.messages.values()].sort((a, b) =>
+        order === "asc" ? a.createdAt.getTime() - b.createdAt.getTime() : b.createdAt.getTime() - a.createdAt.getTime(),
+      );
+      const first = messages[0];
+      if (!first) return null;
+      if (select?.id) return { id: first.id };
+      return first;
+    },
+    count: async ({ where = {} }: { where?: { status?: string; createdAt?: { gte: Date } } } = {}) => {
+      let messages = [...store.messages.values()];
+      if (where.status) messages = messages.filter((message) => message.status === where.status);
+      if (where.createdAt?.gte) messages = messages.filter((message) => message.createdAt >= where.createdAt.gte);
+      return messages.length;
     },
   },
   transcription: {
@@ -514,6 +610,8 @@ export const fakeDb = {
       store.callSessions.set(where.id, merged);
       return merged;
     },
+    count: async ({ where = {} }: { where?: Record<string, unknown> } = {}) =>
+      [...store.callSessions.values()].filter((session) => matchesWhere(session, where)).length,
   },
 };
 

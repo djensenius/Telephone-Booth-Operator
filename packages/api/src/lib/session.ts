@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { OperatorSession, OperatorUser } from "@prisma/client";
 import type { Context, MiddlewareHandler } from "hono";
+import { verifyOperatorBearer } from "./bearer-auth.js";
 import { db } from "./db.js";
 import { refreshTokens, type TokenSet } from "./oidc.js";
 
@@ -10,7 +11,7 @@ type SessionUser = OperatorSession & { user: OperatorUser };
 
 export type AuthVariables = {
   user: OperatorUser;
-  session: SessionUser;
+  session: SessionUser | null;
 };
 
 type TokenInput = Partial<TokenSet> & {
@@ -296,10 +297,29 @@ const publicV1Route = (path: string, method: string): boolean => {
   return false;
 };
 
+const bearerToken = (c: Context): string | null => {
+  const header = c.req.header("authorization") ?? c.req.header("Authorization");
+  if (!header) return null;
+  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+  return match && match[1] ? match[1].trim() : null;
+};
+
 export const requireOperator = (): MiddlewareHandler<{ Variables: AuthVariables }> =>
   async (c, next) => {
     const path = new URL(c.req.url).pathname;
     if (publicV1Route(path, c.req.method)) {
+      await next();
+      return;
+    }
+
+    const token = bearerToken(c);
+    if (token) {
+      const result = await verifyOperatorBearer(token);
+      if (!result.ok) {
+        return c.json({ error: result.reason }, result.status);
+      }
+      c.set("user", result.user);
+      c.set("session", null);
       await next();
       return;
     }

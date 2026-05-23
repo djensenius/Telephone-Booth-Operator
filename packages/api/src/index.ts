@@ -21,6 +21,7 @@ import { eventsRouter } from "./routes/events.js";
 import { messagesRouter } from "./routes/messages.js";
 import { questionsRouter } from "./routes/questions.js";
 import { sessionsRouter } from "./routes/sessions.js";
+import { statsRouter } from "./routes/stats.js";
 import { statusRouter } from "./routes/status.js";
 import { systemRouter } from "./routes/system.js";
 import { uploadsRouter } from "./routes/uploads.js";
@@ -63,6 +64,7 @@ export const createApp = (): Hono<{ Variables: AuthVariables }> => {
   app.route("/v1/status", statusRouter);
   app.route("/v1/events", eventsRouter);
   app.route("/v1/sessions", sessionsRouter);
+  app.route("/v1/stats", statsRouter);
   app.route("/v1/system", systemRouter);
   app.route("/v1/uploads", uploadsRouter);
   app.route("/v1/ws", wsRouter);

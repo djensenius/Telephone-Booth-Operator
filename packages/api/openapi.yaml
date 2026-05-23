@@ -6,7 +6,11 @@ info:
     (`Telephone-Booth-Operator`) and the phone-side Rust client.
 
     The phone client authenticates with a static Bearer API token issued from
-    the operator UI. Operator browser sessions authenticate via Authentik OIDC.
+    the operator UI. Operator browser sessions authenticate via Authentik OIDC
+    (cookie session). Native mobile apps in
+    `Telephone-Booth-Operator-Mobile` authenticate with Authentik PKCE and send
+    the resulting access token as `Authorization: Bearer <jwt>`
+    (`operatorBearer` security scheme).
   version: 1.0.0
   license:
     name: Apache-2.0
@@ -24,6 +28,7 @@ tags:
   - name: tokens
   - name: transcriptions
   - name: moderations
+  - name: stats
 paths:
   /healthz:
     get:
@@ -66,6 +71,7 @@ paths:
       tags: [status]
       security:
         - operatorSession: []
+        - operatorBearer: []
       parameters:
         - name: since
           in: query
@@ -86,6 +92,7 @@ paths:
       tags: [questions]
       security:
         - operatorSession: []
+        - operatorBearer: []
       parameters:
         - name: cursor
           in: query
@@ -104,6 +111,7 @@ paths:
       tags: [questions]
       security:
         - operatorSession: []
+        - operatorBearer: []
       requestBody:
         required: true
         content:
@@ -140,6 +148,7 @@ paths:
       tags: [questions]
       security:
         - operatorSession: []
+        - operatorBearer: []
       responses:
         '204': { description: removed }
         '404': { description: not found }
@@ -150,6 +159,7 @@ paths:
       tags: [messages]
       security:
         - operatorSession: []
+        - operatorBearer: []
       parameters:
         - name: status
           in: query
@@ -193,6 +203,7 @@ paths:
       tags: [messages]
       security:
         - operatorSession: []
+        - operatorBearer: []
       responses:
         '200':
           description: ok
@@ -205,6 +216,7 @@ paths:
       tags: [messages]
       security:
         - operatorSession: []
+        - operatorBearer: []
       responses:
         '204': { description: deleted }
         '404': { description: not found }
@@ -235,6 +247,7 @@ paths:
       tags: [transcriptions]
       security:
         - operatorSession: []
+        - operatorBearer: []
       responses:
         '200':
           description: ok
@@ -261,6 +274,7 @@ paths:
       tags: [transcriptions]
       security:
         - operatorSession: []
+        - operatorBearer: []
       responses:
         '202':
           description: transcription attempt recorded
@@ -282,6 +296,7 @@ paths:
       tags: [moderations]
       security:
         - operatorSession: []
+        - operatorBearer: []
       responses:
         '202':
           description: moderation attempt recorded
@@ -297,6 +312,7 @@ paths:
       tags: [uploads]
       security:
         - operatorSession: []
+        - operatorBearer: []
       requestBody:
         required: true
         content:
@@ -308,6 +324,27 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/UploadSlot' }
+
+  /v1/stats/summary:
+    get:
+      summary: Aggregated booth status + queue counters for mobile widgets.
+      description: |
+        Cached aggregation suitable for high-frequency widget polling.
+        Returns the latest booth status, message-queue counts (pending,
+        received-today, latest id), call counts (today + in-progress), and
+        the active WebSocket subscriber count. Cached for 5 seconds on the
+        server so 1 request per 15s widget timeline ≈ 0 extra DB load.
+      tags: [stats]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      responses:
+        '200':
+          description: aggregated booth statistics
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatsSummary' }
+        '401': { description: missing or invalid credentials }
 
   /v1/auth/login:
     get:
@@ -334,6 +371,7 @@ paths:
       tags: [auth]
       security:
         - operatorSession: []
+        - operatorBearer: []
       responses:
         '302': { description: redirect to IdP logout or UI }
 
@@ -343,6 +381,7 @@ paths:
       tags: [auth]
       security:
         - operatorSession: []
+        - operatorBearer: []
       responses:
         '200':
           description: ok
@@ -356,6 +395,7 @@ paths:
       tags: [tokens]
       security:
         - operatorSession: []
+        - operatorBearer: []
       responses:
         '200':
           description: ok
@@ -369,6 +409,7 @@ paths:
       tags: [tokens]
       security:
         - operatorSession: []
+        - operatorBearer: []
       requestBody:
         required: true
         content:
@@ -389,6 +430,7 @@ paths:
       tags: [tokens]
       security:
         - operatorSession: []
+        - operatorBearer: []
       responses:
         '204': { description: revoked }
 
@@ -400,6 +442,7 @@ paths:
       tags: [tokens]
       security:
         - operatorSession: []
+        - operatorBearer: []
       parameters:
         - name: days
           in: query
@@ -424,6 +467,7 @@ paths:
       tags: [status]
       security:
         - operatorSession: []
+        - operatorBearer: []
       responses:
         '101': { description: switching protocols }
         '426': { description: upgrade required }
@@ -469,6 +513,7 @@ paths:
       tags: [events]
       security:
         - operatorSession: []
+        - operatorBearer: []
       parameters:
         - name: boothId
           in: query
@@ -518,6 +563,7 @@ paths:
       tags: [events]
       security:
         - operatorSession: []
+        - operatorBearer: []
       parameters:
         - { name: boothId, in: query, schema: { type: string } }
         - { name: sessionId, in: query, schema: { type: string, format: uuid } }
@@ -539,6 +585,7 @@ paths:
       tags: [sessions]
       security:
         - operatorSession: []
+        - operatorBearer: []
       parameters:
         - { name: boothId, in: query, schema: { type: string } }
         - { name: cursor, in: query, schema: { type: string } }
@@ -569,6 +616,7 @@ paths:
       tags: [sessions]
       security:
         - operatorSession: []
+        - operatorBearer: []
       responses:
         '200':
           description: session detail
@@ -608,6 +656,7 @@ paths:
       tags: [system]
       security:
         - operatorSession: []
+        - operatorBearer: []
       parameters:
         - name: boothId
           in: query
@@ -629,6 +678,15 @@ components:
       in: cookie
       name: __Host-booth_session
       description: HMAC-signed opaque session cookie set after OIDC login.
+    operatorBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: jwt
+      description: |
+        Authentik-issued JWT access token. Validated against the provider's
+        JWKS, issuer, audience (operator web client_id + any configured
+        `OIDC_MOBILE_AUDIENCES`), and operator group / email allow-lists.
+        Used by native mobile apps that authenticate via PKCE.
   schemas:
     Health:
       type: object
@@ -961,3 +1019,30 @@ components:
         items:
           type: array
           items: { $ref: '#/components/schemas/Transcription' }
+    StatsSummary:
+      type: object
+      required: [booth, messages, calls, realtime, generatedAt]
+      properties:
+        booth: { $ref: '#/components/schemas/BoothStatus' }
+        messages:
+          type: object
+          required: [pending, receivedToday, latestId]
+          properties:
+            pending: { type: integer, minimum: 0 }
+            receivedToday: { type: integer, minimum: 0 }
+            latestId:
+              anyOf:
+                - { type: string, format: uuid }
+                - { type: 'null' }
+        calls:
+          type: object
+          required: [today, inProgress]
+          properties:
+            today: { type: integer, minimum: 0 }
+            inProgress: { type: integer, minimum: 0 }
+        realtime:
+          type: object
+          required: [wsClients]
+          properties:
+            wsClients: { type: integer, minimum: 0 }
+        generatedAt: { type: string, format: date-time }

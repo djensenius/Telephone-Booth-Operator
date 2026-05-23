@@ -3,15 +3,18 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { OperatorMeSchema } from "@telephone-booth-operator/shared";
 import { z } from "zod";
-import { db } from "../lib/db.js";
 import { getAuthConfig, getRequiredOidcConfig } from "../lib/config.js";
 import {
   buildAuthorizationUrl,
   endSessionUrl,
   exchangeCode,
   getOidcClient,
-  type IDTokenClaims,
 } from "../lib/oidc.js";
+import {
+  authorizeAndUpsertOperator,
+  groupsFromClaims as _groupsFromClaims,
+  validateAuthorization as _validateAuthorization,
+} from "../lib/operator-user.js";
 import {
   createSession,
   destroySession,
@@ -19,6 +22,11 @@ import {
   setSessionCookie,
   type AuthVariables,
 } from "../lib/session.js";
+
+// Re-exported for tests + downstream code that imported them from this
+// module before the shared `operator-user.ts` extraction.
+export const groupsFromClaims = _groupsFromClaims;
+export const validateAuthorization = _validateAuthorization;
 
 const loginQuerySchema = z.object({
   return_to: z.string().optional(),
@@ -65,48 +73,6 @@ const html = (title: string, detail: string): string => `<!doctype html>
   <head><meta charset="utf-8"><title>${title}</title></head>
   <body><h1>${title}</h1><p>${detail}</p></body>
 </html>`;
-
-const claimString = (claims: IDTokenClaims, name: string): string | null => {
-  const value = claims[name];
-  return typeof value === "string" && value.trim() ? value : null;
-};
-
-export const groupsFromClaims = (claims: IDTokenClaims): string[] => {
-  const groups = claims.groups;
-  if (!Array.isArray(groups)) return [];
-  return groups.filter((group): group is string => typeof group === "string");
-};
-
-const pictureFromClaims = (claims: IDTokenClaims): string | null => {
-  const picture = claimString(claims, "picture");
-  if (!picture) return null;
-  try {
-    return new URL(picture).toString();
-  } catch {
-    return null;
-  }
-};
-
-export const validateAuthorization = (
-  claims: IDTokenClaims,
-  groups: string[],
-): string | null => {
-  const config = getRequiredOidcConfig();
-  const email = claimString(claims, "email")?.toLowerCase();
-
-  if (config.allowedEmails.length > 0 && (!email || !config.allowedEmails.includes(email))) {
-    return "This email is not authorized for this booth.";
-  }
-
-  if (
-    config.allowedGroups.length > 0 &&
-    !groups.some((group) => config.allowedGroups.includes(group))
-  ) {
-    return "This account is not in an authorized operator group.";
-  }
-
-  return null;
-};
 
 const operatorMe = (session: Awaited<ReturnType<typeof readSession>>) => {
   if (!session) return null;
@@ -169,46 +135,24 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
       query.state,
       pending.nonce,
     );
-    const groups = groupsFromClaims(tokenSet.claims);
-    const authorizationError = validateAuthorization(tokenSet.claims, groups);
-    if (authorizationError) {
-      return c.html(html("Operator credentials required", authorizationError), 403);
+
+    const result = await authorizeAndUpsertOperator(tokenSet.claims, { markLogin: true });
+    if (!result.ok) {
+      if (result.status === 403) {
+        return c.html(html("Operator credentials required", result.reason), 403);
+      }
+      return c.html(
+        html(
+          "OIDC login failed",
+          result.reason === "missing_email_claim"
+            ? "The provider did not return an email claim."
+            : "The login response could not be validated.",
+        ),
+        400,
+      );
     }
 
-    const email = claimString(tokenSet.claims, "email");
-    if (!email) {
-      return c.html(html("OIDC login failed", "The provider did not return an email claim."), 400);
-    }
-
-    const now = new Date();
-    const name =
-      claimString(tokenSet.claims, "name") ??
-      claimString(tokenSet.claims, "preferred_username") ??
-      email;
-    const picture = pictureFromClaims(tokenSet.claims);
-    const user = await db.operatorUser.upsert({
-      where: { oidcSub: tokenSet.claims.sub },
-      create: {
-        id: tokenSet.claims.sub,
-        oidcSub: tokenSet.claims.sub,
-        email,
-        name,
-        groups,
-        picture,
-        lastLoginAt: now,
-        lastSeenAt: now,
-      },
-      update: {
-        email,
-        name,
-        groups,
-        picture,
-        lastLoginAt: now,
-        lastSeenAt: now,
-      },
-    });
-
-    const session = await createSession(user, tokenSet, c.req.raw);
+    const session = await createSession(result.user, tokenSet, c.req.raw);
     setSessionCookie(c, session.id, session.expiresAt);
     return c.redirect(pending.returnTo, 302);
   } catch {

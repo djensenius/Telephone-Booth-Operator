@@ -13,6 +13,11 @@ export type OidcRuntimeConfig = {
   scopes: string;
   allowedGroups: string[];
   allowedEmails: string[];
+  // Additional `aud` values accepted on bearer access tokens — typically the
+  // Authentik client_id(s) of native/mobile applications that PKCE-auth
+  // against the same provider. The primary `clientId` above is always
+  // accepted in addition to this list.
+  mobileAudiences: string[];
 };
 
 export type AuthDisabledConfig = {
@@ -99,6 +104,14 @@ export const resolveAuthConfig = (
     allowedGroups,
     allowedEmails: csv(first(env.OIDC_ALLOWED_EMAILS, env.AUTHENTIK_ALLOWED_EMAILS)).map(
       (email) => email.toLowerCase(),
+    ),
+    mobileAudiences: csv(
+      first(
+        env.OIDC_MOBILE_AUDIENCES,
+        env.OIDC_MOBILE_CLIENT_IDS,
+        env.AUTHENTIK_MOBILE_AUDIENCES,
+        env.AUTHENTIK_MOBILE_CLIENT_IDS,
+      ),
     ),
   };
 };
