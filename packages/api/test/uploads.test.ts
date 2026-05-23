@@ -2,21 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.js")).fakeDb }));
 vi.mock("../src/lib/azure-blob.js", async () => (await import("./support/fake-azure.js")).fakeAzureModule);
-vi.mock("../src/lib/require-api-token.js", () => ({
-  requireApiToken: () => async (c: { req: { header: (name: string) => string | undefined }; json: (body: unknown, status?: number) => Response }, next: () => Promise<void>) => {
-    if (c.req.header("authorization") === "Bearer test-token") {
-      await next();
-      return;
-    }
-    return c.json({ error: "invalid_token" }, 401);
-  },
-}));
 
 import { createApp } from "../src/index.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { resetFakeAzure } from "./support/fake-azure.js";
 import { resetFakeDb } from "./support/fake-db.js";
-import { phoneHeaders } from "./support/http.js";
+import { operatorCookie } from "./support/http.js";
 
 const setup = () => {
   process.env.NODE_ENV = "test";
@@ -36,7 +27,7 @@ describe("uploads routes", () => {
     const sha256 = "c".repeat(64);
     const res = await app.request("/v1/uploads/sas", {
       method: "POST",
-      headers: { "content-type": "application/json", ...phoneHeaders },
+      headers: { "content-type": "application/json", cookie: operatorCookie() },
       body: JSON.stringify({ kind: "question-audio", sha256, sizeBytes: 100, contentType: "audio/flac" }),
     });
     expect(res.status, await res.clone().text()).toBe(201);
@@ -52,7 +43,7 @@ describe("uploads routes", () => {
     const app = createApp();
     const res = await app.request("/v1/uploads/sas", {
       method: "POST",
-      headers: { "content-type": "application/json", ...phoneHeaders },
+      headers: { "content-type": "application/json", cookie: operatorCookie() },
       body: JSON.stringify({ kind: "message", sha256: "not-a-sha", sizeBytes: 100, contentType: "audio/flac" }),
     });
     expect(res.status).toBe(400);
