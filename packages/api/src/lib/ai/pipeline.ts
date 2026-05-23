@@ -319,6 +319,13 @@ export const runModeration = async (opts: RunModerationOptions): Promise<string 
         completedAt: new Date(),
       },
     });
+    // Moderation upstream failed — don't strand the recording. Advance the
+    // message into the operator queue if it is still "received" so a
+    // transient provider outage doesn't hide messages from the operator.
+    const current = await db.message.findUnique({ where: { id: opts.messageId }, select: { status: true } });
+    if (current?.status === "received") {
+      await db.message.update({ where: { id: opts.messageId }, data: { status: "pending" } });
+    }
     log("error", "ai.moderation.failed", { messageId: opts.messageId, provider: provider.name, reason });
     await broadcastMessage(opts.messageId);
     return pending.id;

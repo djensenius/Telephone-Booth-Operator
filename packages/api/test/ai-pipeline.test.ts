@@ -206,6 +206,25 @@ describe("AI pipeline", () => {
     expect(withRelations.status).toBe("approved");
   });
 
+  it("advances messages to pending when the moderation provider throws so they reach the operator queue", async () => {
+    const id = await seedReceivedMessage();
+    const moderationProvider: ModerationProvider = {
+      name: "openai",
+      model: "omni-moderation-latest",
+      moderate: vi.fn(async () => { throw new Error("upstream blew up"); }),
+    };
+    await runTranscription({ messageId: id, deps: baseDeps({ moderationProvider }) });
+    const message = await fakeDb.message.findUnique({ where: { id }, include: { audio: true, transcriptions: true, moderations: true } });
+    const withRelations = message as unknown as {
+      status: string;
+      moderations: Array<{ status: string; error: string | null }>;
+    };
+    expect(withRelations.status).toBe("pending");
+    expect(withRelations.moderations).toHaveLength(1);
+    expect(withRelations.moderations[0]?.status).toBe("failed");
+    expect(withRelations.moderations[0]?.error).toContain("upstream blew up");
+  });
+
   it("records a transcription failure and does not auto-decide when the provider throws", async () => {
     const id = await seedReceivedMessage();
     const failingProvider: TranscriptionProvider = {
