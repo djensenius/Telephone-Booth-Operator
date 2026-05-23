@@ -249,42 +249,47 @@ paths:
     post:
       summary: Re-run transcription (and downstream moderation) for a message.
       description: |
-        Runs transcription synchronously to completion (provider call +
-        any downstream moderation step) and returns the resulting
-        `Transcription` row. Status is `202` because moderation and any
-        auto-decision may still be settling when the response is sent.
-        Additional updates also arrive via the `/v1/ws/status` socket as
-        `{kind:"message"}` envelopes.
+        Runs the full pipeline synchronously — transcription, then
+        moderation against the new transcript, then any configured
+        auto-decision — and returns the resulting `Transcription` row.
+        The same row (plus the matching `Message` update) is also
+        broadcast on `/v1/ws/status` as a `{kind:"message"}` envelope so
+        other clients pick up the change without polling. The status is
+        `202` to signal that the row may still be of interest to other
+        listeners (history queries, the moderation row, the parent
+        `Message`), even though the synchronous work is finished.
       tags: [transcriptions]
       security:
         - operatorSession: []
       responses:
         '202':
-          description: pending transcription accepted
+          description: transcription attempt recorded
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Transcription' }
         '404': { description: message not found }
-        '409': { description: transcription provider disabled }
-        '503': { description: transcription provider unavailable }
 
   /v1/messages/{id}/moderate:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       summary: Re-run moderation against the latest succeeded transcription.
+      description: |
+        Runs the moderation step (and any configured auto-decision)
+        synchronously against the latest succeeded transcription and
+        returns the resulting `Moderation` row. The same row is also
+        broadcast on `/v1/ws/status` as a `{kind:"message"}` envelope.
       tags: [moderations]
       security:
         - operatorSession: []
       responses:
         '202':
-          description: pending moderation accepted
+          description: moderation attempt recorded
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Moderation' }
-        '404': { description: message or transcription not found }
-        '409': { description: moderation provider disabled or transcription empty }
-        '503': { description: moderation provider unavailable }
+        '404': { description: message not found }
+        '409': { description: no succeeded transcription available to moderate }
 
   /v1/uploads/sas:
     post:

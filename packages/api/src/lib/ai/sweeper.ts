@@ -6,17 +6,25 @@ import { db } from "../db.js";
 import { resolveAiConfig } from "./config.js";
 import { kickPipelineForMessage } from "./pipeline.js";
 
-const findStrandedMessages = async (limit: number): Promise<readonly string[]> => {
+const findStrandedMessages = async (limit: number, intervalMs: number): Promise<readonly string[]> => {
   const messages = await db.message.findMany({
     where: { status: "received" },
     orderBy: { createdAt: "desc" },
     take: limit,
     include: { transcriptions: { select: { id: true, status: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 1 } },
   });
+  // A transcription row is considered stuck if it has been pending longer than
+  // twice the sweeper interval. This covers the case where the API crashed
+  // after writing the pending row but before the provider returned.
+  const pendingStaleAfter = Date.now() - intervalMs * 2;
   const stranded: string[] = [];
   for (const message of messages) {
-    const latest = (message as unknown as { transcriptions: Array<{ status: string }> }).transcriptions[0];
-    if (!latest || latest.status === "failed") stranded.push(message.id);
+    const latest = (message as unknown as { transcriptions: Array<{ status: string; createdAt: Date }> }).transcriptions[0];
+    if (!latest || latest.status === "failed") {
+      stranded.push(message.id);
+    } else if (latest.status === "pending" && latest.createdAt.getTime() < pendingStaleAfter) {
+      stranded.push(message.id);
+    }
   }
   return stranded;
 };
@@ -35,7 +43,7 @@ export const startAiSweeper = (): SweeperHandle | null => {
   const tick = async (): Promise<void> => {
     if (stopped) return;
     try {
-      const stranded = await findStrandedMessages(20);
+      const stranded = await findStrandedMessages(20, intervalMs);
       for (const id of stranded) kickPipelineForMessage(id);
     } catch (error) {
       const reason = error instanceof Error ? error.message : "sweeper failed";
