@@ -18,15 +18,15 @@ export const BoothStateSchema = z.enum([
 ]);
 export type BoothState = z.infer<typeof BoothStateSchema>;
 
-export const MessageStatusSchema = z.enum(["pending", "approved", "rejected"]);
+export const MessageStatusSchema = z.enum(["uploading", "received", "pending", "approved", "rejected"]);
 export type MessageStatus = z.infer<typeof MessageStatusSchema>;
+
+export const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 
 export const AudioRefSchema = z.object({
   url: z.string().url(),
-  sha256: z.string().regex(/^[a-f0-9]{64}$/),
-  sizeBytes: z.number().int().positive(),
-  durationMs: z.number().int().positive().nullable().optional(),
-  contentType: z.literal("audio/flac"),
+  sha256: Sha256Schema,
+  durationMs: z.number().int().positive().nullable(),
 });
 export type AudioRef = z.infer<typeof AudioRefSchema>;
 
@@ -39,6 +39,11 @@ export const BoothStatusSchema = z.object({
 });
 export type BoothStatus = z.infer<typeof BoothStatusSchema>;
 
+export const StatusUpdateSchema = BoothStatusSchema.omit({ updatedAt: true }).extend({
+  updatedAt: z.string().datetime().optional(),
+});
+export type StatusUpdate = z.infer<typeof StatusUpdateSchema>;
+
 export const QuestionSchema = z.object({
   id: z.string().uuid(),
   prompt: z.string().min(1).max(280),
@@ -47,21 +52,56 @@ export const QuestionSchema = z.object({
 });
 export type Question = z.infer<typeof QuestionSchema>;
 
+export const QuestionCreateSchema = z.object({
+  prompt: z.string().min(1).max(280),
+  audioFileId: z.string().uuid(),
+});
+export type QuestionCreate = z.infer<typeof QuestionCreateSchema>;
+
 export const MessageSchema = z.object({
   id: z.string().uuid(),
   status: MessageStatusSchema,
   questionId: z.string().uuid().nullable().optional(),
   notes: z.string().nullable().optional(),
   createdAt: z.string().datetime(),
+  receivedAt: z.string().datetime().nullable().optional(),
   audio: AudioRefSchema,
 });
 export type Message = z.infer<typeof MessageSchema>;
 
-export const UploadSlotSchema = z.object({
+export const MessageCreateSchema = z.object({
+  questionId: z.string().uuid().optional(),
+  durationMs: z.number().int().positive(),
+  sha256: Sha256Schema,
+});
+export type MessageCreate = z.infer<typeof MessageCreateSchema>;
+
+export const MessageInitiatedSchema = z.object({
   id: z.string().uuid(),
   uploadUrl: z.string().url(),
-  expiresAt: z.string().datetime(),
+  blobName: z.string().min(1),
+});
+export type MessageInitiated = z.infer<typeof MessageInitiatedSchema>;
+
+export const MessageCompleteSchema = z.object({
+  id: z.string().uuid(),
+  status: z.literal("received"),
+  receivedAt: z.string().datetime(),
+});
+export type MessageComplete = z.infer<typeof MessageCompleteSchema>;
+
+export const UploadSasRequestSchema = z.object({
+  kind: z.enum(["message", "question-audio"]),
+  sha256: Sha256Schema,
+  sizeBytes: z.number().int().positive(),
   contentType: z.literal("audio/flac"),
+});
+export type UploadSasRequest = z.infer<typeof UploadSasRequestSchema>;
+
+export const UploadSlotSchema = z.object({
+  uploadUrl: z.string().url(),
+  blobName: z.string().min(1),
+  expiresAt: z.string().datetime(),
 });
 export type UploadSlot = z.infer<typeof UploadSlotSchema>;
 

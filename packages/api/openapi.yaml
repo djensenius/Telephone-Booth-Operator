@@ -3,8 +3,7 @@ info:
   title: Telephone-Booth Operator API
   description: |
     Versioned REST + WebSocket API between the operator console
-    (`Telephone-Booth-Operator`) and the phone-side Rust client
-    (`Telephone-Booth` on the `rust-client` branch).
+    (`Telephone-Booth-Operator`) and the phone-side Rust client.
 
     The phone client authenticates with a static Bearer API token issued from
     the operator UI. Operator browser sessions authenticate via Authentik OIDC.
@@ -16,8 +15,6 @@ servers:
     description: Local dev
   - url: https://operator.example.com
     description: Production
-security:
-  - apiToken: []
 tags:
   - name: status
   - name: questions
@@ -41,6 +38,7 @@ paths:
     get:
       summary: Current booth status as last reported by the phone client.
       tags: [status]
+      security: []
       responses:
         '200':
           description: ok
@@ -50,19 +48,46 @@ paths:
     put:
       summary: Phone client posts a status update.
       tags: [status]
+      security:
+        - apiToken: []
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/BoothStatusUpdate' }
+            schema: { $ref: '#/components/schemas/StatusUpdate' }
       responses:
         '204': { description: accepted }
 
+  /v1/status/history:
+    get:
+      summary: Recent booth status snapshots for operator charts.
+      tags: [status]
+      security:
+        - operatorSession: []
+      parameters:
+        - name: since
+          in: query
+          schema: { type: string, format: date-time }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusHistory' }
+
   /v1/questions:
     get:
-      summary: List approved questions.
+      summary: List active questions.
       tags: [questions]
+      security:
+        - operatorSession: []
       parameters:
+        - name: cursor
+          in: query
+          schema: { type: string, format: uuid }
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
@@ -71,28 +96,32 @@ paths:
           description: ok
           content:
             application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/Question' }
+              schema: { $ref: '#/components/schemas/QuestionList' }
     post:
-      summary: Create a new question (operator only).
+      summary: Create a new question from an already-uploaded audio file.
       tags: [questions]
+      security:
+        - operatorSession: []
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/QuestionInput' }
+            schema: { $ref: '#/components/schemas/QuestionCreate' }
       responses:
         '201':
           description: created
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Question' }
+        '404': { description: audio file not found }
+        '409': { description: duplicate prompt or audio already attached }
 
   /v1/questions/random:
     get:
-      summary: A random approved question for the phone client to play.
+      summary: A random active question for the phone client to play.
       tags: [questions]
+      security:
+        - apiToken: []
       responses:
         '200':
           description: ok
@@ -105,103 +134,114 @@ paths:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     delete:
-      summary: Remove a question.
+      summary: Soft-delete a question.
       tags: [questions]
+      security:
+        - operatorSession: []
       responses:
         '204': { description: removed }
+        '404': { description: not found }
 
   /v1/messages:
     get:
-      summary: List messages, filterable by status.
+      summary: List messages, filterable by status and creation time.
       tags: [messages]
+      security:
+        - operatorSession: []
       parameters:
         - name: status
           in: query
-          schema:
-            type: string
-            enum: [pending, approved, rejected]
+          schema: { $ref: '#/components/schemas/MessageStatus' }
+        - name: since
+          in: query
+          schema: { type: string, format: date-time }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
       responses:
         '200':
           description: ok
           content:
             application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/Message' }
-
-  /v1/messages/random:
-    get:
-      summary: A random approved message for the phone client to play.
+              schema: { $ref: '#/components/schemas/MessageList' }
+    post:
+      summary: Initiate a message audio upload.
       tags: [messages]
+      security:
+        - apiToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MessageCreate' }
       responses:
-        '200':
-          description: ok
+        '201':
+          description: upload URL issued
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Message' }
-        '404': { description: no messages available }
+              schema: { $ref: '#/components/schemas/MessageInitiated' }
+        '404': { description: question not found }
+        '409': { description: duplicate message }
 
   /v1/messages/{id}:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-    patch:
-      summary: Approve or reject a message (operator only).
+    get:
+      summary: Fetch one message.
       tags: [messages]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [status]
-              properties:
-                status:
-                  type: string
-                  enum: [approved, rejected]
-                notes: { type: string, nullable: true }
+      security:
+        - operatorSession: []
       responses:
         '200':
           description: ok
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Message' }
+        '404': { description: not found }
+    delete:
+      summary: Delete a message row.
+      tags: [messages]
+      security:
+        - operatorSession: []
+      responses:
+        '204': { description: deleted }
+        '404': { description: not found }
 
-  /v1/uploads:
+  /v1/messages/{id}/complete:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     post:
-      summary: Request a presigned Azure Blob upload slot for a new recording.
+      summary: Phone client notifies that the direct blob upload finished.
+      tags: [messages]
+      security:
+        - apiToken: []
+      responses:
+        '200':
+          description: received
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageComplete' }
+        '404': { description: not found }
+        '409': { description: blob not found }
+        '422': { description: sha256 mismatch }
+
+  /v1/uploads/sas:
+    post:
+      summary: Request a presigned Azure Blob upload URL.
       tags: [uploads]
+      security:
+        - apiToken: []
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              required: [sha256, sizeBytes, contentType]
-              properties:
-                sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
-                sizeBytes: { type: integer, minimum: 1 }
-                contentType: { type: string, enum: [audio/flac] }
-                durationMs: { type: integer, minimum: 1 }
-                questionId: { type: string, format: uuid, nullable: true }
+            schema: { $ref: '#/components/schemas/UploadSasRequest' }
       responses:
         '201':
           description: upload slot issued
           content:
             application/json:
               schema: { $ref: '#/components/schemas/UploadSlot' }
-
-  /v1/uploads/{id}/complete:
-    parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-    post:
-      summary: Phone client notifies that the upload finished successfully.
-      tags: [uploads]
-      responses:
-        '200':
-          description: ok
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Message' }
 
   /v1/auth/login:
     get:
@@ -246,7 +286,7 @@ paths:
 
   /v1/api-tokens:
     get:
-      summary: List API tokens for the current operator (last4 only).
+      summary: List active API tokens (last4 only).
       tags: [tokens]
       security:
         - operatorSession: []
@@ -257,7 +297,7 @@ paths:
             application/json:
               schema:
                 type: array
-                items: { $ref: '#/components/schemas/ApiTokenSummary' }
+                items: { $ref: '#/components/schemas/ApiToken' }
     post:
       summary: Issue a new API token. Returned in plaintext exactly once.
       tags: [tokens]
@@ -267,12 +307,7 @@ paths:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              required: [name]
-              properties:
-                name: { type: string, minLength: 1, maxLength: 64 }
-                expiresInDays: { type: integer, minimum: 1, maximum: 3650 }
+            schema: { $ref: '#/components/schemas/CreateApiTokenRequest' }
       responses:
         '201':
           description: created
@@ -295,12 +330,14 @@ paths:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     get:
-      summary: Daily usage buckets for an API token.
+      summary: Return coarse API token usage buckets.
       tags: [tokens]
       security:
         - operatorSession: []
       parameters:
-        - { name: days, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 365, default: 30 } }
+        - name: days
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 365, default: 30 }
       responses:
         '200':
           description: ok
@@ -309,7 +346,6 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/ApiTokenUsageBucket' }
-        '404': { description: token not found }
 
   /v1/ws/status:
     get:
@@ -319,6 +355,7 @@ paths:
         - operatorSession: []
       responses:
         '101': { description: switching protocols }
+        '426': { description: upgrade required }
 
 components:
   securitySchemes:
@@ -340,65 +377,126 @@ components:
         status: { type: string, enum: [ok] }
         version: { type: string }
         time: { type: string, format: date-time }
+    BoothState:
+      type: string
+      enum: [idle, dialTone, dialing, playingQuestion, beep, recording, uploading, playingMessage, playingInstructions, error]
     BoothStatus:
       type: object
       required: [state, updatedAt]
       properties:
-        state:
-          type: string
-          enum:
-            [idle, dialTone, dialing, playingQuestion, beep, recording, uploading, playingMessage, playingInstructions, error]
+        state: { $ref: '#/components/schemas/BoothState' }
         updatedAt: { type: string, format: date-time }
-        currentQuestionId: { type: string, format: uuid, nullable: true }
-        currentMessageId: { type: string, format: uuid, nullable: true }
-        lastError: { type: string, nullable: true }
-    BoothStatusUpdate:
-      allOf:
-        - $ref: '#/components/schemas/BoothStatus'
+        currentQuestionId: { anyOf: [{ type: string, format: uuid }, { type: 'null' }] }
+        currentMessageId: { anyOf: [{ type: string, format: uuid }, { type: 'null' }] }
+        lastError: { anyOf: [{ type: string }, { type: 'null' }] }
+    StatusUpdate:
+      type: object
+      required: [state]
+      properties:
+        state: { $ref: '#/components/schemas/BoothState' }
+        updatedAt: { type: string, format: date-time }
+        currentQuestionId: { anyOf: [{ type: string, format: uuid }, { type: 'null' }] }
+        currentMessageId: { anyOf: [{ type: string, format: uuid }, { type: 'null' }] }
+        lastError: { anyOf: [{ type: string }, { type: 'null' }] }
+    StatusHistory:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/BoothStatus' }
+    Sha256:
+      type: string
+      pattern: '^[a-f0-9]{64}$'
+    AudioRef:
+      type: object
+      required: [url, sha256, durationMs]
+      properties:
+        url: { type: string, format: uri, description: 'Time-bounded read URL.' }
+        sha256: { $ref: '#/components/schemas/Sha256' }
+        durationMs: { anyOf: [{ type: integer, minimum: 1 }, { type: 'null' }] }
     Question:
       type: object
       required: [id, prompt, createdAt, audio]
       properties:
         id: { type: string, format: uuid }
-        prompt: { type: string }
+        prompt: { type: string, minLength: 1, maxLength: 280 }
         createdAt: { type: string, format: date-time }
         audio: { $ref: '#/components/schemas/AudioRef' }
-    QuestionInput:
+    QuestionCreate:
       type: object
-      required: [prompt, audio]
+      required: [prompt, audioFileId]
       properties:
         prompt: { type: string, minLength: 1, maxLength: 280 }
-        audio: { $ref: '#/components/schemas/AudioRef' }
+        audioFileId: { type: string, format: uuid }
+    QuestionList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Question' }
+        nextCursor: { anyOf: [{ type: string, format: uuid }, { type: 'null' }] }
+    MessageStatus:
+      type: string
+      enum: [uploading, received, pending, approved, rejected]
     Message:
       type: object
       required: [id, status, createdAt, audio]
       properties:
         id: { type: string, format: uuid }
-        status: { type: string, enum: [pending, approved, rejected] }
-        questionId: { type: string, format: uuid, nullable: true }
-        notes: { type: string, nullable: true }
+        status: { $ref: '#/components/schemas/MessageStatus' }
+        questionId: { anyOf: [{ type: string, format: uuid }, { type: 'null' }] }
+        notes: { anyOf: [{ type: string }, { type: 'null' }] }
         createdAt: { type: string, format: date-time }
+        receivedAt: { anyOf: [{ type: string, format: date-time }, { type: 'null' }] }
         audio: { $ref: '#/components/schemas/AudioRef' }
-    AudioRef:
+    MessageCreate:
       type: object
-      required: [url, sha256, sizeBytes, contentType]
+      required: [durationMs, sha256]
       properties:
-        url: { type: string, format: uri, description: 'Time-bounded read URL.' }
-        sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+        questionId: { type: string, format: uuid }
+        durationMs: { type: integer, minimum: 1 }
+        sha256: { $ref: '#/components/schemas/Sha256' }
+    MessageInitiated:
+      type: object
+      required: [id, uploadUrl, blobName]
+      properties:
+        id: { type: string, format: uuid }
+        uploadUrl: { type: string, format: uri }
+        blobName: { type: string }
+    MessageComplete:
+      type: object
+      required: [id, status, receivedAt]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [received] }
+        receivedAt: { type: string, format: date-time }
+    MessageList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Message' }
+    UploadSasRequest:
+      type: object
+      required: [kind, sha256, sizeBytes, contentType]
+      properties:
+        kind: { type: string, enum: [message, question-audio] }
+        sha256: { $ref: '#/components/schemas/Sha256' }
         sizeBytes: { type: integer, minimum: 1 }
-        durationMs: { type: integer, minimum: 1, nullable: true }
         contentType: { type: string, enum: [audio/flac] }
     UploadSlot:
       type: object
-      required: [id, uploadUrl, expiresAt, contentType]
+      required: [uploadUrl, blobName, expiresAt]
       properties:
-        id: { type: string, format: uuid }
         uploadUrl: { type: string, format: uri, description: 'Azure Blob PUT URL with SAS.' }
+        blobName: { type: string }
         expiresAt: { type: string, format: date-time }
-        contentType: { type: string, enum: [audio/flac] }
     OperatorMe:
       type: object
-      required: [id, name, email, groups]
+      required: [id, name, email, groups, providerName]
       properties:
         id: { type: string, description: 'Stable Authentik sub' }
         name: { type: string }
@@ -408,7 +506,13 @@ components:
           items: { type: string }
         picture: { type: string, format: uri }
         providerName: { type: string, description: 'OIDC_PROVIDER_NAME — drives UI copy.' }
-    ApiTokenSummary:
+    CreateApiTokenRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        expiresInDays: { type: integer, minimum: 1, maximum: 3650 }
+    ApiToken:
       type: object
       required: [id, name, last4, createdAt, expiresAt, lastUsedAt, revokedAt]
       properties:
@@ -416,12 +520,12 @@ components:
         name: { type: string }
         last4: { type: string, minLength: 4, maxLength: 4 }
         createdAt: { type: string, format: date-time }
-        expiresAt: { type: string, format: date-time, nullable: true }
-        lastUsedAt: { type: string, format: date-time, nullable: true }
-        revokedAt: { type: string, format: date-time, nullable: true }
+        expiresAt: { anyOf: [{ type: string, format: date-time }, { type: 'null' }] }
+        lastUsedAt: { anyOf: [{ type: string, format: date-time }, { type: 'null' }] }
+        revokedAt: { anyOf: [{ type: string, format: date-time }, { type: 'null' }] }
     ApiTokenCreated:
       allOf:
-        - $ref: '#/components/schemas/ApiTokenSummary'
+        - $ref: '#/components/schemas/ApiToken'
         - type: object
           required: [plaintext]
           properties:
@@ -432,5 +536,5 @@ components:
       type: object
       required: [date, count]
       properties:
-        date: { type: string, format: date }
+        date: { type: string }
         count: { type: integer, minimum: 0 }

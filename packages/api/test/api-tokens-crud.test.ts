@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import { createApp } from "../src/index.js";
 import { flushApiTokenUsageUpdates, resetApiTokenStateForTests } from "../src/lib/api-tokens.js";
-import { requireApiToken, type ApiTokenVariables } from "../src/lib/require-api-token-stub.js";
+import { requireApiToken, type ApiTokenVariables } from "../src/lib/require-api-token.js";
 
 const { fakeDb, store } = vi.hoisted(() => {
   const users = new Map<string, Record<string, unknown>>();

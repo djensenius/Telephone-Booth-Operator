@@ -31,9 +31,9 @@ The API never proxies file bytes. Every upload and every download uses a
 **short-lived SAS URL** scoped to a single blob:
 
 - **Upload SAS:** `cw` (create + write), 15 min TTL, scoped to one blob
-  key, `application/flac` content type pinned, `x-ms-blob-content-type`
-  enforced. Issued by `POST /v1/uploads` after the API validates the
-  `sha256` doesn't already exist.
+  key, `audio/flac` content type pinned. Issued by `POST /v1/messages`
+  for message recordings or `POST /v1/uploads/sas` for explicit upload
+  slots.
 - **Download SAS:** `r` (read), 5 min TTL, scoped to one blob key.
   Issued whenever the API serializes an `AudioRef` for the browser or
   the phone client.

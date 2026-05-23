@@ -16,6 +16,11 @@ import { AuthConfigurationError, resolveAuthConfig } from "./lib/config.js";
 import { requireOperator, type AuthVariables } from "./lib/session.js";
 import apiTokensRouter from "./routes/api-tokens.js";
 import { authRoutes } from "./routes/auth.js";
+import { messagesRouter } from "./routes/messages.js";
+import { questionsRouter } from "./routes/questions.js";
+import { statusRouter } from "./routes/status.js";
+import { uploadsRouter } from "./routes/uploads.js";
+import { attachStatusWebSocket, wsRouter } from "./routes/ws.js";
 
 const webOrigins = (): string[] =>
   (process.env.WEB_ORIGIN ?? process.env.PUBLIC_WEB_URL ?? "http://localhost:5173")
@@ -47,6 +52,14 @@ export const createApp = (): Hono<{ Variables: AuthVariables }> => {
   app.route("/v1/api-tokens", apiTokensRouter);
   app.use("/v1/*", requireOperator());
 
+  // Operator backend resource routes. Keep token-management mounts separate;
+  // the operator-token-mgmt sibling task owns /v1/api-tokens.
+  app.route("/v1/questions", questionsRouter);
+  app.route("/v1/messages", messagesRouter);
+  app.route("/v1/status", statusRouter);
+  app.route("/v1/uploads", uploadsRouter);
+  app.route("/v1/ws", wsRouter);
+
   return app;
 };
 
@@ -63,9 +76,10 @@ const start = (): void => {
   }
 
   const port = Number.parseInt(process.env.API_PORT ?? "8787", 10);
-  serve({ fetch: app.fetch, port }, ({ port }) => {
+  const server = serve({ fetch: app.fetch, port }, ({ port }) => {
     console.log(`telephone-booth-operator API listening on :${port}`);
   });
+  attachStatusWebSocket(server);
 };
 
 const app = createApp();

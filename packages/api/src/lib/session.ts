@@ -1,7 +1,6 @@
 import { createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { OperatorSession, OperatorUser } from "@prisma/client";
 import type { Context, MiddlewareHandler } from "hono";
-import { getCookie } from "hono/cookie";
 import { db } from "./db.js";
 import { refreshTokens, type TokenSet } from "./oidc.js";
 
@@ -95,6 +94,18 @@ const verifyCookieValue = (value: string | undefined): string | null => {
   const expectedBuffer = Buffer.from(expected);
   if (signatureBuffer.length !== expectedBuffer.length) return null;
   return timingSafeEqual(signatureBuffer, expectedBuffer) ? sessionId : null;
+};
+
+const cookieValueFromHeader = (cookieHeader: string | undefined, name: string): string | undefined => {
+  if (!cookieHeader) return undefined;
+  for (const part of cookieHeader.split(";")) {
+    const trimmed = part.trim();
+    const separator = trimmed.indexOf("=");
+    if (separator <= 0) continue;
+    if (trimmed.slice(0, separator) !== name) continue;
+    return decodeURIComponent(trimmed.slice(separator + 1));
+  }
+  return undefined;
 };
 
 export const encryptSessionSecret = (plaintext: string | null | undefined): string | null => {
@@ -204,8 +215,10 @@ export const createSession = async (
   });
 };
 
-export const readSession = async (c: Context): Promise<SessionUser | null> => {
-  const sessionId = verifyCookieValue(getCookie(c, SESSION_COOKIE_NAME));
+export const readSessionFromCookieHeader = async (
+  cookieHeader: string | undefined,
+): Promise<SessionUser | null> => {
+  const sessionId = verifyCookieValue(cookieValueFromHeader(cookieHeader, SESSION_COOKIE_NAME));
   if (!sessionId) return null;
 
   const session = await db.operatorSession.findUnique({
@@ -220,6 +233,9 @@ export const readSession = async (c: Context): Promise<SessionUser | null> => {
   });
   return session;
 };
+
+export const readSession = async (c: Context): Promise<SessionUser | null> =>
+  readSessionFromCookieHeader(c.req.header("cookie"));
 
 export const destroySession = async (c: Context): Promise<SessionUser | null> => {
   const session = await readSession(c);
@@ -266,11 +282,13 @@ const refreshIfExpired = async (c: Context, session: SessionUser): Promise<Sessi
 const publicV1Route = (path: string, method: string): boolean => {
   if (path.startsWith("/v1/auth/")) return true;
   if (path === "/v1/healthz") return true;
-  // `/v1/status` remains public for read-only realtime state for now; PUT will be protected by phone API-token middleware.
-  if (path === "/v1/status") return true;
-  if (path.startsWith("/v1/uploads/")) return true;
-  if (method === "POST" && path === "/v1/uploads") return true;
-  if (path === "/v1/messages/incoming") return true;
+  // `/v1/status` GET remains public for read-only realtime state for now; PUT is protected by phone API-token middleware.
+  if (method === "GET" && path === "/v1/status") return true;
+  if (method === "PUT" && path === "/v1/status") return true;
+  if (method === "GET" && path === "/v1/questions/random") return true;
+  if (method === "POST" && path === "/v1/messages") return true;
+  if (method === "POST" && /^\/v1\/messages\/[^/]+\/complete$/.test(path)) return true;
+  if (method === "POST" && path === "/v1/uploads/sas") return true;
   return false;
 };
 

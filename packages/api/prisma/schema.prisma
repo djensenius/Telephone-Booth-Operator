@@ -11,6 +11,8 @@ datasource db {
 }
 
 enum MessageStatus {
+  uploading
+  received
   pending
   approved
   rejected
@@ -48,6 +50,7 @@ model Message {
   audioId     String        @unique @db.Uuid
   audio       File          @relation(fields: [audioId], references: [id])
   createdAt   DateTime      @default(now())
+  receivedAt  DateTime?
   decidedAt   DateTime?
   decidedById String?
   decidedBy   OperatorUser? @relation(fields: [decidedById], references: [id])

@@ -49,7 +49,37 @@ either a `/v2` path or a deliberate ADR.
 The spec declares two:
 
 - `apiToken` — HTTP Bearer for the phone client.
-- `operatorSession` — `tbo_session` cookie set after Authentik OIDC login.
+- `operatorSession` — `__Host-booth_session` cookie set after Authentik OIDC login.
 
 Every operation declares which one(s) it accepts. Routes with `security: []`
-are public (health check, login endpoints).
+are public (health check, login endpoints, and read-only `GET /v1/status`).
+
+## Implemented backend routes
+
+The Hono API now serves questions, messages, status, upload-SAS issuance, and
+status WebSocket routes. Phone-client writes use Bearer API tokens; operator UI
+management routes use the session cookie.
+
+```sh
+# Phone: push current booth state
+curl -X PUT "$PUBLIC_API_URL/v1/status" \
+  -H "Authorization: Bearer $PHONE_API_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"state":"recording"}'
+
+# Phone: get a random question
+curl "$PUBLIC_API_URL/v1/questions/random" \
+  -H "Authorization: Bearer $PHONE_API_TOKEN"
+
+# Phone: initiate and complete a message upload
+curl -X POST "$PUBLIC_API_URL/v1/messages" \
+  -H "Authorization: Bearer $PHONE_API_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"durationMs":12000,"sha256":"<64 lowercase hex>"}'
+curl -X POST "$PUBLIC_API_URL/v1/messages/<id>/complete" \
+  -H "Authorization: Bearer $PHONE_API_TOKEN"
+
+# Operator: list recent messages using the browser session cookie
+curl "$PUBLIC_API_URL/v1/messages?status=received&limit=25" \
+  -H 'Cookie: __Host-booth_session=<signed-session>'
+```

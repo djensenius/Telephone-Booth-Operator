@@ -36,16 +36,19 @@ spec change.
 
 ## Request flow: phone uploads a recording
 
-1. Phone client `POST /v1/uploads` with `{sha256, sizeBytes, contentType}`.
-2. API verifies the file doesn't already exist, mints a SAS URL scoped
-   to that single blob key, returns `{id, uploadUrl, expiresAt}`.
+1. Phone client `POST /v1/messages` with `{questionId?, durationMs, sha256}`.
+2. API creates a `File` + `Message` row (status: `uploading`), mints a
+   15-minute SAS URL scoped to `messages/<sha-prefix>/<sha>.flac`, and
+   returns `{id, uploadUrl, blobName}`.
 3. Phone client `PUT`s the FLAC to `uploadUrl` directly — Azure
    terminates the upload, the API never sees the bytes.
-4. Phone client `POST /v1/uploads/{id}/complete`. The API stat's the
-   blob, persists a `File` + `Message` row (status: `pending`), and
-   broadcasts a status event over `/v1/ws/status`.
-5. Operator browsers receive the WS event; the **Pending** panel
-   refreshes.
+4. Phone client `POST /v1/messages/{id}/complete`. The API stat's the
+   blob, checks the content-addressed SHA-256, marks the message
+   `received`, and returns `{id, status, receivedAt}`.
+5. Phone status updates sent to `PUT /v1/status` are appended to
+   `BoothStatusSnapshot` and broadcast over the cookie-authenticated
+   `/v1/ws/status` WebSocket; missing-cookie clients are closed with
+   policy violation `1008`.
 
 ## Request flow: operator login
 
