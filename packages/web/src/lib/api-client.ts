@@ -4,7 +4,11 @@ import {
   ApiTokenCreatedSchema,
   ApiTokenSchema,
   ApiTokenUsageBucketSchema,
+  BoothEventListSchema,
   BoothStatusSchema,
+  BoothSystemSnapshotEnvelopeSchema,
+  CallSessionDetailSchema,
+  CallSessionListSchema,
   CreateApiTokenRequestSchema,
   MessageSchema,
   MessageStatusSchema,
@@ -18,7 +22,12 @@ import type {
   ApiToken,
   ApiTokenCreated,
   ApiTokenUsageBucket,
+  BoothEventList,
+  BoothEventType,
   BoothStatus,
+  BoothSystemSnapshotEnvelope,
+  CallSessionDetail,
+  CallSessionList,
   CreateApiTokenRequest,
   Message,
   MessageStatus,
@@ -180,6 +189,49 @@ export const auth = {
   },
 };
 
+export interface EventsListParams {
+  readonly boothId?: string;
+  readonly since?: string;
+  readonly until?: string;
+  readonly type?: readonly BoothEventType[];
+  readonly sessionId?: string;
+  readonly cursor?: string;
+  readonly limit?: number;
+}
+
+const buildEventsQuery = (params: EventsListParams): string => {
+  const search = new URLSearchParams();
+  if (params.boothId) search.set("boothId", params.boothId);
+  if (params.since) search.set("since", params.since);
+  if (params.until) search.set("until", params.until);
+  if (params.sessionId) search.set("sessionId", params.sessionId);
+  if (params.cursor) search.set("cursor", params.cursor);
+  search.set("limit", String(params.limit ?? 100));
+  for (const type of params.type ?? []) search.append("type", type);
+  const text = search.toString();
+  return text.length === 0 ? "" : `?${text}`;
+};
+
+export const events = {
+  list: (params: EventsListParams = {}) =>
+    apiFetch<BoothEventList>(`/v1/events${buildEventsQuery(params)}`, { schema: BoothEventListSchema }),
+};
+
+export const sessions = {
+  list: (params: { readonly boothId?: string; readonly cursor?: string; readonly limit?: number } = {}) =>
+    apiFetch<CallSessionList>(`/v1/sessions${query({ boothId: params.boothId, cursor: params.cursor, limit: params.limit ?? 100 })}`, {
+      schema: CallSessionListSchema,
+    }),
+  get: (id: string) => apiFetch<CallSessionDetail>(`/v1/sessions/${id}`, { schema: CallSessionDetailSchema }),
+};
+
+export const system = {
+  current: (boothId: string) =>
+    apiFetch<BoothSystemSnapshotEnvelope>(`/v1/system/current${query({ boothId })}`, {
+      schema: BoothSystemSnapshotEnvelopeSchema,
+    }),
+};
+
 export const apiQueryKeys = {
   me: ["auth", "me"] as const,
   status: ["status", "current"] as const,
@@ -189,7 +241,40 @@ export const apiQueryKeys = {
   message: (id: string) => ["messages", id] as const,
   tokens: ["api-tokens", "list"] as const,
   tokenUsage: (id: string) => ["api-tokens", id, "usage"] as const,
+  events: (params: EventsListParams) => ["events", "list", params] as const,
+  sessions: (boothId?: string) => ["sessions", "list", boothId ?? null] as const,
+  session: (id: string) => ["sessions", id] as const,
+  system: (boothId: string) => ["system", boothId] as const,
 };
+
+export function useEventsList(params: EventsListParams = {}) {
+  return useQuery({ queryKey: apiQueryKeys.events(params), queryFn: () => events.list(params), refetchInterval: 10_000 });
+}
+
+export function useSessionsList(boothId?: string) {
+  return useQuery({
+    queryKey: apiQueryKeys.sessions(boothId),
+    queryFn: () => sessions.list({ ...(boothId ? { boothId } : {}), limit: 100 }),
+    refetchInterval: 10_000,
+  });
+}
+
+export function useSession(id: string | undefined) {
+  return useQuery({
+    queryKey: apiQueryKeys.session(id ?? ""),
+    queryFn: () => sessions.get(id ?? ""),
+    enabled: typeof id === "string" && id.length > 0,
+  });
+}
+
+export function useSystemCurrent(boothId: string | undefined) {
+  return useQuery({
+    queryKey: apiQueryKeys.system(boothId ?? ""),
+    queryFn: () => system.current(boothId ?? ""),
+    enabled: typeof boothId === "string" && boothId.length > 0,
+    refetchInterval: 10_000,
+  });
+}
 
 export function useStatusCurrent() {
   return useQuery({ queryKey: apiQueryKeys.status, queryFn: status.current, refetchInterval: 5_000 });

@@ -6,11 +6,14 @@ import { AboutScreen } from "../features/about/AboutScreen.js";
 import { LoginScreen } from "../features/auth/LoginScreen.js";
 import { RequireAuth } from "../features/auth/RequireAuth.js";
 import { DebugScreen } from "../features/debug/DebugScreen.js";
+import { EventsScreen } from "../features/events/EventsScreen.js";
 import { MessageDetail } from "../features/messages/MessageDetail.js";
 import { MessagesScreen } from "../features/messages/MessagesScreen.js";
 import { QuestionsScreen } from "../features/questions/QuestionsScreen.js";
+import { SessionDetailScreen, SessionsScreen } from "../features/sessions/SessionsScreen.js";
 import { SettingsScreen } from "../features/settings/SettingsScreen.js";
 import { StatusScreen } from "../features/status/StatusScreen.js";
+import { LiveSystemPanel } from "../features/system/LiveSystemPanel.js";
 import { TokensScreen } from "../features/tokens/TokensScreen.js";
 import { useNumericNavigation } from "../hooks/useNumericNavigation.js";
 import { ROTARY_ROUTES, isMessageFilter } from "../lib/navigation.js";
@@ -46,6 +49,14 @@ function AppLayout(): JSX.Element {
                   )}
                 </li>
               ))}
+            </ul>
+          </nav>
+          <nav className="operator-sidebar__nav" aria-label="Observability routes">
+            <h2>Observability</h2>
+            <ul>
+              <li><a href="/system">Live system</a></li>
+              <li><a href="/events">Events</a></li>
+              <li><a href="/sessions">Sessions</a></li>
             </ul>
           </nav>
           <ContempraPhone />
@@ -124,6 +135,33 @@ const debugRoute = createRoute({
   component: () => protectedScreen(<DebugScreen />),
 });
 
+const systemRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/system",
+  component: () => protectedScreen(<LiveSystemPanel />),
+});
+
+const eventsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/events",
+  component: () => protectedScreen(<EventsScreen />),
+});
+
+const sessionsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/sessions",
+  component: () => protectedScreen(<SessionsScreen />),
+});
+
+const sessionDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/sessions/$id",
+  component: () => {
+    const { id } = sessionDetailRoute.useParams();
+    return protectedScreen(<SessionDetailScreen id={id} />);
+  },
+});
+
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
@@ -147,6 +185,10 @@ const routeTree = rootRoute.addChildren([
   tokensRoute,
   settingsRoute,
   debugRoute,
+  systemRoute,
+  eventsRoute,
+  sessionsRoute,
+  sessionDetailRoute,
   loginRoute,
   aboutRoute,
 ]);

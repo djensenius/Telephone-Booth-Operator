@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { BoothStatusSchema } from "@telephone-booth-operator/shared";
-import type { BoothState, BoothStatus } from "@telephone-booth-operator/shared";
+import { WsEnvelopeSchema, BoothStatusSchema } from "@telephone-booth-operator/shared";
+import type { BoothState, BoothStatus, BoothSystemSnapshot } from "@telephone-booth-operator/shared";
 import { GlassPanel, useBoothStatus } from "../../components/booth/index.js";
 import { apiQueryKeys, useStatusCurrent, useStatusHistory } from "../../lib/api-client.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
@@ -48,11 +48,33 @@ export function StatusScreen(): JSX.Element {
       setLastError(null);
     });
     socket.addEventListener("message", (event) => {
-      const parsed = BoothStatusSchema.safeParse(JSON.parse(String(event.data)));
-      if (parsed.success) {
-        setLiveStatus(parsed.data);
-        queryClient.setQueryData(apiQueryKeys.status, parsed.data);
-        queryClient.setQueryData(apiQueryKeys.statusHistory, (current: { readonly items: readonly BoothStatus[] } | undefined) => ({ items: [parsed.data, ...(current?.items ?? [])].slice(0, 50) }));
+      let raw: unknown;
+      try {
+        raw = JSON.parse(String(event.data));
+      } catch {
+        return;
+      }
+      const envelope = WsEnvelopeSchema.safeParse(raw);
+      if (envelope.success) {
+        if (envelope.data.kind === "status") {
+          const status = envelope.data.status;
+          setLiveStatus(status);
+          queryClient.setQueryData(apiQueryKeys.status, status);
+          queryClient.setQueryData(apiQueryKeys.statusHistory, (current: { readonly items: readonly BoothStatus[] } | undefined) => ({ items: [status, ...(current?.items ?? [])].slice(0, 50) }));
+        } else if (envelope.data.kind === "system") {
+          queryClient.setQueryData<{ boothId: string; snapshot: BoothSystemSnapshot; receivedAt: string }>(
+            ["system", envelope.data.boothId],
+            { boothId: envelope.data.boothId, snapshot: envelope.data.snapshot, receivedAt: envelope.data.receivedAt },
+          );
+        }
+        return;
+      }
+      // Back-compat: tolerate the legacy bare-status frame from older API
+      // builds. The op-api PR migrated the wire to a discriminated envelope.
+      const legacy = BoothStatusSchema.safeParse(raw);
+      if (legacy.success) {
+        setLiveStatus(legacy.data);
+        queryClient.setQueryData(apiQueryKeys.status, legacy.data);
       }
     });
     socket.addEventListener("error", () => {

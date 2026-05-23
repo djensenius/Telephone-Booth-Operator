@@ -42,3 +42,21 @@ Every event carries both an `occurredAt` (booth wall clock) and a
 server-stamped `receivedAt`. The list endpoint sorts by `receivedAt` so
 clock skew across reboots can't reorder the log; UIs may resort by
 `occurredAt` for display.
+
+## Web UI
+
+The operator console exposes the observability data on three dedicated
+screens accessible from the **Observability** block in the sidebar:
+
+- **Live system** (`/system`) — bar/lamp readouts for CPU, temperature,
+  memory, disk, network, uptime, audio device, Tailscale link, and
+  throttling flags. Updates in real time via the status WebSocket.
+- **Events** (`/events`) — paginated, filterable table of booth events
+  with links into the originating call session.
+- **Sessions** (`/sessions`) — paginated list of call sessions; each row
+  links to a detail page (`/sessions/:id`) showing the full ordered
+  event timeline along with outcome, dialed digits, recording id, and
+  duration.
+
+All three screens are gated by the same operator OIDC session that
+guards the rest of the console.
