@@ -126,7 +126,10 @@ async function blobArrayBuffer(file: Blob): Promise<ArrayBuffer> {
 
 export async function sha256Hex(file: Blob): Promise<string> {
   const bytes = await blobArrayBuffer(file);
-  const hash = await crypto.subtle.digest("SHA-256", bytes);
+  // Node 22's WebIDL crypto rejects raw Buffer / non-spec-conforming
+  // ArrayBuffer-like values. Wrapping in a Uint8Array view normalizes to
+  // a recognized TypedArray on both browsers and Node test envs.
+  const hash = await crypto.subtle.digest("SHA-256", new Uint8Array(bytes));
   return Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 

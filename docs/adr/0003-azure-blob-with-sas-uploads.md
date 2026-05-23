@@ -19,11 +19,13 @@ multi-MB FLAC uploads.
 ## Consequences
 
 **Good:**
+
 - Operator API is stateless and cheap.
 - Storage is independently durable and backed up by Azure.
 - Browsers download with the same short-lived SAS, no proxy in between.
 
 **Trade-offs:**
+
 - One more external service to set up — but Azurite makes local dev
   trivial.
 - SAS TTLs must be tuned for slow networks (default 15 min upload, 5

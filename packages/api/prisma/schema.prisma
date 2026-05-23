@@ -32,11 +32,11 @@ enum BoothState {
 }
 
 model Question {
-  id        String   @id @default(uuid()) @db.Uuid
-  prompt    String   @unique
-  audioId   String   @unique @db.Uuid
-  audio     File     @relation(fields: [audioId], references: [id])
-  createdAt DateTime @default(now())
+  id        String    @id @default(uuid()) @db.Uuid
+  prompt    String    @unique
+  audioId   String    @unique @db.Uuid
+  audio     File      @relation(fields: [audioId], references: [id])
+  createdAt DateTime  @default(now())
   retiredAt DateTime?
   messages  Message[]
 }
@@ -59,14 +59,14 @@ model Message {
 }
 
 model File {
-  id            String   @id @default(uuid()) @db.Uuid
+  id            String    @id @default(uuid()) @db.Uuid
   blobContainer String
-  blobKey       String   @unique
-  sha256        String   @unique
+  blobKey       String    @unique
+  sha256        String    @unique
   sizeBytes     Int
   durationMs    Int?
   contentType   String
-  createdAt     DateTime @default(now())
+  createdAt     DateTime  @default(now())
   question      Question?
   message       Message?
 }
@@ -80,6 +80,54 @@ model BoothStatusSnapshot {
   updatedAt         DateTime   @default(now())
 
   @@index([updatedAt])
+}
+
+// Persistent log of every observable event emitted by a booth (pickup,
+// hangup, digit dialed, state transition, recording start/stop, upload
+// lifecycle, errors, operator HTTP calls, audio device changes, …).
+//
+// Booth-supplied `eventId` plus `boothId` form a unique key so the
+// `POST /v1/events` bulk endpoint is fully idempotent across retries.
+// `recordingId` is a plain string (NOT @db.Uuid) because the booth side
+// generates string ids like `recording-{monotonic_ns}`.
+model BoothEvent {
+  id          String       @id @default(cuid())
+  eventId     String
+  boothId     String
+  bootId      String
+  type        String
+  occurredAt  DateTime
+  receivedAt  DateTime     @default(now())
+  sessionId   String?
+  recordingId String?
+  payload     Json
+  session     CallSession? @relation(fields: [sessionId], references: [id])
+
+  @@unique([boothId, eventId])
+  @@index([occurredAt])
+  @@index([boothId, occurredAt])
+  @@index([type, occurredAt])
+  @@index([sessionId])
+  @@index([boothId, receivedAt, id])
+}
+
+// Derived from BoothEvent.call_started / call_ended pairs. The booth
+// generates `id` as a UUIDv4 on pickup so the operator can group events
+// into a session without joining on time windows.
+model CallSession {
+  id           String       @id
+  boothId      String
+  bootId       String
+  startedAt    DateTime
+  endedAt      DateTime?
+  digitsDialed String?
+  outcome      String?
+  recordingId  String?
+  durationMs   Int?
+  events       BoothEvent[]
+
+  @@index([boothId, startedAt])
+  @@index([outcome])
 }
 
 // Operator humans authenticated via OIDC (Authentik by default).

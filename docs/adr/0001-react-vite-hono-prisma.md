@@ -22,11 +22,13 @@ stack that's pleasant in 2026.
 ## Consequences
 
 **Good:**
+
 - Hono's first-class TS + middleware story makes auth/OIDC code clean.
 - Prisma migrations are the source of schema truth, version-controlled.
 - Both halves can deploy as small containers.
 
 **Trade-offs:**
+
 - Two languages in the repo (TS for frontend, TS for backend) — same
   ecosystem at least.
 - Prisma generates a client into `node_modules` that must be regenerated
