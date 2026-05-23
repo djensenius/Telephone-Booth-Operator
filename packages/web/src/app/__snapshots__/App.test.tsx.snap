@@ -150,6 +150,37 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
           </li>
         </ul>
       </nav>
+      <nav
+        aria-label="Observability routes"
+        class="operator-sidebar__nav"
+      >
+        <h2>
+          Observability
+        </h2>
+        <ul>
+          <li>
+            <a
+              href="/system"
+            >
+              Live system
+            </a>
+          </li>
+          <li>
+            <a
+              href="/events"
+            >
+              Events
+            </a>
+          </li>
+          <li>
+            <a
+              href="/sessions"
+            >
+              Sessions
+            </a>
+          </li>
+        </ul>
+      </nav>
       <div
         class="contempra-phone"
       >
