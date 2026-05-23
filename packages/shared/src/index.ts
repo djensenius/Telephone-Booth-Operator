@@ -70,6 +70,7 @@ export const OperatorMeSchema = z.object({
   email: z.string().email(),
   name: z.string(),
   groups: z.array(z.string()),
+  picture: z.string().url().optional(),
   providerName: z.string(),
 });
 export type OperatorMe = z.infer<typeof OperatorMeSchema>;

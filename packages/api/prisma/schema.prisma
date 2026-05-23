@@ -82,14 +82,35 @@ model BoothStatusSnapshot {
 // Operator humans authenticated via OIDC (Authentik by default).
 // Row is created lazily on first successful login.
 model OperatorUser {
-  id           String   @id // OIDC `sub`
-  email        String   @unique
-  name         String
-  groups       String[] // raw groups claim at last login
-  firstSeenAt  DateTime @default(now())
-  lastSeenAt   DateTime @default(now())
-  apiTokens    ApiToken[]
-  decisions    Message[]
+  id          String            @id // Historical internal ID; currently mirrors OIDC `sub`.
+  oidcSub     String            @unique
+  email       String            @unique
+  name        String
+  groups      Json? // raw groups claim at last login
+  picture     String?
+  firstSeenAt DateTime          @default(now())
+  lastSeenAt  DateTime          @default(now())
+  lastLoginAt DateTime?
+  apiTokens   ApiToken[]
+  decisions   Message[]
+  sessions    OperatorSession[]
+}
+
+model OperatorSession {
+  id           String       @id
+  userId       String
+  user         OperatorUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  idToken      String?
+  accessToken  String?
+  refreshToken String?
+  expiresAt    DateTime
+  createdAt    DateTime     @default(now())
+  lastSeenAt   DateTime     @default(now())
+  ip           String?
+  userAgent    String?
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 // Static API tokens issued to phone-side clients.

@@ -47,9 +47,8 @@ OIDC_ISSUER=https://keycloak.example.com/realms/<realm>
 OIDC_CLIENT_ID=telephone-booth-operator
 OIDC_CLIENT_SECRET=<from Credentials>
 OIDC_REDIRECT_URI=http://localhost:8787/v1/auth/callback
-OIDC_REQUIRED_GROUP=telephone-booth-operators
-OIDC_GROUPS_CLAIM=groups
-OIDC_GROUPS_SCOPE=openid
+OIDC_SCOPES="openid email profile offline_access"
+OIDC_ALLOWED_GROUPS=telephone-booth-operators
 ```
 
 Confirm by curling `${OIDC_ISSUER}/.well-known/openid-configuration`.

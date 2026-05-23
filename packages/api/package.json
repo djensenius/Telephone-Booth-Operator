@@ -19,9 +19,10 @@
     "@hono/node-server": "^1.13.7",
     "@hono/zod-validator": "^0.4.1",
     "@prisma/client": "^5.22.0",
+    "@telephone-booth-operator/shared": "workspace:^",
     "argon2": "^0.41.1",
     "hono": "^4.6.12",
-    "openid-client": "^5.7.0",
+    "openid-client": "^6.8.4",
     "pino": "^9.5.0",
     "ws": "^8.18.0",
     "zod": "^3.23.8"

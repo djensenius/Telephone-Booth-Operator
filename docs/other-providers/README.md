@@ -23,26 +23,19 @@ OIDC_ISSUER=https://keycloak.example.com/realms/booth
 OIDC_CLIENT_ID=...
 OIDC_CLIENT_SECRET=...
 OIDC_REDIRECT_URI=https://operator.example.com/v1/auth/callback
-OIDC_REQUIRED_GROUP=telephone-booth-operators
-OIDC_GROUPS_CLAIM=groups
-OIDC_GROUPS_SCOPE=groups
+OIDC_POST_LOGOUT_REDIRECT_URI=https://operator.example.com
+OIDC_SCOPES="openid email profile offline_access groups"
+OIDC_ALLOWED_GROUPS=telephone-booth-operators
+OIDC_ALLOWED_EMAILS=
 ```
 
 `OIDC_PROVIDER_NAME` only drives UI copy — the login button reads
 "Sign in with $name" and links to the appropriate provider-specific doc
 in the UI's help drawer.
 
-## Group claim names
+## Authorization claims
 
-Different providers expose group membership under different claim names:
-
-| Provider  | Default claim name                        |
-| --------- | ----------------------------------------- |
-| Authentik | `groups`                                  |
-| Keycloak  | `groups` (after mapper) or `realm_access.roles` |
-| Auth0     | `https://your-namespace/groups` (custom rule) |
-| Google    | _not supported natively; use a Workspace Directory API sync_ |
-| Dex       | `groups`                                  |
-
-Set `OIDC_GROUPS_CLAIM` to the path the claim sits at. Dotted paths are
-supported (`OIDC_GROUPS_CLAIM=realm_access.roles`).
+The backend enforces `OIDC_ALLOWED_GROUPS` against the standard `groups` claim
+and `OIDC_ALLOWED_EMAILS` against the `email` claim. Providers that use a
+custom group claim should map it to `groups` in the ID token or userinfo. If
+both allow-lists are set, both checks must pass.

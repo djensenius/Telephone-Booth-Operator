@@ -33,21 +33,18 @@ OIDC_ISSUER=https://accounts.google.com
 OIDC_CLIENT_ID=...apps.googleusercontent.com
 OIDC_CLIENT_SECRET=...
 OIDC_REDIRECT_URI=http://localhost:8787/v1/auth/callback
-OIDC_REQUIRED_GROUP=
-OIDC_GROUPS_CLAIM=
-OIDC_GROUPS_SCOPE=
+OIDC_SCOPES="openid email profile"
+OIDC_ALLOWED_GROUPS=
 ```
 
 ## 3. Single-user mode
 
-When `OIDC_REQUIRED_GROUP` is empty, the operator backend falls back to
-allow-listing by `sub` or `email`. Set one of:
+When `OIDC_ALLOWED_GROUPS` is empty, the operator backend falls back to
+allow-listing by email. Set:
 
 ```ini
 OIDC_ALLOWED_EMAILS=you@example.com,you+alt@example.com
-# or, more robustly, by Google's stable subject:
-OIDC_ALLOWED_SUBS=1099812345678901234567
 ```
 
-The backend rejects any login whose `sub` / `email` is outside the
-allow-list with a "Not authorized for this booth" screen.
+The backend rejects any login whose email is outside the allow-list with a
+"Not authorized for this booth" screen.

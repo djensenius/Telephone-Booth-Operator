@@ -51,12 +51,11 @@ OIDC_ISSUER=https://dex.example.com
 OIDC_CLIENT_ID=telephone-booth-operator
 OIDC_CLIENT_SECRET=replace-me-with-a-strong-secret
 OIDC_REDIRECT_URI=http://localhost:8787/v1/auth/callback
-OIDC_REQUIRED_GROUP=your-org:telephone-booth-operators
-OIDC_GROUPS_CLAIM=groups
-OIDC_GROUPS_SCOPE=groups
+OIDC_SCOPES="openid email profile offline_access groups"
+OIDC_ALLOWED_GROUPS=your-org:telephone-booth-operators
 ```
 
-Note that `OIDC_REQUIRED_GROUP` includes the GitHub org prefix because
+Note that `OIDC_ALLOWED_GROUPS` includes the GitHub org prefix because
 that's how Dex emits the value. Match the format your connector produces.
 
 ## 3. Verify

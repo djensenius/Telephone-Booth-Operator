@@ -20,9 +20,8 @@ Auth0 doesn't put groups in tokens by default. Use a Post-Login Action
 
 ```js
 exports.onExecutePostLogin = async (event, api) => {
-  const namespace = "https://telephone-booth/";
   const groups = (event.user.app_metadata && event.user.app_metadata.groups) || [];
-  api.idToken.setCustomClaim(`${namespace}groups`, groups);
+  api.idToken.setCustomClaim("groups", groups);
 };
 ```
 
@@ -37,9 +36,8 @@ OIDC_ISSUER=https://YOUR_TENANT.auth0.com/
 OIDC_CLIENT_ID=...
 OIDC_CLIENT_SECRET=...
 OIDC_REDIRECT_URI=http://localhost:8787/v1/auth/callback
-OIDC_REQUIRED_GROUP=telephone-booth-operators
-OIDC_GROUPS_CLAIM=https://telephone-booth/groups
-OIDC_GROUPS_SCOPE=openid
+OIDC_SCOPES="openid email profile offline_access"
+OIDC_ALLOWED_GROUPS=telephone-booth-operators
 ```
 
 Note the trailing slash on `OIDC_ISSUER` — Auth0 issuers are slash-terminated.

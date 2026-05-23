@@ -57,13 +57,14 @@ spec change.
 3. API exchanges code for tokens, validates ID token signature against
    Authentik's JWKS, verifies `nonce`, asserts the user is in
    `AUTHENTIK_REQUIRED_GROUP`.
-4. Sets a `tbo_session` HMAC-signed cookie (12-hour sliding expiry,
-   `HttpOnly`, `Secure`, `SameSite=Lax`).
-5. `OperatorUser` row is upserted keyed by `sub`.
+4. Sets a `__Host-booth_session` HMAC-signed cookie carrying an opaque session ID
+   (`HttpOnly`, `Secure` off localhost, `SameSite=Lax`).
+5. `OperatorUser` row is upserted keyed by `oidcSub`.
 
-See [`authentik-setup.md`](authentik-setup.md) for the IdP config and
+See [`authentik-setup.md`](authentik-setup.md) for the IdP config,
 [`other-providers/generic-oidc.md`](other-providers/generic-oidc.md) for
-provider portability.
+provider portability, and [`sessions.md`](sessions.md) for cookie/session
+storage details.
 
 ## Data model
 
@@ -71,8 +72,10 @@ See `packages/api/prisma/schema.prisma` for the canonical schema.
 
 - `Question`, `Message`, `File` — content tables. `File` is content-addressed
   by `sha256` so duplicate uploads dedupe.
-- `OperatorUser` — humans authenticated via OIDC, keyed by `sub`. Created
+- `OperatorUser` — humans authenticated via OIDC, keyed by `oidcSub`. Created
   lazily on first successful login.
+- `OperatorSession` — browser session rows referenced by signed opaque cookies;
+  refresh tokens are encrypted at rest.
 - `ApiToken` — phone-client tokens, stored hashed with Argon2id; plaintext
   shown to the operator once on creation.
 - `BoothStatusSnapshot` — append-only log of status updates from the phone

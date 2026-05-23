@@ -22,11 +22,10 @@ for the operator UI to work:
 | `OIDC_CLIENT_ID`       | Client ID issued by your IdP.                                  |
 | `OIDC_CLIENT_SECRET`   | Client secret.                                                 |
 | `OIDC_REDIRECT_URI`    | Must match what you registered on the IdP, exactly.            |
-| `OIDC_REQUIRED_GROUP`  | The group/role string the user must have. Set empty to disable group check. |
-| `OIDC_GROUPS_CLAIM`    | JSON path to the array of groups; dotted paths supported (`realm_access.roles`). Default `groups`. |
-| `OIDC_GROUPS_SCOPE`    | Scope to request that surfaces the groups claim. Default `openid`. |
-| `OIDC_ALLOWED_EMAILS`  | (Optional) Comma-separated email allow-list when groups can't be used. |
-| `OIDC_ALLOWED_SUBS`    | (Optional) Comma-separated `sub` allow-list. |
+| `OIDC_POST_LOGOUT_REDIRECT_URI` | Where to send browsers after local/IdP logout.        |
+| `OIDC_SCOPES`          | Scope string to request. Default `openid email profile offline_access`. |
+| `OIDC_ALLOWED_GROUPS`  | Optional CSV. If set, the `groups` claim must intersect.       |
+| `OIDC_ALLOWED_EMAILS`  | Optional CSV. If set, the `email` claim must be listed.        |
 
 When the **`OIDC_*` vars are set, they override their `AUTHENTIK_*`
 counterparts**; that lets you keep both blocks in `.env` and toggle by
@@ -46,9 +45,9 @@ just dev
 curl -fs -b cookies.txt http://localhost:8787/v1/auth/me | jq .
 ```
 
-If the third step shows `groups: []`, your IdP isn't sending the claim
-or `OIDC_GROUPS_CLAIM` points at the wrong path. Increase `LOG_LEVEL` to
-`debug` and look at the raw ID-token payload in the API logs.
+If the third step shows `groups: []`, your IdP isn't sending a standard
+`groups` claim. Map provider-specific group or role data into `groups` and
+try again.
 
 ## When to give up and use a documented provider
 

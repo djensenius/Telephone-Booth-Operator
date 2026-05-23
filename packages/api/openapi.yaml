@@ -229,7 +229,7 @@ paths:
       security:
         - operatorSession: []
       responses:
-        '204': { description: bye }
+        '302': { description: redirect to IdP logout or UI }
 
   /v1/auth/me:
     get:
@@ -310,8 +310,8 @@ components:
     operatorSession:
       type: apiKey
       in: cookie
-      name: tbo_session
-      description: HMAC-signed session cookie set after Authentik login.
+      name: __Host-booth_session
+      description: HMAC-signed opaque session cookie set after OIDC login.
   schemas:
     Health:
       type: object
@@ -386,6 +386,7 @@ components:
         groups:
           type: array
           items: { type: string }
+        picture: { type: string, format: uri }
         providerName: { type: string, description: 'OIDC_PROVIDER_NAME — drives UI copy.' }
     ApiTokenSummary:
       type: object

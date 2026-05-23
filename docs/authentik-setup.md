@@ -80,15 +80,18 @@ AUTHENTIK_ISSUER=https://authentik.example.com/application/o/telephone-booth-ope
 AUTHENTIK_CLIENT_ID=<from step 2>
 AUTHENTIK_CLIENT_SECRET=<from step 2>
 AUTHENTIK_REDIRECT_URI=http://localhost:8787/v1/auth/callback
-AUTHENTIK_REQUIRED_GROUP=telephone-booth-operators
-AUTHENTIK_GROUPS_CLAIM=groups
-AUTHENTIK_GROUPS_SCOPE=goauthentik.io/api
+AUTHENTIK_POST_LOGOUT_REDIRECT_URI=http://localhost:5173
+AUTHENTIK_ALLOWED_GROUPS=telephone-booth-operators
+OIDC_SCOPES="openid email profile offline_access goauthentik.io/api"
 SESSION_SECRET=<openssl rand -hex 32>
+SESSION_ENCRYPTION_KEY=<openssl rand -base64 32>
 ```
 
 > **Issuer URL** is the `/application/o/<slug>/` path on your Authentik
 > host. Confirm by hitting `${AUTHENTIK_ISSUER}.well-known/openid-configuration`
-> with `curl` — you should get a JSON discovery document.
+> with `curl` — you should get a JSON discovery document. Generic `OIDC_*`
+> variables override their `AUTHENTIK_*` counterparts; see
+> [`other-providers/README.md`](other-providers/README.md) for the exact contract.
 
 ## 5. Verify
 
@@ -111,11 +114,13 @@ your name pulled from the ID token.
 3. Roll the operator API container. In-flight sessions stay valid
    (they're signed by `SESSION_SECRET`, not the OIDC secret).
 
-### Rotating `SESSION_SECRET`
+### Rotating `SESSION_SECRET` or `SESSION_ENCRYPTION_KEY`
 
-This **logs everyone out** by invalidating every signed cookie.
+Changing `SESSION_SECRET` **logs everyone out** by invalidating every signed
+cookie. Changing `SESSION_ENCRYPTION_KEY` prevents refresh-token decryption,
+so users should also be logged out before rotation.
 
-1. `openssl rand -hex 32` → new secret.
+1. `openssl rand -hex 32` → new cookie secret, or `openssl rand -base64 32` → new encryption key.
 2. Update the env, roll the container.
 3. Operators log back in via Authentik (no re-onboarding required).
 
