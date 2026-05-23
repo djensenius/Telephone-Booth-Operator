@@ -7,7 +7,7 @@ emulator so dev needs no Azure subscription.
 
 ## Container layout
 
-```
+```text
 booth-recordings/                          # container
 ├── messages/
 │   └── <sha256-prefix>/<sha256>.flac      # uploaded messages
@@ -64,6 +64,7 @@ one-line change in `.env`.
    container SAS or, better, a Managed Identity + RBAC role
    (`Storage Blob Data Contributor`) avoids long-lived secrets.
 4. **Set `.env`:**
+
    ```ini
    AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...;EndpointSuffix=core.windows.net
    AZURE_BLOB_CONTAINER=booth-recordings

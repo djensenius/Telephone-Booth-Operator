@@ -16,11 +16,13 @@ easier to back up, query ad hoc, and reason about migrations for.
 ## Consequences
 
 **Good:**
+
 - `prisma migrate` is the single source of schema-change history.
 - Strongly typed query results in TS.
 - Easy local dev via docker-compose.
 
 **Trade-offs:**
+
 - Prisma generates client code into `node_modules` — must be regenerated
   on every schema change. CI handles this; locally `prisma generate`
   runs automatically on `prisma migrate dev`.

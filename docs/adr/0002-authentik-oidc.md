@@ -25,6 +25,7 @@ Any OIDC-compliant IdP works via the generic `OIDC_*` env vars; see
 ## Consequences
 
 **Good:**
+
 - Operator onboarding is a one-click "add to group" — no code or DB
   changes.
 - Rotation, revocation, MFA all handled by the IdP.
@@ -32,6 +33,7 @@ Any OIDC-compliant IdP works via the generic `OIDC_*` env vars; see
   to Authentik.
 
 **Trade-offs:**
+
 - Need an IdP available, even for tests — solved by running a
   dependency `oidc-provider` mock in CI.
 - One extra service to maintain (or rely on an existing one — Authentik

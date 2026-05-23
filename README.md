@@ -9,7 +9,7 @@ doubles as the navigation.
 
 The booth answers, the operator approves, the call goes through.
 
-```
+```text
             ╔═══════════════════════╗
             ║   📞  T E L E P H O N E ║
             ╠═══════════════════════╣

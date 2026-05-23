@@ -37,6 +37,7 @@ restarted, your network blew up, or your reverse proxy timed the WS out
 ## Recordings show as "Content missing"
 
 The DB has a `File` row but the blob is gone. Either:
+
 - Blob was deleted out of band — restore from Azure backup or accept
   the loss.
 - Connection string points at the wrong container or account in this

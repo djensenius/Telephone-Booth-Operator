@@ -22,6 +22,7 @@ jobs:
             (docker compose exec -T db pg_isready -U booth) && break
             sleep 2
           done
+      - run: pnpm --filter @telephone-booth-operator/api exec prisma generate
       - run: pnpm --filter @telephone-booth-operator/api exec prisma migrate deploy
         env:
           DATABASE_URL: postgres://booth:booth@localhost:5432/telephone_booth
