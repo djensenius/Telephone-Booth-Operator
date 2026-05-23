@@ -26,10 +26,24 @@ jobs:
       - run: pnpm --filter @telephone-booth-operator/api exec prisma migrate deploy
         env:
           DATABASE_URL: postgres://booth:booth@localhost:5432/telephone_booth
-      - run: pnpm exec playwright install --with-deps chromium
+      - name: Skip if no e2e specs exist
+        id: probe
+        run: |
+          shopt -s nullglob
+          specs=(packages/web/tests/**/*.spec.* packages/web/e2e/**/*.spec.*)
+          if [ ${#specs[@]} -eq 0 ]; then
+            echo "no-specs=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::No Playwright spec files found, skipping browser install and test run."
+          else
+            echo "no-specs=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.probe.outputs.no-specs != 'true'
+        run: pnpm exec playwright install --with-deps chromium
         working-directory: packages/web
-      - run: pnpm -r build
-      - name: Start API + Web
+      - if: steps.probe.outputs.no-specs != 'true'
+        run: pnpm -r build
+      - if: steps.probe.outputs.no-specs != 'true'
+        name: Start API + Web
         run: |
           pnpm --filter @telephone-booth-operator/api start &
           pnpm --filter @telephone-booth-operator/web preview --port 5173 &
@@ -37,7 +51,8 @@ jobs:
         env:
           DATABASE_URL: postgres://booth:booth@localhost:5432/telephone_booth
           SESSION_SECRET: "0000000000000000000000000000000000000000000000000000000000000000"
-      - run: pnpm exec playwright test
+      - if: steps.probe.outputs.no-specs != 'true'
+        run: pnpm exec playwright test
         working-directory: packages/web
       - uses: actions/upload-artifact@v4
         if: failure()
