@@ -61,7 +61,11 @@ const loadMessage = async (messageId: string) =>
 const broadcastMessage = async (messageId: string): Promise<void> => {
   const full = await db.message.findUnique({
     where: { id: messageId },
-    include: { audio: true, transcriptions: true, moderations: true },
+    include: {
+      audio: true,
+      transcriptions: { orderBy: { createdAt: "desc" }, take: 1 },
+      moderations: { orderBy: { createdAt: "desc" }, take: 1 },
+    },
   });
   if (!full) return;
   const serialized = serializeMessage(full);
@@ -118,8 +122,10 @@ export interface RunTranscriptionOptions {
   readonly messageId: string;
   readonly deps?: PipelineDeps;
   readonly requestedByUserId?: string | null;
-  // When true, the function skips the moderation + auto-decision follow-up.
-  // Used by the manual moderation endpoint which runs moderation in isolation.
+  // When true, the function only runs the transcription step and does not
+  // trigger moderation or any auto-decision. Currently reserved for callers
+  // that want to re-transcribe without disturbing the existing moderation
+  // verdict; the manual /moderate route runs moderation directly instead.
   readonly skipDownstream?: boolean;
 }
 
