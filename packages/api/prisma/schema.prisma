@@ -1,0 +1,110 @@
+// Telephone-Booth-Operator Prisma schema.
+// Datasource: Postgres. ORM: Prisma. Migrations live in prisma/migrations.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MessageStatus {
+  pending
+  approved
+  rejected
+}
+
+enum BoothState {
+  idle
+  dialTone
+  dialing
+  playingQuestion
+  beep
+  recording
+  uploading
+  playingMessage
+  playingInstructions
+  error
+}
+
+model Question {
+  id        String   @id @default(uuid()) @db.Uuid
+  prompt    String
+  audioId   String   @unique @db.Uuid
+  audio     File     @relation(fields: [audioId], references: [id])
+  createdAt DateTime @default(now())
+  retiredAt DateTime?
+  messages  Message[]
+}
+
+model Message {
+  id          String        @id @default(uuid()) @db.Uuid
+  status      MessageStatus @default(pending)
+  notes       String?
+  questionId  String?       @db.Uuid
+  question    Question?     @relation(fields: [questionId], references: [id])
+  audioId     String        @unique @db.Uuid
+  audio       File          @relation(fields: [audioId], references: [id])
+  createdAt   DateTime      @default(now())
+  decidedAt   DateTime?
+  decidedById String?
+  decidedBy   OperatorUser? @relation(fields: [decidedById], references: [id])
+
+  @@index([status, createdAt])
+}
+
+model File {
+  id            String   @id @default(uuid()) @db.Uuid
+  blobContainer String
+  blobKey       String   @unique
+  sha256        String   @unique
+  sizeBytes     Int
+  durationMs    Int?
+  contentType   String
+  createdAt     DateTime @default(now())
+  question      Question?
+  message       Message?
+}
+
+model BoothStatusSnapshot {
+  id                Int        @id @default(autoincrement())
+  state             BoothState
+  currentQuestionId String?    @db.Uuid
+  currentMessageId  String?    @db.Uuid
+  lastError         String?
+  updatedAt         DateTime   @default(now())
+
+  @@index([updatedAt])
+}
+
+// Operator humans authenticated via OIDC (Authentik by default).
+// Row is created lazily on first successful login.
+model OperatorUser {
+  id           String   @id // OIDC `sub`
+  email        String   @unique
+  name         String
+  groups       String[] // raw groups claim at last login
+  firstSeenAt  DateTime @default(now())
+  lastSeenAt   DateTime @default(now())
+  apiTokens    ApiToken[]
+  decisions    Message[]
+}
+
+// Static API tokens issued to phone-side clients.
+// `tokenHash` is bcrypt/argon2; plaintext is shown to the operator exactly once.
+model ApiToken {
+  id          String        @id @default(uuid()) @db.Uuid
+  label       String
+  last4       String
+  tokenHash   String
+  createdById String
+  createdBy   OperatorUser  @relation(fields: [createdById], references: [id])
+  createdAt   DateTime      @default(now())
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+
+  @@index([revokedAt, expiresAt])
+}

@@ -1,0 +1,408 @@
+openapi: 3.1.0
+info:
+  title: Telephone-Booth Operator API
+  description: |
+    Versioned REST + WebSocket API between the operator console
+    (`Telephone-Booth-Operator`) and the phone-side Rust client
+    (`Telephone-Booth` on the `rust-client` branch).
+
+    The phone client authenticates with a static Bearer API token issued from
+    the operator UI. Operator browser sessions authenticate via Authentik OIDC.
+  version: 1.0.0
+  license:
+    name: Apache-2.0
+servers:
+  - url: http://localhost:8787
+    description: Local dev
+  - url: https://operator.example.com
+    description: Production
+security:
+  - apiToken: []
+tags:
+  - name: status
+  - name: questions
+  - name: messages
+  - name: uploads
+  - name: auth
+  - name: tokens
+paths:
+  /healthz:
+    get:
+      summary: Liveness probe.
+      security: []
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+
+  /v1/status:
+    get:
+      summary: Current booth status as last reported by the phone client.
+      tags: [status]
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BoothStatus' }
+    put:
+      summary: Phone client posts a status update.
+      tags: [status]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BoothStatusUpdate' }
+      responses:
+        '204': { description: accepted }
+
+  /v1/questions:
+    get:
+      summary: List approved questions.
+      tags: [questions]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Question' }
+    post:
+      summary: Create a new question (operator only).
+      tags: [questions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuestionInput' }
+      responses:
+        '201':
+          description: created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Question' }
+
+  /v1/questions/random:
+    get:
+      summary: A random approved question for the phone client to play.
+      tags: [questions]
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Question' }
+        '404': { description: no questions available }
+
+  /v1/questions/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      summary: Remove a question.
+      tags: [questions]
+      responses:
+        '204': { description: removed }
+
+  /v1/messages:
+    get:
+      summary: List messages, filterable by status.
+      tags: [messages]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, approved, rejected]
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Message' }
+
+  /v1/messages/random:
+    get:
+      summary: A random approved message for the phone client to play.
+      tags: [messages]
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Message' }
+        '404': { description: no messages available }
+
+  /v1/messages/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      summary: Approve or reject a message (operator only).
+      tags: [messages]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [approved, rejected]
+                notes: { type: string, nullable: true }
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Message' }
+
+  /v1/uploads:
+    post:
+      summary: Request a presigned Azure Blob upload slot for a new recording.
+      tags: [uploads]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sha256, sizeBytes, contentType]
+              properties:
+                sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+                sizeBytes: { type: integer, minimum: 1 }
+                contentType: { type: string, enum: [audio/flac] }
+                durationMs: { type: integer, minimum: 1 }
+                questionId: { type: string, format: uuid, nullable: true }
+      responses:
+        '201':
+          description: upload slot issued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UploadSlot' }
+
+  /v1/uploads/{id}/complete:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Phone client notifies that the upload finished successfully.
+      tags: [uploads]
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Message' }
+
+  /v1/auth/login:
+    get:
+      summary: Begin Authentik OIDC login (Auth-Code + PKCE).
+      tags: [auth]
+      security: []
+      responses:
+        '302': { description: redirect to IdP }
+
+  /v1/auth/callback:
+    get:
+      summary: OIDC callback. Validates code + sets session cookie.
+      tags: [auth]
+      security: []
+      parameters:
+        - { name: code, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string } }
+      responses:
+        '302': { description: redirect to UI }
+
+  /v1/auth/logout:
+    post:
+      summary: Clear session + RP-initiated logout.
+      tags: [auth]
+      security:
+        - operatorSession: []
+      responses:
+        '204': { description: bye }
+
+  /v1/auth/me:
+    get:
+      summary: Current operator profile (driven by ID-token claims).
+      tags: [auth]
+      security:
+        - operatorSession: []
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperatorMe' }
+
+  /v1/api-tokens:
+    get:
+      summary: List active API tokens (last4 only).
+      tags: [tokens]
+      security:
+        - operatorSession: []
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ApiTokenSummary' }
+    post:
+      summary: Issue a new API token. Returned in plaintext exactly once.
+      tags: [tokens]
+      security:
+        - operatorSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [label]
+              properties:
+                label: { type: string, maxLength: 64 }
+                expiresAt: { type: string, format: date-time, nullable: true }
+      responses:
+        '201':
+          description: created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiTokenCreated' }
+
+  /v1/api-tokens/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      summary: Revoke an API token.
+      tags: [tokens]
+      security:
+        - operatorSession: []
+      responses:
+        '204': { description: revoked }
+
+  /v1/ws/status:
+    get:
+      summary: WebSocket — operator UI subscribes to live status push.
+      tags: [status]
+      security:
+        - operatorSession: []
+      responses:
+        '101': { description: switching protocols }
+
+components:
+  securitySchemes:
+    apiToken:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: Phone-client API token issued from the operator UI.
+    operatorSession:
+      type: apiKey
+      in: cookie
+      name: tbo_session
+      description: HMAC-signed session cookie set after Authentik login.
+  schemas:
+    Health:
+      type: object
+      required: [status, version]
+      properties:
+        status: { type: string, enum: [ok] }
+        version: { type: string }
+        time: { type: string, format: date-time }
+    BoothStatus:
+      type: object
+      required: [state, updatedAt]
+      properties:
+        state:
+          type: string
+          enum:
+            [idle, dialTone, dialing, playingQuestion, beep, recording, uploading, playingMessage, playingInstructions, error]
+        updatedAt: { type: string, format: date-time }
+        currentQuestionId: { type: string, format: uuid, nullable: true }
+        currentMessageId: { type: string, format: uuid, nullable: true }
+        lastError: { type: string, nullable: true }
+    BoothStatusUpdate:
+      allOf:
+        - $ref: '#/components/schemas/BoothStatus'
+    Question:
+      type: object
+      required: [id, prompt, createdAt, audio]
+      properties:
+        id: { type: string, format: uuid }
+        prompt: { type: string }
+        createdAt: { type: string, format: date-time }
+        audio: { $ref: '#/components/schemas/AudioRef' }
+    QuestionInput:
+      type: object
+      required: [prompt, audio]
+      properties:
+        prompt: { type: string, minLength: 1, maxLength: 280 }
+        audio: { $ref: '#/components/schemas/AudioRef' }
+    Message:
+      type: object
+      required: [id, status, createdAt, audio]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [pending, approved, rejected] }
+        questionId: { type: string, format: uuid, nullable: true }
+        notes: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        audio: { $ref: '#/components/schemas/AudioRef' }
+    AudioRef:
+      type: object
+      required: [url, sha256, sizeBytes, contentType]
+      properties:
+        url: { type: string, format: uri, description: 'Time-bounded read URL.' }
+        sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+        sizeBytes: { type: integer, minimum: 1 }
+        durationMs: { type: integer, minimum: 1, nullable: true }
+        contentType: { type: string, enum: [audio/flac] }
+    UploadSlot:
+      type: object
+      required: [id, uploadUrl, expiresAt, contentType]
+      properties:
+        id: { type: string, format: uuid }
+        uploadUrl: { type: string, format: uri, description: 'Azure Blob PUT URL with SAS.' }
+        expiresAt: { type: string, format: date-time }
+        contentType: { type: string, enum: [audio/flac] }
+    OperatorMe:
+      type: object
+      required: [id, name, email, groups]
+      properties:
+        id: { type: string, description: 'Stable Authentik sub' }
+        name: { type: string }
+        email: { type: string, format: email }
+        groups:
+          type: array
+          items: { type: string }
+        providerName: { type: string, description: 'OIDC_PROVIDER_NAME — drives UI copy.' }
+    ApiTokenSummary:
+      type: object
+      required: [id, label, last4, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        label: { type: string }
+        last4: { type: string, minLength: 4, maxLength: 4 }
+        createdAt: { type: string, format: date-time }
+        lastUsedAt: { type: string, format: date-time, nullable: true }
+        expiresAt: { type: string, format: date-time, nullable: true }
+    ApiTokenCreated:
+      allOf:
+        - $ref: '#/components/schemas/ApiTokenSummary'
+        - type: object
+          required: [token]
+          properties:
+            token:
+              type: string
+              description: 'Plaintext token. Shown ONLY on creation. Store securely.'

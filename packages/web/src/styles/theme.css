@@ -1,0 +1,88 @@
+/*
+ * Bell Canada visual system — see docs/theme.md.
+ *
+ * Don't hard-code hex values in component CSS; pull from these tokens.
+ * Don't use --bell-blue outside the hex logo (see docs/theme.md "Don'ts").
+ */
+:root {
+  --bell-red:       #d81e2c;
+  --enamel-white:   #f5f1e8;
+  --bell-blue:      #0033a0; /* reserved for the hex logo */
+  --aluminum:       #b8bcc2;
+  --aluminum-dark:  #7c8189;
+  --glass-blue:     #c9dbe3;
+  --bakelite:       #15141a;
+  --beige:          #e8dcc4;
+  --lamp-red:       #ff2a2a;
+  --lamp-amber:     #ffb300;
+  --lamp-green:     #1faf5c;
+
+  --font-sign: "Bell Sign", "Helvetica Neue Condensed Bold", Impact, sans-serif;
+  --font-heading: "Cooper Black", Georgia, serif;
+  --font-body: "Inter", "Helvetica Neue", Helvetica, sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; margin: 0; }
+
+body {
+  font-family: var(--font-body);
+  color: var(--bakelite);
+  background: var(--bell-red);
+}
+
+.booth-frame {
+  min-height: 100%;
+  padding: 24px;
+  background:
+    linear-gradient(180deg, var(--bell-red) 0 60px, transparent 60px) ,
+    repeating-linear-gradient(
+      90deg, transparent 0 24px, rgba(0,0,0,0.04) 24px 25px
+    ),
+    var(--bell-red);
+  border: 8px solid var(--aluminum-dark);
+  outline: 4px solid var(--bell-red);
+}
+
+.telephone-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  background: var(--enamel-white);
+  border: 2px solid var(--aluminum-dark);
+  border-radius: 4px;
+  box-shadow: 0 2px 0 rgba(0,0,0,0.2);
+}
+
+.telephone-banner__title {
+  font-family: var(--font-sign);
+  font-size: 36px;
+  letter-spacing: 0.18em;
+  color: var(--bell-red);
+}
+
+.bell-hex { flex: 0 0 40px; }
+
+.glass-panel {
+  margin-top: 24px;
+  padding: 32px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.45), rgba(255,255,255,0.15)),
+    var(--glass-blue);
+  border: 2px solid var(--aluminum);
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+}
+
+.glass-panel h1 {
+  font-family: var(--font-heading);
+  font-size: 32px;
+  margin: 0 0 12px 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}

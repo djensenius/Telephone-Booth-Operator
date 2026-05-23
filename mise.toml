@@ -1,0 +1,9 @@
+[tools]
+node = "22.11.0"
+pnpm = "9.15.0"
+just = "1.36.0"
+"npm:markdownlint-cli2" = "0.14.0"
+"aqua:lycheeverse/lychee" = "0.18.1"
+
+[env]
+NODE_OPTIONS = "--enable-source-maps"

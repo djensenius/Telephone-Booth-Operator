@@ -1,0 +1,40 @@
+services:
+  api:
+    image: ghcr.io/djensenius/telephone-booth-operator-api:latest
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8787:8787"
+    depends_on:
+      - db
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8787/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  web:
+    image: ghcr.io/djensenius/telephone-booth-operator-web:latest
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+
+  # NOTE: in production, Postgres and Azure Blob Storage are external services.
+  # Provide DATABASE_URL and AZURE_STORAGE_CONNECTION_STRING in `.env`.
+  # The `db` service below is OPTIONAL and only here for single-node deploys.
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_USER: booth
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-booth}
+      POSTGRES_DB: telephone_booth
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    profiles: ["single-node"]
+
+volumes:
+  db_data:

@@ -1,0 +1,85 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: booth
+          POSTGRES_PASSWORD: booth
+          POSTGRES_DB: telephone_booth
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U booth -d telephone_booth"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgres://booth:booth@localhost:5432/telephone_booth
+      SESSION_SECRET: "0000000000000000000000000000000000000000000000000000000000000000"
+      AUTHENTIK_ISSUER: "http://localhost:8888/"
+      AUTHENTIK_CLIENT_ID: "ci"
+      AUTHENTIK_CLIENT_SECRET: "ci"
+      AUTHENTIK_REDIRECT_URI: "http://localhost:8787/v1/auth/callback"
+      AUTHENTIK_REQUIRED_GROUP: "telephone-booth-operators"
+      AZURE_STORAGE_CONNECTION_STRING: "UseDevelopmentStorage=true"
+      AZURE_BLOB_CONTAINER: "booth-recordings"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          experimental: true
+      - run: pnpm install --frozen-lockfile
+      - name: Prisma generate
+        run: pnpm --filter @telephone-booth-operator/api exec prisma generate
+      - name: Prisma migrate (dry-run via deploy)
+        run: pnpm --filter @telephone-booth-operator/api exec prisma migrate deploy
+      - run: pnpm -r typecheck
+      - run: pnpm -r lint
+      - run: pnpm -r test
+      - run: pnpm -r build
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          experimental: true
+      - run: markdownlint-cli2 'docs/**/*.md' 'README.md'
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          args: --offline --no-progress 'docs/**/*.md' 'README.md'
+
+  openapi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate OpenAPI
+        run: npx --yes @redocly/cli@latest lint packages/api/openapi.yaml
+      - name: Diff against main
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin main
+          git show origin/main:packages/api/openapi.yaml > /tmp/openapi-main.yaml || exit 0
+          npx --yes oasdiff@latest breaking /tmp/openapi-main.yaml packages/api/openapi.yaml || true

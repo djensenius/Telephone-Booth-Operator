@@ -1,0 +1,31 @@
+name: openapi-sync
+on:
+  pull_request:
+    paths:
+      - 'packages/api/openapi.yaml'
+      - '.github/workflows/openapi-sync.yml'
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate
+        run: npx --yes @redocly/cli@latest lint packages/api/openapi.yaml
+      - name: Diff
+        run: |
+          git fetch origin main
+          git show origin/main:packages/api/openapi.yaml > /tmp/openapi-main.yaml 2>/dev/null || exit 0
+          npx --yes oasdiff@latest changelog /tmp/openapi-main.yaml packages/api/openapi.yaml > /tmp/changelog.md || true
+          npx --yes oasdiff@latest breaking /tmp/openapi-main.yaml packages/api/openapi.yaml > /tmp/breaking.txt || true
+          echo "## OpenAPI changelog" >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/changelog.md >> "$GITHUB_STEP_SUMMARY" || true
+          if [ -s /tmp/breaking.txt ]; then
+            echo "## ⚠ Breaking changes" >> "$GITHUB_STEP_SUMMARY"
+            cat /tmp/breaking.txt >> "$GITHUB_STEP_SUMMARY"
+          fi

@@ -1,0 +1,17 @@
+node_modules/
+dist/
+build/
+.next/
+.turbo/
+coverage/
+.cache/
+.parcel-cache/
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+playwright-report/
+test-results/
+*.tsbuildinfo
+packages/web/src/api/schema.gen.ts
