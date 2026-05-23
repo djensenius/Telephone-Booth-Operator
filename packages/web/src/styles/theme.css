@@ -1,88 +1,615 @@
-/*
- * Bell Canada visual system — see docs/theme.md.
- *
- * Don't hard-code hex values in component CSS; pull from these tokens.
- * Don't use --bell-blue outside the hex logo (see docs/theme.md "Don'ts").
- */
+/* Bell Canada visual system — see docs/theme.md. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/inter-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("./fonts/inter-latin-600-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Bell Sign";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/bebas-neue-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Cooper Black Stand-in";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("./fonts/fraunces-latin-800-normal.woff2") format("woff2");
+}
+
 :root {
-  --bell-red:       #d81e2c;
-  --enamel-white:   #f5f1e8;
-  --bell-blue:      #0033a0; /* reserved for the hex logo */
-  --aluminum:       #b8bcc2;
-  --aluminum-dark:  #7c8189;
-  --glass-blue:     #c9dbe3;
-  --bakelite:       #15141a;
-  --beige:          #e8dcc4;
-  --lamp-red:       #ff2a2a;
-  --lamp-amber:     #ffb300;
-  --lamp-green:     #1faf5c;
+  --bell-red: #d81e2c;
+  --enamel-white: #f5f1e8;
+  --bell-blue: #0033a0;
+  --aluminum: #b8bcc2;
+  --aluminum-dark: #7c8189;
+  --glass-blue: #c9dbe3;
+  --bakelite: #15141a;
+  --beige: #e8dcc4;
+  --lamp-red: #ff2a2a;
+  --lamp-amber: #ffb300;
+  --lamp-green: #1faf5c;
 
   --font-sign: "Bell Sign", "Helvetica Neue Condensed Bold", Impact, sans-serif;
-  --font-heading: "Cooper Black", Georgia, serif;
+  --font-heading: "Cooper Black Stand-in", "Cooper Black", Georgia, serif;
   --font-body: "Inter", "Helvetica Neue", Helvetica, sans-serif;
   --font-mono: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
 }
 
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
 
-html, body, #root { height: 100%; margin: 0; }
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
 
 body {
+  min-width: 320px;
   font-family: var(--font-body);
   color: var(--bakelite);
   background: var(--bell-red);
 }
 
+button,
+a,
+input {
+  font: inherit;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+[tabindex]:focus-visible {
+  outline: 4px solid var(--enamel-white);
+  outline-offset: 4px;
+  box-shadow: 0 0 0 7px var(--aluminum-dark);
+}
+
+.skip-link {
+  position: absolute;
+  inset-block-start: 12px;
+  inset-inline-start: 12px;
+  z-index: 20;
+  padding: 10px 14px;
+  color: var(--bakelite);
+  background: var(--enamel-white);
+  border: 2px solid var(--aluminum-dark);
+  transform: translateY(-160%);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
 .booth-frame {
-  min-height: 100%;
-  padding: 24px;
+  position: relative;
+  min-height: 100vh;
+  padding: 28px;
+  overflow: hidden;
   background:
-    linear-gradient(180deg, var(--bell-red) 0 60px, transparent 60px) ,
-    repeating-linear-gradient(
-      90deg, transparent 0 24px, rgba(0,0,0,0.04) 24px 25px
-    ),
+    linear-gradient(90deg, var(--aluminum-dark) 0 10px, transparent 10px calc(100% - 10px), var(--aluminum-dark) calc(100% - 10px)),
+    linear-gradient(180deg, var(--aluminum) 0 12px, transparent 12px calc(100% - 12px), var(--aluminum-dark) calc(100% - 12px)),
     var(--bell-red);
-  border: 8px solid var(--aluminum-dark);
-  outline: 4px solid var(--bell-red);
+  border: 10px solid var(--aluminum-dark);
+  box-shadow: inset 0 0 42px color-mix(in srgb, var(--bakelite) 40%, transparent);
+}
+
+.booth-frame--noise::after {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  opacity: 0.24;
+  background-image:
+    radial-gradient(circle at 10% 20%, color-mix(in srgb, var(--enamel-white) 34%, transparent) 0 1px, transparent 1px),
+    radial-gradient(circle at 70% 30%, color-mix(in srgb, var(--bakelite) 16%, transparent) 0 1px, transparent 1px);
+  background-size: 18px 18px, 22px 22px;
+  mix-blend-mode: soft-light;
 }
 
 .telephone-banner {
+  position: sticky;
+  inset-block-start: 16px;
+  z-index: 10;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 12px;
+  background: var(--enamel-white);
+  border: 3px solid var(--aluminum-dark);
+  border-radius: 8px;
+  box-shadow: 0 12px 0 color-mix(in srgb, var(--bakelite) 18%, transparent), inset 0 0 18px color-mix(in srgb, var(--aluminum) 36%, transparent);
+}
+
+.telephone-banner__brand {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 12px 20px;
-  background: var(--enamel-white);
-  border: 2px solid var(--aluminum-dark);
-  border-radius: 4px;
-  box-shadow: 0 2px 0 rgba(0,0,0,0.2);
+  justify-content: center;
+  gap: clamp(12px, 4vw, 34px);
+  min-height: 68px;
+  color: var(--bell-red);
+  text-decoration: none;
+}
+
+.telephone-banner__logo {
+  flex: 0 0 auto;
+}
+
+.telephone-banner__hex {
+  fill: var(--bell-blue);
+}
+
+.telephone-banner__logo-letter {
+  font-family: var(--font-heading);
+  font-size: 28px;
+  fill: var(--enamel-white);
 }
 
 .telephone-banner__title {
   font-family: var(--font-sign);
-  font-size: 36px;
-  letter-spacing: 0.18em;
-  color: var(--bell-red);
+  font-size: clamp(2.8rem, 10vw, 7rem);
+  line-height: 0.9;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
 }
 
-.bell-hex { flex: 0 0 40px; }
+.ceiling-lamps {
+  display: flex;
+  justify-content: center;
+  gap: 28px;
+  max-width: 420px;
+  margin: 18px auto 0;
+  padding: 10px 16px;
+  background: color-mix(in srgb, var(--bakelite) 45%, transparent);
+  border: 2px solid var(--aluminum-dark);
+  border-radius: 999px;
+}
+
+.ceiling-lamps__lamp {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--lamp-green);
+  border: 2px solid var(--aluminum);
+  box-shadow: 0 0 14px currentColor;
+}
+
+.ceiling-lamps--playing .ceiling-lamps__lamp {
+  color: var(--lamp-amber);
+  background: var(--lamp-amber);
+  animation: booth-pulse 1.1s ease-in-out infinite;
+}
+
+.ceiling-lamps--recording .ceiling-lamps__lamp,
+.ceiling-lamps--error .ceiling-lamps__lamp {
+  color: var(--lamp-red);
+  background: var(--lamp-red);
+}
+
+.ceiling-lamps--recording .ceiling-lamps__lamp {
+  animation: booth-pulse 900ms ease-in-out infinite;
+}
+
+.ceiling-lamps--error .ceiling-lamps__lamp {
+  animation: booth-blink 700ms steps(2, jump-none) infinite;
+}
+
+.app-shell {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
+  gap: 28px;
+  max-width: 1180px;
+  margin: 28px auto 0;
+}
+
+.operator-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  align-self: start;
+}
+
+.operator-sidebar__nav,
+.glass-panel {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--enamel-white) 58%, transparent), color-mix(in srgb, var(--glass-blue) 35%, transparent)),
+    radial-gradient(circle at 10% 10%, color-mix(in srgb, var(--enamel-white) 40%, transparent) 0 1px, transparent 1px),
+    color-mix(in srgb, var(--glass-blue) 35%, transparent);
+  background-size: auto, 12px 12px, auto;
+  border: 2px solid var(--aluminum);
+  border-radius: 14px;
+  box-shadow: inset 0 0 28px color-mix(in srgb, var(--enamel-white) 30%, transparent), 0 18px 30px color-mix(in srgb, var(--bakelite) 24%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.operator-sidebar__nav {
+  padding: 18px;
+}
+
+.operator-sidebar__nav h2,
+.glass-panel h1 {
+  margin: 0 0 14px;
+  font-family: var(--font-heading);
+  letter-spacing: 0.02em;
+}
+
+.operator-sidebar__nav ul {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.operator-sidebar__nav a,
+.operator-sidebar__reserved {
+  display: block;
+  padding: 10px 12px;
+  color: var(--bakelite);
+  background: var(--enamel-white);
+  border: 2px solid var(--aluminum-dark);
+  border-radius: 8px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.operator-sidebar__reserved {
+  color: color-mix(in srgb, var(--bakelite) 62%, var(--aluminum-dark));
+  background: color-mix(in srgb, var(--enamel-white) 70%, var(--aluminum));
+}
+
+.app-shell__main {
+  min-width: 0;
+}
 
 .glass-panel {
-  margin-top: 24px;
-  padding: 32px;
-  background:
-    linear-gradient(180deg, rgba(255,255,255,0.45), rgba(255,255,255,0.15)),
-    var(--glass-blue);
-  border: 2px solid var(--aluminum);
-  border-radius: 8px;
-  backdrop-filter: blur(4px);
+  min-height: 460px;
+  padding: clamp(24px, 5vw, 44px);
 }
 
 .glass-panel h1 {
-  font-family: var(--font-heading);
-  font-size: 32px;
-  margin: 0 0 12px 0;
+  font-size: clamp(2.2rem, 6vw, 4.7rem);
+  line-height: 1;
+  color: var(--bakelite);
+}
+
+.glass-panel p {
+  max-width: 70ch;
+  font-size: 1.05rem;
+  line-height: 1.6;
+}
+
+.screen-kicker {
+  margin: 0 0 8px;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 28px 0 0;
+}
+
+.status-grid div,
+.terminal-card,
+.settings-list {
+  padding: 16px;
+  background: var(--enamel-white);
+  border: 2px solid var(--aluminum-dark);
+  border-radius: 10px;
+}
+
+.status-grid dt {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.status-grid dd {
+  margin: 6px 0 0;
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.terminal-card {
+  font-family: var(--font-mono);
+  color: var(--lamp-green);
+  background: var(--bakelite);
+}
+
+.settings-list {
+  display: grid;
+  gap: 12px;
+  max-width: 640px;
+}
+
+.settings-list label {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.contempra-phone {
+  position: relative;
+  width: min(100%, 320px);
+  margin: 0 auto;
+}
+
+.contempra-phone__body {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 18px 16px color-mix(in srgb, var(--bakelite) 28%, transparent));
+}
+
+.contempra-phone__shadow {
+  fill: var(--bakelite);
+}
+
+.contempra-phone__shell,
+.handset__body {
+  fill: var(--beige);
+  stroke: var(--bakelite);
+  stroke-width: 6px;
+}
+
+.contempra-phone__cradle,
+.contempra-phone__chrome,
+.contempra-phone__label {
+  fill: var(--aluminum);
+  stroke: var(--aluminum-dark);
+  stroke-width: 4px;
+}
+
+.contempra-phone__dial {
+  position: absolute;
+  inset-inline: 13%;
+  inset-block-start: 38%;
+}
+
+.rotary-dial {
+  position: relative;
+  aspect-ratio: 1;
+  width: 100%;
+  max-width: 260px;
+  margin: 0 auto;
+}
+
+.rotary-dial__plate {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.rotary-dial__outer,
+.rotary-dial__center {
+  fill: var(--aluminum);
+  stroke: var(--aluminum-dark);
+  stroke-width: 4px;
+}
+
+.rotary-dial__finger-stop {
+  fill: var(--bakelite);
+}
+
+.rotary-dial__wheel {
+  transform-origin: center;
+  transition: transform 700ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.rotary-dial__wheel--active {
+  transform: rotate(var(--dial-turn));
+}
+
+.rotary-dial__wheel-face {
+  fill: var(--beige);
+  stroke: var(--bakelite);
+  stroke-width: 4px;
+}
+
+.rotary-dial__hole {
+  fill: var(--bakelite);
+  stroke: var(--aluminum);
+  stroke-width: 3px;
+}
+
+.rotary-dial__button {
+  position: absolute;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  color: var(--bakelite);
+  cursor: pointer;
+  background: var(--enamel-white);
+  border: 2px solid var(--aluminum-dark);
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+}
+
+.rotary-dial__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.rotary-dial__button span {
+  display: block;
+  font-weight: 600;
+}
+
+.handset {
+  display: grid;
+  gap: 8px;
+  width: min(100%, 360px);
+  padding: 10px;
+  color: var(--bakelite);
+  cursor: grab;
+  background: transparent;
+  border: 0;
+}
+
+.handset:active {
+  cursor: grabbing;
+}
+
+.handset__svg {
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 12px 10px color-mix(in srgb, var(--bakelite) 24%, transparent));
+}
+
+.handset__grip {
+  fill: none;
+  stroke: var(--aluminum-dark);
+  stroke-width: 8px;
+  stroke-linecap: round;
+}
+
+.handset__label {
+  justify-self: center;
+  padding: 8px 12px;
+  background: var(--enamel-white);
+  border: 2px solid var(--aluminum-dark);
+  border-radius: 999px;
+  font-size: 0.9rem;
+}
+
+.login-screen__phone {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  margin-top: 20px;
+}
+
+.login-screen__phone .handset {
+  margin-top: -370px;
+}
+
+.line-busy-placard {
+  position: fixed;
+  inset-block-start: 26%;
+  inset-inline-end: 0;
+  z-index: 30;
+  display: grid;
+  gap: 6px;
+  min-width: min(320px, 82vw);
+  padding: 20px;
+  color: var(--bakelite);
+  background: var(--enamel-white);
+  border: 3px solid var(--aluminum-dark);
+  border-inline-end: 0;
+  border-radius: 12px 0 0 12px;
+  box-shadow: 0 16px 28px color-mix(in srgb, var(--bakelite) 28%, transparent);
+  transform: translateX(105%);
+  transition: transform 280ms ease;
+}
+
+.line-busy-placard--visible {
+  transform: translateX(0);
+}
+
+.line-busy-placard strong {
+  font-family: var(--font-sign);
+  font-size: 2.4rem;
+  letter-spacing: 0.12em;
+  color: var(--bell-red);
+}
+
+@keyframes booth-pulse {
+  50% {
+    transform: scale(1.18);
+    box-shadow: 0 0 28px currentColor;
+  }
+}
+
+@keyframes booth-blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (max-width: 760px) {
+  .booth-frame {
+    padding: 14px;
+    border-width: 6px;
+  }
+
+  .telephone-banner {
+    inset-block-start: 8px;
+    padding: 8px;
+  }
+
+  .telephone-banner__brand {
+    min-height: 48px;
+  }
+
+  .telephone-banner__logo {
+    width: 38px;
+    height: 34px;
+  }
+
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .operator-sidebar {
+    order: 2;
+  }
+
+  .status-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .login-screen__phone .handset {
+    margin-top: -300px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  * { animation: none !important; transition: none !important; }
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+
+  .rotary-dial__wheel {
+    transform: none !important;
+  }
+
+  .line-busy-placard {
+    transition: none;
+  }
 }
