@@ -143,3 +143,192 @@ export const ApiTokenUsageBucketSchema = z.object({
   count: z.number().int().nonnegative(),
 });
 export type ApiTokenUsageBucket = z.infer<typeof ApiTokenUsageBucketSchema>;
+
+// -----------------------------------------------------------------------------
+// Observability: booth event log, call sessions, and live system snapshots.
+// -----------------------------------------------------------------------------
+//
+// Event type discriminator. Must stay in sync with the Rust booth's
+// `TelemetryEvent` variants (see docs/observability.md "Telemetry events"
+// section in the Telephone-Booth repo). The strings are serialized as the
+// `type` field in `POST /v1/events` payloads.
+export const BoothEventTypeSchema = z.enum([
+  "call_started",
+  "call_ended",
+  "digit_dialed",
+  "state_transition",
+  "recording_started",
+  "recording_stopped",
+  "upload_started",
+  "upload_completed",
+  "upload_failed",
+  "gpio_edge",
+  "audio_device_change",
+  "operator_request",
+  "operator_response",
+  "error",
+  "log",
+  "system_sample",
+]);
+export type BoothEventType = z.infer<typeof BoothEventTypeSchema>;
+
+// Mirrors the Rust `CallOutcome` enum. Operator UI uses these strings to
+// label session rows; Grafana uses them as `outcome` labels on
+// `booth_calls_total`.
+export const CallOutcomeSchema = z.enum([
+  "hung_up_before_dial",
+  "hung_up_during_prompt",
+  "hung_up_during_recording",
+  "hung_up_during_upload",
+  "recording_completed",
+  "recording_failed",
+  "upload_failed",
+  "operator_error",
+  "aborted",
+]);
+export type CallOutcome = z.infer<typeof CallOutcomeSchema>;
+
+export const BoothEventSchema = z.object({
+  eventId: z.string().min(1).max(128),
+  boothId: z.string().min(1).max(64),
+  bootId: z.string().uuid(),
+  type: BoothEventTypeSchema,
+  occurredAt: z.string().datetime(),
+  sessionId: z.string().uuid().nullable().optional(),
+  recordingId: z.string().min(1).max(128).nullable().optional(),
+  payload: z.unknown().optional(),
+});
+export type BoothEvent = z.infer<typeof BoothEventSchema>;
+
+// Maximum batch size enforced server-side. Booth-side `event_forwarder`
+// chunks into batches of at most `batch_max` (default 200) which is well
+// under this cap.
+export const BOOTH_EVENT_BATCH_MAX = 500;
+
+export const BoothEventBatchSchema = z.object({
+  events: z.array(BoothEventSchema).min(1).max(BOOTH_EVENT_BATCH_MAX),
+});
+export type BoothEventBatch = z.infer<typeof BoothEventBatchSchema>;
+
+export const BoothEventBatchResponseSchema = z.object({
+  accepted: z.number().int().nonnegative(),
+  duplicates: z.number().int().nonnegative(),
+});
+export type BoothEventBatchResponse = z.infer<typeof BoothEventBatchResponseSchema>;
+
+// Server-shaped event row. `id` and `receivedAt` are operator-stamped;
+// `payload` is the full JSON column.
+export const BoothEventRecordSchema = BoothEventSchema.extend({
+  id: z.string(),
+  receivedAt: z.string().datetime(),
+  payload: z.unknown(),
+});
+export type BoothEventRecord = z.infer<typeof BoothEventRecordSchema>;
+
+export const BoothEventListSchema = z.object({
+  items: z.array(BoothEventRecordSchema),
+  nextCursor: z.string().nullable(),
+});
+export type BoothEventList = z.infer<typeof BoothEventListSchema>;
+
+export const CallSessionSchema = z.object({
+  id: z.string().uuid(),
+  boothId: z.string(),
+  bootId: z.string().uuid(),
+  startedAt: z.string().datetime(),
+  endedAt: z.string().datetime().nullable(),
+  digitsDialed: z.string().nullable(),
+  outcome: CallOutcomeSchema.nullable(),
+  recordingId: z.string().nullable(),
+  durationMs: z.number().int().nonnegative().nullable(),
+});
+export type CallSession = z.infer<typeof CallSessionSchema>;
+
+export const CallSessionListSchema = z.object({
+  items: z.array(CallSessionSchema),
+  nextCursor: z.string().nullable(),
+});
+export type CallSessionList = z.infer<typeof CallSessionListSchema>;
+
+export const CallSessionDetailSchema = CallSessionSchema.extend({
+  events: z.array(BoothEventRecordSchema),
+});
+export type CallSessionDetail = z.infer<typeof CallSessionDetailSchema>;
+
+// Live system snapshot pushed by the booth via `PUT /v1/system`. All fields
+// are nullable so the schema is forward-compatible with new metrics. Mirrors
+// the Rust `booth-hal::SystemSnapshot` struct.
+export const BoothSystemSnapshotSchema = z
+  .object({
+    boothId: z.string(),
+    capturedAt: z.string().datetime(),
+    uptimeSeconds: z.number().nonnegative().nullable().optional(),
+    hostname: z.string().nullable().optional(),
+    osVersion: z.string().nullable().optional(),
+    kernelVersion: z.string().nullable().optional(),
+    cpuTemperatureCelsius: z.number().nullable().optional(),
+    cpuUsageRatio: z.number().min(0).max(1).nullable().optional(),
+    cpuUsageRatioPerCore: z.array(z.number().min(0).max(1)).nullable().optional(),
+    loadAverage1m: z.number().nullable().optional(),
+    loadAverage5m: z.number().nullable().optional(),
+    loadAverage15m: z.number().nullable().optional(),
+    memoryUsedBytes: z.number().nonnegative().nullable().optional(),
+    memoryTotalBytes: z.number().nonnegative().nullable().optional(),
+    swapUsedBytes: z.number().nonnegative().nullable().optional(),
+    swapTotalBytes: z.number().nonnegative().nullable().optional(),
+    disks: z
+      .array(
+        z.object({
+          mountpoint: z.string(),
+          totalBytes: z.number().nonnegative(),
+          availableBytes: z.number().nonnegative(),
+        }),
+      )
+      .nullable()
+      .optional(),
+    networkInterfaces: z
+      .array(
+        z.object({
+          name: z.string(),
+          receivedBytes: z.number().nonnegative(),
+          transmittedBytes: z.number().nonnegative(),
+        }),
+      )
+      .nullable()
+      .optional(),
+    audioInputDevice: z.string().nullable().optional(),
+    audioOutputDevice: z.string().nullable().optional(),
+    audioInputDbfs: z.number().nullable().optional(),
+    audioOutputDbfs: z.number().nullable().optional(),
+    tailscaleConnected: z.boolean().nullable().optional(),
+    tailscaleHostname: z.string().nullable().optional(),
+    throttlingFlags: z.array(z.string()).nullable().optional(),
+  })
+  .passthrough();
+export type BoothSystemSnapshot = z.infer<typeof BoothSystemSnapshotSchema>;
+
+// `PUT /v1/system` accepts the snapshot body. The `receivedAt` field is
+// stamped server-side and echoed back in responses + WS broadcasts.
+export const BoothSystemSnapshotEnvelopeSchema = z.object({
+  boothId: z.string(),
+  snapshot: BoothSystemSnapshotSchema,
+  receivedAt: z.string().datetime(),
+});
+export type BoothSystemSnapshotEnvelope = z.infer<typeof BoothSystemSnapshotEnvelopeSchema>;
+
+// Discriminated union for the `/v1/ws/status` socket. The legacy payload
+// shape (a bare `BoothStatus`) is migrated to `{ kind: "status", status }`
+// in the `op-api` PR.
+export const WsEnvelopeSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("status"),
+    status: BoothStatusSchema,
+  }),
+  z.object({
+    kind: z.literal("system"),
+    boothId: z.string(),
+    snapshot: BoothSystemSnapshotSchema,
+    receivedAt: z.string().datetime(),
+  }),
+]);
+export type WsEnvelope = z.infer<typeof WsEnvelopeSchema>;
