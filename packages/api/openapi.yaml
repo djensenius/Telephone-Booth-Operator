@@ -441,8 +441,7 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/BoothEventRecord' }
                   nextCursor:
-                    type: string
-                    nullable: true
+                    type: [string, 'null']
 
   /v1/events/stream:
     get:
@@ -491,8 +490,7 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/CallSession' }
                   nextCursor:
-                    type: string
-                    nullable: true
+                    type: [string, 'null']
 
   /v1/sessions/{id}:
     parameters:
@@ -821,16 +819,15 @@ components:
       properties:
         boothId: { type: string }
         capturedAt: { type: string, format: date-time }
-        uptimeSeconds: { type: number, nullable: true }
-        cpuTemperatureCelsius: { type: number, nullable: true }
-        cpuUsageRatio: { type: number, nullable: true }
-        loadAverage1m: { type: number, nullable: true }
-        loadAverage5m: { type: number, nullable: true }
-        loadAverage15m: { type: number, nullable: true }
-        memoryUsedBytes: { type: number, nullable: true }
-        memoryTotalBytes: { type: number, nullable: true }
-        tailscaleConnected: { type: boolean, nullable: true }
+        uptimeSeconds: { type: [number, 'null'] }
+        cpuTemperatureCelsius: { type: [number, 'null'] }
+        cpuUsageRatio: { type: [number, 'null'] }
+        loadAverage1m: { type: [number, 'null'] }
+        loadAverage5m: { type: [number, 'null'] }
+        loadAverage15m: { type: [number, 'null'] }
+        memoryUsedBytes: { type: [number, 'null'] }
+        memoryTotalBytes: { type: [number, 'null'] }
+        tailscaleConnected: { type: [boolean, 'null'] }
         throttlingFlags:
-          type: array
+          type: [array, 'null']
           items: { type: string }
-          nullable: true
