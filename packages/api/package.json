@@ -22,6 +22,7 @@
     "@telephone-booth-operator/shared": "workspace:^",
     "argon2": "^0.41.1",
     "hono": "^4.6.12",
+    "jose": "^6.2.3",
     "openid-client": "^6.8.4",
     "pino": "^9.5.0",
     "ws": "^8.18.0",
