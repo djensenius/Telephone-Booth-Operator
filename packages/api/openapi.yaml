@@ -230,7 +230,7 @@ paths:
       summary: Request a presigned Azure Blob upload URL.
       tags: [uploads]
       security:
-        - apiToken: []
+        - operatorSession: []
       requestBody:
         required: true
         content:
@@ -494,6 +494,7 @@ components:
         uploadUrl: { type: string, format: uri, description: 'Azure Blob PUT URL with SAS.' }
         blobName: { type: string }
         expiresAt: { type: string, format: date-time }
+        audioFileId: { type: string, format: uuid, description: 'Present for question-audio uploads.' }
     OperatorMe:
       type: object
       required: [id, name, email, groups, providerName]

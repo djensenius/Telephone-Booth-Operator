@@ -102,6 +102,7 @@ export const UploadSlotSchema = z.object({
   uploadUrl: z.string().url(),
   blobName: z.string().min(1),
   expiresAt: z.string().datetime(),
+  audioFileId: z.string().uuid().optional(),
 });
 export type UploadSlot = z.infer<typeof UploadSlotSchema>;
 

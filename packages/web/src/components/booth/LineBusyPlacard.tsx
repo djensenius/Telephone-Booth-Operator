@@ -1,12 +1,19 @@
 import { useBoothStatus } from "./BoothStatusContext.js";
 
-export function LineBusyPlacard(): JSX.Element {
+export interface LineBusyPlacardProps {
+  readonly inline?: boolean;
+  readonly message?: string;
+  readonly visible?: boolean;
+}
+
+export function LineBusyPlacard({ inline = false, message, visible: forcedVisible }: LineBusyPlacardProps = {}): JSX.Element {
   const { connectionStatus, lastError } = useBoothStatus();
-  const visible = connectionStatus === "disconnected";
+  const visible = forcedVisible ?? connectionStatus === "disconnected";
+  const classes = ["line-busy-placard", inline ? "line-busy-placard--inline" : "", visible ? "line-busy-placard--visible" : ""].filter(Boolean).join(" ");
   return (
-    <aside className={visible ? "line-busy-placard line-busy-placard--visible" : "line-busy-placard"} aria-hidden={!visible} aria-live="assertive">
+    <aside className={classes} aria-hidden={!visible} aria-live="assertive">
       <strong>LINE BUSY</strong>
-      <span>{lastError ?? "Switchboard link disconnected"}</span>
+      <span>{message ?? lastError ?? "Switchboard link disconnected"}</span>
     </aside>
   );
 }

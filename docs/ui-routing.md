@@ -5,33 +5,40 @@ Contempra phone. Each digit routes you somewhere different.
 
 ## Rotary digit map
 
-| Digit | Route                | Purpose                                       |
-| ----- | -------------------- | --------------------------------------------- |
-| **1** | `/status`            | Live status panel (the default landing route) |
-| **2** | `/messages?status=pending` | Pending messages to review              |
-| **3** | `/messages?status=approved`| Approved messages                       |
-| **4** | `/messages?status=rejected`| Rejected messages                       |
-| **5** | `/questions`         | Manage the question library                   |
-| **6** | `/settings`          | Operator settings (incl. API tokens)          |
-| **7** | _reserved_           | (future)                                      |
-| **8** | _reserved_           | (future)                                      |
-| **9** | `/debug`             | Phone-booth debug surface (LAN/Tailscale)     |
-| **0** | `/about`             | Operator, credits, version, license           |
+| Digit | Route       | Purpose                                       |
+| ----- | ----------- | --------------------------------------------- |
+| **1** | `/status`   | Live status panel (the default landing route) |
+| **2** | `/messages` | Message review queue                          |
+| **3** | `/questions`| Manage the question library                   |
+| **4** | `/tokens`   | API token lifecycle and usage                 |
+| **5** | `/settings` | Operator account, theme, and phone-client connection |
+| **6** | `/about`    | Operator lore, credits, version, license      |
+| **7** | `/login` after logout | Clear the operator session / auth line |
+| **8** | _reserved_  | (future)                                      |
+| **9** | `/debug`    | Phone-booth debug surface (LAN/Tailscale)     |
+| **0** | `/`         | Home (Status)                                 |
 
 Routes are also reachable via the **always-present sidebar** (keyboard
 nav, screen-reader friendly) and via direct numeric shortcuts:
-press `1`–`9` or `0` from any non-input context to navigate.
+press `1`–`9` or `0` from any non-input context to navigate. The hook
+position is displayed around every route through the booth shell status
+lamps and Status screen receiver indicator.
 
 ## Routes deeper than digits
 
 | Route                          | Notes                                              |
 | ------------------------------ | -------------------------------------------------- |
-| `/messages/:id`                | Single-message review screen with audio player      |
-| `/questions/new`               | Record a new question via browser MediaRecorder + upload as FLAC |
-| `/settings/tokens`             | API token CRUD                                     |
-| `/settings/account`            | Connected Authentik account info                    |
-| `/debug/:boothId`              | Detailed debug for one booth (multi-booth support) |
-| `/auth/callback`               | OIDC callback handler                              |
+| `/login`                       | Public OIDC login launcher                         |
+| `/messages?status=received`    | Filter the queue to received recordings            |
+| `/messages?status=uploading`   | Filter uploads still in progress                   |
+| `/messages?status=failed`      | Filter failed/rejected recordings                  |
+| `/messages/:id`                | Single-message review screen with audio player     |
+| `/questions/new`               | Open the new-question upload flow                  |
+| `/tokens`                      | API token CRUD and usage sparklines                |
+| `/settings`                    | Account, theme, and phone-client connection        |
+| `/about`                       | Public lore and credits page                       |
+| `/debug`                       | Debug panel for the configured phone client        |
+| `/v1/auth/callback`            | API OIDC callback handler                          |
 
 ## Reduced motion
 
@@ -50,6 +57,6 @@ When `prefers-reduced-motion: reduce` is set:
 | `?`      | Open shortcuts help dialog       |
 | `/`      | Focus the search/filter input on the current screen |
 | `g s`    | Go to Status (alias for `1`)    |
-| `g q`    | Go to Questions (alias for `5`) |
+| `g q`    | Go to Questions (alias for `3`) |
 | `g d`    | Go to Debug (alias for `9`)     |
 | `Esc`    | Close any open modal / drawer    |

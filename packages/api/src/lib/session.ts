@@ -288,7 +288,6 @@ const publicV1Route = (path: string, method: string): boolean => {
   if (method === "GET" && path === "/v1/questions/random") return true;
   if (method === "POST" && path === "/v1/messages") return true;
   if (method === "POST" && /^\/v1\/messages\/[^/]+\/complete$/.test(path)) return true;
-  if (method === "POST" && path === "/v1/uploads/sas") return true;
   return false;
 };
 

@@ -49,24 +49,38 @@ just db-seed                   # sample questions + first-run prompt
 just dev                       # api on :8787, web on :5173
 ```
 
-Open <http://localhost:5173>, lift the receiver, and complete Authentik
-login. You should land on the **Status** screen with your name in the
-header banner.
+Open <http://localhost:5173>, choose **Sign in with Authentik**, and
+complete login. You should land on the **Status** screen; `/about` stays
+public for visitors who only need lore and credits.
 
-## 6. Issue an API token for the phone client
+## 6. User-visible operator flow
 
-Rotary digit **6** → Settings → API tokens → **Create**. Copy the
-plaintext token (shown once) and paste it into the Rust client's
-`/etc/phone-booth/config.toml`. See [`api-tokens.md`](api-tokens.md) for
-token lifecycle and rotation guidance.
+- Rotary digit **1** → **Status** shows on/off-hook state plus the last 50
+  status snapshots. It uses WebSocket push when available and falls back
+  to polling.
+- Rotary digit **2** → **Messages** reviews recordings, supports filters,
+  playback, downloads, detail view, local listened marks, and bulk delete.
+- Rotary digit **3** → **Questions** uploads FLAC prompt audio, files prompt
+  cards, previews audio, and retires prompts.
+- Rotary digit **4** → **Tokens** issues API tokens. Copy the plaintext token
+  immediately; it is shown once. See [`api-tokens.md`](api-tokens.md).
+- Rotary digit **5** → **Settings** shows account details, logout, theme
+  preferences, and the phone-client connection panel.
+- Rotary digit **6** → **About** explains the booth design and project stack.
+- Rotary digit **7** clears the operator session and returns to login.
+- Rotary digit **9** → **Debug** opens the phone-client diagnostics panel.
+
+Paste issued phone-client tokens into the Rust client's
+`/etc/phone-booth/config.toml`.
 
 ## Smoke test
 
 - Status panel updates in near-real time when the phone client posts.
+- Rotary digit **4** → **Tokens** creates a token and shows it once.
 - Rotary digit **9** → **Debug** — connection chip shows green when the
   booth is reachable (Tailscale or LAN). See [`debug-panel.md`](debug-panel.md)
   for setup and LAN certificate pinning.
-- Rotary digit **2** → **Pending messages** lists any uploads.
+- Rotary digit **2** → **Messages** lists any uploads.
 
 If anything misbehaves, [`troubleshooting.md`](troubleshooting.md) covers
 the usual suspects.

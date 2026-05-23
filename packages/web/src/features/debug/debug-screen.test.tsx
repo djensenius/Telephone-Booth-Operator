@@ -84,6 +84,9 @@ describe("DebugScreen", () => {
       "fetch",
       vi.fn((input: RequestInfo | URL) => {
         const url = input instanceof URL ? input.toString() : typeof input === "string" ? input : input.url;
+        if (url.endsWith("/v1/auth/me")) {
+          return Promise.resolve(jsonResponse({ id: "user-1", email: "operator@example.com", name: "Jane Operator", groups: [], providerName: "Authentik" }));
+        }
         if (url.endsWith("/v1/state")) {
           return Promise.resolve(jsonResponse({ state: "idle", updatedAt: "2026-01-01T00:00:00Z", currentQuestionId: null, currentMessageId: null, lastError: null }));
         }

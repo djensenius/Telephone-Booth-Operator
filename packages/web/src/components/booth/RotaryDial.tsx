@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { getReducedMotionPreference } from "../../lib/motion.js";
+import { auth } from "../../lib/api-client.js";
 import { ROTARY_ROUTES } from "../../lib/navigation.js";
 import type { RotaryDigit } from "../../lib/navigation.js";
 import { playDialClicks } from "../../lib/sounds.js";
@@ -38,6 +40,7 @@ function stepsForDigit(digit: RotaryDigit): number {
 
 export function RotaryDial({ disabled = false, decorativeLabel = "Rotary navigation dial" }: RotaryDialProps): JSX.Element {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { muted, reducedMotionOverride, connectionStatus } = useBoothStatus();
   const [activeDigit, setActiveDigit] = useState<RotaryDigit | null>(null);
   const [reduceMotion, setReduceMotion] = useState(getReducedMotionPreference);
@@ -63,27 +66,32 @@ export function RotaryDial({ disabled = false, decorativeLabel = "Rotary navigat
         void navigate({ to: "/status" });
         break;
       case "2":
-        void navigate({ to: "/messages", search: { status: "pending" } });
+        void navigate({ to: "/messages" });
         break;
       case "3":
-        void navigate({ to: "/messages", search: { status: "approved" } });
-        break;
-      case "4":
-        void navigate({ to: "/messages", search: { status: "rejected" } });
-        break;
-      case "5":
         void navigate({ to: "/questions" });
         break;
-      case "6":
+      case "4":
+        void navigate({ to: "/tokens" });
+        break;
+      case "5":
         void navigate({ to: "/settings" });
+        break;
+      case "6":
+        void navigate({ to: "/about" });
+        break;
+      case "7":
+        void auth.logout().finally(() => {
+          queryClient.clear();
+          void navigate({ to: "/login", replace: true });
+        });
         break;
       case "9":
         void navigate({ to: "/debug" });
         break;
       case "0":
-        void navigate({ to: "/about" });
+        void navigate({ to: "/" });
         break;
-      case "7":
       case "8":
         break;
     }

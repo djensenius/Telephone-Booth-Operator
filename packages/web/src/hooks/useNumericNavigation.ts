@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { auth } from "../lib/api-client.js";
 import { isRotaryDigit } from "../lib/navigation.js";
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -12,6 +14,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 export function useNumericNavigation(): void {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const chordPrefix = useRef(false);
   const chordTimer = useRef<number | undefined>(undefined);
 
@@ -30,25 +33,31 @@ export function useNumericNavigation(): void {
           void navigate({ to: "/status" });
           break;
         case "2":
-          void navigate({ to: "/messages", search: { status: "pending" } });
+          void navigate({ to: "/messages" });
           break;
         case "3":
-          void navigate({ to: "/messages", search: { status: "approved" } });
-          break;
-        case "4":
-          void navigate({ to: "/messages", search: { status: "rejected" } });
-          break;
-        case "5":
           void navigate({ to: "/questions" });
           break;
-        case "6":
+        case "4":
+          void navigate({ to: "/tokens" });
+          break;
+        case "5":
           void navigate({ to: "/settings" });
+          break;
+        case "6":
+          void navigate({ to: "/about" });
+          break;
+        case "7":
+          void auth.logout().finally(() => {
+            queryClient.clear();
+            void navigate({ to: "/login", replace: true });
+          });
           break;
         case "9":
           void navigate({ to: "/debug" });
           break;
         case "0":
-          void navigate({ to: "/about" });
+          void navigate({ to: "/" });
           break;
         default:
           break;
@@ -100,5 +109,5 @@ export function useNumericNavigation(): void {
       document.removeEventListener("keydown", handleKeyDown);
       clearChord();
     };
-  }, [navigate]);
+  }, [navigate, queryClient]);
 }

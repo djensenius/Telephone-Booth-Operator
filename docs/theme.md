@@ -21,7 +21,9 @@ inside. The booth is the chrome; the phone is the navigation.
 | `--lamp-green`    | `#1FAF5C` | "idle" ceiling lamp                                               |
 
 All tokens live in `packages/web/src/styles/theme.css` as CSS custom
-properties so the rest of the UI never sees raw hex.
+properties so the rest of the UI never sees raw hex. The operator Settings
+screen only toggles classes/data attributes for font size and contrast; it
+reuses these tokens rather than adding new palette values.
 
 ## Don'ts
 

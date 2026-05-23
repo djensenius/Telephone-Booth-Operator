@@ -81,63 +81,50 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
             <a
               href="/status"
             >
-              1
-               · 
-              Status
+              1 · Status
             </a>
           </li>
           <li>
             <a
-              href="/messages?status=pending"
+              href="/messages"
             >
-              2
-               · 
-              Pending messages
-            </a>
-          </li>
-          <li>
-            <a
-              href="/messages?status=approved"
-            >
-              3
-               · 
-              Approved messages
-            </a>
-          </li>
-          <li>
-            <a
-              href="/messages?status=rejected"
-            >
-              4
-               · 
-              Rejected messages
+              2 · Messages
             </a>
           </li>
           <li>
             <a
               href="/questions"
             >
-              5
-               · 
-              Questions
+              3 · Questions
+            </a>
+          </li>
+          <li>
+            <a
+              href="/tokens"
+            >
+              4 · Tokens
             </a>
           </li>
           <li>
             <a
               href="/settings"
             >
-              6
-               · 
-              Settings
+              5 · Settings
             </a>
           </li>
           <li>
-            <span
-              class="operator-sidebar__reserved"
+            <a
+              href="/about"
             >
-              7
-               · Reserved
-            </span>
+              6 · About
+            </a>
+          </li>
+          <li>
+            <a
+              href="/login"
+            >
+              7 · Auth / logout
+            </a>
           </li>
           <li>
             <span
@@ -151,18 +138,14 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
             <a
               href="/debug"
             >
-              9
-               · 
-              Debug
+              9 · Debug
             </a>
           </li>
           <li>
             <a
-              href="/about"
+              href="/"
             >
-              0
-               · 
-              About
+              0 · Home
             </a>
           </li>
         </ul>
@@ -318,7 +301,7 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
               </span>
             </button>
             <button
-              aria-label="Dial 2 — Pending messages"
+              aria-label="Dial 2 — Messages"
               class="rotary-dial__button"
               style="left: 82%; top: 34%;"
               type="button"
@@ -328,7 +311,7 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
               </span>
             </button>
             <button
-              aria-label="Dial 3 — Approved messages"
+              aria-label="Dial 3 — Questions"
               class="rotary-dial__button"
               style="left: 84%; top: 52%;"
               type="button"
@@ -338,7 +321,7 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
               </span>
             </button>
             <button
-              aria-label="Dial 4 — Rejected messages"
+              aria-label="Dial 4 — Tokens"
               class="rotary-dial__button"
               style="left: 74%; top: 69%;"
               type="button"
@@ -348,7 +331,7 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
               </span>
             </button>
             <button
-              aria-label="Dial 5 — Questions"
+              aria-label="Dial 5 — Settings"
               class="rotary-dial__button"
               style="left: 57%; top: 79%;"
               type="button"
@@ -358,7 +341,7 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
               </span>
             </button>
             <button
-              aria-label="Dial 6 — Settings"
+              aria-label="Dial 6 — About"
               class="rotary-dial__button"
               style="left: 38%; top: 79%;"
               type="button"
@@ -368,9 +351,8 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
               </span>
             </button>
             <button
-              aria-label="Dial 7 — Reserved"
+              aria-label="Dial 7 — Auth / logout"
               class="rotary-dial__button"
-              disabled=""
               style="left: 22%; top: 68%;"
               type="button"
             >
@@ -400,7 +382,7 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
               </span>
             </button>
             <button
-              aria-label="Dial 0 — About"
+              aria-label="Dial 0 — Home"
               class="rotary-dial__button"
               style="left: 50%; top: 90%;"
               type="button"
@@ -420,7 +402,7 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
     >
       <section
         aria-label="Live status panel"
-        class="glass-panel"
+        class="glass-panel feature-screen status-screen"
       >
         <p
           class="screen-kicker"
@@ -428,11 +410,43 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
           Digit 1
         </p>
         <h1>
-          Live status
+          Status
         </h1>
         <p>
-          The operator console shell is connected to the booth visual system. Feature data lands in the next work item.
+          The switchboard watches the phone client state machine and keeps the booth lamps in step.
         </p>
+        <section
+          aria-label="Hook position"
+          class="status-indicator status-indicator--on"
+        >
+          <span
+            aria-hidden="true"
+            class="status-indicator__receiver"
+          />
+          <div>
+            <p
+              class="screen-kicker"
+            >
+              Receiver
+            </p>
+            <strong>
+              On hook
+            </strong>
+            <span>
+              idle · updated 2025-12-31, 7:00:00 p.m.
+            </span>
+          </div>
+        </section>
+        <details
+          class="feature-help"
+        >
+          <summary>
+            What is this?
+          </summary>
+          <p>
+            The phone client reports each state as the handset moves from hook, to dial tone, to question playback, beep, recording, upload, and message playback.
+          </p>
+        </details>
         <dl
           class="status-grid"
         >
@@ -449,18 +463,61 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
               Line
             </dt>
             <dd>
-              connected
+              connecting
             </dd>
           </div>
           <div>
             <dt>
-              Screen
+              Last error
             </dt>
             <dd>
-              Placeholder
+              Clear
             </dd>
           </div>
         </dl>
+        <div
+          class="feature-table-wrap"
+        >
+          <table
+            class="feature-table"
+          >
+            <caption>
+              Last 50 status snapshots
+            </caption>
+            <thead>
+              <tr>
+                <th>
+                  Time
+                </th>
+                <th>
+                  State
+                </th>
+                <th>
+                  Question
+                </th>
+                <th>
+                  Message
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  2025-12-31, 7:00:00 p.m.
+                </td>
+                <td>
+                  idle
+                </td>
+                <td>
+                  —
+                </td>
+                <td>
+                  —
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
     </main>
   </div>
