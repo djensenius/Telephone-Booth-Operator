@@ -1,4 +1,5 @@
 import { GlassPanel, useBoothStatus } from "../../components/booth/index.js";
+import { PhoneClientConnection } from "../settings/PhoneClientConnection.js";
 
 export function SettingsScreen(): JSX.Element {
   const { muted, reducedMotionOverride, setMuted, setReducedMotionOverride } = useBoothStatus();
@@ -6,7 +7,7 @@ export function SettingsScreen(): JSX.Element {
     <GlassPanel title="Operator settings">
       <p className="screen-kicker">Digit 6</p>
       <h1>Settings & tokens</h1>
-      <p>Placeholder for API token CRUD and Authentik account details.</p>
+      <p>Manage operator preferences and the phone-client debug line.</p>
       <div className="settings-list">
         <label>
           <input type="checkbox" checked={muted} onChange={(event) => setMuted(event.currentTarget.checked)} />
@@ -17,6 +18,7 @@ export function SettingsScreen(): JSX.Element {
           Allow spring motion and sounds when reduced motion is requested
         </label>
       </div>
+      <PhoneClientConnection />
     </GlassPanel>
   );
 }

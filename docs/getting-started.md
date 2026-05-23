@@ -57,13 +57,15 @@ header banner.
 
 Rotary digit **6** → Settings → API tokens → **Create**. Copy the
 plaintext token (shown once) and paste it into the Rust client's
-`/etc/phone-booth/config.toml`.
+`/etc/phone-booth/config.toml`. See [`api-tokens.md`](api-tokens.md) for
+token lifecycle and rotation guidance.
 
 ## Smoke test
 
 - Status panel updates in near-real time when the phone client posts.
 - Rotary digit **9** → **Debug** — connection chip shows green when the
-  booth is reachable (Tailscale or LAN).
+  booth is reachable (Tailscale or LAN). See [`debug-panel.md`](debug-panel.md)
+  for setup and LAN certificate pinning.
 - Rotary digit **2** → **Pending messages** lists any uploads.
 
 If anything misbehaves, [`troubleshooting.md`](troubleshooting.md) covers

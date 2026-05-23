@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 import { useState } from "react";
 import { BoothStatusProvider } from "../components/booth/index.js";
@@ -10,9 +11,12 @@ export interface AppProps {
 
 export function App({ router }: AppProps = {}): JSX.Element {
   const [appRouter] = useState(() => router ?? createAppRouter());
+  const [queryClient] = useState(() => new QueryClient({ defaultOptions: { queries: { retry: false } } }));
   return (
-    <BoothStatusProvider>
-      <RouterProvider router={appRouter} />
-    </BoothStatusProvider>
+    <QueryClientProvider client={queryClient}>
+      <BoothStatusProvider>
+        <RouterProvider router={appRouter} />
+      </BoothStatusProvider>
+    </QueryClientProvider>
   );
 }
