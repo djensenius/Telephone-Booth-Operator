@@ -31,7 +31,7 @@ enum BoothState {
 
 model Question {
   id        String   @id @default(uuid()) @db.Uuid
-  prompt    String
+  prompt    String   @unique
   audioId   String   @unique @db.Uuid
   audio     File     @relation(fields: [audioId], references: [id])
   createdAt DateTime @default(now())

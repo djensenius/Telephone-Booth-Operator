@@ -15,3 +15,4 @@ playwright-report/
 test-results/
 *.tsbuildinfo
 packages/web/src/api/schema.gen.ts
+packages/api/prisma/migrations/*.lock

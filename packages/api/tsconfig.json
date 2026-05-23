@@ -17,5 +17,5 @@
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src", "../shared/src"]
+  "include": ["src"]
 }
