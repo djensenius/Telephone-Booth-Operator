@@ -4,6 +4,7 @@ import { zValidator } from "@hono/zod-validator";
 import { OperatorMeSchema } from "@telephone-booth-operator/shared";
 import { z } from "zod";
 import { getAuthConfig, getRequiredOidcConfig } from "../lib/config.js";
+import { verifyOperatorBearer } from "../lib/bearer-auth.js";
 import {
   buildAuthorizationUrl,
   endSessionUrl,
@@ -74,20 +75,24 @@ const html = (title: string, detail: string): string => `<!doctype html>
   <body><h1>${title}</h1><p>${detail}</p></body>
 </html>`;
 
-const operatorMe = (session: Awaited<ReturnType<typeof readSession>>) => {
-  if (!session) return null;
-  const groups = Array.isArray(session.user.groups)
-    ? session.user.groups.filter((group): group is string => typeof group === "string")
+const operatorMeFromUser = (user: { oidcSub: string; email: string; name: string; groups: unknown; picture: string | null }) => {
+  const groups = Array.isArray(user.groups)
+    ? user.groups.filter((group): group is string => typeof group === "string")
     : [];
   const payload = {
-    id: session.user.oidcSub,
-    email: session.user.email,
-    name: session.user.name,
+    id: user.oidcSub,
+    email: user.email,
+    name: user.name,
     groups,
     providerName: getAuthConfig().providerName,
-    ...(session.user.picture ? { picture: session.user.picture } : {}),
+    ...(user.picture ? { picture: user.picture } : {}),
   };
   return OperatorMeSchema.parse(payload);
+};
+
+const operatorMe = (session: Awaited<ReturnType<typeof readSession>>) => {
+  if (!session) return null;
+  return operatorMeFromUser(session.user);
 };
 
 export const authRoutes = new Hono<{ Variables: AuthVariables }>();
@@ -171,6 +176,18 @@ authRoutes.post("/logout", async (c) => {
 });
 
 authRoutes.get("/me", async (c) => {
+  // Auth routes are mounted BEFORE `requireOperator()` in `index.ts`, so
+  // the middleware never runs here. Support both session-cookie and
+  // bearer-token clients explicitly.
+  const authorization = c.req.header("authorization");
+  const match = authorization ? /^Bearer\s+(.+)$/i.exec(authorization.trim()) : null;
+  if (match && match[1]) {
+    const result = await verifyOperatorBearer(match[1].trim());
+    if (!result.ok) {
+      return c.json({ error: result.reason }, result.status);
+    }
+    return c.json(operatorMeFromUser(result.user));
+  }
   const session = await readSession(c);
   const me = operatorMe(session);
   if (!me) {

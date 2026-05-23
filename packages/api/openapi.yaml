@@ -371,7 +371,6 @@ paths:
       tags: [auth]
       security:
         - operatorSession: []
-        - operatorBearer: []
       responses:
         '302': { description: redirect to IdP logout or UI }
 

@@ -145,4 +145,24 @@ describe("/v1/stats/summary", () => {
     const res = await app.request("/v1/stats/summary", { headers: { cookie } });
     expect(res.status).toBe(200);
   });
+
+  it("/v1/auth/me also resolves via a bearer token", async () => {
+    const app = createApp();
+    installValidBearer();
+    const res = await app.request("/v1/auth/me", {
+      headers: { authorization: "Bearer good-token" },
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const body = (await res.json()) as { id: string; email: string };
+    expect(body.id).toBe("mobile-user-1");
+    expect(body.email).toBe("operator@example.com");
+  });
+
+  it("phone-side public endpoints still bypass bearer enforcement", async () => {
+    const app = createApp();
+    // No bearer header → public phone route is reachable by the booth even
+    // though `requireOperator()` is mounted globally on `/v1/*`.
+    const res = await app.request("/v1/status");
+    expect(res.status).toBe(200);
+  });
 });

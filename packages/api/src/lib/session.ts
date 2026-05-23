@@ -298,7 +298,7 @@ const publicV1Route = (path: string, method: string): boolean => {
 };
 
 const bearerToken = (c: Context): string | null => {
-  const header = c.req.header("authorization") ?? c.req.header("Authorization");
+  const header = c.req.header("authorization");
   if (!header) return null;
   const match = /^Bearer\s+(.+)$/i.exec(header.trim());
   return match && match[1] ? match[1].trim() : null;
