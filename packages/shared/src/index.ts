@@ -74,3 +74,31 @@ export const OperatorMeSchema = z.object({
   providerName: z.string(),
 });
 export type OperatorMe = z.infer<typeof OperatorMeSchema>;
+
+export const CreateApiTokenRequestSchema = z.object({
+  name: z.string().trim().min(1).max(64),
+  expiresInDays: z.number().int().positive().max(3650).optional(),
+});
+export type CreateApiTokenRequest = z.infer<typeof CreateApiTokenRequestSchema>;
+
+export const ApiTokenSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  last4: z.string().length(4),
+  createdAt: z.string().datetime(),
+  expiresAt: z.string().datetime().nullable(),
+  lastUsedAt: z.string().datetime().nullable(),
+  revokedAt: z.string().datetime().nullable(),
+});
+export type ApiToken = z.infer<typeof ApiTokenSchema>;
+
+export const ApiTokenCreatedSchema = ApiTokenSchema.omit({ lastUsedAt: true, revokedAt: true }).extend({
+  plaintext: z.string(),
+});
+export type ApiTokenCreated = z.infer<typeof ApiTokenCreatedSchema>;
+
+export const ApiTokenUsageBucketSchema = z.object({
+  date: z.string(),
+  count: z.number().int().nonnegative(),
+});
+export type ApiTokenUsageBucket = z.infer<typeof ApiTokenUsageBucketSchema>;

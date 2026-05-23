@@ -114,18 +114,21 @@ model OperatorSession {
 }
 
 // Static API tokens issued to phone-side clients.
-// `tokenHash` is bcrypt/argon2; plaintext is shown to the operator exactly once.
+// `tokenHash` is Argon2id; plaintext is shown to the operator exactly once.
 model ApiToken {
-  id          String        @id @default(uuid()) @db.Uuid
-  label       String
-  last4       String
-  tokenHash   String
-  createdById String
-  createdBy   OperatorUser  @relation(fields: [createdById], references: [id])
-  createdAt   DateTime      @default(now())
-  lastUsedAt  DateTime?
-  expiresAt   DateTime?
-  revokedAt   DateTime?
+  id              String       @id @default(uuid()) @db.Uuid
+  name            String
+  lookupId        String       @unique
+  tokenHash       String
+  last4           String
+  createdByUserId String
+  createdBy       OperatorUser @relation(fields: [createdByUserId], references: [id])
+  createdAt       DateTime     @default(now())
+  expiresAt       DateTime?
+  lastUsedAt      DateTime?
+  revokedAt       DateTime?
 
+  @@index([lookupId])
   @@index([revokedAt, expiresAt])
+  @@index([createdByUserId, createdAt])
 }

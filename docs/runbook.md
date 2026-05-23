@@ -30,7 +30,8 @@ seconds later.
 3. **Revoke** the old token in the operator UI.
 
 If you skip the order and revoke first, the booth goes offline until you
-restart it with the new token.
+restart it with the new token. See [`api-tokens.md`](api-tokens.md) for
+the full token lifecycle and storage model.
 
 ## Restoring Postgres
 

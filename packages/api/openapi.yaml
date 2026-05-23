@@ -246,7 +246,7 @@ paths:
 
   /v1/api-tokens:
     get:
-      summary: List active API tokens (last4 only).
+      summary: List API tokens for the current operator (last4 only).
       tags: [tokens]
       security:
         - operatorSession: []
@@ -269,10 +269,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [label]
+              required: [name]
               properties:
-                label: { type: string, maxLength: 64 }
-                expiresAt: { type: string, format: date-time, nullable: true }
+                name: { type: string, minLength: 1, maxLength: 64 }
+                expiresInDays: { type: integer, minimum: 1, maximum: 3650 }
       responses:
         '201':
           description: created
@@ -290,6 +290,26 @@ paths:
         - operatorSession: []
       responses:
         '204': { description: revoked }
+
+  /v1/api-tokens/{id}/usage:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      summary: Daily usage buckets for an API token.
+      tags: [tokens]
+      security:
+        - operatorSession: []
+      parameters:
+        - { name: days, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 365, default: 30 } }
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ApiTokenUsageBucket' }
+        '404': { description: token not found }
 
   /v1/ws/status:
     get:
@@ -390,20 +410,27 @@ components:
         providerName: { type: string, description: 'OIDC_PROVIDER_NAME — drives UI copy.' }
     ApiTokenSummary:
       type: object
-      required: [id, label, last4, createdAt]
+      required: [id, name, last4, createdAt, expiresAt, lastUsedAt, revokedAt]
       properties:
         id: { type: string, format: uuid }
-        label: { type: string }
+        name: { type: string }
         last4: { type: string, minLength: 4, maxLength: 4 }
         createdAt: { type: string, format: date-time }
-        lastUsedAt: { type: string, format: date-time, nullable: true }
         expiresAt: { type: string, format: date-time, nullable: true }
+        lastUsedAt: { type: string, format: date-time, nullable: true }
+        revokedAt: { type: string, format: date-time, nullable: true }
     ApiTokenCreated:
       allOf:
         - $ref: '#/components/schemas/ApiTokenSummary'
         - type: object
-          required: [token]
+          required: [plaintext]
           properties:
-            token:
+            plaintext:
               type: string
               description: 'Plaintext token. Shown ONLY on creation. Store securely.'
+    ApiTokenUsageBucket:
+      type: object
+      required: [date, count]
+      properties:
+        date: { type: string, format: date }
+        count: { type: integer, minimum: 0 }

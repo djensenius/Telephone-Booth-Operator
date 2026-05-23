@@ -14,6 +14,7 @@ import { logger } from "hono/logger";
 import { pathToFileURL } from "node:url";
 import { AuthConfigurationError, resolveAuthConfig } from "./lib/config.js";
 import { requireOperator, type AuthVariables } from "./lib/session.js";
+import apiTokensRouter from "./routes/api-tokens.js";
 import { authRoutes } from "./routes/auth.js";
 
 const webOrigins = (): string[] =>
@@ -43,6 +44,7 @@ export const createApp = (): Hono<{ Variables: AuthVariables }> => {
   );
 
   app.route("/v1/auth", authRoutes);
+  app.route("/v1/api-tokens", apiTokensRouter);
   app.use("/v1/*", requireOperator());
 
   return app;
