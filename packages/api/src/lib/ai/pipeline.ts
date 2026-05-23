@@ -258,6 +258,14 @@ export const runModeration = async (opts: RunModerationOptions): Promise<string 
         completedAt: new Date(),
       },
     });
+    // Moderation is disabled — advance the message into the operator queue
+    // anyway so it doesn't get stranded in "received". Only flip the status
+    // if it is still "received" so we don't clobber an operator decision on
+    // a manual re-run.
+    const current = await db.message.findUnique({ where: { id: opts.messageId }, select: { status: true } });
+    if (current?.status === "received") {
+      await db.message.update({ where: { id: opts.messageId }, data: { status: "pending" } });
+    }
     await broadcastMessage(opts.messageId);
     return failed.id;
   }

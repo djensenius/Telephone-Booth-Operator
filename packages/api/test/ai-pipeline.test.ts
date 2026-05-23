@@ -168,6 +168,44 @@ describe("AI pipeline", () => {
     expect(moderation.moderate).not.toHaveBeenCalled();
   });
 
+  it("advances messages to pending when moderation is disabled so they reach the operator queue", async () => {
+    const id = await seedReceivedMessage();
+    await runTranscription({
+      messageId: id,
+      deps: baseDeps({
+        moderationProvider: null,
+        config: { moderationProvider: "disabled" } as never,
+      }),
+    });
+    const message = await fakeDb.message.findUnique({ where: { id }, include: { audio: true, transcriptions: true, moderations: true } });
+    const withRelations = message as unknown as {
+      status: string;
+      transcriptions: Array<{ status: string }>;
+      moderations: Array<{ status: string; error: string | null }>;
+    };
+    expect(withRelations.status).toBe("pending");
+    expect(withRelations.transcriptions[0]?.status).toBe("succeeded");
+    expect(withRelations.moderations).toHaveLength(1);
+    expect(withRelations.moderations[0]?.status).toBe("failed");
+    expect(withRelations.moderations[0]?.error).toMatch(/disabled/);
+  });
+
+  it("does not roll back an operator decision when re-running moderation while disabled", async () => {
+    const id = await seedReceivedMessage();
+    // First pass: real moderation runs and the operator approves.
+    await runTranscription({ messageId: id, deps: baseDeps() });
+    await fakeDb.message.update({ where: { id }, data: { status: "approved" } });
+    // Operator re-runs moderation, but the provider is now disabled.
+    await runModeration({
+      messageId: id,
+      deps: baseDeps({ moderationProvider: null, config: { moderationProvider: "disabled" } as never }),
+      requestedByUserId: null,
+    });
+    const message = await fakeDb.message.findUnique({ where: { id }, include: { audio: true, transcriptions: true, moderations: true } });
+    const withRelations = message as unknown as { status: string };
+    expect(withRelations.status).toBe("approved");
+  });
+
   it("records a transcription failure and does not auto-decide when the provider throws", async () => {
     const id = await seedReceivedMessage();
     const failingProvider: TranscriptionProvider = {

@@ -273,7 +273,7 @@ export const fakeDb = {
     },
   },
   message: {
-    findUnique: async ({ where, include, select }: { where: { id?: string; audioId?: string }; include?: { audio?: boolean; transcriptions?: unknown; moderations?: unknown }; select?: { id?: boolean } }) => {
+    findUnique: async ({ where, include, select }: { where: { id?: string; audioId?: string }; include?: { audio?: boolean; transcriptions?: unknown; moderations?: unknown }; select?: { id?: boolean; status?: boolean } }) => {
       const message = where.id
         ? store.messages.get(where.id)
         : [...store.messages.values()].find((item) => item.audioId === where.audioId);
@@ -281,6 +281,7 @@ export const fakeDb = {
       if (select) {
         const out: Record<string, unknown> = {};
         if (select.id) out.id = message.id;
+        if (select.status) out.status = message.status;
         return out;
       }
       if (include) return attachAi(message, include);
