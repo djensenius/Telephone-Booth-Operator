@@ -39,7 +39,7 @@ export type TranscriptionStatus = z.infer<typeof TranscriptionStatusSchema>;
 export const ModerationRecommendationSchema = z.enum(["approve", "review", "reject"]);
 export type ModerationRecommendation = z.infer<typeof ModerationRecommendationSchema>;
 
-export const AiProviderSchema = z.enum(["openai", "mac_app"]);
+export const AiProviderSchema = z.enum(["openai", "mac_app", "disabled"]);
 export type AiProvider = z.infer<typeof AiProviderSchema>;
 
 export const TranscriptionSchema = z.object({

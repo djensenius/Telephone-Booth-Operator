@@ -23,7 +23,7 @@ const TRANSCRIPT_SNIPPET_CHARS = 80;
 function transcriptSnippet(transcription: Transcription | null | undefined): string {
   if (!transcription) return "—";
   if (transcription.status === "pending") return "Transcribing…";
-  if (transcription.status === "failed") return transcription.error ? "Transcription failed" : "Transcription failed";
+  if (transcription.status === "failed") return "Transcription failed";
   const text = transcription.text?.replace(/\s+/g, " ").trim() ?? "";
   if (text.length === 0) return "Silence";
   return text.length <= TRANSCRIPT_SNIPPET_CHARS ? text : `${text.slice(0, TRANSCRIPT_SNIPPET_CHARS - 1)}…`;

@@ -131,13 +131,16 @@ Expected response:
 The pipeline runs after both steps succeed. The mode controls what
 happens to `Message.status`:
 
-- `always_pending` (default) — operators decide. `status` stays
-  `received`.
-- `auto_reject` — if the moderation recommendation is `reject`, the
-  message is auto-rejected. `decidedById` is left `null` and `notes`
-  records why.
+- `always_pending` (default) — the pipeline advances the message from
+  `received` to `pending` so it shows up in the operator review queue,
+  but never auto-approves or auto-rejects.
+- `auto_reject` — if the moderation recommendation is `reject` (or
+  `maxScore` is above `AUTO_REJECT_THRESHOLD`), the message is
+  auto-rejected. `decidedById` is left `null` and `notes` records why.
+  Otherwise the message lands in `pending` for an operator.
 - `auto_both` — also auto-approves messages with `flagged === false`
-  and `maxScore <= AUTO_APPROVE_THRESHOLD`.
+  and `maxScore <= AUTO_APPROVE_THRESHOLD`. Borderline scores still go
+  to `pending`.
 
 Auto-decisions are reversible — operators can flip the status from the
 detail screen.

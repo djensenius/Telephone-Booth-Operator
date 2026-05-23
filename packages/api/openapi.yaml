@@ -249,10 +249,12 @@ paths:
     post:
       summary: Re-run transcription (and downstream moderation) for a message.
       description: |
-        Creates a new pending `Transcription` row, kicks the provider
-        asynchronously, and returns immediately. The completed row arrives
-        via the status WebSocket as a `{kind:"message"}` envelope and via
-        the standard `GET /v1/messages/{id}` polling fallback.
+        Runs transcription synchronously to completion (provider call +
+        any downstream moderation step) and returns the resulting
+        `Transcription` row. Status is `202` because moderation and any
+        auto-decision may still be settling when the response is sent.
+        Additional updates also arrive via the `/v1/ws/status` socket as
+        `{kind:"message"}` envelopes.
       tags: [transcriptions]
       security:
         - operatorSession: []
@@ -906,7 +908,7 @@ components:
       enum: [approve, review, reject]
     AiProvider:
       type: string
-      enum: [openai, mac_app]
+      enum: [openai, mac_app, disabled]
     Transcription:
       type: object
       required: [id, messageId, provider, status, createdAt]

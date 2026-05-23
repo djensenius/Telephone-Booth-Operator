@@ -74,11 +74,15 @@ hour at most. Instead:
 `AUTO_DECISION_MODE` (default `always_pending`) controls what the
 pipeline does with `Message.status` after both steps succeed:
 
-- `always_pending` — pipeline never touches `status`; operators decide.
+- `always_pending` — the pipeline advances `received` messages to
+  `pending` so they show up in the operator queue, but never
+  auto-approves or auto-rejects.
 - `auto_reject` — if `recommendation = reject` (or `maxScore >=
   AUTO_REJECT_THRESHOLD`, default `0.85`), the message is auto-rejected.
+  Otherwise it lands in `pending`.
 - `auto_both` — also auto-approves when `flagged = false` and
-  `maxScore <= AUTO_APPROVE_THRESHOLD` (default `0.15`).
+  `maxScore <= AUTO_APPROVE_THRESHOLD` (default `0.15`). Borderline
+  scores still go to `pending`.
 
 Auto-decisions write a human-readable `notes` field and leave
 `decidedById` null, so the audit trail clearly shows the decision was

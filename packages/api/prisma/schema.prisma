@@ -200,10 +200,12 @@ model ApiToken {
   @@index([createdByUserId, createdAt])
 }
 
-// AI transcription attempts. We append rows (never update existing ones)
-// so the operator UI can show full history of attempts per message.
-// `provider` and `model` are free-form strings so adding new providers does
-// not require a migration. The current values are "openai" and "mac_app".
+// AI transcription attempts. Each re-run inserts a new row (never overwrites
+// a previous attempt) so the operator UI can show full history per message.
+// Individual rows are updated in-place through their lifecycle:
+// pending → succeeded | failed. `provider` and `model` are free-form strings
+// so adding new providers does not require a migration. Current values are
+// "openai", "mac_app", and "disabled".
 model Transcription {
   id            String              @id @default(uuid()) @db.Uuid
   messageId     String              @db.Uuid
