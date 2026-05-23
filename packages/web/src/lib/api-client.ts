@@ -12,9 +12,12 @@ import {
   CreateApiTokenRequestSchema,
   MessageSchema,
   MessageStatusSchema,
+  ModerationSchema,
   OperatorMeSchema,
   QuestionCreateSchema,
   QuestionSchema,
+  TranscriptionListSchema,
+  TranscriptionSchema,
   UploadSasRequestSchema,
   UploadSlotSchema,
 } from "@telephone-booth-operator/shared";
@@ -31,9 +34,12 @@ import type {
   CreateApiTokenRequest,
   Message,
   MessageStatus,
+  Moderation,
   OperatorMe,
   Question,
   QuestionCreate,
+  Transcription,
+  TranscriptionList,
   UploadSasRequest,
   UploadSlot,
 } from "@telephone-booth-operator/shared";
@@ -173,6 +179,9 @@ export const messages = {
   list: (params: { readonly status?: MessageStatus; readonly since?: string; readonly limit?: number } = {}) => apiFetch<MessageList>(`/v1/messages${query({ status: params.status, since: params.since, limit: params.limit ?? 50 })}`, { schema: MessageListSchema }),
   get: (id: string) => apiFetch<Message>(`/v1/messages/${id}`, { schema: MessageSchema }),
   delete: (id: string) => apiFetch<void>(`/v1/messages/${id}`, { method: "DELETE" }),
+  transcriptions: (id: string) => apiFetch<TranscriptionList>(`/v1/messages/${id}/transcriptions`, { schema: TranscriptionListSchema }),
+  transcribe: (id: string) => apiFetch<Transcription>(`/v1/messages/${id}/transcribe`, { method: "POST", schema: TranscriptionSchema }),
+  moderate: (id: string) => apiFetch<Moderation>(`/v1/messages/${id}/moderate`, { method: "POST", schema: ModerationSchema }),
 };
 
 export const apiTokens = {
@@ -239,6 +248,7 @@ export const apiQueryKeys = {
   questions: ["questions", "list"] as const,
   messages: (filter?: MessageStatus | "all") => ["messages", "list", filter ?? "all"] as const,
   message: (id: string) => ["messages", id] as const,
+  transcriptions: (id: string) => ["messages", id, "transcriptions"] as const,
   tokens: ["api-tokens", "list"] as const,
   tokenUsage: (id: string) => ["api-tokens", id, "usage"] as const,
   events: (params: EventsListParams) => ["events", "list", params] as const,
@@ -323,6 +333,33 @@ export function useDeleteMessages() {
     mutationFn: (ids: readonly string[]) => Promise.all(ids.map((id) => messages.delete(id))),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["messages"] });
+    },
+  });
+}
+
+export function useMessageTranscriptions(id: string) {
+  return useQuery({ queryKey: apiQueryKeys.transcriptions(id), queryFn: () => messages.transcriptions(id) });
+}
+
+export function useRetranscribeMessage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => messages.transcribe(id),
+    onSuccess: (_data, id) => {
+      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.message(id) });
+      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.transcriptions(id) });
+      void queryClient.invalidateQueries({ queryKey: ["messages", "list"] });
+    },
+  });
+}
+
+export function useRemoderateMessage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => messages.moderate(id),
+    onSuccess: (_data, id) => {
+      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.message(id) });
+      void queryClient.invalidateQueries({ queryKey: ["messages", "list"] });
     },
   });
 }

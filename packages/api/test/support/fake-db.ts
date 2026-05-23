@@ -74,6 +74,41 @@ export type FakeCallSession = {
   durationMs: number | null;
 };
 
+export type FakeTranscription = {
+  id: string;
+  messageId: string;
+  provider: string;
+  model: string | null;
+  status: "pending" | "succeeded" | "failed";
+  text: string | null;
+  language: string | null;
+  durationMs: number | null;
+  latencyMs: number | null;
+  error: string | null;
+  requestedById: string | null;
+  createdAt: Date;
+  completedAt: Date | null;
+};
+
+export type FakeModeration = {
+  id: string;
+  messageId: string;
+  transcriptionId: string | null;
+  provider: string;
+  model: string | null;
+  status: "pending" | "succeeded" | "failed";
+  flagged: boolean | null;
+  recommendation: "approve" | "review" | "reject" | null;
+  maxScore: number | null;
+  categories: unknown;
+  reasonSummary: string | null;
+  latencyMs: number | null;
+  error: string | null;
+  requestedById: string | null;
+  createdAt: Date;
+  completedAt: Date | null;
+};
+
 export const store = {
   files: new Map<string, FakeFile>(),
   questions: new Map<string, FakeQuestion>(),
@@ -82,6 +117,8 @@ export const store = {
   sessions: new Map<string, FakeSession>(),
   boothEvents: [] as FakeBoothEvent[],
   callSessions: new Map<string, FakeCallSession>(),
+  transcriptions: new Map<string, FakeTranscription>(),
+  moderations: new Map<string, FakeModeration>(),
 };
 
 const cloneDate = (date: Date): Date => new Date(date.getTime());
@@ -144,6 +181,38 @@ export const resetFakeDb = (): void => {
   store.sessions.clear();
   store.boothEvents.length = 0;
   store.callSessions.clear();
+  store.transcriptions.clear();
+  store.moderations.clear();
+};
+
+const attachAi = (message: FakeMessage, include?: { audio?: boolean; transcriptions?: unknown; moderations?: unknown }) => {
+  let base: FakeMessage | (FakeMessage & { audio: FakeFile }) = message;
+  if (include?.audio) {
+    base = attachAudio(message);
+  }
+  if (include?.transcriptions !== undefined) {
+    const tConfig = include.transcriptions as { orderBy?: { createdAt?: "asc" | "desc" }; take?: number } | true;
+    let transcriptions = [...store.transcriptions.values()].filter((row) => row.messageId === message.id);
+    const tOrder = typeof tConfig === "object" ? tConfig.orderBy?.createdAt : undefined;
+    transcriptions = transcriptions.sort((a, b) =>
+      tOrder === "asc" ? a.createdAt.getTime() - b.createdAt.getTime() : b.createdAt.getTime() - a.createdAt.getTime(),
+    );
+    const take = typeof tConfig === "object" ? tConfig.take : undefined;
+    if (typeof take === "number") transcriptions = transcriptions.slice(0, take);
+    (base as Record<string, unknown>).transcriptions = transcriptions;
+  }
+  if (include?.moderations !== undefined) {
+    const mConfig = include.moderations as { orderBy?: { createdAt?: "asc" | "desc" }; take?: number } | true;
+    let moderations = [...store.moderations.values()].filter((row) => row.messageId === message.id);
+    const mOrder = typeof mConfig === "object" ? mConfig.orderBy?.createdAt : undefined;
+    moderations = moderations.sort((a, b) =>
+      mOrder === "asc" ? a.createdAt.getTime() - b.createdAt.getTime() : b.createdAt.getTime() - a.createdAt.getTime(),
+    );
+    const take = typeof mConfig === "object" ? mConfig.take : undefined;
+    if (typeof take === "number") moderations = moderations.slice(0, take);
+    (base as Record<string, unknown>).moderations = moderations;
+  }
+  return base;
 };
 
 export const fakeDb = {
@@ -204,19 +273,27 @@ export const fakeDb = {
     },
   },
   message: {
-    findUnique: async ({ where, include }: { where: { id?: string; audioId?: string }; include?: { audio?: boolean } }) => {
+    findUnique: async ({ where, include, select }: { where: { id?: string; audioId?: string }; include?: { audio?: boolean; transcriptions?: unknown; moderations?: unknown }; select?: { id?: boolean } }) => {
       const message = where.id
         ? store.messages.get(where.id)
         : [...store.messages.values()].find((item) => item.audioId === where.audioId);
       if (!message) return null;
-      return include?.audio ? attachAudio(message) : message;
+      if (select) {
+        const out: Record<string, unknown> = {};
+        if (select.id) out.id = message.id;
+        return out;
+      }
+      if (include) return attachAi(message, include);
+      return message;
     },
-    findMany: async ({ where = {}, include, take }: { where?: { status?: string; createdAt?: { gte: Date } }; include?: { audio?: boolean }; take: number }) => {
+    findMany: async ({ where = {}, include, take, orderBy }: { where?: { status?: string; createdAt?: { gte: Date } }; include?: { audio?: boolean; transcriptions?: unknown; moderations?: unknown }; take: number; orderBy?: unknown }) => {
+      void orderBy;
       let messages = [...store.messages.values()];
       if (where.status) messages = messages.filter((message) => message.status === where.status);
       if (where.createdAt?.gte) messages = messages.filter((message) => message.createdAt >= where.createdAt.gte);
       messages = messages.sort(byCreatedDesc).slice(0, take);
-      return include?.audio ? messages.map(attachAudio) : messages;
+      if (include) return messages.map((message) => attachAi(message, include));
+      return messages;
     },
     create: async ({ data }: { data: { status: string; questionId?: string | null; audioId: string } }) => {
       const message: FakeMessage = {
@@ -245,6 +322,93 @@ export const fakeDb = {
       if (!existing) throw new Error("message not found");
       store.messages.delete(where.id);
       return existing;
+    },
+  },
+  transcription: {
+    create: async ({ data }: { data: Partial<FakeTranscription> & { messageId: string; provider: string } }) => {
+      const row: FakeTranscription = {
+        id: randomUUID(),
+        messageId: data.messageId,
+        provider: data.provider,
+        model: data.model ?? null,
+        status: data.status ?? "pending",
+        text: data.text ?? null,
+        language: data.language ?? null,
+        durationMs: data.durationMs ?? null,
+        latencyMs: data.latencyMs ?? null,
+        error: data.error ?? null,
+        requestedById: data.requestedById ?? null,
+        createdAt: new Date(),
+        completedAt: data.completedAt ?? null,
+      };
+      store.transcriptions.set(row.id, row);
+      return row;
+    },
+    update: async ({ where, data }: { where: { id: string }; data: Partial<FakeTranscription> }) => {
+      const existing = store.transcriptions.get(where.id);
+      if (!existing) throw new Error("transcription not found");
+      const updated = { ...existing, ...data };
+      store.transcriptions.set(where.id, updated);
+      return updated;
+    },
+    findUnique: async ({ where }: { where: { id: string } }) => store.transcriptions.get(where.id) ?? null,
+    findFirst: async ({ where, orderBy }: { where: { messageId: string; status?: string }; orderBy?: { createdAt?: "asc" | "desc" } }) => {
+      const order = orderBy?.createdAt ?? "desc";
+      const rows = [...store.transcriptions.values()].filter((row) => row.messageId === where.messageId && (where.status ? row.status === where.status : true));
+      rows.sort((a, b) => order === "asc" ? a.createdAt.getTime() - b.createdAt.getTime() : b.createdAt.getTime() - a.createdAt.getTime());
+      return rows[0] ?? null;
+    },
+    findMany: async ({ where, orderBy, take }: { where: { messageId: string }; orderBy?: { createdAt?: "asc" | "desc" }; take?: number }) => {
+      const order = orderBy?.createdAt ?? "desc";
+      let rows = [...store.transcriptions.values()].filter((row) => row.messageId === where.messageId);
+      rows.sort((a, b) => order === "asc" ? a.createdAt.getTime() - b.createdAt.getTime() : b.createdAt.getTime() - a.createdAt.getTime());
+      if (typeof take === "number") rows = rows.slice(0, take);
+      return rows;
+    },
+  },
+  moderation: {
+    create: async ({ data }: { data: Partial<FakeModeration> & { messageId: string; provider: string } }) => {
+      const row: FakeModeration = {
+        id: randomUUID(),
+        messageId: data.messageId,
+        transcriptionId: data.transcriptionId ?? null,
+        provider: data.provider,
+        model: data.model ?? null,
+        status: data.status ?? "pending",
+        flagged: data.flagged ?? null,
+        recommendation: data.recommendation ?? null,
+        maxScore: data.maxScore ?? null,
+        categories: data.categories ?? null,
+        reasonSummary: data.reasonSummary ?? null,
+        latencyMs: data.latencyMs ?? null,
+        error: data.error ?? null,
+        requestedById: data.requestedById ?? null,
+        createdAt: new Date(),
+        completedAt: data.completedAt ?? null,
+      };
+      store.moderations.set(row.id, row);
+      return row;
+    },
+    update: async ({ where, data }: { where: { id: string }; data: Partial<FakeModeration> }) => {
+      const existing = store.moderations.get(where.id);
+      if (!existing) throw new Error("moderation not found");
+      const updated = { ...existing, ...data };
+      store.moderations.set(where.id, updated);
+      return updated;
+    },
+    findUnique: async ({ where }: { where: { id: string } }) => store.moderations.get(where.id) ?? null,
+    findFirst: async ({ where, orderBy }: { where: { messageId: string }; orderBy?: { createdAt?: "asc" | "desc" } }) => {
+      const order = orderBy?.createdAt ?? "desc";
+      const rows = [...store.moderations.values()].filter((row) => row.messageId === where.messageId);
+      rows.sort((a, b) => order === "asc" ? a.createdAt.getTime() - b.createdAt.getTime() : b.createdAt.getTime() - a.createdAt.getTime());
+      return rows[0] ?? null;
+    },
+    findMany: async ({ where, orderBy, take }: { where: { messageId: string }; orderBy?: { createdAt?: "asc" | "desc" }; take?: number }) => {
+      const order = orderBy?.createdAt ?? "desc";
+      let rows = [...store.moderations.values()].filter((row) => row.messageId === where.messageId);
+      rows.sort((a, b) => order === "asc" ? a.createdAt.getTime() - b.createdAt.getTime() : b.createdAt.getTime() - a.createdAt.getTime());
+      if (typeof take === "number") rows = rows.slice(0, take);
+      return rows;
     },
   },
   boothStatusSnapshot: {

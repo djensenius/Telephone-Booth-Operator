@@ -1053,6 +1053,58 @@ textarea:focus-visible,
   background: color-mix(in srgb, var(--lamp-red) 18%, var(--enamel-white));
 }
 
+.feature-badge--moderation-approve {
+  background: color-mix(in srgb, var(--lamp-green) 28%, var(--enamel-white));
+}
+
+.feature-badge--moderation-review {
+  background: color-mix(in srgb, var(--lamp-amber) 32%, var(--enamel-white));
+}
+
+.feature-badge--moderation-reject {
+  background: color-mix(in srgb, var(--lamp-red) 18%, var(--enamel-white));
+}
+
+.feature-badge--moderation-pending {
+  background: color-mix(in srgb, var(--aluminum-light) 60%, var(--enamel-white));
+}
+
+.feature-badge--moderation-failed {
+  background: var(--enamel-white);
+  border-style: dashed;
+}
+
+.feature-badge--moderation-none {
+  background: transparent;
+  color: var(--aluminum-dark);
+}
+
+.feature-row-transcript {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.feature-transcript-body {
+  white-space: pre-wrap;
+  margin-block: 8px;
+}
+
+.feature-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.feature-card-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .feature-dialog-backdrop {
   position: fixed;
   inset: 0;

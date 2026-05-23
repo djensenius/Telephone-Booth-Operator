@@ -18,6 +18,7 @@ rebuilds it from the filesystem; CI fails if it drifts.
 - [API](api/README.md) — reading and regenerating `openapi.yaml`
 - [Azure storage](azure-storage.md) — container layout, SAS scoping, Azurite for dev
 - [Theme](theme.md) — Bell Canada visual system, components, accessibility
+- [Transcription providers](transcription-providers.md) — AI transcription + moderation pipeline
 - [UI routing](ui-routing.md) — rotary digit ↔ route map, keyboard nav, reduced motion
 
 ## Running it
@@ -36,3 +37,4 @@ rebuilds it from the filesystem; CI fails if it drifts.
 - [0002 — Authentik OIDC](adr/0002-authentik-oidc.md)
 - [0003 — Azure Blob with SAS uploads](adr/0003-azure-blob-with-sas-uploads.md)
 - [0004 — Postgres with Prisma](adr/0004-postgres-with-prisma.md)
+- [0005 — AI transcription and moderation](adr/0005-ai-transcription-and-moderation.md)

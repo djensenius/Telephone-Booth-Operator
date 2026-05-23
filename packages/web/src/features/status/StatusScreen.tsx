@@ -66,6 +66,11 @@ export function StatusScreen(): JSX.Element {
             ["system", envelope.data.boothId],
             { boothId: envelope.data.boothId, snapshot: envelope.data.snapshot, receivedAt: envelope.data.receivedAt },
           );
+        } else if (envelope.data.kind === "message") {
+          const message = envelope.data.message;
+          queryClient.setQueryData(apiQueryKeys.message(message.id), message);
+          void queryClient.invalidateQueries({ queryKey: ["messages", "list"] });
+          void queryClient.invalidateQueries({ queryKey: apiQueryKeys.transcriptions(message.id) });
         }
         return;
       }

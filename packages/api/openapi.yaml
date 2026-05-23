@@ -22,6 +22,8 @@ tags:
   - name: uploads
   - name: auth
   - name: tokens
+  - name: transcriptions
+  - name: moderations
 paths:
   /healthz:
     get:
@@ -225,6 +227,63 @@ paths:
         '409': { description: blob not found }
         '422': { description: sha256 mismatch }
 
+  /v1/messages/{id}/transcriptions:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      summary: List all transcription attempts for a message (newest first).
+      tags: [transcriptions]
+      security:
+        - operatorSession: []
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TranscriptionList' }
+        '404': { description: message not found }
+
+  /v1/messages/{id}/transcribe:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Re-run transcription (and downstream moderation) for a message.
+      description: |
+        Creates a new pending `Transcription` row, kicks the provider
+        asynchronously, and returns immediately. The completed row arrives
+        via the status WebSocket as a `{kind:"message"}` envelope and via
+        the standard `GET /v1/messages/{id}` polling fallback.
+      tags: [transcriptions]
+      security:
+        - operatorSession: []
+      responses:
+        '202':
+          description: pending transcription accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transcription' }
+        '404': { description: message not found }
+        '409': { description: transcription provider disabled }
+        '503': { description: transcription provider unavailable }
+
+  /v1/messages/{id}/moderate:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Re-run moderation against the latest succeeded transcription.
+      tags: [moderations]
+      security:
+        - operatorSession: []
+      responses:
+        '202':
+          description: pending moderation accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Moderation' }
+        '404': { description: message or transcription not found }
+        '409': { description: moderation provider disabled or transcription empty }
+        '503': { description: moderation provider unavailable }
+
   /v1/uploads/sas:
     post:
       summary: Request a presigned Azure Blob upload URL.
@@ -352,7 +411,7 @@ paths:
       summary: WebSocket — operator UI subscribes to live status push.
       description: |
         Operator UIs subscribe over WebSocket; the server fans out a
-        discriminated `{kind:"status"|"system", ...}` envelope. The
+        discriminated `{kind:"status"|"system"|"message", ...}` envelope. The
         connection is dropped with code 1009 if outbound buffering exceeds
         ~1 MiB (slow consumer guard).
       tags: [status]
@@ -645,6 +704,14 @@ components:
         createdAt: { type: string, format: date-time }
         receivedAt: { anyOf: [{ type: string, format: date-time }, { type: 'null' }] }
         audio: { $ref: '#/components/schemas/AudioRef' }
+        latestTranscription:
+          anyOf:
+            - $ref: '#/components/schemas/Transcription'
+            - { type: 'null' }
+        latestModeration:
+          anyOf:
+            - $ref: '#/components/schemas/Moderation'
+            - { type: 'null' }
     MessageCreate:
       type: object
       required: [durationMs, sha256]
@@ -831,3 +898,59 @@ components:
         throttlingFlags:
           type: [array, 'null']
           items: { type: string }
+    TranscriptionStatus:
+      type: string
+      enum: [pending, succeeded, failed]
+    ModerationRecommendation:
+      type: string
+      enum: [approve, review, reject]
+    AiProvider:
+      type: string
+      enum: [openai, mac_app]
+    Transcription:
+      type: object
+      required: [id, messageId, provider, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        messageId: { type: string, format: uuid }
+        provider: { $ref: '#/components/schemas/AiProvider' }
+        model: { anyOf: [{ type: string }, { type: 'null' }] }
+        status: { $ref: '#/components/schemas/TranscriptionStatus' }
+        text: { anyOf: [{ type: string }, { type: 'null' }] }
+        language: { anyOf: [{ type: string }, { type: 'null' }] }
+        durationMs: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }] }
+        latencyMs: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }] }
+        error: { anyOf: [{ type: string }, { type: 'null' }] }
+        requestedById: { anyOf: [{ type: string }, { type: 'null' }] }
+        createdAt: { type: string, format: date-time }
+        completedAt: { anyOf: [{ type: string, format: date-time }, { type: 'null' }] }
+    Moderation:
+      type: object
+      required: [id, messageId, provider, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        messageId: { type: string, format: uuid }
+        transcriptionId: { anyOf: [{ type: string, format: uuid }, { type: 'null' }] }
+        provider: { $ref: '#/components/schemas/AiProvider' }
+        model: { anyOf: [{ type: string }, { type: 'null' }] }
+        status: { $ref: '#/components/schemas/TranscriptionStatus' }
+        flagged: { anyOf: [{ type: boolean }, { type: 'null' }] }
+        recommendation:
+          anyOf:
+            - $ref: '#/components/schemas/ModerationRecommendation'
+            - { type: 'null' }
+        maxScore: { anyOf: [{ type: number, minimum: 0, maximum: 1 }, { type: 'null' }] }
+        categories: { anyOf: [{ type: object, additionalProperties: { type: number } }, { type: 'null' }] }
+        reasonSummary: { anyOf: [{ type: string }, { type: 'null' }] }
+        latencyMs: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }] }
+        error: { anyOf: [{ type: string }, { type: 'null' }] }
+        requestedById: { anyOf: [{ type: string }, { type: 'null' }] }
+        createdAt: { type: string, format: date-time }
+        completedAt: { anyOf: [{ type: string, format: date-time }, { type: 'null' }] }
+    TranscriptionList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Transcription' }

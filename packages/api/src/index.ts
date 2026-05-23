@@ -12,6 +12,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { pathToFileURL } from "node:url";
+import { startAiSweeper } from "./lib/ai/sweeper.js";
 import { AuthConfigurationError, resolveAuthConfig } from "./lib/config.js";
 import { requireOperator, type AuthVariables } from "./lib/session.js";
 import apiTokensRouter from "./routes/api-tokens.js";
@@ -86,6 +87,7 @@ const start = (): void => {
     console.log(`telephone-booth-operator API listening on :${port}`);
   });
   attachStatusWebSocket(server);
+  startAiSweeper();
 };
 
 const app = createApp();
