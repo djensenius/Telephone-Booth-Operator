@@ -183,8 +183,15 @@ export const runTranscription = async (opts: RunTranscriptionOptions): Promise<s
       preview: previewTranscript(result.text),
     });
     await broadcastMessage(message.id);
-    if (!opts.skipDownstream && result.text.trim().length > 0) {
-      await runModeration({ messageId: message.id, transcriptionId: pending.id, deps, requestedByUserId: null });
+    if (!opts.skipDownstream) {
+      if (result.text.trim().length > 0) {
+        await runModeration({ messageId: message.id, transcriptionId: pending.id, deps, requestedByUserId: null });
+      } else {
+        // Silent recording: there is nothing to moderate, but we still want
+        // the message in the operator queue rather than stuck in "received".
+        await db.message.update({ where: { id: message.id }, data: { status: "pending" } });
+        await broadcastMessage(message.id);
+      }
     }
     return pending.id;
   } catch (error) {

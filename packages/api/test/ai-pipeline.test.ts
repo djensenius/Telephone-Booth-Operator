@@ -153,6 +153,21 @@ describe("AI pipeline", () => {
     expect(result).toBeNull();
   });
 
+  it("advances silent (empty-transcript) messages to pending without running moderation", async () => {
+    const id = await seedReceivedMessage();
+    const moderation = fakeModeration({ flagged: false, recommendation: "approve", maxScore: 0.05 });
+    await runTranscription({
+      messageId: id,
+      deps: baseDeps({ transcriptionProvider: fakeTranscription("   "), moderationProvider: moderation }),
+    });
+    const message = await fakeDb.message.findUnique({ where: { id }, include: { audio: true, transcriptions: true, moderations: true } });
+    const withRelations = message as unknown as { status: string; transcriptions: Array<{ status: string }>; moderations: Array<unknown> };
+    expect(withRelations.status).toBe("pending");
+    expect(withRelations.transcriptions[0]?.status).toBe("succeeded");
+    expect(withRelations.moderations).toHaveLength(0);
+    expect(moderation.moderate).not.toHaveBeenCalled();
+  });
+
   it("records a transcription failure and does not auto-decide when the provider throws", async () => {
     const id = await seedReceivedMessage();
     const failingProvider: TranscriptionProvider = {
