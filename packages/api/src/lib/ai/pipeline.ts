@@ -1,7 +1,7 @@
 // AI orchestration: transcription → moderation → optional auto-decision.
 //
 // The pipeline is in-process and fire-and-forget:
-//   - `POST /v1/messages/:id/complete` calls `runPipelineForMessage(id)` via
+//   - `POST /v1/messages/:id/complete` calls `kickPipelineForMessage(id)` via
 //     `setImmediate`. Errors are caught here so they never reject the request.
 //   - A separate recovery sweeper (see `start-ai-sweeper.ts`) reprocesses
 //     `received` messages that have no successful transcription, which covers

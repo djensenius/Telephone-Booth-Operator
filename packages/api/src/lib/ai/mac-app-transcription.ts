@@ -49,9 +49,13 @@ export class MacAppTranscriptionProvider implements TranscriptionProvider {
     }
     const payload: unknown = await response.json().catch(() => ({}));
     const data = (typeof payload === "object" && payload !== null ? payload : {}) as { text?: unknown; language?: unknown };
-    if (typeof data.text !== "string" || data.text.length === 0) {
+    if (typeof data.text !== "string") {
       throw new ProviderError(this.name, "mac-app transcription returned no text");
     }
+    // Allow empty transcripts through — the pipeline interprets an empty
+    // string as a silent recording and advances the message into the
+    // operator queue. Mirrors the OpenAI provider's behaviour so callers
+    // see the same shape regardless of provider.
     return { text: data.text, language: typeof data.language === "string" ? data.language : null };
   }
 }
