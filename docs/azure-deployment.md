@@ -330,6 +330,41 @@ To roll back application code, point the API and web Container Apps back to the
 previous image tags. Prisma migrations are forward-only; if a release includes a
 schema migration, prepare the rollback plan before applying it.
 
+## 13. GitHub Actions CI/CD
+
+The repository includes `.github/workflows/deploy-azure.yml`. It waits for the
+`ci` workflow to pass on `main`, builds pinned API and web images in GHCR, runs
+the Prisma migration job, deploys both Container Apps, and smoke-tests
+`/healthz`.
+
+Configure these GitHub Actions secrets:
+
+| Secret                  | Value                                                 |
+| ----------------------- | ----------------------------------------------------- |
+| `AZURE_CLIENT_ID`       | Microsoft Entra application/client ID for GitHub OIDC |
+| `AZURE_TENANT_ID`       | Microsoft Entra tenant ID                             |
+| `AZURE_SUBSCRIPTION_ID` | Azure subscription ID                                 |
+
+Configure these repository variables:
+
+| Variable               | Value                                                                  |
+| ---------------------- | ---------------------------------------------------------------------- |
+| `AZURE_RESOURCE_GROUP` | Resource group that contains the Container Apps                        |
+| `AZURE_API_APP`        | API Container App name                                                 |
+| `AZURE_WEB_APP`        | Web Container App name                                                 |
+| `AZURE_MIGRATE_JOB`    | Container Apps job that runs Prisma migrations                         |
+| `PUBLIC_API_URL`       | Browser-visible API origin, for example `https://operator.example.com` |
+
+Create a federated credential on the Entra application for this repository and
+the `main` branch, with subject:
+
+```text
+repo:<owner>/<repo>:ref:refs/heads/main
+```
+
+Grant that application enough Azure RBAC to update the Container Apps and start
+the migration job, usually `Contributor` scoped to the resource group.
+
 ## Operational notes
 
 - Rotate `SESSION_SECRET` only when you are comfortable logging everyone out.
