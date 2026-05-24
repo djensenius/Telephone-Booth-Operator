@@ -415,7 +415,7 @@ export type MobileDevicePreferences = z.infer<typeof MobileDevicePreferencesSche
 
 export const MobileDeviceSchema = z.object({
   id: z.string().uuid(),
-  apnsToken: z.string().min(1),
+  apnsToken: z.string().min(32),
   platform: MobileDevicePlatformSchema,
   deviceName: z.string().nullable(),
   preferences: MobileDevicePreferencesSchema,
@@ -425,7 +425,7 @@ export const MobileDeviceSchema = z.object({
 export type MobileDevice = z.infer<typeof MobileDeviceSchema>;
 
 export const RegisterMobileDeviceRequestSchema = z.object({
-  apnsToken: z.string().min(1),
+  apnsToken: z.string().min(32),
   platform: MobileDevicePlatformSchema,
   deviceName: z.string().min(1).max(120).nullish(),
   preferences: MobileDevicePreferencesSchema.partial().optional(),
@@ -434,6 +434,6 @@ export type RegisterMobileDeviceRequest = z.infer<typeof RegisterMobileDeviceReq
 
 export const UpdateMobileDevicePreferencesSchema = z.object({
   deviceName: z.string().min(1).max(120).nullish(),
-  preferences: MobileDevicePreferencesSchema.partial(),
+  preferences: MobileDevicePreferencesSchema.partial().optional(),
 });
 export type UpdateMobileDevicePreferences = z.infer<typeof UpdateMobileDevicePreferencesSchema>;

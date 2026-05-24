@@ -17,6 +17,7 @@ import { AuthConfigurationError, resolveAuthConfig } from "./lib/config.js";
 import { requireOperator, type AuthVariables } from "./lib/session.js";
 import apiTokensRouter from "./routes/api-tokens.js";
 import { authRoutes } from "./routes/auth.js";
+import { devicesRouter } from "./routes/devices.js";
 import { eventsRouter } from "./routes/events.js";
 import { messagesRouter } from "./routes/messages.js";
 import { questionsRouter } from "./routes/questions.js";
@@ -25,7 +26,6 @@ import { statsRouter } from "./routes/stats.js";
 import { statusRouter } from "./routes/status.js";
 import { systemRouter } from "./routes/system.js";
 import { uploadsRouter } from "./routes/uploads.js";
-import { devicesRouter } from "./routes/devices.js";
 import { attachStatusWebSocket, wsRouter } from "./routes/ws.js";
 
 const webOrigins = (): string[] =>
