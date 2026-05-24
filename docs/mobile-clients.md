@@ -27,7 +27,7 @@ In Authentik admin → **Applications** → **Create**:
     mobile app registers with the OS). Additional schemes can be added if
     you want different bundle IDs for dev vs prod.
   - **PKCE:** `Required`.
-  - **Scopes:** `openid profile email groups offline_access`.
+  - **Scopes:** `openid profile email offline_access`.
   - **Subject mode:** `Based on the User's hashed ID` (or any stable identifier
     — the operator stores it as `OperatorUser.oidcSub`).
   - **Signing Key:** Use the same RSA key the existing operator provider uses
@@ -38,6 +38,20 @@ In Authentik admin → **Applications** → **Create**:
 - **Bindings / Groups:** restrict access to the same `telephone-booth-operators`
   group used by the web client (or whichever value you've set in
   `OIDC_ALLOWED_GROUPS`).
+
+The mobile app sends the access token directly to the operator API, so the
+mobile provider must include the same `groups` claim in the **access token**
+that the web provider includes in the ID token. Authentik's default
+`profile` scope mapping includes group membership. If you've removed it,
+add a scope mapping on `profile`:
+
+```python
+return {"groups": [group.name for group in user.groups.all()]}
+```
+
+That expression returns all group names for the signed-in user. The operator
+still only grants access when at least one returned group matches
+`OIDC_ALLOWED_GROUPS`, typically `telephone-booth-operators`.
 
 ## 2. Configure the operator API
 
@@ -67,7 +81,7 @@ to drive the full OIDC PKCE Authorization-Code grant:
 2. App opens `https://authentik.example/application/o/authorize/?...` with
    `response_type=code`, `client_id=telephone-booth-operator-mobile`,
    `redirect_uri=tboperator://oauth/callback`, `scope=openid profile email
-   groups offline_access`, `code_challenge`, `code_challenge_method=S256`,
+   offline_access`, `code_challenge`, `code_challenge_method=S256`,
    `state`, `nonce`.
 3. User authenticates in the system browser; Authentik redirects back to
    `tboperator://oauth/callback?code=...&state=...`.

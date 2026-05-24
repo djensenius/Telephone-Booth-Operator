@@ -23,6 +23,7 @@ rebuilds it from the filesystem; CI fails if it drifts.
 
 ## Running it
 
+- [Azure deployment](azure-deployment.md) — Azure Database, Blob Storage, Container Apps, Authentik
 - [Deployment](deployment.md) — building images, env, secrets, reverse proxy
 - [Runbook](runbook.md) — day-2 ops
 - [Troubleshooting](troubleshooting.md)

@@ -60,9 +60,9 @@ one-line change in `.env`.
    plenty for an art installation. Pick a region close to your operators.
 2. **Create the container.** `booth-recordings`, private access (no public
    read).
-3. **Create an access key or a SAS-issuing identity.** A scoped
-   container SAS or, better, a Managed Identity + RBAC role
-   (`Storage Blob Data Contributor`) avoids long-lived secrets.
+3. **Create an access key.** The current API creates per-blob SAS URLs from an
+   account-key connection string. Managed Identity / RBAC-only SAS issuing is
+   not implemented yet.
 4. **Set `.env`:**
 
    ```ini
@@ -70,10 +70,8 @@ one-line change in `.env`.
    AZURE_BLOB_CONTAINER=booth-recordings
    ```
 
-For Managed Identity, drop `AZURE_STORAGE_CONNECTION_STRING` and instead
-set `AZURE_STORAGE_ACCOUNT=<name>` — the API will reach for
-`DefaultAzureCredential`, which walks the standard chain (env, workload
-identity, MSI, az login).
+Store the connection string in your platform's secret manager, not in source
+control. Rotate the storage account key when staff access changes.
 
 ## Lifecycle / retention
 

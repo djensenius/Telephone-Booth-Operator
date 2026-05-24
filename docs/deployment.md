@@ -19,7 +19,7 @@ docker images | grep telephone-booth
 | Service               | What for                                    |
 | --------------------- | ------------------------------------------- |
 | **Postgres ≥ 15**     | Operator data                                |
-| **Azure Blob Storage**| Recordings (see [`azure-storage.md`](azure-storage.md)) |
+| **Azure Blob Storage** | Recordings (see [`azure-storage.md`](azure-storage.md)) |
 | **An OIDC provider**  | Operator login (see [`authentik-setup.md`](authentik-setup.md)) |
 | **A reverse proxy with TLS** | Caddy / nginx / Traefik in front     |
 
@@ -29,9 +29,9 @@ session cookies that browsers reject over plain HTTP.
 
 ## Minimal production `docker-compose`
 
-`docker-compose.prod.yml` (already in this repo) deploys both
-containers; you supply `.env` and either a managed Postgres or the
-opt-in single-node `db` service:
+`docker-compose.prod.yml` (already in this repo) deploys both containers; you
+supply `.env` and either a managed Postgres or the opt-in single-node `db`
+service:
 
 ```sh
 cp .env.example .env             # populate AUTHENTIK_* + SESSION_SECRET + AZURE_*
@@ -39,6 +39,11 @@ docker compose -f docker-compose.prod.yml up -d
 # or, for single-node with bundled postgres:
 docker compose -f docker-compose.prod.yml --profile single-node up -d
 ```
+
+When you use the bundled single-node Postgres service, set `DATABASE_URL` to the
+Compose service name, for example
+`postgres://booth:${POSTGRES_PASSWORD}@db:5432/telephone_booth`. For managed
+Postgres, set `DATABASE_URL` to the external provider's TLS connection string.
 
 Place a reverse proxy in front:
 
@@ -98,14 +103,16 @@ server {
 
 ## Database migrations on deploy
 
-The API container's startup command runs `prisma migrate deploy` before
-serving traffic. If you'd rather decouple migrations from rollout, set
-`PRISMA_AUTO_MIGRATE=false` and run them manually:
+The API container does not run Prisma migrations automatically. Run migrations
+as an explicit deploy step before serving a new release:
 
 ```sh
 docker compose -f docker-compose.prod.yml run --rm api \
-  pnpm --filter @telephone-booth-operator/api exec prisma migrate deploy
+  pnpm exec prisma migrate deploy
 ```
+
+For Azure Container Apps, run the same command from a one-off job. See
+[`azure-deployment.md`](azure-deployment.md).
 
 ## Secrets management
 
@@ -113,8 +120,9 @@ docker compose -f docker-compose.prod.yml run --rm api \
   [`runbook.md`](runbook.md)).
 - `AUTHENTIK_CLIENT_SECRET`: rotate quarterly or after personnel
   changes; sessions survive rotation.
-- `AZURE_STORAGE_CONNECTION_STRING`: prefer a Managed Identity over a
-  baked-in key. See [`azure-storage.md`](azure-storage.md).
+- `AZURE_STORAGE_CONNECTION_STRING`: rotate the storage account key when staff
+  access changes. Managed Identity SAS issuing is not implemented yet. See
+  [`azure-storage.md`](azure-storage.md).
 - Phone-client API tokens: rotated via the operator UI; old ones can be
   revoked instantly.
 
