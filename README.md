@@ -88,6 +88,17 @@ and shown only once on creation.
 
 Full index: [`docs/README.md`](docs/README.md).
 
+## Related repositories
+
+The Telephone Booth art installation spans several repos:
+
+| Repo | What it is |
+| --- | --- |
+| [`Telephone-Booth`](https://github.com/djensenius/Telephone-Booth) | Rust phone client running on a Pi inside the booth. |
+| [`Telephone-Booth-Operator`](https://github.com/djensenius/Telephone-Booth-Operator) | Hono + React operator console (this repo). |
+| [`Telephone-Booth-Operator-Mobile`](https://github.com/djensenius/Telephone-Booth-Operator-Mobile) | Native Swift/SwiftUI operator app for iOS, macOS, watchOS, visionOS, and tvOS. |
+| [`Telephone-Booth-Transcription`](https://github.com/djensenius/Telephone-Booth-Transcription) | macOS app exposing an OpenAI-compatible local transcription and moderation API. |
+
 ## License
 
 Apache-2.0 — same as the original `Telephone-Booth` project.
