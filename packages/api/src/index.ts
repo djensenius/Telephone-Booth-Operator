@@ -25,6 +25,7 @@ import { statsRouter } from "./routes/stats.js";
 import { statusRouter } from "./routes/status.js";
 import { systemRouter } from "./routes/system.js";
 import { uploadsRouter } from "./routes/uploads.js";
+import { devicesRouter } from "./routes/devices.js";
 import { attachStatusWebSocket, wsRouter } from "./routes/ws.js";
 
 const webOrigins = (): string[] =>
@@ -67,6 +68,7 @@ export const createApp = (): Hono<{ Variables: AuthVariables }> => {
   app.route("/v1/stats", statsRouter);
   app.route("/v1/system", systemRouter);
   app.route("/v1/uploads", uploadsRouter);
+  app.route("/v1/devices", devicesRouter);
   app.route("/v1/ws", wsRouter);
 
   return app;

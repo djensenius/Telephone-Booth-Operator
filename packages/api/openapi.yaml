@@ -665,6 +665,70 @@ paths:
           description: snapshot or list of snapshots
         '404': { description: no snapshot cached for the given booth }
 
+  /v1/devices:
+    get:
+      summary: List the caller's mobile devices (active only).
+      tags: [devices]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/MobileDevice' }
+    post:
+      summary: Register or refresh a mobile device APNs token for push.
+      tags: [devices]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterMobileDeviceRequest' }
+      responses:
+        '201':
+          description: registered
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MobileDevice' }
+
+  /v1/devices/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      summary: Update per-device notification preferences or display name.
+      tags: [devices]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateMobileDevicePreferencesRequest' }
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MobileDevice' }
+        '404': { description: not found }
+    delete:
+      summary: Revoke a mobile device (stops APNs delivery to it).
+      tags: [devices]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      responses:
+        '204': { description: revoked }
+        '404': { description: not found }
+
 components:
   securitySchemes:
     apiToken:
@@ -1045,3 +1109,50 @@ components:
           properties:
             wsClients: { type: integer, minimum: 0 }
         generatedAt: { type: string, format: date-time }
+    MobileDevicePlatform:
+      type: string
+      enum: [ios, ipados, macos, watchos, visionos, tvos]
+    MobileDevicePreferences:
+      type: object
+      required: [callStarted, messageReceived, messageFlagged, moderationQueueHigh]
+      properties:
+        callStarted: { type: boolean }
+        messageReceived: { type: boolean }
+        messageFlagged: { type: boolean }
+        moderationQueueHigh: { type: boolean }
+    MobileDevice:
+      type: object
+      required: [id, apnsToken, platform, preferences, registeredAt, lastSeenAt]
+      properties:
+        id: { type: string, format: uuid }
+        apnsToken: { type: string, minLength: 32 }
+        platform: { $ref: '#/components/schemas/MobileDevicePlatform' }
+        deviceName: { anyOf: [{ type: string }, { type: 'null' }] }
+        preferences: { $ref: '#/components/schemas/MobileDevicePreferences' }
+        registeredAt: { type: string, format: date-time }
+        lastSeenAt: { type: string, format: date-time }
+    RegisterMobileDeviceRequest:
+      type: object
+      required: [apnsToken, platform]
+      properties:
+        apnsToken: { type: string, minLength: 32 }
+        platform: { $ref: '#/components/schemas/MobileDevicePlatform' }
+        deviceName: { type: string }
+        preferences:
+          type: object
+          properties:
+            callStarted: { type: boolean }
+            messageReceived: { type: boolean }
+            messageFlagged: { type: boolean }
+            moderationQueueHigh: { type: boolean }
+    UpdateMobileDevicePreferencesRequest:
+      type: object
+      properties:
+        deviceName: { anyOf: [{ type: string }, { type: 'null' }] }
+        preferences:
+          type: object
+          properties:
+            callStarted: { type: boolean }
+            messageReceived: { type: boolean }
+            messageFlagged: { type: boolean }
+            moderationQueueHigh: { type: boolean }
