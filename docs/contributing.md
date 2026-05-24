@@ -33,8 +33,8 @@ If your provider isn't covered:
 ## Adding a new screen
 
 1. Add the route to `packages/web/src/app/router.ts`.
-2. If it should be reachable via the rotary, update `docs/ui-routing.md`
-   and the rotary key map in `packages/web/src/features/booth/RotaryDial.tsx`.
+2. If it should be reachable via a digit shortcut, update
+   `docs/ui-routing.md` and `packages/web/src/lib/navigation.ts`.
 3. Wrap the screen body in `<GlassPanel>` to keep the theme consistent.
 
 ## Adding an API endpoint

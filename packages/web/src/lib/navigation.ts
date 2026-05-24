@@ -1,16 +1,16 @@
-export type RotaryDigit = "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "0";
+export type NavigationDigit = "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "0";
 
 export type RouteStatusFilter = "pending" | "approved" | "rejected";
 export type MessageRouteFilter = "all" | "received" | "uploading" | "failed";
 
-export interface RotaryRoute {
-  readonly digit: RotaryDigit;
+export interface DigitRoute {
+  readonly digit: NavigationDigit;
   readonly label: string;
   readonly href: string;
   readonly reserved?: boolean;
 }
 
-export const ROTARY_ROUTES: readonly RotaryRoute[] = [
+export const DIGIT_ROUTES: readonly DigitRoute[] = [
   { digit: "1", label: "Status", href: "/status" },
   { digit: "2", label: "Messages", href: "/messages" },
   { digit: "3", label: "Questions", href: "/questions" },
@@ -23,17 +23,19 @@ export const ROTARY_ROUTES: readonly RotaryRoute[] = [
   { digit: "0", label: "Home", href: "/" },
 ];
 
-const routeByDigit = new Map<RotaryDigit, RotaryRoute>(ROTARY_ROUTES.map((route) => [route.digit, route]));
+const routeByDigit = new Map<NavigationDigit, DigitRoute>(
+  DIGIT_ROUTES.map((route) => [route.digit, route]),
+);
 
-export function getRouteForDigit(digit: RotaryDigit): RotaryRoute {
+export function getRouteForDigit(digit: NavigationDigit): DigitRoute {
   const route = routeByDigit.get(digit);
   if (route === undefined) {
-    throw new Error(`Unknown rotary digit: ${digit}`);
+    throw new Error(`Unknown navigation digit: ${digit}`);
   }
   return route;
 }
 
-export function isRotaryDigit(value: string): value is RotaryDigit {
+export function isNavigationDigit(value: string): value is NavigationDigit {
   return /^[0-9]$/.test(value);
 }
 

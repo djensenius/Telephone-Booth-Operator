@@ -17,9 +17,9 @@ rebuilds it from the filesystem; CI fails if it drifts.
 - [Architecture](architecture.md) — Hono + Prisma + Postgres + Azure overview
 - [API](api/README.md) — reading and regenerating `openapi.yaml`
 - [Azure storage](azure-storage.md) — container layout, SAS scoping, Azurite for dev
-- [Theme](theme.md) — Bell Canada visual system, components, accessibility
+- [Theme](theme.md) — operator-console visual system, components, accessibility
 - [Transcription providers](transcription-providers.md) — AI transcription + moderation pipeline
-- [UI routing](ui-routing.md) — rotary digit ↔ route map, keyboard nav, reduced motion
+- [UI routing](ui-routing.md) — digit shortcuts, keyboard nav, reduced motion
 
 ## Running it
 

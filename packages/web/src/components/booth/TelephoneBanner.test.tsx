@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { TelephoneBanner } from "./TelephoneBanner.js";
 
 describe("TelephoneBanner", () => {
-  it("renders title and Bell hex logo", () => {
+  it("renders the console brand", () => {
     render(<TelephoneBanner />);
-    expect(screen.getByText("TELEPHONE")).toBeDefined();
-    expect(screen.getByRole("img", { name: "Bell Canada hex logo" })).toBeDefined();
+    expect(screen.getByText("Telephone Booth")).toBeDefined();
+    expect(screen.getByText("Operator console")).toBeDefined();
   });
 });

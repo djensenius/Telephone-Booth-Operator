@@ -2,9 +2,22 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/bell-hex.svg" />
+    <script>
+      (() => {
+        try {
+          const theme = window.localStorage.getItem("booth.theme.mode") || "system";
+          if (theme === "dark" || theme === "light" || theme === "system") {
+            document.documentElement.dataset.theme = theme;
+          }
+        } catch {
+          document.documentElement.dataset.theme = "system";
+        }
+      })();
+    </script>
+    <link rel="icon" type="image/svg+xml" href="/operator-mark.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#D81E2C" />
+    <meta name="theme-color" content="#1e1e2e" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#fff5f2" media="(prefers-color-scheme: light)" />
     <title>Telephone Booth — Operator</title>
   </head>
   <body>

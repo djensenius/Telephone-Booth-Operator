@@ -1,8 +1,10 @@
 import { useSearch } from "@tanstack/react-router";
-import { ContempraPhone, GlassPanel, Handset } from "../../components/booth/index.js";
+import { GlassPanel } from "../../components/booth/index.js";
 
 function safeReturnTo(value: unknown): string {
-  return typeof value === "string" && value.startsWith("/") && !value.startsWith("//") ? value : window.location.pathname;
+  return typeof value === "string" && value.startsWith("/") && !value.startsWith("//")
+    ? value
+    : window.location.pathname;
 }
 
 export function LoginScreen(): JSX.Element {
@@ -15,13 +17,32 @@ export function LoginScreen(): JSX.Element {
 
   return (
     <GlassPanel title="Operator login" className="login-screen">
-      <p className="screen-kicker">Answering service</p>
-      <h1>Place a call to begin</h1>
-      <p>Pick up the receiver and connect through the operator identity provider. Cookie-based sessions keep the line warm after sign-in.</p>
-      <button className="feature-primary-button" type="button" onClick={beginLogin}>Sign in with Authentik</button>
-      <div className="login-screen__phone" aria-hidden="true">
-        <ContempraPhone showDial={false} />
-        <Handset />
+      <div className="login-screen__layout">
+        <div className="login-screen__copy">
+          <p className="screen-kicker">Secure operator line</p>
+          <h1>Sign in to connect</h1>
+          <p>
+            Authenticate with the operator identity provider to review calls, manage prompts, and
+            monitor the installation.
+          </p>
+          <button className="feature-primary-button" type="button" onClick={beginLogin}>
+            Sign in with Authentik
+          </button>
+        </div>
+        <div className="login-screen__flourish" aria-hidden="true">
+          <svg viewBox="0 0 180 150">
+            <path
+              className="login-screen__phone-receiver"
+              d="M48 34h84c10 0 18 8 18 18v9H30v-9c0-10 8-18 18-18Z"
+            />
+            <path
+              className="login-screen__phone-body"
+              d="M50 66h80l14 48c2 8-4 16-12 16H48c-8 0-14-8-12-16l14-48Z"
+            />
+            <path className="login-screen__phone-slot" d="M64 88h52" />
+            <path className="login-screen__phone-cord" d="M116 92c18 8 14 28 30 30" />
+          </svg>
+        </div>
       </div>
     </GlassPanel>
   );

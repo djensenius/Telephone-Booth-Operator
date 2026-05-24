@@ -6,6 +6,10 @@ import { PhoneClientConnection } from "./PhoneClientConnection.js";
 
 const fontSizeKey = "booth.theme.fontSize";
 const highContrastKey = "booth.theme.highContrast";
+const themeModeKey = "booth.theme.mode";
+const themeModes = ["system", "dark", "light"] as const;
+
+type ThemeMode = (typeof themeModes)[number];
 
 function readSetting(key: string, fallback: string): string {
   try {
@@ -13,6 +17,15 @@ function readSetting(key: string, fallback: string): string {
   } catch {
     return fallback;
   }
+}
+
+function isThemeMode(value: string): value is ThemeMode {
+  return themeModes.some((mode) => mode === value);
+}
+
+function readThemeMode(): ThemeMode {
+  const value = readSetting(themeModeKey, "system");
+  return isThemeMode(value) ? value : "system";
 }
 
 function writeSetting(key: string, value: string): void {
@@ -28,6 +41,7 @@ export function SettingsScreen(): JSX.Element {
   const { muted, reducedMotionOverride, setMuted, setReducedMotionOverride } = useBoothStatus();
   const [fontSize, setFontSize] = useState(() => readSetting(fontSizeKey, "normal"));
   const [highContrast, setHighContrast] = useState(() => readSetting(highContrastKey, "false") === "true");
+  const [themeMode, setThemeMode] = useState<ThemeMode>(readThemeMode);
 
   useEffect(() => {
     document.documentElement.dataset.boothFontSize = fontSize;
@@ -38,6 +52,11 @@ export function SettingsScreen(): JSX.Element {
     document.documentElement.classList.toggle("booth-high-contrast", highContrast);
     writeSetting(highContrastKey, String(highContrast));
   }, [highContrast]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = themeMode;
+    writeSetting(themeModeKey, themeMode);
+  }, [themeMode]);
 
   return (
     <GlassPanel title="Operator settings" className="feature-screen settings-screen">
@@ -56,6 +75,22 @@ export function SettingsScreen(): JSX.Element {
       <section className="feature-card">
         <h2>Theme</h2>
         <div className="settings-list">
+          <label>
+            Color theme
+            <select
+              value={themeMode}
+              onChange={(event) => {
+                const nextThemeMode = event.currentTarget.value;
+                if (isThemeMode(nextThemeMode)) {
+                  setThemeMode(nextThemeMode);
+                }
+              }}
+            >
+              <option value="system">Follow system</option>
+              <option value="dark">Dark operator console</option>
+              <option value="light">Light operator console</option>
+            </select>
+          </label>
           <label>
             Font size
             <select value={fontSize} onChange={(event) => setFontSize(event.currentTarget.value)}>

@@ -11,6 +11,7 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
     Skip to content
   </a>
   <header
+    aria-label="Application header"
     class="telephone-banner"
   >
     <a
@@ -18,50 +19,27 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
       class="telephone-banner__brand"
       href="/status"
     >
-      <svg
-        aria-label="Bell Canada hex logo"
-        class="telephone-banner__logo"
-        height="48"
-        role="img"
-        viewBox="0 0 56 48"
-        width="56"
-      >
-        <polygon
-          class="telephone-banner__hex"
-          points="28,2 53,14 53,34 28,46 3,34 3,14"
-        />
-        <text
-          aria-hidden="true"
-          class="telephone-banner__logo-letter"
-          text-anchor="middle"
-          x="28"
-          y="32"
-        >
-          B
-        </text>
-      </svg>
       <span
-        class="telephone-banner__title"
+        class="telephone-banner__copy"
       >
-        TELEPHONE
+        <span
+          class="telephone-banner__eyebrow"
+        >
+          Operator console
+        </span>
+        <span
+          class="telephone-banner__title"
+        >
+          Telephone Booth
+        </span>
       </span>
     </a>
+    <p
+      class="telephone-banner__tagline"
+    >
+      Calls, questions, and system status for the installation.
+    </p>
   </header>
-  <div
-    aria-label="Booth status: idle"
-    class="ceiling-lamps ceiling-lamps--idle"
-    role="status"
-  >
-    <span
-      class="ceiling-lamps__lamp ceiling-lamps__lamp--left"
-    />
-    <span
-      class="ceiling-lamps__lamp ceiling-lamps__lamp--center"
-    />
-    <span
-      class="ceiling-lamps__lamp ceiling-lamps__lamp--right"
-    />
-  </div>
   <div
     class="app-shell"
   >
@@ -69,12 +47,31 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
       aria-label="Operator navigation"
       class="operator-sidebar"
     >
+      <div
+        class="booth-status-badge booth-status-badge--idle"
+        role="status"
+      >
+        <span
+          aria-hidden="true"
+          class="booth-status-badge__dot"
+        />
+        <span>
+          <span
+            class="booth-status-badge__label"
+          >
+            Booth status
+          </span>
+          <strong>
+            Idle
+          </strong>
+        </span>
+      </div>
       <nav
-        aria-label="Rotary digit routes"
+        aria-label="Digit shortcut routes"
         class="operator-sidebar__nav"
       >
         <h2>
-          Switchboard
+          Shortcuts
         </h2>
         <ul>
           <li>
@@ -181,250 +178,6 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
           </li>
         </ul>
       </nav>
-      <div
-        class="contempra-phone"
-      >
-        <svg
-          aria-hidden="true"
-          class="contempra-phone__body"
-          viewBox="0 0 320 520"
-        >
-          <path
-            class="contempra-phone__shadow"
-            d="M60 500 C30 420 36 160 88 42 C126 10 204 10 238 42 C292 168 292 418 256 500 Z"
-          />
-          <path
-            class="contempra-phone__shell"
-            d="M70 492 C42 420 48 165 96 52 C130 24 198 24 228 52 C278 172 278 420 246 492 Z"
-          />
-          <rect
-            class="contempra-phone__cradle"
-            data-handset-cradle="true"
-            height="44"
-            rx="22"
-            width="148"
-            x="86"
-            y="54"
-          />
-          <path
-            class="contempra-phone__chrome"
-            d="M102 110 H218 C229 110 238 119 238 130 V168 H82 V130 C82 119 91 110 102 110 Z"
-          />
-          <rect
-            class="contempra-phone__label"
-            height="30"
-            rx="8"
-            width="108"
-            x="106"
-            y="180"
-          />
-        </svg>
-        <div
-          class="contempra-phone__dial"
-        >
-          <div
-            aria-label="Rotary navigation dial"
-            class="rotary-dial"
-          >
-            <svg
-              aria-hidden="true"
-              class="rotary-dial__plate"
-              viewBox="0 0 200 200"
-            >
-              <circle
-                class="rotary-dial__outer"
-                cx="100"
-                cy="100"
-                r="94"
-              />
-              <circle
-                class="rotary-dial__finger-stop"
-                cx="150"
-                cy="168"
-                r="10"
-              />
-              <g
-                class="rotary-dial__wheel"
-                style="--dial-turn: 0deg;"
-              >
-                <circle
-                  class="rotary-dial__wheel-face"
-                  cx="100"
-                  cy="100"
-                  r="72"
-                />
-                <circle
-                  class="rotary-dial__hole"
-                  cx="140"
-                  cy="40"
-                  r="14"
-                />
-                <circle
-                  class="rotary-dial__hole"
-                  cx="164"
-                  cy="68"
-                  r="14"
-                />
-                <circle
-                  class="rotary-dial__hole"
-                  cx="168"
-                  cy="104"
-                  r="14"
-                />
-                <circle
-                  class="rotary-dial__hole"
-                  cx="148"
-                  cy="138"
-                  r="14"
-                />
-                <circle
-                  class="rotary-dial__hole"
-                  cx="114"
-                  cy="158"
-                  r="14"
-                />
-                <circle
-                  class="rotary-dial__hole"
-                  cx="76"
-                  cy="158"
-                  r="14"
-                />
-                <circle
-                  class="rotary-dial__hole"
-                  cx="44"
-                  cy="136"
-                  r="14"
-                />
-                <circle
-                  class="rotary-dial__hole"
-                  cx="28"
-                  cy="102"
-                  r="14"
-                />
-                <circle
-                  class="rotary-dial__hole"
-                  cx="36"
-                  cy="66"
-                  r="14"
-                />
-                <circle
-                  class="rotary-dial__hole"
-                  cx="100"
-                  cy="180"
-                  r="14"
-                />
-              </g>
-              <circle
-                class="rotary-dial__center"
-                cx="100"
-                cy="100"
-                r="27"
-              />
-            </svg>
-            <button
-              aria-label="Dial 1 — Status"
-              class="rotary-dial__button"
-              style="left: 70%; top: 20%;"
-              type="button"
-            >
-              <span>
-                1
-              </span>
-            </button>
-            <button
-              aria-label="Dial 2 — Messages"
-              class="rotary-dial__button"
-              style="left: 82%; top: 34%;"
-              type="button"
-            >
-              <span>
-                2
-              </span>
-            </button>
-            <button
-              aria-label="Dial 3 — Questions"
-              class="rotary-dial__button"
-              style="left: 84%; top: 52%;"
-              type="button"
-            >
-              <span>
-                3
-              </span>
-            </button>
-            <button
-              aria-label="Dial 4 — Tokens"
-              class="rotary-dial__button"
-              style="left: 74%; top: 69%;"
-              type="button"
-            >
-              <span>
-                4
-              </span>
-            </button>
-            <button
-              aria-label="Dial 5 — Settings"
-              class="rotary-dial__button"
-              style="left: 57%; top: 79%;"
-              type="button"
-            >
-              <span>
-                5
-              </span>
-            </button>
-            <button
-              aria-label="Dial 6 — About"
-              class="rotary-dial__button"
-              style="left: 38%; top: 79%;"
-              type="button"
-            >
-              <span>
-                6
-              </span>
-            </button>
-            <button
-              aria-label="Dial 7 — Auth / logout"
-              class="rotary-dial__button"
-              style="left: 22%; top: 68%;"
-              type="button"
-            >
-              <span>
-                7
-              </span>
-            </button>
-            <button
-              aria-label="Dial 8 — Reserved"
-              class="rotary-dial__button"
-              disabled=""
-              style="left: 14%; top: 51%;"
-              type="button"
-            >
-              <span>
-                8
-              </span>
-            </button>
-            <button
-              aria-label="Dial 9 — Debug"
-              class="rotary-dial__button"
-              style="left: 18%; top: 33%;"
-              type="button"
-            >
-              <span>
-                9
-              </span>
-            </button>
-            <button
-              aria-label="Dial 0 — Home"
-              class="rotary-dial__button"
-              style="left: 50%; top: 90%;"
-              type="button"
-            >
-              <span>
-                0
-              </span>
-            </button>
-          </div>
-        </div>
-      </div>
     </aside>
     <main
       class="app-shell__main"
@@ -444,16 +197,12 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
           Status
         </h1>
         <p>
-          The switchboard watches the phone client state machine and keeps the booth lamps in step.
+          The switchboard watches the phone client state machine and keeps the console status in step.
         </p>
         <section
           aria-label="Hook position"
           class="status-indicator status-indicator--on"
         >
-          <span
-            aria-hidden="true"
-            class="status-indicator__receiver"
-          />
           <div>
             <p
               class="screen-kicker"
