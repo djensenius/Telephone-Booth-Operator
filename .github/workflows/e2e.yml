@@ -9,17 +9,32 @@ on:
 jobs:
   playwright:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: booth
+          POSTGRES_PASSWORD: booth
+          POSTGRES_DB: telephone_booth
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U booth -d telephone_booth"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
         with:
           experimental: true
       - run: pnpm install --frozen-lockfile
-      - run: docker compose up -d
+      - run: docker compose up -d azurite
       - name: Wait for services
         run: |
           for i in {1..30}; do
-            (docker compose exec -T db pg_isready -U booth) && break
+            (docker compose exec -T azurite nc -z 127.0.0.1 10000) && break
             sleep 2
           done
       - run: pnpm --filter @telephone-booth-operator/api exec prisma generate

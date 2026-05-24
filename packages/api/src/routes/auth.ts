@@ -5,12 +5,7 @@ import { OperatorMeSchema } from "@telephone-booth-operator/shared";
 import { z } from "zod";
 import { getAuthConfig, getRequiredOidcConfig } from "../lib/config.js";
 import { verifyOperatorBearer } from "../lib/bearer-auth.js";
-import {
-  buildAuthorizationUrl,
-  endSessionUrl,
-  exchangeCode,
-  getOidcClient,
-} from "../lib/oidc.js";
+import { buildAuthorizationUrl, endSessionUrl, exchangeCode, getOidcClient } from "../lib/oidc.js";
 import {
   authorizeAndUpsertOperator,
   groupsFromClaims as _groupsFromClaims,
@@ -69,13 +64,47 @@ const safeReturnTo = (input: string | undefined): string => {
   }
 };
 
+const webRedirectBase = (): URL => {
+  const raw =
+    (process.env.WEB_ORIGIN ?? process.env.PUBLIC_WEB_URL ?? "http://localhost:5173")
+      .split(",")[0]
+      ?.trim() || "http://localhost:5173";
+  return new URL(raw);
+};
+
+const webRedirectUrl = (returnTo: string): string =>
+  new URL(returnTo, webRedirectBase()).toString();
+
 const html = (title: string, detail: string): string => `<!doctype html>
 <html lang="en">
   <head><meta charset="utf-8"><title>${title}</title></head>
   <body><h1>${title}</h1><p>${detail}</p></body>
 </html>`;
 
-const operatorMeFromUser = (user: { oidcSub: string; email: string; name: string; groups: unknown; picture: string | null }) => {
+const logAuthCallbackError = (error: unknown): void => {
+  const payload =
+    error instanceof Error
+      ? {
+          level: "error",
+          event: "auth_callback_failed",
+          error: error.name,
+          message: error.message,
+        }
+      : {
+          level: "error",
+          event: "auth_callback_failed",
+          error: "UnknownError",
+        };
+  console.error(JSON.stringify(payload));
+};
+
+const operatorMeFromUser = (user: {
+  oidcSub: string;
+  email: string;
+  name: string;
+  groups: unknown;
+  picture: string | null;
+}) => {
   const groups = Array.isArray(user.groups)
     ? user.groups.filter((group): group is string => typeof group === "string")
     : [];
@@ -99,7 +128,10 @@ export const authRoutes = new Hono<{ Variables: AuthVariables }>();
 
 authRoutes.get("/login", zValidator("query", loginQuerySchema), async (c) => {
   if (getAuthConfig().disabled) {
-    return c.html(html("Authentication disabled", "AUTH_DISABLED=true is enabled for local development."), 503);
+    return c.html(
+      html("Authentication disabled", "AUTH_DISABLED=true is enabled for local development."),
+      503,
+    );
   }
 
   prunePendingLogins();
@@ -134,14 +166,14 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
   }
 
   try {
-    const tokenSet = await exchangeCode(
+    const { tokenSet, claims } = await exchangeCode(
       new URL(c.req.url),
       pending.codeVerifier,
       query.state,
       pending.nonce,
     );
 
-    const result = await authorizeAndUpsertOperator(tokenSet.claims, { markLogin: true });
+    const result = await authorizeAndUpsertOperator(claims, { markLogin: true });
     if (!result.ok) {
       if (result.status === 403) {
         return c.html(html("Operator credentials required", result.reason), 403);
@@ -159,8 +191,9 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
 
     const session = await createSession(result.user, tokenSet, c.req.raw);
     setSessionCookie(c, session.id, session.expiresAt);
-    return c.redirect(pending.returnTo, 302);
-  } catch {
+    return c.redirect(webRedirectUrl(pending.returnTo), 302);
+  } catch (error) {
+    logAuthCallbackError(error);
     return c.html(html("OIDC login failed", "The login response could not be validated."), 400);
   }
 });

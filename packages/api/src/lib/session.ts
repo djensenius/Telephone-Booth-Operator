@@ -1,4 +1,10 @@
-import { createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+} from "node:crypto";
 import type { OperatorSession, OperatorUser } from "@prisma/client";
 import type { Context, MiddlewareHandler } from "hono";
 import { verifyOperatorBearer } from "./bearer-auth.js";
@@ -6,6 +12,7 @@ import { db } from "./db.js";
 import { refreshTokens, type TokenSet } from "./oidc.js";
 
 export const SESSION_COOKIE_NAME = "__Host-booth_session";
+const DEV_SESSION_COOKIE_NAME = "booth_session";
 
 type SessionUser = OperatorSession & { user: OperatorUser };
 
@@ -97,7 +104,10 @@ const verifyCookieValue = (value: string | undefined): string | null => {
   return timingSafeEqual(signatureBuffer, expectedBuffer) ? sessionId : null;
 };
 
-const cookieValueFromHeader = (cookieHeader: string | undefined, name: string): string | undefined => {
+const cookieValueFromHeader = (
+  cookieHeader: string | undefined,
+  name: string,
+): string | undefined => {
   if (!cookieHeader) return undefined;
   for (const part of cookieHeader.split(";")) {
     const trimmed = part.trim();
@@ -107,6 +117,18 @@ const cookieValueFromHeader = (cookieHeader: string | undefined, name: string): 
     return decodeURIComponent(trimmed.slice(separator + 1));
   }
   return undefined;
+};
+
+const devCookieEnabled = (): boolean => process.env.NODE_ENV !== "production";
+
+const isLocalHostname = (hostname: string): boolean =>
+  hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+
+const isLocalRequest = (c: Context): boolean => {
+  const url = new URL(c.req.url);
+  const host = c.req.header("host") ?? url.host;
+  const hostname = host.split(":")[0] ?? host;
+  return isLocalHostname(hostname);
 };
 
 export const encryptSessionSecret = (plaintext: string | null | undefined): string | null => {
@@ -153,46 +175,55 @@ const forwardedFirst = (headers: Headers, name: string): string | null => {
 const requestIp = (request: Request): string | null =>
   forwardedFirst(request.headers, "x-forwarded-for");
 
-const isLocalHostname = (hostname: string): boolean =>
-  hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
-
-const secureCookie = (c: Context): boolean => {
-  const url = new URL(c.req.url);
-  const host = c.req.header("host") ?? url.host;
-  const hostname = host.split(":")[0] ?? host;
-  return !isLocalHostname(hostname);
-};
-
 const appendCookie = (c: Context, parts: string[]): void => {
   c.header("Set-Cookie", parts.join("; "), { append: true });
 };
 
 export const setSessionCookie = (c: Context, sessionId: string, expiresAt: Date): void => {
+  const signedValue = encodeURIComponent(signedCookieValue(sessionId));
   const parts = [
-    `${SESSION_COOKIE_NAME}=${encodeURIComponent(signedCookieValue(sessionId))}`,
+    `${SESSION_COOKIE_NAME}=${signedValue}`,
     "Path=/",
     `Expires=${expiresAt.toUTCString()}`,
     "HttpOnly",
     "SameSite=Lax",
+    "Secure",
   ];
-  if (secureCookie(c)) parts.push("Secure");
   appendCookie(c, parts);
+
+  if (!devCookieEnabled() || !isLocalRequest(c)) return;
+  appendCookie(c, [
+    `${DEV_SESSION_COOKIE_NAME}=${signedValue}`,
+    "Path=/",
+    `Expires=${expiresAt.toUTCString()}`,
+    "HttpOnly",
+    "SameSite=Lax",
+  ]);
 };
 
 export const clearSessionCookie = (c: Context): void => {
-  const parts = [
+  appendCookie(c, [
     `${SESSION_COOKIE_NAME}=`,
     "Path=/",
     "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
     "HttpOnly",
     "SameSite=Lax",
-  ];
-  if (secureCookie(c)) parts.push("Secure");
-  appendCookie(c, parts);
+    "Secure",
+  ]);
+
+  if (!devCookieEnabled() || !isLocalRequest(c)) return;
+  appendCookie(c, [
+    `${DEV_SESSION_COOKIE_NAME}=`,
+    "Path=/",
+    "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
+    "HttpOnly",
+    "SameSite=Lax",
+  ]);
 };
 
 const tokenExpiresAt = (tokens: TokenInput): Date => {
-  const ttlSeconds = tokens.expires_in ?? Number.parseInt(process.env.SESSION_TTL_SECONDS ?? "43200", 10);
+  const ttlSeconds =
+    tokens.expires_in ?? Number.parseInt(process.env.SESSION_TTL_SECONDS ?? "43200", 10);
   return new Date(Date.now() + Math.max(ttlSeconds, 60) * 1000);
 };
 
@@ -219,7 +250,10 @@ export const createSession = async (
 export const readSessionFromCookieHeader = async (
   cookieHeader: string | undefined,
 ): Promise<SessionUser | null> => {
-  const sessionId = verifyCookieValue(cookieValueFromHeader(cookieHeader, SESSION_COOKIE_NAME));
+  const cookieValue =
+    cookieValueFromHeader(cookieHeader, SESSION_COOKIE_NAME) ??
+    (devCookieEnabled() ? cookieValueFromHeader(cookieHeader, DEV_SESSION_COOKIE_NAME) : undefined);
+  const sessionId = verifyCookieValue(cookieValue);
   if (!sessionId) return null;
 
   const session = await db.operatorSession.findUnique({
@@ -304,8 +338,8 @@ const bearerToken = (c: Context): string | null => {
   return match && match[1] ? match[1].trim() : null;
 };
 
-export const requireOperator = (): MiddlewareHandler<{ Variables: AuthVariables }> =>
-  async (c, next) => {
+export const requireOperator =
+  (): MiddlewareHandler<{ Variables: AuthVariables }> => async (c, next) => {
     const path = new URL(c.req.url).pathname;
     if (publicV1Route(path, c.req.method)) {
       await next();

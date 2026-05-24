@@ -21,11 +21,11 @@ flowchart LR
 
 ## Packages
 
-| Package           | Notes                                                                |
-| ----------------- | -------------------------------------------------------------------- |
-| `packages/api`    | Hono on the Node runtime. Prisma + Postgres. Routes per resource.    |
-| `packages/web`    | React + Vite + TypeScript. TanStack Router + Query. Themed shell.    |
-| `packages/shared` | Zod schemas + TS types both packages import. Source of wire-type truth.|
+| Package           | Notes                                                                   |
+| ----------------- | ----------------------------------------------------------------------- |
+| `packages/api`    | Hono on the Node runtime. Prisma + Postgres. Routes per resource.       |
+| `packages/web`    | React + Vite + TypeScript. TanStack Router + Query. Themed shell.       |
+| `packages/shared` | Zod schemas + TS types both packages import. Source of wire-type truth. |
 
 The API's `openapi.yaml` is the **second** source of truth, used to
 generate the typed fetch client in `packages/web/src/api/schema.gen.ts`
@@ -61,7 +61,7 @@ spec change.
    Authentik's JWKS, verifies `nonce`, asserts the user is in
    `AUTHENTIK_REQUIRED_GROUP`.
 4. Sets a `__Host-booth_session` HMAC-signed cookie carrying an opaque session ID
-   (`HttpOnly`, `Secure` off localhost, `SameSite=Lax`).
+   (`HttpOnly`, `Secure`, `SameSite=Lax`).
 5. `OperatorUser` row is upserted keyed by `oidcSub`.
 
 See [`authentik-setup.md`](authentik-setup.md) for the IdP config,

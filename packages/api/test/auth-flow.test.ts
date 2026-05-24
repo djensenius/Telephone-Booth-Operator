@@ -66,26 +66,32 @@ vi.mock("openid-client", () => ({
     for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
     return url;
   }),
-  authorizationCodeGrant: vi.fn(async () => ({
-    access_token: "access-token",
-    refresh_token: "refresh-token",
-    id_token: "id-token",
-    token_type: "bearer",
-    expires_in: 3600,
-    claims: () => ({
-      iss: "https://idp.example",
-      sub: "oidc-sub-1",
-      aud: "client-id",
-      iat: 1,
-      exp: 9999999999,
-      nonce: "nonce-1",
-      email: "operator@example.com",
-      name: "Operator One",
-      groups: ["operators"],
-      picture: "https://example.com/avatar.png",
-    }),
-    expiresIn: () => 3600,
-  })),
+  authorizationCodeGrant: vi.fn(async () => {
+    const tokenSet = {
+      access_token: "access-token",
+      refresh_token: "refresh-token",
+      id_token: "id-token",
+      token_type: "bearer",
+      expires_in: 3600,
+      expiresIn: () => 3600,
+    };
+    Object.defineProperty(tokenSet, "claims", {
+      value: () => ({
+        iss: "https://idp.example",
+        sub: "oidc-sub-1",
+        aud: "client-id",
+        iat: 1,
+        exp: 9999999999,
+        nonce: "nonce-1",
+        email: "operator@example.com",
+        name: "Operator One",
+        groups: ["operators"],
+        picture: "https://example.com/avatar.png",
+      }),
+      writable: false,
+    });
+    return tokenSet;
+  }),
   refreshTokenGrant: vi.fn(async () => ({
     access_token: "new-access-token",
     token_type: "bearer",
@@ -95,7 +101,8 @@ vi.mock("openid-client", () => ({
   })),
   buildEndSessionUrl: vi.fn((_config, params) => {
     const url = new URL("https://idp.example/logout");
-    for (const [key, value] of Object.entries(params ?? {})) url.searchParams.set(key, String(value));
+    for (const [key, value] of Object.entries(params ?? {}))
+      url.searchParams.set(key, String(value));
     return url;
   }),
 }));
@@ -125,6 +132,8 @@ describe("auth flow", () => {
     process.env.OIDC_REDIRECT_URI = "http://localhost/v1/auth/callback";
     process.env.OIDC_POST_LOGOUT_REDIRECT_URI = "http://localhost:5173";
     process.env.OIDC_ALLOWED_GROUPS = "operators";
+    delete process.env.PUBLIC_WEB_URL;
+    delete process.env.WEB_ORIGIN;
     delete process.env.AUTH_DISABLED;
     resetAuthConfigForTests();
     resetOidcForTests();
@@ -140,9 +149,12 @@ describe("auth flow", () => {
 
     const callback = await app.request("/v1/auth/callback?code=code-1&state=state-1");
     expect(callback.status, await callback.clone().text()).toBe(302);
-    expect(callback.headers.get("location")).toBe("/dashboard");
+    expect(callback.headers.get("location")).toBe("http://localhost:5173/dashboard");
     const cookie = cookieFrom(callback);
     expect(cookie).toContain("__Host-booth_session=");
+    const setCookie = callback.headers.get("set-cookie");
+    expect(setCookie).toContain("Secure");
+    expect(setCookie).toMatch(/(?:^|, )booth_session=/);
 
     const me = await app.request("/v1/auth/me", { headers: { cookie } });
     expect(me.status).toBe(200);
