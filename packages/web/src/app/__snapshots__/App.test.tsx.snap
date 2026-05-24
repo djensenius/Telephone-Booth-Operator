@@ -67,7 +67,7 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
         </span>
       </div>
       <nav
-        aria-label="Rotary digit routes"
+        aria-label="Digit shortcut routes"
         class="operator-sidebar__nav"
       >
         <h2>

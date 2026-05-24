@@ -30,9 +30,9 @@ Settings.
 
 ## Brand and iconography
 
-The app mark is an abstract red receiver inside a simple orbit. It is the
-favicon and the header mark. Do not use legacy telecom-style hex marks, letter logos,
-or oversized signage wordmarks.
+The app mark is a compact red rounded square with a simple `T` letterform for
+the favicon. The header is intentionally text-first. Do not use legacy
+telecom-style hex marks, mascot logos, or oversized signage wordmarks.
 
 Decorative phone imagery should be small and purposeful. The default UI
 does not render a rotary dial or large phone illustration; digit shortcuts

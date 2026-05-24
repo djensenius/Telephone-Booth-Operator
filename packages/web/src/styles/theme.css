@@ -93,6 +93,7 @@
 }
 
 :root[data-theme="dark"] {
+  /* Keep this explicit override in sync with the default dark palette in :root. */
   color-scheme: dark;
   --accent-red: #e64553;
   --accent-red-strong: #ff5f67;
@@ -119,6 +120,7 @@
 }
 
 :root[data-theme="light"] {
+  /* Keep this explicit override in sync with the system light palette above. */
   color-scheme: light;
   --accent-red: #d20f39;
   --accent-red-strong: #b3132f;
@@ -598,7 +600,7 @@ textarea:focus-visible,
 .login-screen__phone-slot,
 .login-screen__phone-cord {
   fill: none;
-  stroke: var(--surface-raised);
+  stroke: var(--surface-panel-raised);
   stroke-linecap: round;
   stroke-width: 8px;
 }

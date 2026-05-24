@@ -42,7 +42,7 @@ function AppLayout(): JSX.Element {
       <div className="app-shell">
         <aside className="operator-sidebar" aria-label="Operator navigation">
           <BoothStatusBadge />
-          <nav className="operator-sidebar__nav" aria-label="Rotary digit routes">
+          <nav className="operator-sidebar__nav" aria-label="Digit shortcut routes">
             <h2>Shortcuts</h2>
             <ul>
               {DIGIT_ROUTES.map((route) => (
