@@ -1,9 +1,10 @@
 # UI routing
 
-The operator UI's primary navigation is the rotary dial set into the
-Contempra phone. Each digit routes you somewhere different.
+The operator UI's primary navigation is the always-present sidebar. Each
+route keeps a digit prefix so operators can use fast numeric shortcuts
+without needing a decorative rotary control.
 
-## Rotary digit map
+## Digit shortcut map
 
 | Digit | Route       | Purpose                                       |
 | ----- | ----------- | --------------------------------------------- |
@@ -12,17 +13,15 @@ Contempra phone. Each digit routes you somewhere different.
 | **3** | `/questions`| Manage the question library                   |
 | **4** | `/tokens`   | API token lifecycle and usage                 |
 | **5** | `/settings` | Operator account, theme, and phone-client connection |
-| **6** | `/about`    | Operator lore, credits, version, license      |
+| **6** | `/about`    | Console context, credits, version, license    |
 | **7** | `/login` after logout | Clear the operator session / auth line |
 | **8** | _reserved_  | (future)                                      |
 | **9** | `/debug`    | Phone-booth debug surface (LAN/Tailscale)     |
 | **0** | `/`         | Home (Status)                                 |
 
-Routes are also reachable via the **always-present sidebar** (keyboard
-nav, screen-reader friendly) and via direct numeric shortcuts:
-press `1`–`9` or `0` from any non-input context to navigate. The hook
-position is displayed around every route through the booth shell status
-lamps and Status screen receiver indicator.
+Routes are reachable via direct numeric shortcuts: press `1`–`9` or `0`
+from any non-input context to navigate. The sidebar shows the same digit
+prefixes for keyboard and screen-reader users.
 
 ## Routes deeper than digits
 
@@ -42,18 +41,15 @@ lamps and Status screen receiver indicator.
 
 ## Reduced motion
 
-When `prefers-reduced-motion: reduce` is set:
-
-- Rotary dial renders as static SVG buttons; clicking still navigates.
-- No spring animation, no dial-tone hum, no condensation on the glass.
-- Sound effects are muted by default; users can opt back in via
-  Settings.
+When `prefers-reduced-motion: reduce` is set, interface transitions and
+status animations are minimized. Sound effects are muted by default;
+users can opt back in via Settings.
 
 ## Keyboard shortcuts
 
 | Key      | Action                          |
 | -------- | ------------------------------- |
-| `1`..`9`,`0` | Navigate to the matching rotary route |
+| `1`..`9`,`0` | Navigate to the matching digit route |
 | `?`      | Open shortcuts help dialog       |
 | `/`      | Focus the search/filter input on the current screen |
 | `g s`    | Go to Status (alias for `1`)    |

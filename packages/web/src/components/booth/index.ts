@@ -1,10 +1,7 @@
 export { BoothFrame } from "./BoothFrame.js";
 export { BoothStatusProvider, useBoothStatus } from "./BoothStatusContext.js";
 export type { BoothConnectionStatus, BoothDisplayStatus } from "./BoothStatusContext.js";
-export { CeilingLamps } from "./CeilingLamps.js";
-export { ContempraPhone } from "./ContempraPhone.js";
+export { BoothStatusBadge } from "./BoothStatusBadge.js";
 export { GlassPanel } from "./GlassPanel.js";
-export { Handset } from "./Handset.js";
 export { LineBusyPlacard } from "./LineBusyPlacard.js";
-export { RotaryDial } from "./RotaryDial.js";
 export { TelephoneBanner } from "./TelephoneBanner.js";

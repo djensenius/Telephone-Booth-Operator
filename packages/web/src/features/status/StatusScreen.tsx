@@ -102,14 +102,13 @@ export function StatusScreen(): JSX.Element {
     <GlassPanel title="Live status panel" className="feature-screen status-screen">
       <p className="screen-kicker">Digit 1</p>
       <h1>Status</h1>
-      <p>The switchboard watches the phone client state machine and keeps the booth lamps in step.</p>
+      <p>The switchboard watches the phone client state machine and keeps the console status in step.</p>
       {statusQuery.isLoading && current === null ? <FeatureSkeleton /> : null}
       {statusQuery.error ? <FeatureError message="Could not read the booth status line." /> : null}
       {current === null && !statusQuery.isLoading ? <FeatureEmpty title="No signal yet">No status snapshots have arrived from the booth.</FeatureEmpty> : null}
       {current === null ? null : (
         <>
           <section className={`status-indicator status-indicator--${hookLabel(current.state) === "On hook" ? "on" : "off"}`} aria-label="Hook position">
-            <span className="status-indicator__receiver" aria-hidden="true" />
             <div>
               <p className="screen-kicker">Receiver</p>
               <strong>{hookLabel(current.state)}</strong>

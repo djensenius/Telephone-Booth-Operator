@@ -1,7 +1,12 @@
 import { Outlet, createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
 import type { RouterHistory } from "@tanstack/react-router";
 import { z } from "zod";
-import { BoothFrame, CeilingLamps, ContempraPhone, LineBusyPlacard, TelephoneBanner } from "../components/booth/index.js";
+import {
+  BoothStatusBadge,
+  BoothFrame,
+  LineBusyPlacard,
+  TelephoneBanner,
+} from "../components/booth/index.js";
 import { AboutScreen } from "../features/about/AboutScreen.js";
 import { LoginScreen } from "../features/auth/LoginScreen.js";
 import { RequireAuth } from "../features/auth/RequireAuth.js";
@@ -16,7 +21,7 @@ import { StatusScreen } from "../features/status/StatusScreen.js";
 import { LiveSystemPanel } from "../features/system/LiveSystemPanel.js";
 import { TokensScreen } from "../features/tokens/TokensScreen.js";
 import { useNumericNavigation } from "../hooks/useNumericNavigation.js";
-import { ROTARY_ROUTES, isMessageFilter } from "../lib/navigation.js";
+import { DIGIT_ROUTES, isMessageFilter } from "../lib/navigation.js";
 
 const messagesSearchSchema = z.object({
   status: z.enum(["all", "received", "uploading", "failed"]).optional(),
@@ -34,13 +39,13 @@ function AppLayout(): JSX.Element {
         Skip to content
       </a>
       <TelephoneBanner />
-      <CeilingLamps />
       <div className="app-shell">
         <aside className="operator-sidebar" aria-label="Operator navigation">
+          <BoothStatusBadge />
           <nav className="operator-sidebar__nav" aria-label="Rotary digit routes">
-            <h2>Switchboard</h2>
+            <h2>Shortcuts</h2>
             <ul>
-              {ROTARY_ROUTES.map((route) => (
+              {DIGIT_ROUTES.map((route) => (
                 <li key={route.digit}>
                   {route.reserved === true ? (
                     <span className="operator-sidebar__reserved">{route.digit} · Reserved</span>
@@ -54,12 +59,17 @@ function AppLayout(): JSX.Element {
           <nav className="operator-sidebar__nav" aria-label="Observability routes">
             <h2>Observability</h2>
             <ul>
-              <li><a href="/system">Live system</a></li>
-              <li><a href="/events">Events</a></li>
-              <li><a href="/sessions">Sessions</a></li>
+              <li>
+                <a href="/system">Live system</a>
+              </li>
+              <li>
+                <a href="/events">Events</a>
+              </li>
+              <li>
+                <a href="/sessions">Sessions</a>
+              </li>
             </ul>
           </nav>
-          <ContempraPhone />
         </aside>
         <main className="app-shell__main" id="main-content" tabIndex={-1}>
           <Outlet />

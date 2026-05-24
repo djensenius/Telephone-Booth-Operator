@@ -2,14 +2,19 @@ import { useEffect, useRef } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { auth } from "../lib/api-client.js";
-import { isRotaryDigit } from "../lib/navigation.js";
+import { isNavigationDigit } from "../lib/navigation.js";
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
     return false;
   }
   const tagName = target.tagName.toLowerCase();
-  return target.isContentEditable || tagName === "input" || tagName === "textarea" || tagName === "select";
+  return (
+    target.isContentEditable ||
+    tagName === "input" ||
+    tagName === "textarea" ||
+    tagName === "select"
+  );
 }
 
 export function useNumericNavigation(): void {
@@ -65,7 +70,13 @@ export function useNumericNavigation(): void {
     }
 
     function handleKeyDown(event: KeyboardEvent): void {
-      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || isEditableTarget(event.target)) {
+      if (
+        event.defaultPrevented ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        isEditableTarget(event.target)
+      ) {
         return;
       }
 
@@ -98,7 +109,7 @@ export function useNumericNavigation(): void {
         return;
       }
 
-      if (isRotaryDigit(key)) {
+      if (isNavigationDigit(key)) {
         event.preventDefault();
         dialDigit(key);
       }

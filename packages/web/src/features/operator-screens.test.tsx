@@ -126,7 +126,7 @@ afterEach(() => {
 describe("Auth feature", () => {
   it("renders the login call to action", async () => {
     renderPath("/login");
-    expect(await screen.findByText("Place a call to begin")).toBeTruthy();
+    expect(await screen.findByText("Sign in to connect")).toBeTruthy();
     expect(screen.getByText("Sign in with Authentik")).toBeTruthy();
   });
 
@@ -134,7 +134,7 @@ describe("Auth feature", () => {
     server.use(http.get("http://localhost/v1/auth/me", () => HttpResponse.json({ error: "unauthenticated" }, { status: 401 })));
     renderPath("/settings");
     expect(await screen.findByText("Checking the operator line…")).toBeTruthy();
-    expect(await screen.findByText("Place a call to begin")).toBeTruthy();
+    expect(await screen.findByText("Sign in to connect")).toBeTruthy();
   });
 
   it("renders account information from /me", async () => {
@@ -327,6 +327,13 @@ describe("Settings feature", () => {
     expect(window.localStorage.getItem("booth.theme.fontSize")).toBe("large");
   });
 
+  it("persists color theme selection", async () => {
+    renderPath("/settings");
+    fireEvent.change(await screen.findByLabelText("Color theme"), { target: { value: "dark" } });
+    expect(window.localStorage.getItem("booth.theme.mode")).toBe("dark");
+    expect(document.documentElement.dataset.theme).toBe("dark");
+  });
+
   it("stores phone-client URL edits", async () => {
     renderPath("/settings");
     fireEvent.change(await screen.findByLabelText("Tailscale URL"), { target: { value: "https://phone.example" } });
@@ -343,7 +350,7 @@ describe("Settings feature", () => {
 describe("About feature", () => {
   it("renders booth lore", async () => {
     renderPath("/about");
-    expect(await screen.findByText(/Northern Electric Contempra/iu)).toBeTruthy();
+    expect(await screen.findByText(/control console for a participatory phone installation/iu)).toBeTruthy();
   });
 
   it("links to GitHub", async () => {
