@@ -66,7 +66,7 @@ const safeReturnTo = (input: string | undefined): string => {
 
 const webRedirectBase = (): URL => {
   const raw =
-    (process.env.PUBLIC_WEB_URL ?? process.env.WEB_ORIGIN ?? "http://localhost:5173")
+    (process.env.WEB_ORIGIN ?? process.env.PUBLIC_WEB_URL ?? "http://localhost:5173")
       .split(",")[0]
       ?.trim() || "http://localhost:5173";
   return new URL(raw);
