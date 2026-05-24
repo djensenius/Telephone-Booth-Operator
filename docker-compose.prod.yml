@@ -23,7 +23,7 @@ services:
   # Provide DATABASE_URL and AZURE_STORAGE_CONNECTION_STRING in `.env`.
   # The `db` service below is OPTIONAL and only here for single-node deploys.
   db:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     restart: unless-stopped
     env_file: .env
     environment:

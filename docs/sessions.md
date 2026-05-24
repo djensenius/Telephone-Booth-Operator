@@ -8,9 +8,14 @@ opaque `__Host-booth_session` cookie containing only the signed session ID.
 
 - `HttpOnly` so browser JavaScript cannot read it.
 - `SameSite=Lax` so the OIDC callback can set it while limiting cross-site use.
-- `Secure` on non-localhost hosts.
+- `Secure` so browsers accept the `__Host-` prefix; localhost development still
+  works in modern browsers.
 - `Path=/` and no `Domain`, matching the `__Host-` cookie prefix rules.
 - HMAC-signed with `SESSION_SECRET`; rotating this secret logs everyone out.
+
+In non-production localhost development, the API also sets a signed
+`booth_session` fallback cookie because some browsers reject `__Host-` cookies
+on plain HTTP. Production only accepts the `__Host-booth_session` cookie.
 
 ## Database model
 

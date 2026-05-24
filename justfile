@@ -25,7 +25,7 @@ db-migrate:
 
 # Reset and seed the local database with sample data.
 db-seed:
-    pnpm --filter @telephone-booth-operator/api exec tsx ../../tools/seed.ts
+    pnpm --filter @telephone-booth-operator/api exec tsx scripts/seed.ts
 
 # Typecheck every package.
 typecheck:

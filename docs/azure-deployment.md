@@ -59,7 +59,7 @@ az postgres flexible-server create \
   --sku-name Standard_B1ms \
   --tier Burstable \
   --storage-size 32 \
-  --version 17 \
+  --version 18 \
   --public-access 0.0.0.0
 
 az postgres flexible-server db create \
@@ -136,13 +136,13 @@ export SESSION_ENCRYPTION_KEY="$(openssl rand -base64 32)"
 
 Collect Authentik values:
 
-| Variable | Value |
-| --- | --- |
-| `AUTHENTIK_ISSUER` | Authentik provider issuer, ending in `/application/o/<slug>/` |
-| `AUTHENTIK_CLIENT_ID` | Operator web provider client ID |
-| `AUTHENTIK_CLIENT_SECRET` | Operator web provider client secret |
-| `AUTHENTIK_ALLOWED_GROUPS` | Comma-separated group names allowed into the operator UI |
-| `OIDC_MOBILE_AUDIENCES` | Mobile/native Authentik client IDs, for example `telephone-booth-operator-mobile` |
+| Variable                   | Value                                                                             |
+| -------------------------- | --------------------------------------------------------------------------------- |
+| `AUTHENTIK_ISSUER`         | Authentik provider issuer, ending in `/application/o/<slug>/`                     |
+| `AUTHENTIK_CLIENT_ID`      | Operator web provider client ID                                                   |
+| `AUTHENTIK_CLIENT_SECRET`  | Operator web provider client secret                                               |
+| `AUTHENTIK_ALLOWED_GROUPS` | Comma-separated group names allowed into the operator UI                          |
+| `OIDC_MOBILE_AUDIENCES`    | Mobile/native Authentik client IDs, for example `telephone-booth-operator-mobile` |
 
 For a single public hostname, use these URLs:
 
@@ -278,12 +278,12 @@ az containerapp create \
 For the simplest production layout, put both apps behind one hostname using
 Azure Front Door, Application Gateway, or another reverse proxy:
 
-| Path | Backend |
-| --- | --- |
-| `/v1/*` | API Container App |
+| Path       | Backend                                  |
+| ---------- | ---------------------------------------- |
+| `/v1/*`    | API Container App                        |
 | `/v1/ws/*` | API Container App with WebSocket support |
-| `/healthz` | API Container App |
-| `/*` | Web Container App |
+| `/healthz` | API Container App                        |
+| `/*`       | Web Container App                        |
 
 The shared-hostname layout avoids cross-site cookie issues and keeps
 `SameSite=Lax` session cookies straightforward.

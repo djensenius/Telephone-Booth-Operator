@@ -11,6 +11,10 @@ import { getRequiredOidcConfig, resetAuthConfigForTests } from "./config.js";
 export type Client = Configuration;
 export type TokenSet = TokenEndpointResponse & TokenEndpointResponseHelpers;
 export type { IDTokenClaims };
+export type CodeExchangeResult = {
+  tokenSet: TokenSet;
+  claims: IDTokenClaims;
+};
 
 export type ExchangeParams = URL | Request | URLSearchParams | string;
 
@@ -59,11 +63,7 @@ const currentClient = (): Client => {
 const codeChallenge = (codeVerifier: string): string =>
   createHash("sha256").update(codeVerifier).digest("base64url");
 
-export const buildAuthorizationUrl = (
-  state: string,
-  nonce: string,
-  codeVerifier: string,
-): URL => {
+export const buildAuthorizationUrl = (state: string, nonce: string, codeVerifier: string): URL => {
   const config = getRequiredOidcConfig();
   return oidc.buildAuthorizationUrl(currentClient(), {
     redirect_uri: config.redirectUri,
@@ -91,22 +91,18 @@ export const exchangeCode = async (
   codeVerifier: string,
   expectedState: string,
   expectedNonce: string,
-): Promise<TokenSet & { claims: IDTokenClaims }> => {
-  const tokens = await oidc.authorizationCodeGrant(
-    await getOidcClient(),
-    paramsToUrl(params),
-    {
-      expectedNonce,
-      expectedState,
-      idTokenExpected: true,
-      pkceCodeVerifier: codeVerifier,
-    },
-  );
+): Promise<CodeExchangeResult> => {
+  const tokens = await oidc.authorizationCodeGrant(await getOidcClient(), paramsToUrl(params), {
+    expectedNonce,
+    expectedState,
+    idTokenExpected: true,
+    pkceCodeVerifier: codeVerifier,
+  });
   const claims = tokens.claims();
   if (!claims) {
     throw new Error("OIDC provider did not return an ID token.");
   }
-  return Object.assign(tokens, { claims });
+  return { tokenSet: tokens, claims };
 };
 
 export const refreshTokens = async (refreshToken: string): Promise<TokenSet> =>
