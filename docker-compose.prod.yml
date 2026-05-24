@@ -5,8 +5,6 @@ services:
     env_file: .env
     ports:
       - "8787:8787"
-    depends_on:
-      - db
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8787/healthz"]
       interval: 15s

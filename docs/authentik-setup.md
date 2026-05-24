@@ -35,22 +35,29 @@ later is a no-code change.
 | Signing Key              | _default (RSA)_                                                       |
 | Subject mode             | **Based on the User's hashed ID** (stable, opaque `sub`)              |
 | Include claims in id_token | **Yes**                                                             |
-| Scopes                   | `openid` `profile` `email` `goauthentik.io/api`                       |
+| Scopes                   | `openid` `profile` `email` `offline_access`                          |
 
-Save. You'll also want to make sure the **Group Membership** property
-mapping is included in your scopes — Authentik exposes a `groups` claim
-by default in the `goauthentik.io/api` scope. If you've trimmed it, add
-a custom mapping:
+Save. Make sure the provider includes a scope mapping that emits a
+`groups` claim in both the ID token and access token. Authentik's default
+`profile` scope mapping includes group membership, so the normal
+`openid profile email offline_access` scope set is enough unless you've
+customized the provider mappings.
+
+If you've removed the default profile mapping, add a custom mapping:
 
 ```python
 # Authentik: Customization → Property Mappings → Create → Scope Mapping
-# Name:  oidc-groups
-# Scope name: groups
+# Name:  oidc-profile-groups
+# Scope name: profile
 # Expression:
-return {"groups": [group.name for group in user.ak_groups.all()]}
+return {"groups": [group.name for group in user.groups.all()]}
 ```
 
-Then attach `oidc-groups` to the provider's scopes.
+Then attach `oidc-profile-groups` to the provider's scopes. This mapping
+returns the signed-in user's group names as a claim; it is not the
+authorization rule. The operator API authorizes only when at least one of
+those names matches `AUTHENTIK_ALLOWED_GROUPS` / `OIDC_ALLOWED_GROUPS`
+(for example, `telephone-booth-operators`).
 
 ## 3. Create the application
 
@@ -82,7 +89,7 @@ AUTHENTIK_CLIENT_SECRET=<from step 2>
 AUTHENTIK_REDIRECT_URI=http://localhost:8787/v1/auth/callback
 AUTHENTIK_POST_LOGOUT_REDIRECT_URI=http://localhost:5173
 AUTHENTIK_ALLOWED_GROUPS=telephone-booth-operators
-OIDC_SCOPES="openid email profile offline_access goauthentik.io/api"
+OIDC_SCOPES="openid email profile offline_access"
 SESSION_SECRET=<openssl rand -hex 32>
 SESSION_ENCRYPTION_KEY=<openssl rand -base64 32>
 ```
@@ -129,7 +136,7 @@ so users should also be logged out before rotation.
 | Symptom                                | Likely cause                                              |
 | -------------------------------------- | --------------------------------------------------------- |
 | `invalid_redirect_uri`                 | Missing entry in step 2; redirect must match exactly      |
-| `missing groups claim`                 | Provider isn't including `goauthentik.io/api` scope, or the custom mapping isn't attached |
+| `missing groups claim`                 | Provider isn't including the default `profile` group mapping, or the custom mapping isn't attached |
 | `Operator credentials required` screen | User isn't in `telephone-booth-operators`                 |
 | `iat` / clock-skew errors              | Pi/server clocks differ; install `chrony` or `systemd-timesyncd` |
 | Cookies missing in prod                | Operator UI not served over HTTPS; `Secure` cookies are dropped |
