@@ -3,6 +3,7 @@ import { MessageCreateSchema, MessageStatusSchema } from "@telephone-booth-opera
 import { Hono } from "hono";
 import { z } from "zod";
 import { kickPipelineForMessage, runModeration, runTranscription } from "../lib/ai/pipeline.js";
+import { fanOutNotification } from "../lib/apns.js";
 import { generateSasUrl, headBlob } from "../lib/azure-blob.js";
 import { db } from "../lib/db.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
@@ -122,6 +123,15 @@ messagesRouter.post("/:id/complete", requireApiToken(), zValidator("param", idPa
   // Fire-and-forget. The pipeline catches its own errors and updates the
   // DB asynchronously; the booth's `/complete` call does not wait on AI.
   kickPipelineForMessage(updated.id);
+  // Push fan-out: notify mobile devices that a new message has landed.
+  void fanOutNotification({
+    preferenceKey: "messageReceived",
+    title: "New booth message",
+    body: "A new recording is ready to moderate.",
+    threadId: `message:${updated.id}`,
+    category: "BOOTH_MESSAGE",
+    data: { messageId: updated.id },
+  });
   return c.json({ id: updated.id, status: "received", receivedAt: receivedAt.toISOString() });
 });
 

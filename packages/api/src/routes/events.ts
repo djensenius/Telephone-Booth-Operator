@@ -19,6 +19,7 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { fanOutNotification } from "../lib/apns.js";
 import { Broadcaster } from "../lib/broadcaster.js";
 import { decodeCursor, encodeCursor } from "../lib/cursor.js";
 import { db } from "../lib/db.js";
@@ -260,7 +261,21 @@ eventsRouter.post(
         orderBy: { receivedAt: "asc" },
       }));
       for (const row of recent.slice(-accepted)) {
-        eventsBroadcaster.broadcast(serializeBoothEvent(row));
+        const record = serializeBoothEvent(row);
+        eventsBroadcaster.broadcast(record);
+        // Best-effort push fan-out for notable event types. Failures are
+        // swallowed inside `fanOutNotification`; we don't want a dead
+        // APNs config to break /v1/events ingestion.
+        if (record.type === "call_started") {
+          void fanOutNotification({
+            preferenceKey: "callStarted",
+            title: "Call started",
+            body: "Someone picked up the booth.",
+            threadId: `booth:${record.boothId}`,
+            category: "BOOTH_CALL",
+            data: { eventId: record.id, sessionId: record.sessionId ?? null },
+          });
+        }
       }
     }
 

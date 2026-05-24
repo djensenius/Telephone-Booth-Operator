@@ -390,3 +390,50 @@ export const WsEnvelopeSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 export type WsEnvelope = z.infer<typeof WsEnvelopeSchema>;
+
+// -----------------------------------------------------------------------------
+// Mobile devices: APNs push registry for the operator mobile app.
+// -----------------------------------------------------------------------------
+
+export const MobileDevicePlatformSchema = z.enum([
+  "ios",
+  "ipados",
+  "macos",
+  "watchos",
+  "tvos",
+  "visionos",
+]);
+export type MobileDevicePlatform = z.infer<typeof MobileDevicePlatformSchema>;
+
+export const MobileDevicePreferencesSchema = z.object({
+  callStarted: z.boolean().default(true),
+  messageReceived: z.boolean().default(true),
+  messageFlagged: z.boolean().default(true),
+  moderationQueueHigh: z.boolean().default(false),
+});
+export type MobileDevicePreferences = z.infer<typeof MobileDevicePreferencesSchema>;
+
+export const MobileDeviceSchema = z.object({
+  id: z.string().uuid(),
+  apnsToken: z.string().min(32),
+  platform: MobileDevicePlatformSchema,
+  deviceName: z.string().nullable(),
+  preferences: MobileDevicePreferencesSchema,
+  registeredAt: z.string().datetime(),
+  lastSeenAt: z.string().datetime(),
+});
+export type MobileDevice = z.infer<typeof MobileDeviceSchema>;
+
+export const RegisterMobileDeviceRequestSchema = z.object({
+  apnsToken: z.string().min(32),
+  platform: MobileDevicePlatformSchema,
+  deviceName: z.string().min(1).max(120).nullish(),
+  preferences: MobileDevicePreferencesSchema.partial().optional(),
+});
+export type RegisterMobileDeviceRequest = z.infer<typeof RegisterMobileDeviceRequestSchema>;
+
+export const UpdateMobileDevicePreferencesSchema = z.object({
+  deviceName: z.string().min(1).max(120).nullish(),
+  preferences: MobileDevicePreferencesSchema.partial().optional(),
+});
+export type UpdateMobileDevicePreferences = z.infer<typeof UpdateMobileDevicePreferencesSchema>;

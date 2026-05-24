@@ -161,6 +161,7 @@ model OperatorUser {
   sessions                OperatorSession[]
   requestedTranscriptions Transcription[]   @relation("TranscriptionRequester")
   requestedModerations    Moderation[]      @relation("ModerationRequester")
+  mobileDevices           MobileDevice[]
 }
 
 model OperatorSession {
@@ -254,4 +255,23 @@ model Moderation {
 
   @@index([messageId, createdAt])
   @@index([recommendation, createdAt])
+}
+
+// Mobile device registered for APNs / push notifications. One row per
+// physical device + platform; revoked rows stay in the table with a
+// non-null revokedAt so we can track tokens reused after re-install.
+model MobileDevice {
+  id                   String       @id @default(uuid()) @db.Uuid
+  userId               String
+  user                 OperatorUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  apnsToken            String
+  platform             String       // "ios" | "ipados" | "macos" | "watchos" | "tvos" | "visionos"
+  deviceName           String?
+  preferences          Json         @default("{}")
+  registeredAt         DateTime     @default(now())
+  lastSeenAt           DateTime     @default(now())
+  revokedAt            DateTime?
+
+  @@unique([apnsToken, platform])
+  @@index([userId, revokedAt])
 }
