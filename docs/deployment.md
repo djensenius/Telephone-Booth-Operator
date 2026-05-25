@@ -44,7 +44,8 @@ When you use the bundled single-node Postgres service, you **must** set
 `POSTGRES_PASSWORD` in `.env` — Compose will refuse to start without it.
 Generate one with `openssl rand -base64 24`. Then set `DATABASE_URL` to match,
 for example
-`postgres://booth:${POSTGRES_PASSWORD}@db:5432/telephone_booth`. For managed
+`postgres://booth:YOUR_PASSWORD_HERE@db:5432/telephone_booth` (replacing
+`YOUR_PASSWORD_HERE` with the generated value). For managed
 Postgres, set `DATABASE_URL` to the external provider's TLS connection string.
 
 Place a reverse proxy in front:
