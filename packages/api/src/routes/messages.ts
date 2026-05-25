@@ -140,24 +140,38 @@ messagesRouter.post(
         contentType: blob.contentType ?? message.audio.contentType,
       },
     });
+
+    // Idempotent transition: only move from "uploading" → "received".
+    // If the message already advanced past "uploading" (e.g. retry after
+    // timeout), skip the pipeline and return the current state.
     const receivedAt = new Date();
-    const updated = await db.message.update({
-      where: { id },
+    const { count } = await db.message.updateMany({
+      where: { id, status: "uploading" },
       data: { status: "received", receivedAt },
     });
+
+    if (count === 0) {
+      const current = await db.message.findUnique({ where: { id } });
+      return c.json({
+        id: current!.id,
+        status: current!.status,
+        receivedAt: current!.receivedAt?.toISOString() ?? null,
+      });
+    }
+
     // Fire-and-forget. The pipeline catches its own errors and updates the
     // DB asynchronously; the booth's `/complete` call does not wait on AI.
-    kickPipelineForMessage(updated.id);
+    kickPipelineForMessage(id);
     // Push fan-out: notify mobile devices that a new message has landed.
     void fanOutNotification({
       preferenceKey: "messageReceived",
       title: "New booth message",
       body: "A new recording is ready to moderate.",
-      threadId: `message:${updated.id}`,
+      threadId: `message:${id}`,
       category: "BOOTH_MESSAGE",
-      data: { messageId: updated.id },
+      data: { messageId: id },
     });
-    return c.json({ id: updated.id, status: "received", receivedAt: receivedAt.toISOString() });
+    return c.json({ id, status: "received", receivedAt: receivedAt.toISOString() });
   },
 );
 
