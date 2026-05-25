@@ -74,7 +74,7 @@ jobs:
 
           # Poll API /healthz
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:3000/healthz > /dev/null 2>&1; then
+            if curl -sf http://localhost:8787/healthz > /dev/null 2>&1; then
               echo "API ready after attempt $i"
               break
             fi
