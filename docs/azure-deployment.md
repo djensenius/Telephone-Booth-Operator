@@ -354,6 +354,7 @@ Configure these repository variables:
 | `AZURE_WEB_APP`        | Web Container App name                                                 |
 | `AZURE_MIGRATE_JOB`    | Container Apps job that runs Prisma migrations                         |
 | `PUBLIC_API_URL`       | Browser-visible API origin, for example `https://operator.example.com` |
+| `VITE_API_BASE_URL`    | Optional web build API origin; defaults to `PUBLIC_API_URL`            |
 
 Create a federated credential on the Entra application for this repository and
 the `main` branch, with subject:
