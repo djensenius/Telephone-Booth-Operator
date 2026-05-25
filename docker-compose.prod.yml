@@ -28,7 +28,7 @@ services:
     env_file: .env
     environment:
       POSTGRES_USER: booth
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-booth}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: telephone_booth
     volumes:
       - db_data:/var/lib/postgresql/data
