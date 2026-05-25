@@ -82,8 +82,6 @@ jobs:
             --resource-group "$RESOURCE_GROUP" \
             --name "$MIGRATE_JOB" \
             --image "${API_IMAGE}:${IMAGE_TAG}" \
-            --command "/bin/sh" \
-            --args "-lc" "pnpm exec prisma migrate deploy" \
             --output none
 
           execution_name="$(
