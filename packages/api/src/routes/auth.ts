@@ -1,5 +1,6 @@
 import { randomNonce, randomPKCECodeVerifier, randomState } from "openid-client";
 import { Hono } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { zValidator } from "@hono/zod-validator";
 import { OperatorMeSchema } from "@telephone-booth-operator/shared";
 import { z } from "zod";
@@ -148,11 +149,28 @@ const readLoginTxCookie = (cookieHeader: string | undefined): string | null => {
   return verifyCookieValue(raw);
 };
 
-const html = (title: string, detail: string): string => `<!doctype html>
+export const escapeHtml = (unsafe: string): string =>
+  unsafe
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
+const htmlBody = (title: string, detail: string): string => {
+  const safeTitle = escapeHtml(title);
+  const safeDetail = escapeHtml(detail);
+  return `<!doctype html>
 <html lang="en">
-  <head><meta charset="utf-8"><title>${title}</title></head>
-  <body><h1>${title}</h1><p>${detail}</p></body>
+  <head><meta charset="utf-8"><title>${safeTitle}</title></head>
+  <body><h1>${safeTitle}</h1><p>${safeDetail}</p></body>
 </html>`;
+};
+
+const htmlResponse = (c: { html: (body: string, status?: ContentfulStatusCode, headers?: Record<string, string>) => Response | Promise<Response> }, title: string, detail: string, status: ContentfulStatusCode): Response | Promise<Response> =>
+  c.html(htmlBody(title, detail), status, {
+    "Content-Security-Policy": "default-src 'none'",
+  });
 
 const logAuthCallbackError = (error: unknown): void => {
   const payload =
@@ -201,10 +219,7 @@ export const authRoutes = new Hono<{ Variables: AuthVariables }>();
 
 authRoutes.get("/login", zValidator("query", loginQuerySchema), async (c) => {
   if (getAuthConfig().disabled) {
-    return c.html(
-      html("Authentication disabled", "AUTH_DISABLED=true is enabled for local development."),
-      503,
-    );
+    return htmlResponse(c, "Authentication disabled", "AUTH_DISABLED=true is enabled for local development.", 503);
   }
 
   prunePendingLogins();
@@ -227,11 +242,11 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
   const query = c.req.valid("query");
   if (query.error) {
     clearLoginTxCookie(c);
-    return c.html(html("OIDC login failed", query.error_description ?? query.error), 400);
+    return htmlResponse(c, "OIDC login failed", query.error_description ?? query.error, 400);
   }
   if (!query.code || !query.state) {
     clearLoginTxCookie(c);
-    return c.html(html("OIDC login failed", "Missing code or state."), 400);
+    return htmlResponse(c, "OIDC login failed", "Missing code or state.", 400);
   }
 
   // Verify the login transaction cookie binds this callback to the browser
@@ -239,17 +254,14 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
   const txState = readLoginTxCookie(c.req.header("cookie"));
   clearLoginTxCookie(c);
   if (!txState || txState !== query.state) {
-    return c.html(
-      html("OIDC login failed", "Login transaction cookie missing or mismatched."),
-      400,
-    );
+    return htmlResponse(c, "OIDC login failed", "Login transaction cookie missing or mismatched.", 400);
   }
 
   prunePendingLogins();
   const pending = pendingLogins.get(query.state);
   pendingLogins.delete(query.state);
   if (!pending) {
-    return c.html(html("OIDC login failed", "Login state expired or was not recognized."), 400);
+    return htmlResponse(c, "OIDC login failed", "Login state expired or was not recognized.", 400);
   }
 
   try {
@@ -263,15 +275,14 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
     const result = await authorizeAndUpsertOperator(claims, { markLogin: true });
     if (!result.ok) {
       if (result.status === 403) {
-        return c.html(html("Operator credentials required", result.reason), 403);
+        return htmlResponse(c, "Operator credentials required", result.reason, 403);
       }
-      return c.html(
-        html(
-          "OIDC login failed",
-          result.reason === "missing_email_claim"
-            ? "The provider did not return an email claim."
-            : "The login response could not be validated.",
-        ),
+      return htmlResponse(
+        c,
+        "OIDC login failed",
+        result.reason === "missing_email_claim"
+          ? "The provider did not return an email claim."
+          : "The login response could not be validated.",
         400,
       );
     }
@@ -281,7 +292,7 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
     return c.redirect(webRedirectUrl(pending.returnTo), 302);
   } catch (error) {
     logAuthCallbackError(error);
-    return c.html(html("OIDC login failed", "The login response could not be validated."), 400);
+    return htmlResponse(c, "OIDC login failed", "The login response could not be validated.", 400);
   }
 });
 

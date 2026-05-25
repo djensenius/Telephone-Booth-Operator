@@ -328,4 +328,52 @@ describe("auth flow", () => {
     const body = await callback.text();
     expect(body).toContain("Login transaction cookie missing or mismatched");
   });
+
+  describe("XSS prevention in OIDC error responses", () => {
+    it("escapes script tags in error_description", async () => {
+      const xssPayload = '<script>alert("xss")</script>';
+      const res = await app.request(
+        `http://127.0.0.1/v1/auth/callback?error=access_denied&error_description=${encodeURIComponent(xssPayload)}`,
+      );
+
+      expect(res.status).toBe(400);
+      const body = await res.text();
+      expect(body).not.toContain("<script>");
+      expect(body).toContain("&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;");
+      expect(res.headers.get("content-security-policy")).toBe("default-src 'none'");
+    });
+
+    it("escapes script tags in error param when no error_description", async () => {
+      const xssPayload = '<img src=x onerror="alert(1)">';
+      const res = await app.request(
+        `http://127.0.0.1/v1/auth/callback?error=${encodeURIComponent(xssPayload)}`,
+      );
+
+      expect(res.status).toBe(400);
+      const body = await res.text();
+      expect(body).not.toContain("<img");
+      expect(body).toContain("&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
+    });
+
+    it("escapes HTML entities in error_description", async () => {
+      const payload = '"><svg onload=alert(document.cookie)>';
+      const res = await app.request(
+        `http://127.0.0.1/v1/auth/callback?error=server_error&error_description=${encodeURIComponent(payload)}`,
+      );
+
+      expect(res.status).toBe(400);
+      const body = await res.text();
+      expect(body).not.toContain("<svg");
+      expect(body).toContain("&quot;&gt;&lt;svg onload=alert(document.cookie)&gt;");
+    });
+
+    it("includes CSP header on all error HTML responses", async () => {
+      const res = await app.request(
+        "http://127.0.0.1/v1/auth/callback?error=access_denied&error_description=normal+error",
+      );
+
+      expect(res.status).toBe(400);
+      expect(res.headers.get("content-security-policy")).toBe("default-src 'none'");
+    });
+  });
 });
