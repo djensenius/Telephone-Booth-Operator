@@ -63,6 +63,13 @@ describe("App shell", () => {
     expect(container.firstChild).toMatchSnapshot();
   });
 
+  it("shows the build date in the app shell", async () => {
+    renderShell();
+    await screen.findByText("Status");
+    expect(screen.getByText("Build date")).toBeTruthy();
+    expect(screen.getByText("Jan 1, 1970, 12:00 AM")).toBeTruthy();
+  });
+
   it("has no critical axe violations", async () => {
     const { container } = renderShell();
     await screen.findByText("Status");

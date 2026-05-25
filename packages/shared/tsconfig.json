@@ -14,7 +14,8 @@
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
     "declaration": true,
-    "outDir": "dist"
+    "outDir": "dist",
+    "rootDir": "src"
   },
   "include": ["src"]
 }
