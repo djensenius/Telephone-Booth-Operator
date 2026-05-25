@@ -13,6 +13,7 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { pathToFileURL } from "node:url";
 import { startAiSweeper } from "./lib/ai/sweeper.js";
+import { startSnapshotPruner } from "./lib/snapshot-pruner.js";
 import { AuthConfigurationError, resolveAuthConfig } from "./lib/config.js";
 import { requireOperator, type AuthVariables } from "./lib/session.js";
 import apiTokensRouter from "./routes/api-tokens.js";
@@ -92,6 +93,7 @@ const start = (): void => {
   });
   attachStatusWebSocket(server);
   startAiSweeper();
+  startSnapshotPruner();
 };
 
 const app = createApp();
