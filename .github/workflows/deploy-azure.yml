@@ -81,13 +81,16 @@ jobs:
           az containerapp job update \
             --resource-group "$RESOURCE_GROUP" \
             --name "$MIGRATE_JOB" \
-            --image "${API_IMAGE}:${IMAGE_TAG}"
+            --image "${API_IMAGE}:${IMAGE_TAG}" \
+            --command "/bin/sh" \
+            --args "-lc" "pnpm exec prisma migrate deploy" \
+            --output none
 
           execution_name="$(
             az containerapp job start \
               --resource-group "$RESOURCE_GROUP" \
               --name "$MIGRATE_JOB" \
-              --query executionName \
+              --query name \
               --output tsv
           )"
 
@@ -95,8 +98,8 @@ jobs:
             status="$(
               az containerapp job execution show \
                 --resource-group "$RESOURCE_GROUP" \
-                --job-name "$MIGRATE_JOB" \
-                --name "$execution_name" \
+                --name "$MIGRATE_JOB" \
+                --job-execution-name "$execution_name" \
                 --query properties.status \
                 --output tsv
             )"
@@ -110,6 +113,7 @@ jobs:
                   --resource-group "$RESOURCE_GROUP" \
                   --name "$MIGRATE_JOB" \
                   --execution "$execution_name" \
+                  --container "$MIGRATE_JOB" \
                   --tail 100
                 exit 1
                 ;;
