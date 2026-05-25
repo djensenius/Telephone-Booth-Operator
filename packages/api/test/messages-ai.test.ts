@@ -26,7 +26,7 @@ vi.mock("../src/lib/require-api-token.js", () => ({
 import { createApp } from "../src/index.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { fakeBlobs, resetFakeAzure } from "./support/fake-azure.js";
-import { resetFakeDb } from "./support/fake-db.js";
+import { fakeDb, resetFakeDb } from "./support/fake-db.js";
 import { operatorCookie, phoneHeaders } from "./support/http.js";
 
 const setup = () => {
@@ -116,6 +116,36 @@ describe("messages AI routes", () => {
     expect(res.status).toBe(202);
     const body = await res.json();
     expect(body).toMatchObject({ messageId: id, status: "failed", provider: "disabled" });
+  });
+
+  it("returns 409 when a manual transcription is already pending", async () => {
+    const app = createApp();
+    const id = await seedReceivedMessage(app);
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    process.env.TRANSCRIPTION_PROVIDER = "openai";
+    process.env.OPENAI_API_KEY = "sk-test";
+    const existing = await fakeDb.transcription.create({
+      data: {
+        messageId: id,
+        provider: "openai",
+        model: "whisper-1",
+        status: "pending",
+        durationMs: 4000,
+        requestedById: null,
+      },
+    });
+    const cookie = operatorCookie();
+    const res = await app.request(`/v1/messages/${id}/transcribe`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body).toEqual({
+      error: "transcription_already_pending",
+      transcriptionId: existing.id,
+    });
   });
 
   it("returns 409 when moderating without a succeeded transcription", async () => {
