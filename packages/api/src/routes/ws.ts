@@ -64,13 +64,15 @@ export const attachStatusWebSocket = (server: ServerType): void => {
   server.on("upgrade", (request: IncomingMessage, socket: Duplex, head: Buffer) => {
     if (!isStatusWsPath(request)) return;
 
-    wss.handleUpgrade(request, socket, head, async (ws) => {
-      const session = await readSessionFromCookieHeader(request.headers.cookie);
-      if (!session || session.expiresAt.getTime() <= Date.now()) {
-        closePolicyViolation(ws);
-        return;
-      }
-      wss.emit("connection", ws, request);
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      void (async () => {
+        const session = await readSessionFromCookieHeader(request.headers.cookie);
+        if (!session || session.expiresAt.getTime() <= Date.now()) {
+          closePolicyViolation(ws);
+          return;
+        }
+        wss.emit("connection", ws, request);
+      })();
     });
   });
 

@@ -26,7 +26,20 @@ for (const [fileName, duration] of assets) {
   if (hasFfmpeg) {
     const result = spawnSync(
       "ffmpeg",
-      ["-y", "-f", "lavfi", "-i", "anullsrc=r=8000:cl=mono", "-t", duration, "-c:a", "flac", "-compression_level", "12", output],
+      [
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        "anullsrc=r=8000:cl=mono",
+        "-t",
+        duration,
+        "-c:a",
+        "flac",
+        "-compression_level",
+        "12",
+        output,
+      ],
       { stdio: "ignore" },
     );
     if (result.status === 0 && existsSync(output)) {

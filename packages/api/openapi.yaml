@@ -35,11 +35,11 @@ paths:
       summary: Liveness probe.
       security: []
       responses:
-        '200':
+        "200":
           description: ok
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Health' }
+              schema: { $ref: "#/components/schemas/Health" }
 
   /v1/status:
     get:
@@ -47,11 +47,11 @@ paths:
       tags: [status]
       security: []
       responses:
-        '200':
+        "200":
           description: ok
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/BoothStatus' }
+              schema: { $ref: "#/components/schemas/BoothStatus" }
     put:
       summary: Phone client posts a status update.
       tags: [status]
@@ -61,9 +61,9 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/StatusUpdate' }
+            schema: { $ref: "#/components/schemas/StatusUpdate" }
       responses:
-        '204': { description: accepted }
+        "204": { description: accepted }
 
   /v1/status/history:
     get:
@@ -80,11 +80,11 @@ paths:
           in: query
           schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
       responses:
-        '200':
+        "200":
           description: ok
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/StatusHistory' }
+              schema: { $ref: "#/components/schemas/StatusHistory" }
 
   /v1/questions:
     get:
@@ -101,11 +101,11 @@ paths:
           in: query
           schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
       responses:
-        '200':
+        "200":
           description: ok
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/QuestionList' }
+              schema: { $ref: "#/components/schemas/QuestionList" }
     post:
       summary: Create a new question from an already-uploaded audio file.
       tags: [questions]
@@ -116,15 +116,15 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/QuestionCreate' }
+            schema: { $ref: "#/components/schemas/QuestionCreate" }
       responses:
-        '201':
+        "201":
           description: created
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Question' }
-        '404': { description: audio file not found }
-        '409': { description: duplicate prompt or audio already attached }
+              schema: { $ref: "#/components/schemas/Question" }
+        "404": { description: audio file not found }
+        "409": { description: duplicate prompt or audio already attached }
 
   /v1/questions/random:
     get:
@@ -133,12 +133,12 @@ paths:
       security:
         - apiToken: []
       responses:
-        '200':
+        "200":
           description: ok
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Question' }
-        '404': { description: no questions available }
+              schema: { $ref: "#/components/schemas/Question" }
+        "404": { description: no questions available }
 
   /v1/questions/{id}:
     parameters:
@@ -150,8 +150,8 @@ paths:
         - operatorSession: []
         - operatorBearer: []
       responses:
-        '204': { description: removed }
-        '404': { description: not found }
+        "204": { description: removed }
+        "404": { description: not found }
 
   /v1/messages:
     get:
@@ -163,7 +163,7 @@ paths:
       parameters:
         - name: status
           in: query
-          schema: { $ref: '#/components/schemas/MessageStatus' }
+          schema: { $ref: "#/components/schemas/MessageStatus" }
         - name: since
           in: query
           schema: { type: string, format: date-time }
@@ -171,11 +171,11 @@ paths:
           in: query
           schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
       responses:
-        '200':
+        "200":
           description: ok
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/MessageList' }
+              schema: { $ref: "#/components/schemas/MessageList" }
     post:
       summary: Initiate a message audio upload.
       tags: [messages]
@@ -185,15 +185,15 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/MessageCreate' }
+            schema: { $ref: "#/components/schemas/MessageCreate" }
       responses:
-        '201':
+        "201":
           description: upload URL issued
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/MessageInitiated' }
-        '404': { description: question not found }
-        '409': { description: duplicate message }
+              schema: { $ref: "#/components/schemas/MessageInitiated" }
+        "404": { description: question not found }
+        "409": { description: duplicate message }
 
   /v1/messages/{id}:
     parameters:
@@ -205,12 +205,12 @@ paths:
         - operatorSession: []
         - operatorBearer: []
       responses:
-        '200':
+        "200":
           description: ok
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Message' }
-        '404': { description: not found }
+              schema: { $ref: "#/components/schemas/Message" }
+        "404": { description: not found }
     delete:
       summary: Delete a message row.
       tags: [messages]
@@ -218,8 +218,8 @@ paths:
         - operatorSession: []
         - operatorBearer: []
       responses:
-        '204': { description: deleted }
-        '404': { description: not found }
+        "204": { description: deleted }
+        "404": { description: not found }
 
   /v1/messages/{id}/complete:
     parameters:
@@ -230,14 +230,14 @@ paths:
       security:
         - apiToken: []
       responses:
-        '200':
+        "200":
           description: received
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/MessageComplete' }
-        '404': { description: not found }
-        '409': { description: blob not found }
-        '422': { description: sha256 mismatch }
+              schema: { $ref: "#/components/schemas/MessageComplete" }
+        "404": { description: not found }
+        "409": { description: blob not found }
+        "422": { description: sha256 mismatch }
 
   /v1/messages/{id}/transcriptions:
     parameters:
@@ -249,12 +249,12 @@ paths:
         - operatorSession: []
         - operatorBearer: []
       responses:
-        '200':
+        "200":
           description: ok
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/TranscriptionList' }
-        '404': { description: message not found }
+              schema: { $ref: "#/components/schemas/TranscriptionList" }
+        "404": { description: message not found }
 
   /v1/messages/{id}/transcribe:
     parameters:
@@ -276,12 +276,12 @@ paths:
         - operatorSession: []
         - operatorBearer: []
       responses:
-        '202':
+        "202":
           description: transcription attempt recorded
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Transcription' }
-        '404': { description: message not found }
+              schema: { $ref: "#/components/schemas/Transcription" }
+        "404": { description: message not found }
 
   /v1/messages/{id}/moderate:
     parameters:
@@ -298,13 +298,13 @@ paths:
         - operatorSession: []
         - operatorBearer: []
       responses:
-        '202':
+        "202":
           description: moderation attempt recorded
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Moderation' }
-        '404': { description: message not found }
-        '409': { description: no succeeded transcription available to moderate }
+              schema: { $ref: "#/components/schemas/Moderation" }
+        "404": { description: message not found }
+        "409": { description: no succeeded transcription available to moderate }
 
   /v1/uploads/sas:
     post:
@@ -317,13 +317,13 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/UploadSasRequest' }
+            schema: { $ref: "#/components/schemas/UploadSasRequest" }
       responses:
-        '201':
+        "201":
           description: upload slot issued
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/UploadSlot' }
+              schema: { $ref: "#/components/schemas/UploadSlot" }
 
   /v1/stats/summary:
     get:
@@ -339,12 +339,12 @@ paths:
         - operatorSession: []
         - operatorBearer: []
       responses:
-        '200':
+        "200":
           description: aggregated booth statistics
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/StatsSummary' }
-        '401': { description: missing or invalid credentials }
+              schema: { $ref: "#/components/schemas/StatsSummary" }
+        "401": { description: missing or invalid credentials }
 
   /v1/auth/login:
     get:
@@ -352,7 +352,7 @@ paths:
       tags: [auth]
       security: []
       responses:
-        '302': { description: redirect to IdP }
+        "302": { description: redirect to IdP }
 
   /v1/auth/callback:
     get:
@@ -363,7 +363,7 @@ paths:
         - { name: code, in: query, schema: { type: string } }
         - { name: state, in: query, schema: { type: string } }
       responses:
-        '302': { description: redirect to UI }
+        "302": { description: redirect to UI }
 
   /v1/auth/logout:
     post:
@@ -372,7 +372,7 @@ paths:
       security:
         - operatorSession: []
       responses:
-        '302': { description: redirect to IdP logout or UI }
+        "302": { description: redirect to IdP logout or UI }
 
   /v1/auth/me:
     get:
@@ -382,11 +382,11 @@ paths:
         - operatorSession: []
         - operatorBearer: []
       responses:
-        '200':
+        "200":
           description: ok
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/OperatorMe' }
+              schema: { $ref: "#/components/schemas/OperatorMe" }
 
   /v1/api-tokens:
     get:
@@ -396,13 +396,13 @@ paths:
         - operatorSession: []
         - operatorBearer: []
       responses:
-        '200':
+        "200":
           description: ok
           content:
             application/json:
               schema:
                 type: array
-                items: { $ref: '#/components/schemas/ApiToken' }
+                items: { $ref: "#/components/schemas/ApiToken" }
     post:
       summary: Issue a new API token. Returned in plaintext exactly once.
       tags: [tokens]
@@ -413,13 +413,13 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/CreateApiTokenRequest' }
+            schema: { $ref: "#/components/schemas/CreateApiTokenRequest" }
       responses:
-        '201':
+        "201":
           description: created
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ApiTokenCreated' }
+              schema: { $ref: "#/components/schemas/ApiTokenCreated" }
 
   /v1/api-tokens/{id}:
     parameters:
@@ -431,7 +431,7 @@ paths:
         - operatorSession: []
         - operatorBearer: []
       responses:
-        '204': { description: revoked }
+        "204": { description: revoked }
 
   /v1/api-tokens/{id}/usage:
     parameters:
@@ -447,13 +447,13 @@ paths:
           in: query
           schema: { type: integer, minimum: 1, maximum: 365, default: 30 }
       responses:
-        '200':
+        "200":
           description: ok
           content:
             application/json:
               schema:
                 type: array
-                items: { $ref: '#/components/schemas/ApiTokenUsageBucket' }
+                items: { $ref: "#/components/schemas/ApiTokenUsageBucket" }
 
   /v1/ws/status:
     get:
@@ -468,8 +468,8 @@ paths:
         - operatorSession: []
         - operatorBearer: []
       responses:
-        '101': { description: switching protocols }
-        '426': { description: upgrade required }
+        "101": { description: switching protocols }
+        "426": { description: upgrade required }
 
   /v1/events:
     post:
@@ -491,11 +491,11 @@ paths:
               properties:
                 events:
                   type: array
-                  items: { $ref: '#/components/schemas/BoothEvent' }
+                  items: { $ref: "#/components/schemas/BoothEvent" }
                   minItems: 1
                   maxItems: 500
       responses:
-        '200':
+        "200":
           description: batch accepted
           content:
             application/json:
@@ -505,8 +505,8 @@ paths:
                 properties:
                   accepted: { type: integer, minimum: 0 }
                   duplicates: { type: integer, minimum: 0 }
-        '400': { description: invalid batch (too large or malformed) }
-        '401': { description: missing or invalid API token }
+        "400": { description: invalid batch (too large or malformed) }
+        "401": { description: missing or invalid API token }
     get:
       summary: List booth events (cursor-paginated).
       tags: [events]
@@ -539,7 +539,7 @@ paths:
           in: query
           schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
       responses:
-        '200':
+        "200":
           description: events page
           content:
             application/json:
@@ -549,9 +549,9 @@ paths:
                 properties:
                   items:
                     type: array
-                    items: { $ref: '#/components/schemas/BoothEventRecord' }
+                    items: { $ref: "#/components/schemas/BoothEventRecord" }
                   nextCursor:
-                    type: [string, 'null']
+                    type: [string, "null"]
 
   /v1/events/stream:
     get:
@@ -573,7 +573,7 @@ paths:
               - { type: string }
               - { type: array, items: { type: string } }
       responses:
-        '200':
+        "200":
           description: SSE stream (text/event-stream)
           content:
             text/event-stream: {}
@@ -588,9 +588,13 @@ paths:
       parameters:
         - { name: boothId, in: query, schema: { type: string } }
         - { name: cursor, in: query, schema: { type: string } }
-        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+        - {
+            name: limit,
+            in: query,
+            schema: { type: integer, minimum: 1, maximum: 500, default: 100 },
+          }
       responses:
-        '200':
+        "200":
           description: sessions page
           content:
             application/json:
@@ -600,9 +604,9 @@ paths:
                 properties:
                   items:
                     type: array
-                    items: { $ref: '#/components/schemas/CallSession' }
+                    items: { $ref: "#/components/schemas/CallSession" }
                   nextCursor:
-                    type: [string, 'null']
+                    type: [string, "null"]
 
   /v1/sessions/{id}:
     parameters:
@@ -617,12 +621,12 @@ paths:
         - operatorSession: []
         - operatorBearer: []
       responses:
-        '200':
+        "200":
           description: session detail
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/CallSessionDetail' }
-        '404': { description: not found }
+              schema: { $ref: "#/components/schemas/CallSessionDetail" }
+        "404": { description: not found }
 
   /v1/system:
     put:
@@ -644,10 +648,10 @@ paths:
               required: [boothId, snapshot]
               properties:
                 boothId: { type: string }
-                snapshot: { $ref: '#/components/schemas/BoothSystemSnapshot' }
+                snapshot: { $ref: "#/components/schemas/BoothSystemSnapshot" }
       responses:
-        '204': { description: snapshot accepted }
-        '401': { description: missing or invalid API token }
+        "204": { description: snapshot accepted }
+        "401": { description: missing or invalid API token }
 
   /v1/system/current:
     get:
@@ -661,9 +665,9 @@ paths:
           in: query
           schema: { type: string }
       responses:
-        '200':
+        "200":
           description: snapshot or list of snapshots
-        '404': { description: no snapshot cached for the given booth }
+        "404": { description: no snapshot cached for the given booth }
 
   /v1/devices:
     get:
@@ -673,13 +677,13 @@ paths:
         - operatorSession: []
         - operatorBearer: []
       responses:
-        '200':
+        "200":
           description: ok
           content:
             application/json:
               schema:
                 type: array
-                items: { $ref: '#/components/schemas/MobileDevice' }
+                items: { $ref: "#/components/schemas/MobileDevice" }
     post:
       summary: Register or refresh a mobile device APNs token for push.
       tags: [devices]
@@ -690,13 +694,13 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/RegisterMobileDeviceRequest' }
+            schema: { $ref: "#/components/schemas/RegisterMobileDeviceRequest" }
       responses:
-        '201':
+        "201":
           description: registered
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/MobileDevice' }
+              schema: { $ref: "#/components/schemas/MobileDevice" }
 
   /v1/devices/{id}:
     parameters:
@@ -711,14 +715,14 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/UpdateMobileDevicePreferencesRequest' }
+            schema: { $ref: "#/components/schemas/UpdateMobileDevicePreferencesRequest" }
       responses:
-        '200':
+        "200":
           description: ok
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/MobileDevice' }
-        '404': { description: not found }
+              schema: { $ref: "#/components/schemas/MobileDevice" }
+        "404": { description: not found }
     delete:
       summary: Revoke a mobile device (stops APNs delivery to it).
       tags: [devices]
@@ -726,8 +730,8 @@ paths:
         - operatorSession: []
         - operatorBearer: []
       responses:
-        '204': { description: revoked }
-        '404': { description: not found }
+        "204": { description: revoked }
+        "404": { description: not found }
 
 components:
   securitySchemes:
@@ -760,42 +764,54 @@ components:
         time: { type: string, format: date-time }
     BoothState:
       type: string
-      enum: [idle, dialTone, dialing, playingQuestion, beep, recording, uploading, playingMessage, playingInstructions, error]
+      enum:
+        [
+          idle,
+          dialTone,
+          dialing,
+          playingQuestion,
+          beep,
+          recording,
+          uploading,
+          playingMessage,
+          playingInstructions,
+          error,
+        ]
     BoothStatus:
       type: object
       required: [state, updatedAt]
       properties:
-        state: { $ref: '#/components/schemas/BoothState' }
+        state: { $ref: "#/components/schemas/BoothState" }
         updatedAt: { type: string, format: date-time }
-        currentQuestionId: { anyOf: [{ type: string, format: uuid }, { type: 'null' }] }
-        currentMessageId: { anyOf: [{ type: string, format: uuid }, { type: 'null' }] }
-        lastError: { anyOf: [{ type: string }, { type: 'null' }] }
+        currentQuestionId: { anyOf: [{ type: string, format: uuid }, { type: "null" }] }
+        currentMessageId: { anyOf: [{ type: string, format: uuid }, { type: "null" }] }
+        lastError: { anyOf: [{ type: string }, { type: "null" }] }
     StatusUpdate:
       type: object
       required: [state]
       properties:
-        state: { $ref: '#/components/schemas/BoothState' }
+        state: { $ref: "#/components/schemas/BoothState" }
         updatedAt: { type: string, format: date-time }
-        currentQuestionId: { anyOf: [{ type: string, format: uuid }, { type: 'null' }] }
-        currentMessageId: { anyOf: [{ type: string, format: uuid }, { type: 'null' }] }
-        lastError: { anyOf: [{ type: string }, { type: 'null' }] }
+        currentQuestionId: { anyOf: [{ type: string, format: uuid }, { type: "null" }] }
+        currentMessageId: { anyOf: [{ type: string, format: uuid }, { type: "null" }] }
+        lastError: { anyOf: [{ type: string }, { type: "null" }] }
     StatusHistory:
       type: object
       required: [items]
       properties:
         items:
           type: array
-          items: { $ref: '#/components/schemas/BoothStatus' }
+          items: { $ref: "#/components/schemas/BoothStatus" }
     Sha256:
       type: string
-      pattern: '^[a-f0-9]{64}$'
+      pattern: "^[a-f0-9]{64}$"
     AudioRef:
       type: object
       required: [url, sha256, durationMs]
       properties:
-        url: { type: string, format: uri, description: 'Time-bounded read URL.' }
-        sha256: { $ref: '#/components/schemas/Sha256' }
-        durationMs: { anyOf: [{ type: integer, minimum: 1 }, { type: 'null' }] }
+        url: { type: string, format: uri, description: "Time-bounded read URL." }
+        sha256: { $ref: "#/components/schemas/Sha256" }
+        durationMs: { anyOf: [{ type: integer, minimum: 1 }, { type: "null" }] }
     Question:
       type: object
       required: [id, prompt, createdAt, audio]
@@ -803,7 +819,7 @@ components:
         id: { type: string, format: uuid }
         prompt: { type: string, minLength: 1, maxLength: 280 }
         createdAt: { type: string, format: date-time }
-        audio: { $ref: '#/components/schemas/AudioRef' }
+        audio: { $ref: "#/components/schemas/AudioRef" }
     QuestionCreate:
       type: object
       required: [prompt, audioFileId]
@@ -816,8 +832,8 @@ components:
       properties:
         items:
           type: array
-          items: { $ref: '#/components/schemas/Question' }
-        nextCursor: { anyOf: [{ type: string, format: uuid }, { type: 'null' }] }
+          items: { $ref: "#/components/schemas/Question" }
+        nextCursor: { anyOf: [{ type: string, format: uuid }, { type: "null" }] }
     MessageStatus:
       type: string
       enum: [uploading, received, pending, approved, rejected]
@@ -826,27 +842,27 @@ components:
       required: [id, status, createdAt, audio]
       properties:
         id: { type: string, format: uuid }
-        status: { $ref: '#/components/schemas/MessageStatus' }
-        questionId: { anyOf: [{ type: string, format: uuid }, { type: 'null' }] }
-        notes: { anyOf: [{ type: string }, { type: 'null' }] }
+        status: { $ref: "#/components/schemas/MessageStatus" }
+        questionId: { anyOf: [{ type: string, format: uuid }, { type: "null" }] }
+        notes: { anyOf: [{ type: string }, { type: "null" }] }
         createdAt: { type: string, format: date-time }
-        receivedAt: { anyOf: [{ type: string, format: date-time }, { type: 'null' }] }
-        audio: { $ref: '#/components/schemas/AudioRef' }
+        receivedAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+        audio: { $ref: "#/components/schemas/AudioRef" }
         latestTranscription:
           anyOf:
-            - $ref: '#/components/schemas/Transcription'
-            - { type: 'null' }
+            - $ref: "#/components/schemas/Transcription"
+            - { type: "null" }
         latestModeration:
           anyOf:
-            - $ref: '#/components/schemas/Moderation'
-            - { type: 'null' }
+            - $ref: "#/components/schemas/Moderation"
+            - { type: "null" }
     MessageCreate:
       type: object
       required: [durationMs, sha256]
       properties:
         questionId: { type: string, format: uuid }
         durationMs: { type: integer, minimum: 1 }
-        sha256: { $ref: '#/components/schemas/Sha256' }
+        sha256: { $ref: "#/components/schemas/Sha256" }
     MessageInitiated:
       type: object
       required: [id, uploadUrl, blobName]
@@ -867,35 +883,36 @@ components:
       properties:
         items:
           type: array
-          items: { $ref: '#/components/schemas/Message' }
+          items: { $ref: "#/components/schemas/Message" }
     UploadSasRequest:
       type: object
       required: [kind, sha256, sizeBytes, contentType]
       properties:
         kind: { type: string, enum: [message, question-audio] }
-        sha256: { $ref: '#/components/schemas/Sha256' }
+        sha256: { $ref: "#/components/schemas/Sha256" }
         sizeBytes: { type: integer, minimum: 1 }
         contentType: { type: string, enum: [audio/flac] }
     UploadSlot:
       type: object
       required: [uploadUrl, blobName, expiresAt]
       properties:
-        uploadUrl: { type: string, format: uri, description: 'Azure Blob PUT URL with SAS.' }
+        uploadUrl: { type: string, format: uri, description: "Azure Blob PUT URL with SAS." }
         blobName: { type: string }
         expiresAt: { type: string, format: date-time }
-        audioFileId: { type: string, format: uuid, description: 'Present for question-audio uploads.' }
+        audioFileId:
+          { type: string, format: uuid, description: "Present for question-audio uploads." }
     OperatorMe:
       type: object
       required: [id, name, email, groups, providerName]
       properties:
-        id: { type: string, description: 'Stable Authentik sub' }
+        id: { type: string, description: "Stable Authentik sub" }
         name: { type: string }
         email: { type: string, format: email }
         groups:
           type: array
           items: { type: string }
         picture: { type: string, format: uri }
-        providerName: { type: string, description: 'OIDC_PROVIDER_NAME — drives UI copy.' }
+        providerName: { type: string, description: "OIDC_PROVIDER_NAME — drives UI copy." }
     CreateApiTokenRequest:
       type: object
       required: [name]
@@ -910,18 +927,18 @@ components:
         name: { type: string }
         last4: { type: string, minLength: 4, maxLength: 4 }
         createdAt: { type: string, format: date-time }
-        expiresAt: { anyOf: [{ type: string, format: date-time }, { type: 'null' }] }
-        lastUsedAt: { anyOf: [{ type: string, format: date-time }, { type: 'null' }] }
-        revokedAt: { anyOf: [{ type: string, format: date-time }, { type: 'null' }] }
+        expiresAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+        lastUsedAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+        revokedAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
     ApiTokenCreated:
       allOf:
-        - $ref: '#/components/schemas/ApiToken'
+        - $ref: "#/components/schemas/ApiToken"
         - type: object
           required: [plaintext]
           properties:
             plaintext:
               type: string
-              description: 'Plaintext token. Shown ONLY on creation. Store securely.'
+              description: "Plaintext token. Shown ONLY on creation. Store securely."
     ApiTokenUsageBucket:
       type: object
       required: [date, count]
@@ -966,14 +983,14 @@ components:
         eventId: { type: string, minLength: 1, maxLength: 128 }
         boothId: { type: string, minLength: 1, maxLength: 64 }
         bootId: { type: string, format: uuid }
-        type: { $ref: '#/components/schemas/BoothEventType' }
+        type: { $ref: "#/components/schemas/BoothEventType" }
         occurredAt: { type: string, format: date-time }
-        sessionId: { anyOf: [{ type: string, format: uuid }, { type: 'null' }] }
-        recordingId: { anyOf: [{ type: string }, { type: 'null' }] }
+        sessionId: { anyOf: [{ type: string, format: uuid }, { type: "null" }] }
+        recordingId: { anyOf: [{ type: string }, { type: "null" }] }
         payload: {}
     BoothEventRecord:
       allOf:
-        - $ref: '#/components/schemas/BoothEvent'
+        - $ref: "#/components/schemas/BoothEvent"
         - type: object
           required: [id, receivedAt]
           properties:
@@ -981,29 +998,30 @@ components:
             receivedAt: { type: string, format: date-time }
     CallSession:
       type: object
-      required: [id, boothId, bootId, startedAt, endedAt, digitsDialed, outcome, recordingId, durationMs]
+      required:
+        [id, boothId, bootId, startedAt, endedAt, digitsDialed, outcome, recordingId, durationMs]
       properties:
         id: { type: string, format: uuid }
         boothId: { type: string }
         bootId: { type: string, format: uuid }
         startedAt: { type: string, format: date-time }
-        endedAt: { anyOf: [{ type: string, format: date-time }, { type: 'null' }] }
-        digitsDialed: { anyOf: [{ type: string }, { type: 'null' }] }
+        endedAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+        digitsDialed: { anyOf: [{ type: string }, { type: "null" }] }
         outcome:
           anyOf:
-            - $ref: '#/components/schemas/CallOutcome'
-            - { type: 'null' }
-        recordingId: { anyOf: [{ type: string }, { type: 'null' }] }
-        durationMs: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }] }
+            - $ref: "#/components/schemas/CallOutcome"
+            - { type: "null" }
+        recordingId: { anyOf: [{ type: string }, { type: "null" }] }
+        durationMs: { anyOf: [{ type: integer, minimum: 0 }, { type: "null" }] }
     CallSessionDetail:
       allOf:
-        - $ref: '#/components/schemas/CallSession'
+        - $ref: "#/components/schemas/CallSession"
         - type: object
           required: [events]
           properties:
             events:
               type: array
-              items: { $ref: '#/components/schemas/BoothEventRecord' }
+              items: { $ref: "#/components/schemas/BoothEventRecord" }
     BoothSystemSnapshot:
       type: object
       description: |
@@ -1014,17 +1032,17 @@ components:
       properties:
         boothId: { type: string }
         capturedAt: { type: string, format: date-time }
-        uptimeSeconds: { type: [number, 'null'] }
-        cpuTemperatureCelsius: { type: [number, 'null'] }
-        cpuUsageRatio: { type: [number, 'null'] }
-        loadAverage1m: { type: [number, 'null'] }
-        loadAverage5m: { type: [number, 'null'] }
-        loadAverage15m: { type: [number, 'null'] }
-        memoryUsedBytes: { type: [number, 'null'] }
-        memoryTotalBytes: { type: [number, 'null'] }
-        tailscaleConnected: { type: [boolean, 'null'] }
+        uptimeSeconds: { type: [number, "null"] }
+        cpuTemperatureCelsius: { type: [number, "null"] }
+        cpuUsageRatio: { type: [number, "null"] }
+        loadAverage1m: { type: [number, "null"] }
+        loadAverage5m: { type: [number, "null"] }
+        loadAverage15m: { type: [number, "null"] }
+        memoryUsedBytes: { type: [number, "null"] }
+        memoryTotalBytes: { type: [number, "null"] }
+        tailscaleConnected: { type: [boolean, "null"] }
         throttlingFlags:
-          type: [array, 'null']
+          type: [array, "null"]
           items: { type: string }
     TranscriptionStatus:
       type: string
@@ -1041,52 +1059,53 @@ components:
       properties:
         id: { type: string, format: uuid }
         messageId: { type: string, format: uuid }
-        provider: { $ref: '#/components/schemas/AiProvider' }
-        model: { anyOf: [{ type: string }, { type: 'null' }] }
-        status: { $ref: '#/components/schemas/TranscriptionStatus' }
-        text: { anyOf: [{ type: string }, { type: 'null' }] }
-        language: { anyOf: [{ type: string }, { type: 'null' }] }
-        durationMs: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }] }
-        latencyMs: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }] }
-        error: { anyOf: [{ type: string }, { type: 'null' }] }
-        requestedById: { anyOf: [{ type: string }, { type: 'null' }] }
+        provider: { $ref: "#/components/schemas/AiProvider" }
+        model: { anyOf: [{ type: string }, { type: "null" }] }
+        status: { $ref: "#/components/schemas/TranscriptionStatus" }
+        text: { anyOf: [{ type: string }, { type: "null" }] }
+        language: { anyOf: [{ type: string }, { type: "null" }] }
+        durationMs: { anyOf: [{ type: integer, minimum: 0 }, { type: "null" }] }
+        latencyMs: { anyOf: [{ type: integer, minimum: 0 }, { type: "null" }] }
+        error: { anyOf: [{ type: string }, { type: "null" }] }
+        requestedById: { anyOf: [{ type: string }, { type: "null" }] }
         createdAt: { type: string, format: date-time }
-        completedAt: { anyOf: [{ type: string, format: date-time }, { type: 'null' }] }
+        completedAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
     Moderation:
       type: object
       required: [id, messageId, provider, status, createdAt]
       properties:
         id: { type: string, format: uuid }
         messageId: { type: string, format: uuid }
-        transcriptionId: { anyOf: [{ type: string, format: uuid }, { type: 'null' }] }
-        provider: { $ref: '#/components/schemas/AiProvider' }
-        model: { anyOf: [{ type: string }, { type: 'null' }] }
-        status: { $ref: '#/components/schemas/TranscriptionStatus' }
-        flagged: { anyOf: [{ type: boolean }, { type: 'null' }] }
+        transcriptionId: { anyOf: [{ type: string, format: uuid }, { type: "null" }] }
+        provider: { $ref: "#/components/schemas/AiProvider" }
+        model: { anyOf: [{ type: string }, { type: "null" }] }
+        status: { $ref: "#/components/schemas/TranscriptionStatus" }
+        flagged: { anyOf: [{ type: boolean }, { type: "null" }] }
         recommendation:
           anyOf:
-            - $ref: '#/components/schemas/ModerationRecommendation'
-            - { type: 'null' }
-        maxScore: { anyOf: [{ type: number, minimum: 0, maximum: 1 }, { type: 'null' }] }
-        categories: { anyOf: [{ type: object, additionalProperties: { type: number } }, { type: 'null' }] }
-        reasonSummary: { anyOf: [{ type: string }, { type: 'null' }] }
-        latencyMs: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }] }
-        error: { anyOf: [{ type: string }, { type: 'null' }] }
-        requestedById: { anyOf: [{ type: string }, { type: 'null' }] }
+            - $ref: "#/components/schemas/ModerationRecommendation"
+            - { type: "null" }
+        maxScore: { anyOf: [{ type: number, minimum: 0, maximum: 1 }, { type: "null" }] }
+        categories:
+          { anyOf: [{ type: object, additionalProperties: { type: number } }, { type: "null" }] }
+        reasonSummary: { anyOf: [{ type: string }, { type: "null" }] }
+        latencyMs: { anyOf: [{ type: integer, minimum: 0 }, { type: "null" }] }
+        error: { anyOf: [{ type: string }, { type: "null" }] }
+        requestedById: { anyOf: [{ type: string }, { type: "null" }] }
         createdAt: { type: string, format: date-time }
-        completedAt: { anyOf: [{ type: string, format: date-time }, { type: 'null' }] }
+        completedAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
     TranscriptionList:
       type: object
       required: [items]
       properties:
         items:
           type: array
-          items: { $ref: '#/components/schemas/Transcription' }
+          items: { $ref: "#/components/schemas/Transcription" }
     StatsSummary:
       type: object
       required: [booth, messages, calls, realtime, generatedAt]
       properties:
-        booth: { $ref: '#/components/schemas/BoothStatus' }
+        booth: { $ref: "#/components/schemas/BoothStatus" }
         messages:
           type: object
           required: [pending, receivedToday, latestId]
@@ -1096,7 +1115,7 @@ components:
             latestId:
               anyOf:
                 - { type: string, format: uuid }
-                - { type: 'null' }
+                - { type: "null" }
         calls:
           type: object
           required: [today, inProgress]
@@ -1126,9 +1145,9 @@ components:
       properties:
         id: { type: string, format: uuid }
         apnsToken: { type: string, minLength: 32 }
-        platform: { $ref: '#/components/schemas/MobileDevicePlatform' }
-        deviceName: { anyOf: [{ type: string }, { type: 'null' }] }
-        preferences: { $ref: '#/components/schemas/MobileDevicePreferences' }
+        platform: { $ref: "#/components/schemas/MobileDevicePlatform" }
+        deviceName: { anyOf: [{ type: string }, { type: "null" }] }
+        preferences: { $ref: "#/components/schemas/MobileDevicePreferences" }
         registeredAt: { type: string, format: date-time }
         lastSeenAt: { type: string, format: date-time }
     RegisterMobileDeviceRequest:
@@ -1136,7 +1155,7 @@ components:
       required: [apnsToken, platform]
       properties:
         apnsToken: { type: string, minLength: 32 }
-        platform: { $ref: '#/components/schemas/MobileDevicePlatform' }
+        platform: { $ref: "#/components/schemas/MobileDevicePlatform" }
         deviceName: { type: string }
         preferences:
           type: object
@@ -1148,7 +1167,7 @@ components:
     UpdateMobileDevicePreferencesRequest:
       type: object
       properties:
-        deviceName: { anyOf: [{ type: string }, { type: 'null' }] }
+        deviceName: { anyOf: [{ type: string }, { type: "null" }] }
         preferences:
           type: object
           properties:

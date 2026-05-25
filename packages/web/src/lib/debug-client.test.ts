@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { createDebugClient } from "./debug-client.js";
 
 function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
@@ -54,14 +54,28 @@ describe("debug client", () => {
       if (url.startsWith("https://tail.example")) {
         return Promise.reject(new Error("tail down"));
       }
-      return Promise.resolve(jsonResponse({ state: "idle", updatedAt: "2026-01-01T00:00:00Z", currentQuestionId: null, currentMessageId: null, lastError: null }));
+      return Promise.resolve(
+        jsonResponse({
+          state: "idle",
+          updatedAt: "2026-01-01T00:00:00Z",
+          currentQuestionId: null,
+          currentMessageId: null,
+          lastError: null,
+        }),
+      );
     });
-    const client = createDebugClient({ tailscaleUrl: "https://tail.example", lanUrl: "https://192.168.1.42:8443", fetchImpl });
+    const client = createDebugClient({
+      tailscaleUrl: "https://tail.example",
+      lanUrl: "https://192.168.1.42:8443",
+      fetchImpl,
+    });
 
     await expect(client.getState()).rejects.toThrow("tail down");
     await expect(client.getState()).resolves.toMatchObject({ state: "idle" });
     expect(fetchImpl).toHaveBeenCalledTimes(3);
-    expect(fetchImpl.mock.calls[2]?.[0] === undefined ? "" : requestUrl(fetchImpl.mock.calls[2][0])).toBe("https://192.168.1.42:8443/v1/state");
+    expect(
+      fetchImpl.mock.calls[2]?.[0] === undefined ? "" : requestUrl(fetchImpl.mock.calls[2][0]),
+    ).toBe("https://192.168.1.42:8443/v1/state");
   });
 
   it("reconnects telemetry WebSocket with capped exponential backoff", () => {

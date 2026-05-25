@@ -5,20 +5,19 @@
   "type": "module",
   "packageManager": "pnpm@9.15.0",
   "engines": {
-    "node": ">=22.11.0"
+    "node": ">=24.16.0"
   },
   "scripts": {
-    "build": "pnpm -r build",
-    "dev": "pnpm -r --parallel run dev",
-    "lint": "pnpm -r lint",
-    "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck"
+    "build": "vp run -r build",
+    "dev": "vp run -r --parallel dev",
+    "format": "vp fmt",
+    "lint": "vp run -r lint",
+    "test": "vp run -r test",
+    "typecheck": "vp run -r typecheck"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.4",
-    "prettier": "^3.3.3",
     "tsx": "^4.19.2",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.59.4"
+    "vite-plus": "^0.1.22"
   }
 }

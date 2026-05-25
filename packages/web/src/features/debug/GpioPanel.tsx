@@ -32,7 +32,8 @@ export function GpioPanel({ snapshot, pulseAccumulator, pinLabels }: GpioPanelPr
         <span>Current pulse group</span>
         <strong>{pulseAccumulator.currentCount}</strong>
         <span>
-          Last decoded: {pulseAccumulator.lastDigit === null ? "none" : pulseAccumulator.lastDigit} ({pulseAccumulator.lastPulseCount ?? 0} pulses)
+          Last decoded: {pulseAccumulator.lastDigit === null ? "none" : pulseAccumulator.lastDigit}{" "}
+          ({pulseAccumulator.lastPulseCount ?? 0} pulses)
         </span>
       </div>
       <div className="debug-table-wrap" tabIndex={0} aria-label="GPIO pin states">
@@ -56,7 +57,11 @@ export function GpioPanel({ snapshot, pulseAccumulator, pinLabels }: GpioPanelPr
                 <tr key={pin.role}>
                   <th scope="row">{roleLabel(pin.role)}</th>
                   <td>{pinLabel(pin.role, pinLabels)}</td>
-                  <td><span className={`debug-level debug-level--${pin.level ? "high" : "low"}`}>{pin.level ? "high" : "low"}</span></td>
+                  <td>
+                    <span className={`debug-level debug-level--${pin.level ? "high" : "low"}`}>
+                      {pin.level ? "high" : "low"}
+                    </span>
+                  </td>
                   <td>{pin.lastEdgeMonotonicNs.toLocaleString()} ns</td>
                 </tr>
               ))

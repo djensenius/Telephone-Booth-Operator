@@ -79,7 +79,7 @@ async function main(): Promise<void> {
   }
 
   const questionCount = await prisma.question.count();
-  // eslint-disable-next-line no-console
+  // oxlint-disable-next-line no-console
   console.log(
     `seeded ${SAMPLE_QUESTIONS.length} sample questions (${questionCount} total); instructions file ${instructionsFile.blobKey}`,
   );
@@ -87,7 +87,7 @@ async function main(): Promise<void> {
 
 main()
   .catch((err) => {
-    // eslint-disable-next-line no-console
+    // oxlint-disable-next-line no-console
     console.error(err);
     process.exit(1);
   })

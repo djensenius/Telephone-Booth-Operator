@@ -2,7 +2,17 @@ import { useMemo, useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { GlassPanel } from "../../components/booth/index.js";
 import { createDebugClient, readDebugConnectionPrefs } from "../../lib/debug-client.js";
-import type { AudioMeter, BoothStatus, DebugClient, DebugConnectionChange, GpioSnapshot, JsonValue, LogEntry, RedactedConfig, TelemetryRecord } from "../../lib/debug-client.js";
+import type {
+  AudioMeter,
+  BoothStatus,
+  DebugClient,
+  DebugConnectionChange,
+  GpioSnapshot,
+  JsonValue,
+  LogEntry,
+  RedactedConfig,
+  TelemetryRecord,
+} from "../../lib/debug-client.js";
 import { AudioPanel } from "./AudioPanel.js";
 import { CertFingerprintCard } from "./CertFingerprintCard.js";
 import { ConfigPanel } from "./ConfigPanel.js";
@@ -24,7 +34,10 @@ function dbfsFromLinear(value: number): number {
   return Math.max(-120, 20 * Math.log10(Math.max(value, 0.000001)));
 }
 
-function upsertGpioEdge(snapshot: GpioSnapshot | undefined, record: Extract<TelemetryRecord, { readonly kind: "gpio_edge" }>): GpioSnapshot {
+function upsertGpioEdge(
+  snapshot: GpioSnapshot | undefined,
+  record: Extract<TelemetryRecord, { readonly kind: "gpio_edge" }>,
+): GpioSnapshot {
   const pins = [...(snapshot?.pins ?? [])];
   const index = pins.findIndex((pin) => pin.role === record.role);
   const pin = {
@@ -42,7 +55,10 @@ function upsertGpioEdge(snapshot: GpioSnapshot | undefined, record: Extract<Tele
   return { pins, updatedAt: record.ts };
 }
 
-function applyAudioEvent(audio: AudioMeter | undefined, record: TelemetryRecord): AudioMeter | undefined {
+function applyAudioEvent(
+  audio: AudioMeter | undefined,
+  record: TelemetryRecord,
+): AudioMeter | undefined {
   if (record.kind === "audio_level") {
     const next = audio ?? {
       inputLevelDbfs: -120,
@@ -54,17 +70,40 @@ function applyAudioEvent(audio: AudioMeter | undefined, record: TelemetryRecord)
       updatedAt: null,
     };
     if (record.channel === "input") {
-      return { ...next, inputLevelDbfs: dbfsFromLinear(record.rms), inputPeakDbfs: dbfsFromLinear(record.peak), updatedAt: record.ts };
+      return {
+        ...next,
+        inputLevelDbfs: dbfsFromLinear(record.rms),
+        inputPeakDbfs: dbfsFromLinear(record.peak),
+        updatedAt: record.ts,
+      };
     }
-    return { ...next, outputLevelDbfs: dbfsFromLinear(record.rms), outputPeakDbfs: dbfsFromLinear(record.peak), updatedAt: record.ts };
+    return {
+      ...next,
+      outputLevelDbfs: dbfsFromLinear(record.rms),
+      outputPeakDbfs: dbfsFromLinear(record.peak),
+      updatedAt: record.ts,
+    };
   }
   if (record.kind === "audio_device_change") {
-    return { ...(audio ?? { inputLevelDbfs: -120, outputLevelDbfs: -120, inputPeakDbfs: -120, outputPeakDbfs: -120, sampleRateHz: null, updatedAt: null }), currentDevice: record.name };
+    return {
+      ...(audio ?? {
+        inputLevelDbfs: -120,
+        outputLevelDbfs: -120,
+        inputPeakDbfs: -120,
+        outputPeakDbfs: -120,
+        sampleRateHz: null,
+        updatedAt: null,
+      }),
+      currentDevice: record.name,
+    };
   }
   return audio;
 }
 
-function updateStatus(status: BoothStatus | undefined, transition: StateTransitionRow): BoothStatus {
+function updateStatus(
+  status: BoothStatus | undefined,
+  transition: StateTransitionRow,
+): BoothStatus {
   return {
     state: transition.to,
     updatedAt: transition.ts,
@@ -142,7 +181,11 @@ export function DebugScreen(): JSX.Element {
   const [liveAudio, setLiveAudio] = useState<AudioMeter | undefined>();
   const [liveLogs, setLiveLogs] = useState<readonly LogEntry[]>([]);
   const [transitions, setTransitions] = useState<readonly StateTransitionRow[]>([]);
-  const [pulseAccumulator, setPulseAccumulator] = useState<PulseAccumulator>({ currentCount: 0, lastDigit: null, lastPulseCount: null });
+  const [pulseAccumulator, setPulseAccumulator] = useState<PulseAccumulator>({
+    currentCount: 0,
+    lastDigit: null,
+    lastPulseCount: null,
+  });
 
   const client = useMemo<DebugClient | null>(() => {
     if (!hasPrefs) {
@@ -158,19 +201,53 @@ export function DebugScreen(): JSX.Element {
   }, [hasPrefs, prefs.lanUrl, prefs.pinnedFingerprint, prefs.tailscaleUrl, prefs.token]);
 
   const wsConnected = connection.wsState === "open";
-  const stateQuery = useQuery({ queryKey: ["debug", "state"], queryFn: () => client!.getState(), enabled: client !== null, refetchInterval: wsConnected ? false : 2_000 });
-  const gpioQuery = useQuery({ queryKey: ["debug", "gpio"], queryFn: () => client!.getGpio(), enabled: client !== null, refetchInterval: wsConnected ? false : 2_000 });
-  const audioQuery = useQuery({ queryKey: ["debug", "audio"], queryFn: () => client!.getAudio(), enabled: client !== null, refetchInterval: wsConnected ? false : 2_000 });
-  const logsQuery = useQuery({ queryKey: ["debug", "logs", level], queryFn: () => client!.getLogs({ level, limit: 200 }), enabled: client !== null, refetchInterval: wsConnected ? false : 2_000 });
-  const configQuery = useQuery({ queryKey: ["debug", "config"], queryFn: () => client!.getConfig(), enabled: client !== null, staleTime: 30_000 });
-  const eventsQuery = useQuery({ queryKey: ["debug", "events"], queryFn: () => client!.getEvents(), enabled: client !== null, staleTime: 10_000 });
+  const stateQuery = useQuery({
+    queryKey: ["debug", "state"],
+    queryFn: () => client!.getState(),
+    enabled: client !== null,
+    refetchInterval: wsConnected ? false : 2_000,
+  });
+  const gpioQuery = useQuery({
+    queryKey: ["debug", "gpio"],
+    queryFn: () => client!.getGpio(),
+    enabled: client !== null,
+    refetchInterval: wsConnected ? false : 2_000,
+  });
+  const audioQuery = useQuery({
+    queryKey: ["debug", "audio"],
+    queryFn: () => client!.getAudio(),
+    enabled: client !== null,
+    refetchInterval: wsConnected ? false : 2_000,
+  });
+  const logsQuery = useQuery({
+    queryKey: ["debug", "logs", level],
+    queryFn: () => client!.getLogs({ level, limit: 200 }),
+    enabled: client !== null,
+    refetchInterval: wsConnected ? false : 2_000,
+  });
+  const configQuery = useQuery({
+    queryKey: ["debug", "config"],
+    queryFn: () => client!.getConfig(),
+    enabled: client !== null,
+    staleTime: 30_000,
+  });
+  const eventsQuery = useQuery({
+    queryKey: ["debug", "events"],
+    queryFn: () => client!.getEvents(),
+    enabled: client !== null,
+    staleTime: 10_000,
+  });
 
   useEffect(() => setLiveStatus(stateQuery.data), [stateQuery.data]);
   useEffect(() => setLiveGpio(gpioQuery.data), [gpioQuery.data]);
   useEffect(() => setLiveAudio(audioQuery.data), [audioQuery.data]);
   useEffect(() => setLiveLogs(logsQuery.data ?? []), [logsQuery.data]);
   useEffect(() => {
-    const rows = (eventsQuery.data ?? []).map(transitionFromRecord).filter((row): row is StateTransitionRow => row !== null).slice(-50).reverse();
+    const rows = (eventsQuery.data ?? [])
+      .map(transitionFromRecord)
+      .filter((row): row is StateTransitionRow => row !== null)
+      .slice(-50)
+      .reverse();
     if (rows.length > 0) {
       setTransitions(rows);
     }
@@ -184,7 +261,10 @@ export function DebugScreen(): JSX.Element {
       if (record.kind === "gpio_edge") {
         setLiveGpio((current) => upsertGpioEdge(current, record));
         if (record.role === "rotary_pulse" && record.level) {
-          setPulseAccumulator((current) => ({ ...current, currentCount: current.currentCount + 1 }));
+          setPulseAccumulator((current) => ({
+            ...current,
+            currentCount: current.currentCount + 1,
+          }));
         }
       }
       const transition = transitionFromRecord(record);
@@ -193,16 +273,30 @@ export function DebugScreen(): JSX.Element {
         setLiveStatus((current) => updateStatus(current, transition));
       }
       if (record.kind === "digit_dialed") {
-        setPulseAccumulator({ currentCount: 0, lastDigit: record.digit, lastPulseCount: record.pulses });
+        setPulseAccumulator({
+          currentCount: 0,
+          lastDigit: record.digit,
+          lastPulseCount: record.pulses,
+        });
       }
       if (record.kind === "audio_level" || record.kind === "audio_device_change") {
         setLiveAudio((current) => applyAudioEvent(current, record));
       }
       if (record.kind === "log") {
-        setLiveLogs((current) => [...current, { ts: record.ts, level: record.level, target: record.target, message: record.message }].slice(-200));
+        setLiveLogs((current) =>
+          [
+            ...current,
+            { ts: record.ts, level: record.level, target: record.target, message: record.message },
+          ].slice(-200),
+        );
       }
       if (record.kind === "error") {
-        setLiveLogs((current) => [...current, { ts: record.ts, level: "error", target: record.source, message: record.message }].slice(-200));
+        setLiveLogs((current) =>
+          [
+            ...current,
+            { ts: record.ts, level: "error", target: record.source, message: record.message },
+          ].slice(-200),
+        );
       }
     });
   }, [client]);
@@ -214,9 +308,16 @@ export function DebugScreen(): JSX.Element {
     <GlassPanel title="Phone-booth debug surface" className="debug-screen">
       <p className="screen-kicker">Digit 9</p>
       <h1>Debug</h1>
-      <p>Operator diagnostics for the phone client. Tailscale is tried first; LAN is the pinned-certificate fallback.</p>
+      <p>
+        Operator diagnostics for the phone client. Tailscale is tried first; LAN is the
+        pinned-certificate fallback.
+      </p>
       <ConnectionStatusBar connection={connection} hasPrefs={hasPrefs} />
-      {!hasPrefs ? <p className="debug-callout">Configure the Phone Client Connection panel in Settings to open this line.</p> : null}
+      {!hasPrefs ? (
+        <p className="debug-callout">
+          Configure the Phone Client Connection panel in Settings to open this line.
+        </p>
+      ) : null}
       <div className="debug-grid">
         <StateMachinePanel status={liveStatus} transitions={transitions} />
         <GpioPanel snapshot={liveGpio} pulseAccumulator={pulseAccumulator} pinLabels={pinLabels} />

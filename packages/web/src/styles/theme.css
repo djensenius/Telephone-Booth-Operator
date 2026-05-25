@@ -600,7 +600,11 @@ textarea:focus-visible,
   padding: 24px;
   border-radius: var(--radius-lg);
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--accent-red) 18%, transparent), transparent 62%),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent-red) 18%, transparent),
+      transparent 62%
+    ),
     var(--surface-muted);
   border: 1px solid var(--border-subtle);
 }

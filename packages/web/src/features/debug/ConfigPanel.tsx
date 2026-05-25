@@ -13,7 +13,9 @@ export function ConfigPanel({ config }: ConfigPanelProps): JSX.Element {
       </div>
       <details className="debug-details" open>
         <summary>Show JSON tree</summary>
-        <pre className="debug-json" tabIndex={0}>{JSON.stringify(config ?? {}, null, 2)}</pre>
+        <pre className="debug-json" tabIndex={0}>
+          {JSON.stringify(config ?? {}, null, 2)}
+        </pre>
       </details>
     </section>
   );

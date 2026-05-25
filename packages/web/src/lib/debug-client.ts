@@ -48,7 +48,13 @@ export interface LogEntry {
   readonly message: string;
 }
 
-export type JsonValue = null | boolean | number | string | readonly JsonValue[] | { readonly [key: string]: JsonValue };
+export type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly JsonValue[]
+  | { readonly [key: string]: JsonValue };
 export type JsonObject = { readonly [key: string]: JsonValue };
 
 export interface DebugConfigProjection {
@@ -118,7 +124,11 @@ export type TelemetryRecord =
       readonly source: string;
       readonly message: string;
     })
-  | ({ readonly id: number; readonly ts: string; readonly kind: "operator_request" | "operator_response" } & JsonObject);
+  | ({
+      readonly id: number;
+      readonly ts: string;
+      readonly kind: "operator_request" | "operator_response";
+    } & JsonObject);
 
 export interface DebugConnectionPrefs {
   readonly tailscaleUrl: string;
@@ -146,11 +156,18 @@ export interface DebugClient {
   readonly getEvents: (since?: number) => Promise<readonly TelemetryRecord[]>;
   readonly getGpio: () => Promise<GpioSnapshot>;
   readonly getAudio: () => Promise<AudioMeter>;
-  readonly getLogs: (opts?: { readonly level?: string; readonly limit?: number }) => Promise<readonly LogEntry[]>;
+  readonly getLogs: (opts?: {
+    readonly level?: string;
+    readonly limit?: number;
+  }) => Promise<readonly LogEntry[]>;
   readonly getConfig: () => Promise<RedactedConfig>;
   readonly getLanCertificateFingerprint: () => Promise<string>;
-  readonly simulateEvent: (event: CoreEvent) => Promise<{ readonly accepted: boolean; readonly injected: number }>;
-  readonly simulatePulse: (count: number) => Promise<{ readonly accepted: boolean; readonly injected: number }>;
+  readonly simulateEvent: (
+    event: CoreEvent,
+  ) => Promise<{ readonly accepted: boolean; readonly injected: number }>;
+  readonly simulatePulse: (
+    count: number,
+  ) => Promise<{ readonly accepted: boolean; readonly injected: number }>;
   readonly subscribe: (onEvent: (record: TelemetryRecord) => void) => () => void;
 }
 
@@ -218,7 +235,10 @@ export function readDebugConnectionPrefs(userSub = "anonymous"): DebugConnection
   }
 }
 
-export function writeDebugConnectionPrefs(prefs: DebugConnectionPrefs, userSub = "anonymous"): void {
+export function writeDebugConnectionPrefs(
+  prefs: DebugConnectionPrefs,
+  userSub = "anonymous",
+): void {
   if (typeof window === "undefined") {
     return;
   }
@@ -249,7 +269,8 @@ export function createDebugClient(options: CreateDebugClientOptions): DebugClien
   const fetchImpl = options.fetchImpl ?? fetch.bind(globalThis);
   const failureThreshold = options.failureThreshold ?? DEFAULT_FAILURE_THRESHOLD;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  let activeTransport: Exclude<DebugTransport, "disconnected"> | "disconnected" = tailscaleUrl === undefined ? (lanUrl === undefined ? "disconnected" : "lan") : "tailscale";
+  let activeTransport: Exclude<DebugTransport, "disconnected"> | "disconnected" =
+    tailscaleUrl === undefined ? (lanUrl === undefined ? "disconnected" : "lan") : "tailscale";
   let tailscaleFailures = 0;
   let wsState: DebugWebSocketState = "idle";
   let lastLatencyMs: number | null = null;
@@ -278,7 +299,11 @@ export function createDebugClient(options: CreateDebugClientOptions): DebugClien
     return requestHeaders;
   }
 
-  async function attempt<T>(transport: Exclude<DebugTransport, "disconnected">, path: string, init: RequestInit = {}): Promise<T> {
+  async function attempt<T>(
+    transport: Exclude<DebugTransport, "disconnected">,
+    path: string,
+    init: RequestInit = {},
+  ): Promise<T> {
     const base = baseFor(transport);
     if (base === undefined) {
       throw new Error(`${transport} URL is not configured`);
@@ -314,7 +339,12 @@ export function createDebugClient(options: CreateDebugClientOptions): DebugClien
   }
 
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const preferred = activeTransport === "disconnected" ? (tailscaleUrl === undefined ? "lan" : "tailscale") : activeTransport;
+    const preferred =
+      activeTransport === "disconnected"
+        ? tailscaleUrl === undefined
+          ? "lan"
+          : "tailscale"
+        : activeTransport;
     if (preferred === "tailscale") {
       try {
         return await attempt<T>("tailscale", path, init);
@@ -322,7 +352,8 @@ export function createDebugClient(options: CreateDebugClientOptions): DebugClien
         if (lanUrl !== undefined && tailscaleFailures >= failureThreshold) {
           return attempt<T>("lan", path, init);
         }
-        activeTransport = lanUrl === undefined && tailscaleUrl === undefined ? "disconnected" : activeTransport;
+        activeTransport =
+          lanUrl === undefined && tailscaleUrl === undefined ? "disconnected" : activeTransport;
         emit({ lastError: errorMessage(error) });
         throw error;
       }
@@ -344,14 +375,19 @@ export function createDebugClient(options: CreateDebugClientOptions): DebugClien
   }
 
   return {
-    getHealth: () => request<{ readonly ok: boolean; readonly version: string }>("/healthz", { headers: headers(false) }),
+    getHealth: () =>
+      request<{ readonly ok: boolean; readonly version: string }>("/healthz", {
+        headers: headers(false),
+      }),
     getState: () => request<BoothStatus>("/v1/state", { headers: headers(false) }),
     getEvents: (since?: number) => {
       const params = new URLSearchParams();
       if (since !== undefined) {
         params.set("since", String(since));
       }
-      return request<readonly TelemetryRecord[]>(`/v1/events${queryString(params)}`, { headers: headers(false) });
+      return request<readonly TelemetryRecord[]>(`/v1/events${queryString(params)}`, {
+        headers: headers(false),
+      });
     },
     getGpio: () => request<GpioSnapshot>("/v1/gpio", { headers: headers(false) }),
     getAudio: () => request<AudioMeter>("/v1/audio", { headers: headers(false) }),
@@ -363,17 +399,28 @@ export function createDebugClient(options: CreateDebugClientOptions): DebugClien
       if (opts.limit !== undefined) {
         params.set("limit", String(opts.limit));
       }
-      return request<readonly LogEntry[]>(`/v1/logs${queryString(params)}`, { headers: headers(false) });
+      return request<readonly LogEntry[]>(`/v1/logs${queryString(params)}`, {
+        headers: headers(false),
+      });
     },
     getConfig: () => request<RedactedConfig>("/v1/config", { headers: headers(false) }),
     getLanCertificateFingerprint: async () => {
-      const response = await attempt<{ readonly sha256: string }>("tailscale", "/v1/cert/fingerprint", { headers: headers(false) });
+      const response = await attempt<{ readonly sha256: string }>(
+        "tailscale",
+        "/v1/cert/fingerprint",
+        { headers: headers(false) },
+      );
       return response.sha256;
     },
-    simulateEvent: (event: CoreEvent) => post<{ readonly accepted: boolean; readonly injected: number }>("/v1/simulate/event", event),
-    simulatePulse: (count: number) => post<{ readonly accepted: boolean; readonly injected: number }>("/v1/simulate/pulse", { count }),
+    simulateEvent: (event: CoreEvent) =>
+      post<{ readonly accepted: boolean; readonly injected: number }>("/v1/simulate/event", event),
+    simulatePulse: (count: number) =>
+      post<{ readonly accepted: boolean; readonly injected: number }>("/v1/simulate/pulse", {
+        count,
+      }),
     subscribe: (onEvent: (record: TelemetryRecord) => void) => {
-      const WebSocketCtor = options.webSocketFactory ?? (typeof WebSocket === "undefined" ? undefined : WebSocket);
+      const WebSocketCtor =
+        options.webSocketFactory ?? (typeof WebSocket === "undefined" ? undefined : WebSocket);
       if (WebSocketCtor === undefined) {
         wsState = "closed";
         emit();
@@ -396,7 +443,12 @@ export function createDebugClient(options: CreateDebugClientOptions): DebugClien
       }
 
       function connect(): void {
-        const transport = activeTransport === "disconnected" ? (tailscaleUrl === undefined ? "lan" : "tailscale") : activeTransport;
+        const transport =
+          activeTransport === "disconnected"
+            ? tailscaleUrl === undefined
+              ? "lan"
+              : "tailscale"
+            : activeTransport;
         const base = transport === "tailscale" ? tailscaleUrl : lanUrl;
         if (base === undefined) {
           wsState = "closed";
@@ -408,7 +460,10 @@ export function createDebugClient(options: CreateDebugClientOptions): DebugClien
         wsState = "connecting";
         emit();
         const protocols = token.length > 0 ? [`bearer.${token}`] : undefined;
-        socket = protocols === undefined ? new SocketCtor(wsUrlFromBase(base, "/v1/ws/telemetry")) : new SocketCtor(wsUrlFromBase(base, "/v1/ws/telemetry"), protocols);
+        socket =
+          protocols === undefined
+            ? new SocketCtor(wsUrlFromBase(base, "/v1/ws/telemetry"))
+            : new SocketCtor(wsUrlFromBase(base, "/v1/ws/telemetry"), protocols);
         socket.addEventListener("open", () => {
           wsState = "open";
           retryMs = 1_000;

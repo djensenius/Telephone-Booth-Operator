@@ -41,18 +41,20 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
-      - uses: jdx/mise-action@v4
+      - uses: voidzero-dev/setup-vp@v1
         with:
-          experimental: true
-      - run: pnpm install --frozen-lockfile
+          node-version-file: ".node-version"
+          cache: true
+          run-install: false
+      - run: vp install --frozen-lockfile
       - name: Prisma generate
-        run: pnpm --filter @telephone-booth-operator/api exec prisma generate
+        run: vp exec -F @telephone-booth-operator/api -- prisma generate
       - name: Prisma migrate (dry-run via deploy)
-        run: pnpm --filter @telephone-booth-operator/api exec prisma migrate deploy
-      - run: pnpm -r typecheck
-      - run: pnpm -r lint
-      - run: pnpm -r test
-      - run: pnpm -r build
+        run: vp exec -F @telephone-booth-operator/api -- prisma migrate deploy
+      - run: vp run -r typecheck
+      - run: vp run -r lint
+      - run: vp run -r test
+      - run: vp run -r build
 
   docs:
     runs-on: ubuntu-latest
@@ -74,7 +76,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 24
       - name: Validate OpenAPI
         run: npx --yes @redocly/cli@latest lint packages/api/openapi.yaml
       - name: Diff against main

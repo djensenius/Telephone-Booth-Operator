@@ -14,11 +14,16 @@ export function CertFingerprintCard({ fingerprint }: CertFingerprintCardProps): 
         <h2 id="debug-cert-heading">Pinned fingerprint</h2>
       </div>
       {fingerprint.length === 0 ? (
-        <p>No LAN certificate pinned yet. Pin it from Settings before using the self-signed LAN fallback.</p>
+        <p>
+          No LAN certificate pinned yet. Pin it from Settings before using the self-signed LAN
+          fallback.
+        </p>
       ) : (
         <div className="debug-fingerprint">
           <code>{fingerprint}</code>
-          <button type="button" onClick={() => void copy()}>Copy fingerprint</button>
+          <button type="button" onClick={() => void copy()}>
+            Copy fingerprint
+          </button>
         </div>
       )}
     </section>

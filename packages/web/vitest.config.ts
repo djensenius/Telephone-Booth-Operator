@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig } from "vite-plus/test/config";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({

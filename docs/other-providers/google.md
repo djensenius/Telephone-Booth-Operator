@@ -18,9 +18,9 @@ For multi-operator deploys, use Authentik / Keycloak / Auth0.
 > _Google Cloud console → APIs & Services → Credentials → Create
 > credentials → OAuth client ID_
 
-| Setting               | Value                                              |
-| --------------------- | -------------------------------------------------- |
-| Application type      | Web application                                    |
+| Setting                  | Value                                                     |
+| ------------------------ | --------------------------------------------------------- |
+| Application type         | Web application                                           |
 | Authorized redirect URIs | `http://localhost:8787/v1/auth/callback`, prod equivalent |
 
 Copy the Client ID + Client Secret.

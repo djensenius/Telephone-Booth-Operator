@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { getDebugConnectionStorageKey } from "../../lib/debug-client.js";
 import { PhoneClientConnection } from "./PhoneClientConnection.js";
 
@@ -41,8 +41,12 @@ describe("PhoneClientConnection", () => {
   it("persists edits to user-scoped localStorage", () => {
     render(<PhoneClientConnection userSub="user-123" />);
 
-    fireEvent.change(screen.getByLabelText("Tailscale URL"), { target: { value: "https://tail.example" } });
-    fireEvent.change(screen.getByLabelText("LAN URL"), { target: { value: "https://192.168.1.42:8443" } });
+    fireEvent.change(screen.getByLabelText("Tailscale URL"), {
+      target: { value: "https://tail.example" },
+    });
+    fireEvent.change(screen.getByLabelText("LAN URL"), {
+      target: { value: "https://192.168.1.42:8443" },
+    });
     fireEvent.change(screen.getByLabelText("Debug token"), { target: { value: "secret-token" } });
 
     const stored = window.localStorage.getItem(getDebugConnectionStorageKey("user-123"));
@@ -55,7 +59,16 @@ describe("PhoneClientConnection", () => {
   });
 
   it("forgets persisted connection settings", () => {
-    window.localStorage.setItem(getDebugConnectionStorageKey("user-123"), JSON.stringify({ tailscaleUrl: "https://tail.example", lanUrl: "", token: "", pinnedFingerprint: "", updatedAt: "2026-01-01T00:00:00Z" }));
+    window.localStorage.setItem(
+      getDebugConnectionStorageKey("user-123"),
+      JSON.stringify({
+        tailscaleUrl: "https://tail.example",
+        lanUrl: "",
+        token: "",
+        pinnedFingerprint: "",
+        updatedAt: "2026-01-01T00:00:00Z",
+      }),
+    );
     render(<PhoneClientConnection userSub="user-123" />);
 
     fireEvent.click(screen.getByText("Forget"));

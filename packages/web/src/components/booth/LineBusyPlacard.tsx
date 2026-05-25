@@ -6,10 +6,20 @@ export interface LineBusyPlacardProps {
   readonly visible?: boolean;
 }
 
-export function LineBusyPlacard({ inline = false, message, visible: forcedVisible }: LineBusyPlacardProps = {}): JSX.Element {
+export function LineBusyPlacard({
+  inline = false,
+  message,
+  visible: forcedVisible,
+}: LineBusyPlacardProps = {}): JSX.Element {
   const { connectionStatus, lastError } = useBoothStatus();
   const visible = forcedVisible ?? connectionStatus === "disconnected";
-  const classes = ["line-busy-placard", inline ? "line-busy-placard--inline" : "", visible ? "line-busy-placard--visible" : ""].filter(Boolean).join(" ");
+  const classes = [
+    "line-busy-placard",
+    inline ? "line-busy-placard--inline" : "",
+    visible ? "line-busy-placard--visible" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
     <aside className={classes} aria-hidden={!visible} aria-live="assertive">
       <strong>LINE BUSY</strong>

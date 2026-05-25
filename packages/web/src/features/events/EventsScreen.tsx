@@ -62,7 +62,9 @@ export function EventsScreen(): JSX.Element {
         </label>
       </div>
 
-      {query.isLoading && items.length === 0 ? <FeatureSkeleton label="Tuning to the wire…" /> : null}
+      {query.isLoading && items.length === 0 ? (
+        <FeatureSkeleton label="Tuning to the wire…" />
+      ) : null}
       {query.error ? <FeatureError message="Could not read the event log." /> : null}
       {!query.isLoading && !query.error && items.length === 0 ? (
         <FeatureEmpty title="Quiet line">No events match the current filter yet.</FeatureEmpty>
@@ -84,7 +86,9 @@ export function EventsScreen(): JSX.Element {
               {items.map((event) => (
                 <tr key={event.id}>
                   <td>
-                    <time dateTime={event.receivedAt}>{new Date(event.receivedAt).toLocaleString()}</time>
+                    <time dateTime={event.receivedAt}>
+                      {new Date(event.receivedAt).toLocaleString()}
+                    </time>
                   </td>
                   <td>
                     <code>{event.type}</code>

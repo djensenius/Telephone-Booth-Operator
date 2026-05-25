@@ -3,7 +3,7 @@
 You'll need:
 
 - **Docker** (or another OCI runtime) for Postgres + Azurite.
-- **Node 22** + **pnpm 9**. We pin both via `mise`.
+- **Node 24** + **pnpm 9**. We pin both via `mise`.
 - A reachable **Authentik** instance, or any other OIDC provider — see
   [`authentik-setup.md`](authentik-setup.md) or
   [`other-providers/`](other-providers/).
@@ -14,8 +14,8 @@ You'll need:
 brew install mise              # or: curl https://mise.run | sh
 git clone https://github.com/djensenius/Telephone-Booth-Operator.git
 cd Telephone-Booth-Operator
-mise install                   # installs Node 22 + pnpm 9 + just + …
-pnpm install --frozen-lockfile
+mise install                   # installs Node 24 + pnpm 9 + just + …
+vp install --frozen-lockfile
 ```
 
 ## 2. Start dependencies

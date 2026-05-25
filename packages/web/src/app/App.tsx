@@ -11,7 +11,9 @@ export interface AppProps {
 
 export function App({ router }: AppProps = {}): JSX.Element {
   const [appRouter] = useState(() => router ?? createAppRouter());
-  const [queryClient] = useState(() => new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+  const [queryClient] = useState(
+    () => new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+  );
   return (
     <QueryClientProvider client={queryClient}>
       <BoothStatusProvider>

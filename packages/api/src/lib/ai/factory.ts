@@ -8,7 +8,9 @@ import { OpenAiModerationProvider } from "./openai-moderation.js";
 import { OpenAiTranscriptionProvider } from "./openai-transcription.js";
 import type { ModerationProvider, TranscriptionProvider } from "./types.js";
 
-export const buildTranscriptionProvider = (config: AiConfig = resolveAiConfig()): TranscriptionProvider | null => {
+export const buildTranscriptionProvider = (
+  config: AiConfig = resolveAiConfig(),
+): TranscriptionProvider | null => {
   switch (config.transcriptionProvider) {
     case "disabled":
       return null;
@@ -28,7 +30,9 @@ export const buildTranscriptionProvider = (config: AiConfig = resolveAiConfig())
   }
 };
 
-export const buildModerationProvider = (config: AiConfig = resolveAiConfig()): ModerationProvider | null => {
+export const buildModerationProvider = (
+  config: AiConfig = resolveAiConfig(),
+): ModerationProvider | null => {
   switch (config.moderationProvider) {
     case "disabled":
       return null;

@@ -13,10 +13,7 @@ import { db } from "../db.js";
 import { serializeMessage } from "../serializers.js";
 import { resolveAiConfig, type AiConfig } from "./config.js";
 import { buildModerationProvider, buildTranscriptionProvider } from "./factory.js";
-import type {
-  ModerationProvider,
-  TranscriptionProvider,
-} from "./types.js";
+import type { ModerationProvider, TranscriptionProvider } from "./types.js";
 
 const TRANSCRIPT_PREVIEW_LIMIT = 80;
 
@@ -27,7 +24,11 @@ const previewTranscript = (text: string): string => {
     : `${trimmed.slice(0, TRANSCRIPT_PREVIEW_LIMIT - 1)}…`;
 };
 
-const log = (level: "info" | "warn" | "error", event: string, fields: Record<string, unknown>): void => {
+const log = (
+  level: "info" | "warn" | "error",
+  event: string,
+  fields: Record<string, unknown>,
+): void => {
   // Pino is in the package's dep list but the rest of the codebase logs via
   // console.* (see other routes). Keep parity and never include the full
   // transcript in the payload — fields should already be redacted.
@@ -75,14 +76,20 @@ const broadcastMessage = async (messageId: string): Promise<void> => {
 const applyAutoDecision = async (
   messageId: string,
   deps: PipelineDeps,
-  moderationOutcome: { recommendation: "approve" | "review" | "reject"; flagged: boolean; maxScore: number; reasonSummary?: string },
+  moderationOutcome: {
+    recommendation: "approve" | "review" | "reject";
+    flagged: boolean;
+    maxScore: number;
+    reasonSummary?: string;
+  },
 ): Promise<void> => {
   const { autoDecisionMode, autoRejectThreshold, autoApproveThreshold } = deps.config;
   if (autoDecisionMode === "always_pending") {
     await db.message.update({ where: { id: messageId }, data: { status: "pending" } });
     return;
   }
-  const reasonNote = moderationOutcome.reasonSummary ?? `score ${moderationOutcome.maxScore.toFixed(2)}`;
+  const reasonNote =
+    moderationOutcome.reasonSummary ?? `score ${moderationOutcome.maxScore.toFixed(2)}`;
   if (
     moderationOutcome.recommendation === "reject" ||
     moderationOutcome.flagged ||
@@ -191,7 +198,12 @@ export const runTranscription = async (opts: RunTranscriptionOptions): Promise<s
     await broadcastMessage(message.id);
     if (!opts.skipDownstream) {
       if (result.text.trim().length > 0) {
-        await runModeration({ messageId: message.id, transcriptionId: pending.id, deps, requestedByUserId: null });
+        await runModeration({
+          messageId: message.id,
+          transcriptionId: pending.id,
+          deps,
+          requestedByUserId: null,
+        });
       } else {
         // Silent recording: there is nothing to moderate, but we still want
         // the message in the operator queue rather than stuck in "received".
@@ -241,7 +253,12 @@ export const runModeration = async (opts: RunModerationOptions): Promise<string 
   const transcription = opts.transcriptionId
     ? await db.transcription.findUnique({ where: { id: opts.transcriptionId } })
     : await findLatestTranscription(opts.messageId);
-  if (!transcription || transcription.status !== "succeeded" || !transcription.text || transcription.text.trim().length === 0) {
+  if (
+    !transcription ||
+    transcription.status !== "succeeded" ||
+    !transcription.text ||
+    transcription.text.trim().length === 0
+  ) {
     return null;
   }
 
@@ -262,7 +279,10 @@ export const runModeration = async (opts: RunModerationOptions): Promise<string 
     // anyway so it doesn't get stranded in "received". Only flip the status
     // if it is still "received" so we don't clobber an operator decision on
     // a manual re-run.
-    const current = await db.message.findUnique({ where: { id: opts.messageId }, select: { status: true } });
+    const current = await db.message.findUnique({
+      where: { id: opts.messageId },
+      select: { status: true },
+    });
     if (current?.status === "received") {
       await db.message.update({ where: { id: opts.messageId }, data: { status: "pending" } });
     }
@@ -322,11 +342,18 @@ export const runModeration = async (opts: RunModerationOptions): Promise<string 
     // Moderation upstream failed — don't strand the recording. Advance the
     // message into the operator queue if it is still "received" so a
     // transient provider outage doesn't hide messages from the operator.
-    const current = await db.message.findUnique({ where: { id: opts.messageId }, select: { status: true } });
+    const current = await db.message.findUnique({
+      where: { id: opts.messageId },
+      select: { status: true },
+    });
     if (current?.status === "received") {
       await db.message.update({ where: { id: opts.messageId }, data: { status: "pending" } });
     }
-    log("error", "ai.moderation.failed", { messageId: opts.messageId, provider: provider.name, reason });
+    log("error", "ai.moderation.failed", {
+      messageId: opts.messageId,
+      provider: provider.name,
+      reason,
+    });
     await broadcastMessage(opts.messageId);
     return pending.id;
   }

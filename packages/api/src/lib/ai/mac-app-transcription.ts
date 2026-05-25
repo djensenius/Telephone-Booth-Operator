@@ -45,10 +45,17 @@ export class MacAppTranscriptionProvider implements TranscriptionProvider {
     });
     if (!response.ok) {
       const text = await response.text().catch(() => "");
-      throw new ProviderError(this.name, `mac-app transcription failed: ${response.status} ${text.slice(0, 200)}`, response.status);
+      throw new ProviderError(
+        this.name,
+        `mac-app transcription failed: ${response.status} ${text.slice(0, 200)}`,
+        response.status,
+      );
     }
     const payload: unknown = await response.json().catch(() => ({}));
-    const data = (typeof payload === "object" && payload !== null ? payload : {}) as { text?: unknown; language?: unknown };
+    const data = (typeof payload === "object" && payload !== null ? payload : {}) as {
+      text?: unknown;
+      language?: unknown;
+    };
     if (typeof data.text !== "string") {
       throw new ProviderError(this.name, "mac-app transcription returned no text");
     }

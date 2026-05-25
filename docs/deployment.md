@@ -16,12 +16,12 @@ docker images | grep telephone-booth
 
 ## Required external services
 
-| Service               | What for                                    |
-| --------------------- | ------------------------------------------- |
-| **Postgres ≥ 15**     | Operator data                                |
-| **Azure Blob Storage** | Recordings (see [`azure-storage.md`](azure-storage.md)) |
-| **An OIDC provider**  | Operator login (see [`authentik-setup.md`](authentik-setup.md)) |
-| **A reverse proxy with TLS** | Caddy / nginx / Traefik in front     |
+| Service                      | What for                                                        |
+| ---------------------------- | --------------------------------------------------------------- |
+| **Postgres ≥ 15**            | Operator data                                                   |
+| **Azure Blob Storage**       | Recordings (see [`azure-storage.md`](azure-storage.md))         |
+| **An OIDC provider**         | Operator login (see [`authentik-setup.md`](authentik-setup.md)) |
+| **A reverse proxy with TLS** | Caddy / nginx / Traefik in front                                |
 
 Postgres and Blob can both run in-cluster or as managed services. The
 reverse proxy is **required** because the operator UI sets `Secure`

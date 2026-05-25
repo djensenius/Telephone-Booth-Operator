@@ -96,9 +96,13 @@ export const readExpiresAt = (): Date =>
 
 export const containerClient = (): ContainerClient => init().containerClient;
 
-export const generateSasUrl = (blobName: string, options: GenerateSasOptions): { url: string; expiresAt: Date } => {
+export const generateSasUrl = (
+  blobName: string,
+  options: GenerateSasOptions,
+): { url: string; expiresAt: Date } => {
   const { containerClient: client, credential, containerName } = init();
-  const expiresAt = options.expiresOn ?? (options.permissions === "r" ? readExpiresAt() : uploadExpiresAt());
+  const expiresAt =
+    options.expiresOn ?? (options.permissions === "r" ? readExpiresAt() : uploadExpiresAt());
   const startsOn = new Date(Date.now() - 60_000);
   const signatureValues: BlobSASSignatureValues = {
     containerName,
@@ -124,7 +128,10 @@ export const headBlob = async (blobName: string): Promise<BlobHead> => {
       sha256: properties.metadata?.sha256 ?? null,
     };
   } catch (error) {
-    const statusCode = typeof error === "object" && error !== null && "statusCode" in error ? error.statusCode : null;
+    const statusCode =
+      typeof error === "object" && error !== null && "statusCode" in error
+        ? error.statusCode
+        : null;
     if (statusCode === 404) return { exists: false, sizeBytes: 0, contentType: null, sha256: null };
     throw error;
   }

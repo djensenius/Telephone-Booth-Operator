@@ -19,19 +19,29 @@ uploadsRouter.post("/sas", zValidator("json", UploadSasRequestSchema), async (c)
   let audioFileId: string | undefined;
   if (body.kind === "question-audio") {
     const existing = await db.file.findUnique({ where: { sha256: body.sha256 } });
-    const file = existing ?? (await db.file.create({
-      data: {
-        blobContainer: process.env.AZURE_BLOB_CONTAINER?.trim() || "booth-recordings",
-        blobKey: blobName,
-        sha256: body.sha256,
-        sizeBytes: body.sizeBytes,
-        durationMs: null,
-        contentType: body.contentType,
-      },
-    }));
+    const file =
+      existing ??
+      (await db.file.create({
+        data: {
+          blobContainer: process.env.AZURE_BLOB_CONTAINER?.trim() || "booth-recordings",
+          blobKey: blobName,
+          sha256: body.sha256,
+          sizeBytes: body.sizeBytes,
+          durationMs: null,
+          contentType: body.contentType,
+        },
+      }));
     audioFileId = file.id;
   }
 
   const sas = generateSasUrl(blobName, { permissions: "cw", contentType: body.contentType });
-  return c.json({ uploadUrl: sas.url, blobName, expiresAt: sas.expiresAt.toISOString(), ...(audioFileId ? { audioFileId } : {}) }, 201);
+  return c.json(
+    {
+      uploadUrl: sas.url,
+      blobName,
+      expiresAt: sas.expiresAt.toISOString(),
+      ...(audioFileId ? { audioFileId } : {}),
+    },
+    201,
+  );
 });

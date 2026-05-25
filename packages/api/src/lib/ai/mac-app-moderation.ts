@@ -54,14 +54,22 @@ export class MacAppModerationProvider implements ModerationProvider {
     });
     if (!response.ok) {
       const text = await response.text().catch(() => "");
-      throw new ProviderError(this.name, `mac-app moderation failed: ${response.status} ${text.slice(0, 200)}`, response.status);
+      throw new ProviderError(
+        this.name,
+        `mac-app moderation failed: ${response.status} ${text.slice(0, 200)}`,
+        response.status,
+      );
     }
     const raw = (await response.json().catch(() => ({}))) as MacAppModerationPayload;
-    const recommendation = raw.recommendation === "approve" || raw.recommendation === "reject" || raw.recommendation === "review"
-      ? raw.recommendation
-      : "review";
+    const recommendation =
+      raw.recommendation === "approve" ||
+      raw.recommendation === "reject" ||
+      raw.recommendation === "review"
+        ? raw.recommendation
+        : "review";
     const flagged = typeof raw.flagged === "boolean" ? raw.flagged : recommendation === "reject";
-    const maxScore = typeof raw.maxScore === "number" && raw.maxScore >= 0 && raw.maxScore <= 1 ? raw.maxScore : 0;
+    const maxScore =
+      typeof raw.maxScore === "number" && raw.maxScore >= 0 && raw.maxScore <= 1 ? raw.maxScore : 0;
     return {
       flagged,
       recommendation,

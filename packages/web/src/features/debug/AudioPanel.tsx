@@ -24,7 +24,13 @@ function recordingDuration(status: BoothStatus | undefined): string {
   return `${seconds}s`;
 }
 
-function Meter({ label, value }: { readonly label: string; readonly value: number | undefined }): JSX.Element {
+function Meter({
+  label,
+  value,
+}: {
+  readonly label: string;
+  readonly value: number | undefined;
+}): JSX.Element {
   const display = value === undefined ? "—" : `${value.toFixed(1)} dBFS`;
   return (
     <div className="debug-meter">
@@ -32,7 +38,14 @@ function Meter({ label, value }: { readonly label: string; readonly value: numbe
         <span>{label}</span>
         <span>{display}</span>
       </div>
-      <div className="debug-meter__track" role="meter" aria-label={label} aria-valuemin={-120} aria-valuemax={0} aria-valuenow={value ?? -120}>
+      <div
+        className="debug-meter__track"
+        role="meter"
+        aria-label={label}
+        aria-valuemin={-120}
+        aria-valuemax={0}
+        aria-valuenow={value ?? -120}
+      >
         <span className="debug-meter__fill" style={{ inlineSize: `${meterPercent(value)}%` }} />
       </div>
     </div>
@@ -55,7 +68,11 @@ export function AudioPanel({ audio, status }: AudioPanelProps): JSX.Element {
         </div>
         <div>
           <dt>Sample rate</dt>
-          <dd>{audio?.sampleRateHz === null || audio?.sampleRateHz === undefined ? "—" : `${audio.sampleRateHz} Hz`}</dd>
+          <dd>
+            {audio?.sampleRateHz === null || audio?.sampleRateHz === undefined
+              ? "—"
+              : `${audio.sampleRateHz} Hz`}
+          </dd>
         </div>
         <div>
           <dt>Recording duration</dt>

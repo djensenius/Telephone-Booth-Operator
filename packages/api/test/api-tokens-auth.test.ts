@@ -1,5 +1,5 @@
 import { createHmac, randomUUID } from "node:crypto";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { createApp } from "../src/index.js";
 import { resetApiTokenStateForTests } from "../src/lib/api-tokens.js";
 
@@ -8,9 +8,14 @@ const { fakeDb, store } = vi.hoisted(() => {
   const sessions = new Map<string, Record<string, unknown>>();
   const tokens = new Map<string, Record<string, unknown>>();
 
-  const withUser = (session: Record<string, unknown>) => ({ ...session, user: users.get(session.userId as string) });
-  const selectFields = (row: Record<string, unknown>, select: Record<string, boolean> | undefined) =>
-    select ? Object.fromEntries(Object.keys(select).map((key) => [key, row[key]])) : row;
+  const withUser = (session: Record<string, unknown>) => ({
+    ...session,
+    user: users.get(session.userId as string),
+  });
+  const selectFields = (
+    row: Record<string, unknown>,
+    select: Record<string, boolean> | undefined,
+  ) => (select ? Object.fromEntries(Object.keys(select).map((key) => [key, row[key]])) : row);
 
   return {
     store: { users, sessions, tokens },
@@ -31,14 +36,22 @@ const { fakeDb, store } = vi.hoisted(() => {
       },
       apiToken: {
         create: vi.fn(async ({ data, select }) => {
-          const row = { id: randomUUID(), createdAt: new Date(), lastUsedAt: null, revokedAt: null, ...data };
+          const row = {
+            id: randomUUID(),
+            createdAt: new Date(),
+            lastUsedAt: null,
+            revokedAt: null,
+            ...data,
+          };
           tokens.set(row.id, row);
           return selectFields(row, select);
         }),
         findMany: vi.fn(async () => []),
         findUnique: vi.fn(async ({ where }) => {
           if (where.id) return tokens.get(where.id) ?? null;
-          return Array.from(tokens.values()).find((token) => token.lookupId === where.lookupId) ?? null;
+          return (
+            Array.from(tokens.values()).find((token) => token.lookupId === where.lookupId) ?? null
+          );
         }),
         findFirst: vi.fn(async ({ where, select }) => {
           const row = Array.from(tokens.values()).find(
@@ -68,7 +81,13 @@ const cookieForSession = (sessionId: string): string => {
 };
 
 const seedSession = (): string => {
-  const user = { id: "user-1", oidcSub: "user-1", email: "operator@example.com", name: "Operator", groups: [] };
+  const user = {
+    id: "user-1",
+    oidcSub: "user-1",
+    email: "operator@example.com",
+    name: "Operator",
+    groups: [],
+  };
   store.users.set(user.id, user);
   store.sessions.set("session-1", {
     id: "session-1",
@@ -117,6 +136,8 @@ describe("api token auth", () => {
     expect(body).not.toHaveProperty("tokenHash");
     expect(body).not.toHaveProperty("hash");
     expect(body).not.toHaveProperty("lookupId");
-    expect(JSON.stringify(body)).not.toContain(String(store.tokens.values().next().value?.tokenHash));
+    expect(JSON.stringify(body)).not.toContain(
+      String(store.tokens.values().next().value?.tokenHash),
+    );
   });
 });

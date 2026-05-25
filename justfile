@@ -8,12 +8,12 @@ default:
 
 # Install dependencies (Node packages only; use `mise install` for tools).
 setup:
-    pnpm install --frozen-lockfile
+    vp install --frozen-lockfile
 
 # Run the full local stack: containers + api + web.
 dev:
     docker compose up -d
-    pnpm -r --parallel run dev
+    vp run -r --parallel dev
 
 # Stop containers.
 down:
@@ -29,20 +29,20 @@ db-seed:
 
 # Typecheck every package.
 typecheck:
-    pnpm -r typecheck
+    vp run -r typecheck
 
 # Lint every package.
 lint:
-    pnpm -r lint
+    vp run -r lint
     markdownlint-cli2 'docs/**/*.md' 'README.md'
 
 # Format every package.
 fmt:
-    pnpm -r run format
+    vp fmt
 
 # Run all tests.
 test:
-    pnpm -r test
+    vp run -r test
 
 # fmt + lint + typecheck + test
 check: fmt lint typecheck test

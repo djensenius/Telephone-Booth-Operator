@@ -15,17 +15,17 @@ for the operator UI to work:
 
 ## Configurable on the operator backend
 
-| Env var                | Purpose                                                       |
-| ---------------------- | ------------------------------------------------------------- |
-| `OIDC_PROVIDER_NAME`   | UI copy. e.g. "Sign in with $name".                            |
-| `OIDC_ISSUER`          | Discovery base URL.                                            |
-| `OIDC_CLIENT_ID`       | Client ID issued by your IdP.                                  |
-| `OIDC_CLIENT_SECRET`   | Client secret.                                                 |
-| `OIDC_REDIRECT_URI`    | Must match what you registered on the IdP, exactly.            |
-| `OIDC_POST_LOGOUT_REDIRECT_URI` | Where to send browsers after local/IdP logout.        |
-| `OIDC_SCOPES`          | Scope string to request. Default `openid email profile offline_access`. |
-| `OIDC_ALLOWED_GROUPS`  | Optional CSV. If set, the `groups` claim must intersect.       |
-| `OIDC_ALLOWED_EMAILS`  | Optional CSV. If set, the `email` claim must be listed.        |
+| Env var                         | Purpose                                                                 |
+| ------------------------------- | ----------------------------------------------------------------------- |
+| `OIDC_PROVIDER_NAME`            | UI copy. e.g. "Sign in with $name".                                     |
+| `OIDC_ISSUER`                   | Discovery base URL.                                                     |
+| `OIDC_CLIENT_ID`                | Client ID issued by your IdP.                                           |
+| `OIDC_CLIENT_SECRET`            | Client secret.                                                          |
+| `OIDC_REDIRECT_URI`             | Must match what you registered on the IdP, exactly.                     |
+| `OIDC_POST_LOGOUT_REDIRECT_URI` | Where to send browsers after local/IdP logout.                          |
+| `OIDC_SCOPES`                   | Scope string to request. Default `openid email profile offline_access`. |
+| `OIDC_ALLOWED_GROUPS`           | Optional CSV. If set, the `groups` claim must intersect.                |
+| `OIDC_ALLOWED_EMAILS`           | Optional CSV. If set, the `email` claim must be listed.                 |
 
 When the **`OIDC_*` vars are set, they override their `AUTHENTIK_*`
 counterparts**; that lets you keep both blocks in `.env` and toggle by

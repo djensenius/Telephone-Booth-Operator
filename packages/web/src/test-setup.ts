@@ -2,7 +2,7 @@
 // render dates via `toLocaleString()` are deterministic across machines
 // (Mac dev: en-CA / America/Toronto vs CI Ubuntu: en-US / UTC).
 
-import { afterAll, beforeAll } from "vitest";
+import { afterAll, beforeAll } from "vite-plus/test";
 
 const FIXED_LOCALE = "en-CA";
 const FIXED_TIME_ZONE = "America/Toronto";
@@ -14,19 +14,19 @@ type LocaleMethod = (
 ) => string;
 
 const proto = Date.prototype;
-/* eslint-disable @typescript-eslint/unbound-method -- intentionally
+/* oxlint-disable @typescript-eslint/unbound-method -- intentionally
    capturing the prototype methods to monkey-patch them, then restoring. */
 const originals = {
   toLocaleString: proto.toLocaleString,
   toLocaleDateString: proto.toLocaleDateString,
   toLocaleTimeString: proto.toLocaleTimeString,
 };
-/* eslint-enable @typescript-eslint/unbound-method */
+/* oxlint-enable @typescript-eslint/unbound-method */
 
 function withFixedZone(
   options: Intl.DateTimeFormatOptions | undefined,
 ): Intl.DateTimeFormatOptions {
-  return { ...(options ?? {}), timeZone: options?.timeZone ?? FIXED_TIME_ZONE };
+  return { ...options, timeZone: options?.timeZone ?? FIXED_TIME_ZONE };
 }
 
 function makePinned(original: LocaleMethod): LocaleMethod {

@@ -13,7 +13,8 @@ export const resetFakeAzure = (): void => {
 
 export const fakeAzureModule = {
   generateSasUrl: (blobName: string, options: { permissions: "r" | "cw"; expiresOn?: Date }) => {
-    const expiresAt = options.expiresOn ?? new Date(Date.now() + (options.permissions === "r" ? 5 : 15) * 60_000);
+    const expiresAt =
+      options.expiresOn ?? new Date(Date.now() + (options.permissions === "r" ? 5 : 15) * 60_000);
     return {
       url: `https://storage.example/${encodeURIComponent(blobName)}?sp=${options.permissions}&se=${encodeURIComponent(expiresAt.toISOString())}`,
       expiresAt,

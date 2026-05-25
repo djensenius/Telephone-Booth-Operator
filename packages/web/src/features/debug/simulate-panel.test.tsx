@@ -1,11 +1,15 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 import type { CoreEvent, DebugClient } from "../../lib/debug-client.js";
 import { SimulatePanel } from "./SimulatePanel.js";
 
 function makeClient() {
-  const simulateEvent = vi.fn<(event: CoreEvent) => Promise<{ readonly accepted: boolean; readonly injected: number }>>().mockResolvedValue({ accepted: true, injected: 1 });
-  const simulatePulse = vi.fn<(count: number) => Promise<{ readonly accepted: boolean; readonly injected: number }>>().mockResolvedValue({ accepted: true, injected: 2 });
+  const simulateEvent = vi
+    .fn<(event: CoreEvent) => Promise<{ readonly accepted: boolean; readonly injected: number }>>()
+    .mockResolvedValue({ accepted: true, injected: 1 });
+  const simulatePulse = vi
+    .fn<(count: number) => Promise<{ readonly accepted: boolean; readonly injected: number }>>()
+    .mockResolvedValue({ accepted: true, injected: 2 });
   const client: DebugClient = {
     getHealth: vi.fn(),
     getState: vi.fn(),

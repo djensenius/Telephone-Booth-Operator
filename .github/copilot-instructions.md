@@ -34,17 +34,18 @@ repository (`rust-client` branch). The two sides communicate over a versioned
 
 ### Workspace layout
 
-| Path              | Contents                                                             |
-| ----------------- | -------------------------------------------------------------------- |
-| `packages/api`    | Hono backend on Node, Prisma + Postgres, Authentik OIDC, WebSocket   |
-| `packages/web`    | React 18 + Vite + TS, TanStack Router/Query, themed booth shell      |
-| `packages/shared` | Zod schemas + generated TS types shared by `api` and `web`           |
-| `tools/`          | One-off scripts (seed, docs index generator)                         |
-| `docs/`           | Architecture, setup, theme, runbooks, ADRs, provider guides          |
+| Path              | Contents                                                           |
+| ----------------- | ------------------------------------------------------------------ |
+| `packages/api`    | Hono backend on Node, Prisma + Postgres, Authentik OIDC, WebSocket |
+| `packages/web`    | React 18 + Vite + TS, TanStack Router/Query, themed booth shell    |
+| `packages/shared` | Zod schemas + generated TS types shared by `api` and `web`         |
+| `tools/`          | One-off scripts (seed, docs index generator)                       |
+| `docs/`           | Architecture, setup, theme, runbooks, ADRs, provider guides        |
 
-This is a **pnpm workspace** (`pnpm@9.15.0`) on **Node 22**. Use `pnpm`, never
-`npm` or `yarn`. Tool versions are pinned in `mise.toml` — run `mise install`
-to get them.
+This is a **pnpm workspace** (`pnpm@9.15.0`) on **Node 24** with the **Vite+**
+toolchain. Use `vp` for install/dev/build/test/lint/format workflows; use raw
+`pnpm` only for package-manager-specific operations. Tool versions are pinned in
+`mise.toml` and `.node-version` — run `mise install` to get them.
 
 ## Tech stack & key conventions
 
@@ -53,8 +54,7 @@ to get them.
   boundaries.
 - **Modules:** ESM only (`"type": "module"`). Use named exports; default
   exports only where a framework requires them.
-- **Imports:** use `import type { … }` for type-only imports
-  (`@typescript-eslint/consistent-type-imports` is `error`). Unused vars must
+- **Imports:** use `import type { … }` for type-only imports. Unused vars must
   be prefixed with `_` or removed.
 - **Backend:** Hono on `@hono/node-server`. Routes live in
   `packages/api/src/routes/` grouped per resource. Validate request bodies and
@@ -153,15 +153,15 @@ See [`docs/architecture.md`](../docs/architecture.md),
 Use `just` (the workspace task runner). Generated and verified recipes:
 
 ```sh
-just setup          # pnpm install --frozen-lockfile
-just dev            # docker compose up -d  +  pnpm -r --parallel run dev
+just setup          # vp install --frozen-lockfile
+just dev            # docker compose up -d  +  vp run -r --parallel dev
 just down           # docker compose down
 just db-migrate     # prisma migrate dev
 just db-seed        # tsx tools/seed.ts via the api package
-just typecheck      # pnpm -r typecheck
-just lint           # eslint + markdownlint
-just fmt            # prettier
-just test           # vitest across the workspace
+just typecheck      # vp run -r typecheck
+just lint           # vp run -r lint + markdownlint
+just fmt            # vp fmt
+just test           # Vite+ tests across the workspace
 just check          # fmt + lint + typecheck + test  (run before pushing)
 just docs-check     # markdownlint + lychee link check
 just openapi-gen    # regenerate the typed web API client
@@ -169,11 +169,10 @@ just e2e            # playwright e2e (needs running stack)
 just docker-build   # build prod images locally
 ```
 
-Equivalent pnpm scripts exist (`pnpm lint`, `pnpm test`, `pnpm typecheck`,
-`pnpm build`) and are what CI runs. Prefer the `just` recipes locally.
+Equivalent Vite+ scripts exist (`vp run lint`, `vp run test`, `vp run typecheck`,
+`vp run build`) and are what CI runs. Prefer the `just` recipes locally.
 
-Lint runs with `--max-warnings=0` in CI — warnings break the build, so fix
-them, don't ignore them.
+Lint warnings break the build, so fix them, don't ignore them.
 
 ## Testing
 

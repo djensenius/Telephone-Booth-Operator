@@ -112,7 +112,8 @@ export const devicesRouter = new Hono<{ Variables: AuthVariables }>()
       const row = await db.mobileDevice.update({
         where: { id },
         data: {
-          deviceName: body.deviceName === undefined ? existing.deviceName : (body.deviceName ?? null),
+          deviceName:
+            body.deviceName === undefined ? existing.deviceName : (body.deviceName ?? null),
           preferences: merged,
           lastSeenAt: new Date(),
         },

@@ -96,12 +96,12 @@ to drive the full OIDC PKCE Authorization-Code grant:
 
 ## 4. Troubleshooting
 
-| Symptom                            | Likely cause                                                          |
-| ---------------------------------- | --------------------------------------------------------------------- |
-| `401 invalid_token` from `/v1/*`   | Token expired, audience mismatch, or signed by an unknown JWKS key.   |
-| `403` from `/v1/*` after sign-in   | Authenticated principal isn't in `OIDC_ALLOWED_GROUPS`.                |
-| Sign-in completes but app loops    | App's URL scheme not registered, or Authentik redirect URI mismatch.  |
-| `aud` mismatch only in mobile      | `OIDC_MOBILE_AUDIENCES` not set / restart pending on the API.         |
+| Symptom                          | Likely cause                                                         |
+| -------------------------------- | -------------------------------------------------------------------- |
+| `401 invalid_token` from `/v1/*` | Token expired, audience mismatch, or signed by an unknown JWKS key.  |
+| `403` from `/v1/*` after sign-in | Authenticated principal isn't in `OIDC_ALLOWED_GROUPS`.              |
+| Sign-in completes but app loops  | App's URL scheme not registered, or Authentik redirect URI mismatch. |
+| `aud` mismatch only in mobile    | `OIDC_MOBILE_AUDIENCES` not set / restart pending on the API.        |
 
 To inspect a failing token locally, paste it into <https://jwt.io> or run
 `jose.decodeJwt(token)` in a Node REPL — the API only logs failure reasons

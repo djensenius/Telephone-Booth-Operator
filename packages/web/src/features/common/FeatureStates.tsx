@@ -1,7 +1,11 @@
 import type { ReactNode } from "react";
 import { LineBusyPlacard } from "../../components/booth/index.js";
 
-export function FeatureSkeleton({ label = "Connecting the cord…" }: { readonly label?: string }): JSX.Element {
+export function FeatureSkeleton({
+  label = "Connecting the cord…",
+}: {
+  readonly label?: string;
+}): JSX.Element {
   return (
     <div className="feature-skeleton" role="status" aria-live="polite">
       <span className="feature-skeleton__cord" aria-hidden="true" />
@@ -10,7 +14,13 @@ export function FeatureSkeleton({ label = "Connecting the cord…" }: { readonly
   );
 }
 
-export function FeatureEmpty({ title, children }: { readonly title: string; readonly children?: ReactNode }): JSX.Element {
+export function FeatureEmpty({
+  title,
+  children,
+}: {
+  readonly title: string;
+  readonly children?: ReactNode;
+}): JSX.Element {
   return (
     <div className="feature-empty">
       <strong>{title}</strong>

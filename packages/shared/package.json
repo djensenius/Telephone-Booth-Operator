@@ -9,17 +9,17 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "lint": "eslint src --max-warnings=0",
-    "format": "prettier --write 'src/**/*.ts'",
+    "lint": "vp lint src",
+    "format": "vp fmt src",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vp test run"
   },
   "dependencies": {
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "eslint": "^9.15.0",
     "typescript": "^6.0.3",
-    "vitest": "^2.1.5"
+    "vite": "^8.0.14",
+    "vite-plus": "^0.1.22"
   }
 }

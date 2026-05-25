@@ -19,9 +19,18 @@ export function SimulatePanel({ allowControls, client }: SimulatePanelProps): JS
         <h2 id="debug-simulate-heading">Simulate booth events</h2>
       </div>
       <div className="debug-button-row">
-        <button type="button" onClick={() => void client?.simulateEvent({ event: "hook_off" })}>Simulate hook-off</button>
-        <button type="button" onClick={() => void client?.simulateEvent({ event: "playback_ended" })}>Simulate playback complete</button>
-        <button type="button" onClick={() => void client?.simulateEvent({ event: "hook_on" })}>Reset to Idle</button>
+        <button type="button" onClick={() => void client?.simulateEvent({ event: "hook_off" })}>
+          Simulate hook-off
+        </button>
+        <button
+          type="button"
+          onClick={() => void client?.simulateEvent({ event: "playback_ended" })}
+        >
+          Simulate playback complete
+        </button>
+        <button type="button" onClick={() => void client?.simulateEvent({ event: "hook_on" })}>
+          Reset to Idle
+        </button>
       </div>
       <div className="debug-pulse-buttons" aria-label="Pulse dial buttons">
         {PULSE_DIGITS.map((digit) => {

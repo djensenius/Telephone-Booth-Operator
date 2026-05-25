@@ -11,16 +11,16 @@ All colors live as CSS custom properties in
 `packages/web/src/styles/theme.css`. Components should reference tokens
 instead of raw color values.
 
-| Token family | Use |
-| ------------ | --- |
-| `--surface-*` | Page, panel, raised-card, muted, and inset surfaces |
-| `--text-*` | Primary, secondary, muted, and on-accent text |
-| `--accent-red*` | Product mark, primary actions, live recording/error emphasis |
-| `--accent-green` | Healthy/approved/connected state |
-| `--accent-yellow` | Pending/review/playing state |
-| `--accent-blue`, `--accent-mauve`, `--accent-peach` | Secondary highlights and depth |
-| `--border-*` | Subtle and strong borders |
-| `--shadow-*` | Soft elevation and card shadows |
+| Token family                                        | Use                                                          |
+| --------------------------------------------------- | ------------------------------------------------------------ |
+| `--surface-*`                                       | Page, panel, raised-card, muted, and inset surfaces          |
+| `--text-*`                                          | Primary, secondary, muted, and on-accent text                |
+| `--accent-red*`                                     | Product mark, primary actions, live recording/error emphasis |
+| `--accent-green`                                    | Healthy/approved/connected state                             |
+| `--accent-yellow`                                   | Pending/review/playing state                                 |
+| `--accent-blue`, `--accent-mauve`, `--accent-peach` | Secondary highlights and depth                               |
+| `--border-*`                                        | Subtle and strong borders                                    |
+| `--shadow-*`                                        | Soft elevation and card shadows                              |
 
 The palette is Catppuccin-inspired in spirit: soft dark surfaces, warm
 text, and saturated accents. It is intentionally project-specific rather
@@ -40,24 +40,24 @@ remain available through the sidebar and keyboard.
 
 ## Typography
 
-| Use | Family | Notes |
-| --- | ------ | ----- |
-| Product display / empty states | Inter (`--font-display`) | Restrained display scale without novelty typography |
-| Headings and UI labels | Inter (`--font-heading`) | Keeps screens functional and scannable |
-| Body | Inter (`--font-body`) | Primary reading face |
-| Status, timestamps, diagnostics | IBM Plex Mono (`--font-mono`) | Operator-console and log readouts |
+| Use                             | Family                        | Notes                                               |
+| ------------------------------- | ----------------------------- | --------------------------------------------------- |
+| Product display / empty states  | Inter (`--font-display`)      | Restrained display scale without novelty typography |
+| Headings and UI labels          | Inter (`--font-heading`)      | Keeps screens functional and scannable              |
+| Body                            | Inter (`--font-body`)         | Primary reading face                                |
+| Status, timestamps, diagnostics | IBM Plex Mono (`--font-mono`) | Operator-console and log readouts                   |
 
 Fonts are self-hosted under `packages/web/src/styles/fonts/`.
 
 ## Components
 
-| Component | Role |
-| --------- | ---- |
-| `<BoothFrame>` | Outermost ambient background and page padding |
-| `<TelephoneBanner>` | Compact app identity, mark, and descriptive tagline |
-| `<BoothStatusBadge>` | Labeled booth state indicator in the sidebar |
-| `<GlassPanel>` | Main content surface for routed screens |
-| `<LineBusyPlacard>` | Disconnect/line-busy notification |
+| Component            | Role                                                |
+| -------------------- | --------------------------------------------------- |
+| `<BoothFrame>`       | Outermost ambient background and page padding       |
+| `<TelephoneBanner>`  | Compact app identity, mark, and descriptive tagline |
+| `<BoothStatusBadge>` | Labeled booth state indicator in the sidebar        |
+| `<GlassPanel>`       | Main content surface for routed screens             |
+| `<LineBusyPlacard>`  | Disconnect/line-busy notification                   |
 
 Cards, tables, forms, badges, and debug panels share the same semantic
 surface/border/shadow tokens so feature screens feel consistent.

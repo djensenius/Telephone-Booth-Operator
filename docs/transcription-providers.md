@@ -18,22 +18,22 @@ Architecture rationale lives in [ADR 0005](./adr/0005-ai-transcription-and-moder
 All settings live in environment variables. See `.env.example` for the
 authoritative list.
 
-| Variable | Default | Description |
-| -------- | ------- | ----------- |
-| `TRANSCRIPTION_PROVIDER` | `disabled` | `openai`, `mac_app`, or `disabled`. |
-| `TRANSCRIPTION_OPENAI_MODEL` | `whisper-1` | Model passed to `/v1/audio/transcriptions`. |
-| `TRANSCRIPTION_MAC_APP_URL` | _empty_ | HTTPS URL of the Mac app's transcription endpoint. |
-| `TRANSCRIPTION_MAC_APP_TOKEN` | _empty_ | Optional bearer token for the Mac app. |
-| `MODERATION_PROVIDER` | `disabled` | `openai`, `mac_app`, or `disabled`. |
-| `MODERATION_OPENAI_MODEL` | `omni-moderation-latest` | Model passed to `/v1/moderations`. |
-| `MODERATION_MAC_APP_URL` | _empty_ | HTTPS URL of the Mac app's moderation endpoint. |
-| `MODERATION_MAC_APP_TOKEN` | _empty_ | Optional bearer token for the Mac app. |
-| `OPENAI_API_KEY` | _empty_ | Shared key for both OpenAI endpoints. |
-| `OPENAI_BASE_URL` | `https://api.openai.com` | Override for self-hosted OpenAI-compatible APIs. |
-| `AUTO_DECISION_MODE` | `always_pending` | `always_pending`, `auto_reject`, or `auto_both`. |
-| `AUTO_REJECT_THRESHOLD` | `0.85` | Moderation score at which `auto_reject` triggers. |
-| `AUTO_APPROVE_THRESHOLD` | `0.15` | Max score below which `auto_both` will auto-approve. |
-| `AI_SWEEPER_INTERVAL_SECONDS` | `60` | How often the recovery sweeper retries stuck messages. |
+| Variable                      | Default                  | Description                                            |
+| ----------------------------- | ------------------------ | ------------------------------------------------------ |
+| `TRANSCRIPTION_PROVIDER`      | `disabled`               | `openai`, `mac_app`, or `disabled`.                    |
+| `TRANSCRIPTION_OPENAI_MODEL`  | `whisper-1`              | Model passed to `/v1/audio/transcriptions`.            |
+| `TRANSCRIPTION_MAC_APP_URL`   | _empty_                  | HTTPS URL of the Mac app's transcription endpoint.     |
+| `TRANSCRIPTION_MAC_APP_TOKEN` | _empty_                  | Optional bearer token for the Mac app.                 |
+| `MODERATION_PROVIDER`         | `disabled`               | `openai`, `mac_app`, or `disabled`.                    |
+| `MODERATION_OPENAI_MODEL`     | `omni-moderation-latest` | Model passed to `/v1/moderations`.                     |
+| `MODERATION_MAC_APP_URL`      | _empty_                  | HTTPS URL of the Mac app's moderation endpoint.        |
+| `MODERATION_MAC_APP_TOKEN`    | _empty_                  | Optional bearer token for the Mac app.                 |
+| `OPENAI_API_KEY`              | _empty_                  | Shared key for both OpenAI endpoints.                  |
+| `OPENAI_BASE_URL`             | `https://api.openai.com` | Override for self-hosted OpenAI-compatible APIs.       |
+| `AUTO_DECISION_MODE`          | `always_pending`         | `always_pending`, `auto_reject`, or `auto_both`.       |
+| `AUTO_REJECT_THRESHOLD`       | `0.85`                   | Moderation score at which `auto_reject` triggers.      |
+| `AUTO_APPROVE_THRESHOLD`      | `0.15`                   | Max score below which `auto_both` will auto-approve.   |
+| `AI_SWEEPER_INTERVAL_SECONDS` | `60`                     | How often the recovery sweeper retries stuck messages. |
 
 A provider with `disabled` selected, or with credentials missing, is a
 no-op — the pipeline writes a `failed` row with `error = "disabled"` and

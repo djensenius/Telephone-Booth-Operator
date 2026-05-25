@@ -1,5 +1,5 @@
 import { createHmac, randomUUID } from "node:crypto";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { createApp } from "../src/index.js";
 
 type DeviceRow = {
@@ -66,7 +66,10 @@ const { fakeDb, store } = vi.hoisted(() => {
           return Array.from(devices.values()).find((row) => matches(row, where)) ?? null;
         }),
         upsert: vi.fn(async ({ where, create, update }) => {
-          const { apnsToken, platform } = where.apnsToken_platform as { apnsToken: string; platform: string };
+          const { apnsToken, platform } = where.apnsToken_platform as {
+            apnsToken: string;
+            platform: string;
+          };
           const existing = Array.from(devices.values()).find(
             (row) => row.apnsToken === apnsToken && row.platform === platform,
           );
@@ -206,7 +209,10 @@ describe("mobile device registry", () => {
     });
     expect(first.status).toBe(201);
     const created = (await first.json()) as { id: string };
-    await app.request(`/v1/devices/${created.id}`, { method: "DELETE", headers: { cookie: cookieA } });
+    await app.request(`/v1/devices/${created.id}`, {
+      method: "DELETE",
+      headers: { cookie: cookieA },
+    });
     expect(store.devices.get(created.id)?.revokedAt).toBeInstanceOf(Date);
 
     const second = await app.request("/v1/devices", {

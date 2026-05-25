@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import {
   BOOTH_EVENT_BATCH_MAX,
@@ -31,9 +31,7 @@ describe("BoothEventSchema", () => {
   });
 
   it("rejects an unknown event type", () => {
-    expect(() =>
-      BoothEventSchema.parse({ ...validEvent, type: "made_up_event" }),
-    ).toThrow();
+    expect(() => BoothEventSchema.parse({ ...validEvent, type: "made_up_event" })).toThrow();
   });
 
   it("rejects a non-UUID bootId", () => {
@@ -140,12 +138,8 @@ describe("BoothSystemSnapshotSchema", () => {
       loadAverage1m: 0.5,
       memoryUsedBytes: 100_000_000,
       memoryTotalBytes: 4_000_000_000,
-      disks: [
-        { mountpoint: "/", totalBytes: 30_000_000_000, availableBytes: 20_000_000_000 },
-      ],
-      networkInterfaces: [
-        { name: "eth0", receivedBytes: 1000, transmittedBytes: 2000 },
-      ],
+      disks: [{ mountpoint: "/", totalBytes: 30_000_000_000, availableBytes: 20_000_000_000 }],
+      networkInterfaces: [{ name: "eth0", receivedBytes: 1000, transmittedBytes: 2000 }],
       tailscaleConnected: true,
       throttlingFlags: [],
     });
@@ -185,8 +179,6 @@ describe("WsEnvelopeSchema", () => {
   });
 
   it("rejects an unknown kind", () => {
-    expect(() =>
-      WsEnvelopeSchema.parse({ kind: "weather", foo: 1 } as unknown),
-    ).toThrow();
+    expect(() => WsEnvelopeSchema.parse({ kind: "weather", foo: 1 } as unknown)).toThrow();
   });
 });

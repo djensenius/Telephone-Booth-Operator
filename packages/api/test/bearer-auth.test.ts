@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const { fakeDb, store } = vi.hoisted(() => {
   const users = new Map<string, Record<string, unknown>>();
@@ -8,7 +8,9 @@ const { fakeDb, store } = vi.hoisted(() => {
       operatorUser: {
         upsert: vi.fn(async ({ where, create, update }) => {
           const existing = users.get(where.oidcSub);
-          const next = existing ? { ...existing, ...update } : { firstSeenAt: new Date(), ...create };
+          const next = existing
+            ? { ...existing, ...update }
+            : { firstSeenAt: new Date(), ...create };
           users.set(where.oidcSub, next);
           return next;
         }),
@@ -65,7 +67,11 @@ const setupEnv = () => {
 };
 
 const installVerifier = (
-  jwtVerifyMock: (token: string, key: unknown, options: { audience?: string[]; issuer?: string }) => Promise<{ payload: Record<string, unknown> }>,
+  jwtVerifyMock: (
+    token: string,
+    key: unknown,
+    options: { audience?: string[]; issuer?: string },
+  ) => Promise<{ payload: Record<string, unknown> }>,
 ) => {
   __setBearerVerifierForTests({
     jwks: () => SIGNING_KEY as unknown as never,
@@ -96,7 +102,11 @@ describe("verifyOperatorBearer", () => {
     installVerifier(async (_token, _key, options) => {
       const allowed = options.audience as string[] | undefined;
       if (!allowed?.includes("intruder-client")) {
-        throw new joseErrors.JWTClaimValidationFailed("unexpected aud claim", "aud", "unexpected_aud");
+        throw new joseErrors.JWTClaimValidationFailed(
+          "unexpected aud claim",
+          "aud",
+          "unexpected_aud",
+        );
       }
       return { payload: { ...FRESH_CLAIMS, aud: "intruder-client" } };
     });
@@ -109,7 +119,11 @@ describe("verifyOperatorBearer", () => {
   it("rejects when the issuer does not match", async () => {
     installVerifier(async (_token, _key, options) => {
       if (options.issuer !== "https://attacker.example") {
-        throw new joseErrors.JWTClaimValidationFailed("unexpected iss claim", "iss", "unexpected_iss");
+        throw new joseErrors.JWTClaimValidationFailed(
+          "unexpected iss claim",
+          "iss",
+          "unexpected_iss",
+        );
       }
       return { payload: { ...FRESH_CLAIMS, iss: "https://attacker.example" } };
     });

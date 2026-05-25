@@ -20,10 +20,14 @@ export function SessionsScreen(): JSX.Element {
       <h1>Sessions</h1>
       <p>Each pickup-to-hangup is grouped into a session with its outcome and dialed digits.</p>
 
-      {query.isLoading && items.length === 0 ? <FeatureSkeleton label="Sorting the cords…" /> : null}
+      {query.isLoading && items.length === 0 ? (
+        <FeatureSkeleton label="Sorting the cords…" />
+      ) : null}
       {query.error ? <FeatureError message="Could not read the session log." /> : null}
       {!query.isLoading && !query.error && items.length === 0 ? (
-        <FeatureEmpty title="No calls yet">When someone picks up the booth, a session appears here.</FeatureEmpty>
+        <FeatureEmpty title="No calls yet">
+          When someone picks up the booth, a session appears here.
+        </FeatureEmpty>
       ) : null}
 
       {items.length > 0 ? (
@@ -42,7 +46,9 @@ export function SessionsScreen(): JSX.Element {
               {items.map((session) => (
                 <tr key={session.id}>
                   <td>
-                    <time dateTime={session.startedAt}>{new Date(session.startedAt).toLocaleString()}</time>
+                    <time dateTime={session.startedAt}>
+                      {new Date(session.startedAt).toLocaleString()}
+                    </time>
                   </td>
                   <td>
                     <code>{session.outcome ?? "live"}</code>
@@ -91,7 +97,9 @@ export function SessionDetailScreen({ id }: { readonly id: string }): JSX.Elemen
             </div>
             <div>
               <dt>Outcome</dt>
-              <dd><code>{session.outcome ?? "live"}</code></dd>
+              <dd>
+                <code>{session.outcome ?? "live"}</code>
+              </dd>
             </div>
             <div>
               <dt>Digits dialed</dt>
@@ -113,7 +121,9 @@ export function SessionDetailScreen({ id }: { readonly id: string }): JSX.Elemen
             <ol className="session-detail-screen__timeline">
               {session.events.map((event) => (
                 <li key={event.id}>
-                  <time dateTime={event.occurredAt}>{new Date(event.occurredAt).toLocaleTimeString()}</time>
+                  <time dateTime={event.occurredAt}>
+                    {new Date(event.occurredAt).toLocaleTimeString()}
+                  </time>
                   <code>{event.type}</code>
                   {event.recordingId ? <span> · recording {event.recordingId}</span> : null}
                 </li>

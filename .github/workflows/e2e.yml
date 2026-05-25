@@ -26,10 +26,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
-      - uses: jdx/mise-action@v4
+      - uses: voidzero-dev/setup-vp@v1
         with:
-          experimental: true
-      - run: pnpm install --frozen-lockfile
+          node-version-file: ".node-version"
+          cache: true
+          run-install: false
+      - run: vp install --frozen-lockfile
       - run: docker compose up -d azurite
       - name: Wait for services
         run: |
@@ -37,8 +39,8 @@ jobs:
             (docker compose exec -T azurite nc -z 127.0.0.1 10000) && break
             sleep 2
           done
-      - run: pnpm --filter @telephone-booth-operator/api exec prisma generate
-      - run: pnpm --filter @telephone-booth-operator/api exec prisma migrate deploy
+      - run: vp exec -F @telephone-booth-operator/api -- prisma generate
+      - run: vp exec -F @telephone-booth-operator/api -- prisma migrate deploy
         env:
           DATABASE_URL: postgres://booth:booth@localhost:5432/telephone_booth
       - name: Skip if no e2e specs exist
@@ -53,21 +55,21 @@ jobs:
             echo "no-specs=false" >> "$GITHUB_OUTPUT"
           fi
       - if: steps.probe.outputs.no-specs != 'true'
-        run: pnpm exec playwright install --with-deps chromium
+        run: vp exec -- playwright install --with-deps chromium
         working-directory: packages/web
       - if: steps.probe.outputs.no-specs != 'true'
-        run: pnpm -r build
+        run: vp run -r build
       - if: steps.probe.outputs.no-specs != 'true'
         name: Start API + Web
         run: |
-          pnpm --filter @telephone-booth-operator/api start &
-          pnpm --filter @telephone-booth-operator/web preview --port 5173 &
+          vp run -F @telephone-booth-operator/api start &
+          vp run -F @telephone-booth-operator/web preview -- --port 5173 &
           sleep 5
         env:
           DATABASE_URL: postgres://booth:booth@localhost:5432/telephone_booth
           SESSION_SECRET: "0000000000000000000000000000000000000000000000000000000000000000"
       - if: steps.probe.outputs.no-specs != 'true'
-        run: pnpm exec playwright test
+        run: vp exec -- playwright test
         working-directory: packages/web
       - uses: actions/upload-artifact@v7
         if: failure()

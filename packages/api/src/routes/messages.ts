@@ -7,7 +7,11 @@ import { fanOutNotification } from "../lib/apns.js";
 import { generateSasUrl, headBlob } from "../lib/azure-blob.js";
 import { db } from "../lib/db.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
-import { serializeMessage, serializeModeration, serializeTranscription } from "../lib/serializers.js";
+import {
+  serializeMessage,
+  serializeModeration,
+  serializeTranscription,
+} from "../lib/serializers.js";
 import type { AuthVariables } from "../lib/session.js";
 
 const listQuerySchema = z.object({
@@ -99,41 +103,47 @@ messagesRouter.post("/", requireApiToken(), zValidator("json", MessageCreateSche
   return c.json({ id: message.id, uploadUrl: sas.url, blobName }, 201);
 });
 
-messagesRouter.post("/:id/complete", requireApiToken(), zValidator("param", idParamSchema), async (c) => {
-  const { id } = c.req.valid("param");
-  const message = await db.message.findUnique({ where: { id }, include: { audio: true } });
-  if (!message) return c.json({ error: "not_found" }, 404);
+messagesRouter.post(
+  "/:id/complete",
+  requireApiToken(),
+  zValidator("param", idParamSchema),
+  async (c) => {
+    const { id } = c.req.valid("param");
+    const message = await db.message.findUnique({ where: { id }, include: { audio: true } });
+    if (!message) return c.json({ error: "not_found" }, 404);
 
-  const blob = await headBlob(message.audio.blobKey);
-  if (!blob.exists) return c.json({ error: "blob_not_found" }, 409);
-  if (blob.sha256 && blob.sha256 !== message.audio.sha256) return c.json({ error: "sha256_mismatch" }, 422);
+    const blob = await headBlob(message.audio.blobKey);
+    if (!blob.exists) return c.json({ error: "blob_not_found" }, 409);
+    if (blob.sha256 && blob.sha256 !== message.audio.sha256)
+      return c.json({ error: "sha256_mismatch" }, 422);
 
-  await db.file.update({
-    where: { id: message.audio.id },
-    data: {
-      sizeBytes: blob.sizeBytes,
-      contentType: blob.contentType ?? message.audio.contentType,
-    },
-  });
-  const receivedAt = new Date();
-  const updated = await db.message.update({
-    where: { id },
-    data: { status: "received", receivedAt },
-  });
-  // Fire-and-forget. The pipeline catches its own errors and updates the
-  // DB asynchronously; the booth's `/complete` call does not wait on AI.
-  kickPipelineForMessage(updated.id);
-  // Push fan-out: notify mobile devices that a new message has landed.
-  void fanOutNotification({
-    preferenceKey: "messageReceived",
-    title: "New booth message",
-    body: "A new recording is ready to moderate.",
-    threadId: `message:${updated.id}`,
-    category: "BOOTH_MESSAGE",
-    data: { messageId: updated.id },
-  });
-  return c.json({ id: updated.id, status: "received", receivedAt: receivedAt.toISOString() });
-});
+    await db.file.update({
+      where: { id: message.audio.id },
+      data: {
+        sizeBytes: blob.sizeBytes,
+        contentType: blob.contentType ?? message.audio.contentType,
+      },
+    });
+    const receivedAt = new Date();
+    const updated = await db.message.update({
+      where: { id },
+      data: { status: "received", receivedAt },
+    });
+    // Fire-and-forget. The pipeline catches its own errors and updates the
+    // DB asynchronously; the booth's `/complete` call does not wait on AI.
+    kickPipelineForMessage(updated.id);
+    // Push fan-out: notify mobile devices that a new message has landed.
+    void fanOutNotification({
+      preferenceKey: "messageReceived",
+      title: "New booth message",
+      body: "A new recording is ready to moderate.",
+      threadId: `message:${updated.id}`,
+      category: "BOOTH_MESSAGE",
+      data: { messageId: updated.id },
+    });
+    return c.json({ id: updated.id, status: "received", receivedAt: receivedAt.toISOString() });
+  },
+);
 
 messagesRouter.get("/:id/transcriptions", zValidator("param", idParamSchema), async (c) => {
   const { id } = c.req.valid("param");

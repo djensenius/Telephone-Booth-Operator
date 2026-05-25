@@ -3,7 +3,12 @@ import { useMemo, useState } from "react";
 import type { Message, Moderation, Transcription } from "@telephone-booth-operator/shared";
 import type { MessageRouteFilter } from "../../lib/navigation.js";
 import { GlassPanel } from "../../components/booth/index.js";
-import { useDeleteMessage, useDeleteMessages, useMessagesList, useQuestionsList } from "../../lib/api-client.js";
+import {
+  useDeleteMessage,
+  useDeleteMessages,
+  useMessagesList,
+  useQuestionsList,
+} from "../../lib/api-client.js";
 import { isMessageFilter } from "../../lib/navigation.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
 
@@ -26,7 +31,9 @@ function transcriptSnippet(transcription: Transcription | null | undefined): str
   if (transcription.status === "failed") return "Transcription failed";
   const text = transcription.text?.replace(/\s+/g, " ").trim() ?? "";
   if (text.length === 0) return "Silence";
-  return text.length <= TRANSCRIPT_SNIPPET_CHARS ? text : `${text.slice(0, TRANSCRIPT_SNIPPET_CHARS - 1)}…`;
+  return text.length <= TRANSCRIPT_SNIPPET_CHARS
+    ? text
+    : `${text.slice(0, TRANSCRIPT_SNIPPET_CHARS - 1)}…`;
 }
 
 interface ModerationBadge {
@@ -53,7 +60,10 @@ export function MessagesScreen(): JSX.Element {
   const deleteMessages = useDeleteMessages();
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
   const rows = messages.data?.items ?? [];
-  const promptById = useMemo(() => new Map((questions.data?.items ?? []).map((question) => [question.id, question.prompt])), [questions.data?.items]);
+  const promptById = useMemo(
+    () => new Map((questions.data?.items ?? []).map((question) => [question.id, question.prompt])),
+    [questions.data?.items],
+  );
 
   function toggle(id: string): void {
     setSelected((current) => {
@@ -70,33 +80,100 @@ export function MessagesScreen(): JSX.Element {
       <h1>Messages</h1>
       <p>Review recordings from the booth, download keepers, and clear crossed lines.</p>
       <div className="feature-toolbar" role="toolbar" aria-label="Message filters">
-        {filters.map((filter) => <button key={filter} type="button" aria-pressed={status === filter} onClick={() => void navigate({ to: "/messages", search: filter === "all" ? {} : { status: filter } })}>{filter}</button>)}
-        <button type="button" disabled={selected.size === 0 || deleteMessages.isPending} onClick={() => void deleteMessages.mutateAsync([...selected]).then(() => setSelected(new Set()))}>Delete selected</button>
+        {filters.map((filter) => (
+          <button
+            key={filter}
+            type="button"
+            aria-pressed={status === filter}
+            onClick={() =>
+              void navigate({ to: "/messages", search: filter === "all" ? {} : { status: filter } })
+            }
+          >
+            {filter}
+          </button>
+        ))}
+        <button
+          type="button"
+          disabled={selected.size === 0 || deleteMessages.isPending}
+          onClick={() =>
+            void deleteMessages.mutateAsync([...selected]).then(() => setSelected(new Set()))
+          }
+        >
+          Delete selected
+        </button>
       </div>
       {messages.isLoading ? <FeatureSkeleton /> : null}
       {messages.error ? <FeatureError message="Could not load the message queue." /> : null}
-      {!messages.isLoading && rows.length === 0 ? <FeatureEmpty title="No messages on the line">The booth has not sent recordings for this filter.</FeatureEmpty> : null}
+      {!messages.isLoading && rows.length === 0 ? (
+        <FeatureEmpty title="No messages on the line">
+          The booth has not sent recordings for this filter.
+        </FeatureEmpty>
+      ) : null}
       {rows.length === 0 ? null : (
         <div className="feature-table-wrap">
           <table className="feature-table">
             <caption>Message queue</caption>
-            <thead><tr><th>Select</th><th>Received at</th><th>Duration</th><th>Question</th><th>Transcript</th><th>Moderation</th><th>Status</th><th>Actions</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Select</th>
+                <th>Received at</th>
+                <th>Duration</th>
+                <th>Question</th>
+                <th>Transcript</th>
+                <th>Moderation</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
             <tbody>
               {rows.map((message: Message) => {
                 const badge = moderationBadge(message.latestModeration ?? null);
                 return (
                   <tr key={message.id}>
-                    <td><input aria-label={`Select message ${message.id}`} type="checkbox" checked={selected.has(message.id)} onChange={() => toggle(message.id)} /></td>
+                    <td>
+                      <input
+                        aria-label={`Select message ${message.id}`}
+                        type="checkbox"
+                        checked={selected.has(message.id)}
+                        onChange={() => toggle(message.id)}
+                      />
+                    </td>
                     <td>{date(message.receivedAt ?? message.createdAt)}</td>
                     <td>{duration(message.audio.durationMs)}</td>
-                    <td>{message.questionId === null || message.questionId === undefined ? "Unlinked" : promptById.get(message.questionId) ?? message.questionId}</td>
-                    <td className="feature-row-transcript" title={message.latestTranscription?.text ?? undefined}>{transcriptSnippet(message.latestTranscription ?? null)}</td>
-                    <td><span className={`feature-badge feature-badge--moderation-${badge.variant}`}>{badge.label}</span></td>
-                    <td><span className={`feature-badge feature-badge--${message.status}`}>{message.status}</span></td>
+                    <td>
+                      {message.questionId === null || message.questionId === undefined
+                        ? "Unlinked"
+                        : (promptById.get(message.questionId) ?? message.questionId)}
+                    </td>
+                    <td
+                      className="feature-row-transcript"
+                      title={message.latestTranscription?.text ?? undefined}
+                    >
+                      {transcriptSnippet(message.latestTranscription ?? null)}
+                    </td>
+                    <td>
+                      <span className={`feature-badge feature-badge--moderation-${badge.variant}`}>
+                        {badge.label}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`feature-badge feature-badge--${message.status}`}>
+                        {message.status}
+                      </span>
+                    </td>
                     <td className="feature-row-actions">
-                      <Link to="/messages/$id" params={{ id: message.id }}>Play</Link>
-                      <a href={message.audio.url} download>Download</a>
-                      <button type="button" onClick={() => void deleteMessage.mutateAsync(message.id)}>Delete</button>
+                      <Link to="/messages/$id" params={{ id: message.id }}>
+                        Play
+                      </Link>
+                      <a href={message.audio.url} download>
+                        Download
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => void deleteMessage.mutateAsync(message.id)}
+                      >
+                        Delete
+                      </button>
                     </td>
                   </tr>
                 );
