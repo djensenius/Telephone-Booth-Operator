@@ -87,26 +87,26 @@ const getEncryptionKey = (): Buffer => {
   return generatedEncryptionKey;
 };
 
-const signSessionId = (sessionId: string): string =>
-  createHmac("sha256", getSessionSecret()).update(sessionId).digest("base64url");
+const signValue = (payload: string): string =>
+  createHmac("sha256", getSessionSecret()).update(payload).digest("base64url");
 
-const signedCookieValue = (sessionId: string): string => `${sessionId}.${signSessionId(sessionId)}`;
+export const signedCookieValue = (payload: string): string => `${payload}.${signValue(payload)}`;
 
-const verifyCookieValue = (value: string | undefined): string | null => {
+export const verifyCookieValue = (value: string | undefined): string | null => {
   if (!value) return null;
   const separator = value.lastIndexOf(".");
   if (separator <= 0) return null;
 
-  const sessionId = value.slice(0, separator);
+  const payload = value.slice(0, separator);
   const signature = value.slice(separator + 1);
-  const expected = signSessionId(sessionId);
+  const expected = signValue(payload);
   const signatureBuffer = Buffer.from(signature);
   const expectedBuffer = Buffer.from(expected);
   if (signatureBuffer.length !== expectedBuffer.length) return null;
-  return timingSafeEqual(signatureBuffer, expectedBuffer) ? sessionId : null;
+  return timingSafeEqual(signatureBuffer, expectedBuffer) ? payload : null;
 };
 
-const cookieValueFromHeader = (
+export const cookieValueFromHeader = (
   cookieHeader: string | undefined,
   name: string,
 ): string | undefined => {
