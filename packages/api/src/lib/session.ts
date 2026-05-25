@@ -146,7 +146,8 @@ export const decryptSessionSecret = (encrypted: string | null | undefined): stri
   if (!encrypted) return null;
   const [version, ivRaw, tagRaw, ciphertextRaw] = encrypted.split(".");
   if (version !== "v1" || !ivRaw || !tagRaw || !ciphertextRaw) {
-    throw new Error("Invalid encrypted session secret format.");
+    // Legacy plaintext value stored before encryption was applied to this field.
+    return encrypted;
   }
 
   const decipher = createDecipheriv(
@@ -247,8 +248,8 @@ export const createSession = async (
     data: {
       id,
       userId: user.id,
-      idToken: tokens.id_token ?? null,
-      accessToken: tokens.access_token ?? null,
+      idToken: encryptSessionSecret(tokens.id_token),
+      accessToken: encryptSessionSecret(tokens.access_token),
       refreshToken: encryptSessionSecret(tokens.refresh_token),
       accessTokenExpiresAt: accessTokenExpiresAt(tokens),
       expiresAt: sessionExpiresAt(),
@@ -324,8 +325,8 @@ const refreshAccessToken = async (
     return await db.operatorSession.update({
       where: { id: session.id },
       data: {
-        accessToken: tokens.access_token ?? session.accessToken,
-        idToken: tokens.id_token ?? session.idToken,
+        accessToken: encryptSessionSecret(tokens.access_token) ?? session.accessToken,
+        idToken: encryptSessionSecret(tokens.id_token) ?? session.idToken,
         refreshToken: encryptSessionSecret(tokens.refresh_token ?? refreshToken),
         accessTokenExpiresAt: accessTokenExpiresAt(tokens),
         lastSeenAt: new Date(),

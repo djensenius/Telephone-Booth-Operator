@@ -13,6 +13,7 @@ import {
 } from "../lib/operator-user.js";
 import {
   createSession,
+  decryptSessionSecret,
   destroySession,
   readValidSession,
   setSessionCookie,
@@ -201,9 +202,10 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
 authRoutes.post("/logout", async (c) => {
   const session = await destroySession(c);
   let redirectTo = webRedirectUrl("/login");
-  if (session?.idToken && !getAuthConfig().disabled) {
+  const idToken = decryptSessionSecret(session?.idToken);
+  if (idToken && !getAuthConfig().disabled) {
     await getOidcClient();
-    redirectTo = endSessionUrl(session.idToken)?.toString() ?? redirectTo;
+    redirectTo = endSessionUrl(idToken)?.toString() ?? redirectTo;
   }
   return c.redirect(redirectTo, 302);
 });
