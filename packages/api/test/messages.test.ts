@@ -139,6 +139,33 @@ describe("messages routes", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects /complete when blob metadata is missing sha256", async () => {
+    const app = createApp();
+    const sha256 = "f".repeat(64);
+
+    const initiated = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({ durationMs: 3000, sha256 }),
+    });
+    expect(initiated.status).toBe(201);
+    const slot = await initiated.json();
+
+    fakeBlobs.set(slot.blobName, {
+      exists: true,
+      sizeBytes: 4242,
+      contentType: "audio/flac",
+      sha256: null,
+    });
+
+    const completed = await app.request(`/v1/messages/${slot.id}/complete`, {
+      method: "POST",
+      headers: phoneHeaders,
+    });
+    expect(completed.status).toBe(422);
+    await expect(completed.json()).resolves.toMatchObject({ error: "sha256_metadata_missing" });
+  });
+
   it("duplicate /complete is idempotent and does not reset status", async () => {
     const app = createApp();
     const sha256 = "d".repeat(64);

@@ -252,7 +252,7 @@ paths:
         "404": { description: not found }
         "409": { description: blob not found }
         "413": { description: audio blob exceeds maximum allowed size }
-        "422": { description: sha256 mismatch }
+        "422": { description: "sha256 metadata missing or mismatch" }
 
   /v1/messages/{id}/transcriptions:
     parameters:
