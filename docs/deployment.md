@@ -48,6 +48,28 @@ for example
 `YOUR_PASSWORD_HERE` with the generated value). For managed
 Postgres, set `DATABASE_URL` to the external provider's TLS connection string.
 
+## Production environment checklist
+
+Set these values before promoting a deployment beyond local development:
+
+- `POSTGRES_PASSWORD` — mandatory for the single-node Compose Postgres profile.
+- `SESSION_SECRET` and `SESSION_ENCRYPTION_KEY` — required in production for
+  signed cookies and encrypted refresh tokens.
+- `OIDC_ALLOWED_GROUPS` or `OIDC_ALLOWED_EMAILS` — at least one production
+  allow-list is required. The `AUTHENTIK_ALLOWED_GROUPS` and
+  `AUTHENTIK_ALLOWED_EMAILS` aliases are also accepted.
+- `OIDC_ALLOW_HTTP_ISSUER=true` — only if you intentionally use a non-HTTPS
+  issuer. Prefer HTTPS; production rejects HTTP issuers unless this explicit
+  override is set.
+- `MAX_AUDIO_BYTES` — maximum accepted recording size. The default is 25 MiB;
+  `/v1/messages/:id/complete` returns `413` when the uploaded blob exceeds it.
+- `TRANSCRIPTION_MAC_APP_URL`, `TRANSCRIPTION_MAC_APP_TOKEN`,
+  `MODERATION_MAC_APP_URL`, and `MODERATION_MAC_APP_TOKEN` — when using
+  `mac_app` providers, these point at an OpenAI-compatible upstream such as the
+  [`Telephone-Booth-Transcription`](https://github.com/djensenius/Telephone-Booth-Transcription)
+  macOS app. If that app binds off-loopback, its settings must include
+  `nonLoopbackBindAcknowledged=true`.
+
 Place a reverse proxy in front:
 
 - **API** on internal `:8787`, proxied at `https://operator.example.com/v1/*`

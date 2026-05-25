@@ -18,22 +18,22 @@ Architecture rationale lives in [ADR 0005](./adr/0005-ai-transcription-and-moder
 All settings live in environment variables. See `.env.example` for the
 authoritative list.
 
-| Variable                      | Default                  | Description                                            |
-| ----------------------------- | ------------------------ | ------------------------------------------------------ |
-| `TRANSCRIPTION_PROVIDER`      | `disabled`               | `openai`, `mac_app`, or `disabled`.                    |
-| `TRANSCRIPTION_OPENAI_MODEL`  | `whisper-1`              | Model passed to `/v1/audio/transcriptions`.            |
-| `TRANSCRIPTION_MAC_APP_URL`   | _empty_                  | HTTPS URL of the Mac app's transcription endpoint.     |
-| `TRANSCRIPTION_MAC_APP_TOKEN` | _empty_                  | Optional bearer token for the Mac app.                 |
-| `MODERATION_PROVIDER`         | `disabled`               | `openai`, `mac_app`, or `disabled`.                    |
-| `MODERATION_OPENAI_MODEL`     | `omni-moderation-latest` | Model passed to `/v1/moderations`.                     |
-| `MODERATION_MAC_APP_URL`      | _empty_                  | HTTPS URL of the Mac app's moderation endpoint.        |
-| `MODERATION_MAC_APP_TOKEN`    | _empty_                  | Optional bearer token for the Mac app.                 |
-| `OPENAI_API_KEY`              | _empty_                  | Shared key for both OpenAI endpoints.                  |
-| `OPENAI_BASE_URL`             | `https://api.openai.com` | Override for self-hosted OpenAI-compatible APIs.       |
-| `AUTO_DECISION_MODE`          | `always_pending`         | `always_pending`, `auto_reject`, or `auto_both`.       |
-| `AUTO_REJECT_THRESHOLD`       | `0.85`                   | Moderation score at which `auto_reject` triggers.      |
-| `AUTO_APPROVE_THRESHOLD`      | `0.15`                   | Max score below which `auto_both` will auto-approve.   |
-| `AI_SWEEPER_INTERVAL_SECONDS` | `60`                     | How often the recovery sweeper retries stuck messages. |
+| Variable                      | Default                  | Description                                               |
+| ----------------------------- | ------------------------ | --------------------------------------------------------- |
+| `TRANSCRIPTION_PROVIDER`      | `disabled`               | `openai`, `mac_app`, or `disabled`.                       |
+| `TRANSCRIPTION_OPENAI_MODEL`  | `whisper-1`              | Model passed to `/v1/audio/transcriptions`.               |
+| `TRANSCRIPTION_MAC_APP_URL`   | _empty_                  | Base or full URL for OpenAI-compatible Mac transcription. |
+| `TRANSCRIPTION_MAC_APP_TOKEN` | _empty_                  | Optional bearer token for the Mac app.                    |
+| `MODERATION_PROVIDER`         | `disabled`               | `openai`, `mac_app`, or `disabled`.                       |
+| `MODERATION_OPENAI_MODEL`     | `omni-moderation-latest` | Model passed to `/v1/moderations`.                        |
+| `MODERATION_MAC_APP_URL`      | _empty_                  | Base or full URL for OpenAI-compatible Mac moderation.    |
+| `MODERATION_MAC_APP_TOKEN`    | _empty_                  | Optional bearer token for the Mac app.                    |
+| `OPENAI_API_KEY`              | _empty_                  | Shared key for both OpenAI endpoints.                     |
+| `OPENAI_BASE_URL`             | `https://api.openai.com` | Override for self-hosted OpenAI-compatible APIs.          |
+| `AUTO_DECISION_MODE`          | `always_pending`         | `always_pending`, `auto_reject`, or `auto_both`.          |
+| `AUTO_REJECT_THRESHOLD`       | `0.85`                   | Moderation score at which `auto_reject` triggers.         |
+| `AUTO_APPROVE_THRESHOLD`      | `0.15`                   | Max score below which `auto_both` will auto-approve.      |
+| `AI_SWEEPER_INTERVAL_SECONDS` | `60`                     | How often the recovery sweeper retries stuck messages.    |
 
 A provider with `disabled` selected, or with credentials missing, is a
 no-op — the pipeline writes a `failed` row with `error = "disabled"` and
@@ -63,33 +63,35 @@ A `recommendation` is derived from the response: `flagged === true` or
 
 ## Mac app
 
-The Mac app at `../Telephone-Booth-Transcription` is currently a
-Hummingbird skeleton. The HTTP contract below is the source of truth —
-the app team implements it; the operator API speaks it.
+The Mac app in the
+[`Telephone-Booth-Transcription`](https://github.com/djensenius/Telephone-Booth-Transcription)
+repo exposes OpenAI-compatible HTTP endpoints. The operator reuses the same
+wire shapes as the OpenAI providers, with an optional bearer token from the
+matching `*_MAC_APP_TOKEN` variable.
 
 Set:
 
 ```env
 TRANSCRIPTION_PROVIDER=mac_app
 MODERATION_PROVIDER=mac_app
-TRANSCRIPTION_MAC_APP_URL=https://mac-app.example/transcribe
-MODERATION_MAC_APP_URL=https://mac-app.example/moderate
+TRANSCRIPTION_MAC_APP_URL=http://127.0.0.1:8089
+MODERATION_MAC_APP_URL=http://127.0.0.1:8089
 TRANSCRIPTION_MAC_APP_TOKEN=...  # optional
 MODERATION_MAC_APP_TOKEN=...     # optional
 ```
 
+`*_MAC_APP_URL` may be either the app's base URL or the full endpoint URL.
+If the Transcription host binds to a non-loopback address, its settings must
+explicitly acknowledge that by setting `nonLoopbackBindAcknowledged=true`.
+
 ### Transcription contract
 
-`POST` to `TRANSCRIPTION_MAC_APP_URL` with `Content-Type: application/json`
-and an optional `Authorization: Bearer <token>`. Request body:
-
-```json
-{
-  "audioUrl": "https://...sas",
-  "sha256": "<hex>",
-  "durationMs": 12345
-}
-```
+The operator downloads the recording from its short-lived SAS URL, enforces
+`MAX_AUDIO_BYTES`, then `POST`s multipart/form-data to
+`{TRANSCRIPTION_MAC_APP_URL}/v1/audio/transcriptions` (or the full URL if one
+was configured). The multipart body contains the `file` part and
+`response_format=verbose_json`; a `model` part is sent only when a mac-app
+provider model is configured by code.
 
 Expected response (HTTP 200):
 
@@ -101,30 +103,36 @@ Expected response (HTTP 200):
 ```
 
 `language` is optional. Non-2xx responses are recorded as a `failed`
-transcription with the response body in the `error` column.
+transcription without persisting the upstream response body.
 
 ### Moderation contract
 
-`POST` to `MODERATION_MAC_APP_URL` with the transcript:
+The operator `POST`s OpenAI-shaped JSON to
+`{MODERATION_MAC_APP_URL}/v1/moderations` (or the full URL if one was
+configured):
 
 ```json
-{ "text": "Hello world" }
+{ "input": "Hello world" }
 ```
 
 Expected response:
 
 ```json
 {
-  "flagged": false,
-  "recommendation": "approve",
-  "maxScore": 0.02,
-  "categories": { "hate": 0.01, "violence": 0.0 },
-  "reasonSummary": "Clean recording."
+  "id": "modr-local-...",
+  "model": "omni-moderation-latest",
+  "results": [
+    {
+      "flagged": false,
+      "categories": { "hate": false, "violence": false },
+      "category_scores": { "hate": 0.01, "violence": 0.0 }
+    }
+  ]
 }
 ```
 
-`recommendation` must be one of `approve`, `review`, or `reject`.
-`reasonSummary` is optional.
+The operator derives `recommendation`, `maxScore`, and stored category scores
+using the same threshold logic as the OpenAI moderation provider.
 
 ## Auto-decision modes
 
