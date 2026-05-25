@@ -104,14 +104,21 @@ describe("App shell", () => {
   it("matches the themed shell snapshot", async () => {
     const { container } = renderShell();
     await screen.findByText("Status");
+    // Exclude locale-dependent build date text from snapshot comparison
+    const timeEl = container.querySelector(".build-footer time");
+    const originalText = timeEl?.textContent;
+    if (timeEl) timeEl.textContent = "{{BUILD_DATE}}";
     expect(container.firstChild).toMatchSnapshot();
+    if (timeEl) timeEl.textContent = originalText ?? "";
   });
 
   it("shows the build date in the app shell", async () => {
     renderShell();
     await screen.findByText("Status");
     expect(screen.getByText("Build date")).toBeTruthy();
-    expect(screen.getByText("Jan 1, 1970, 12:00 AM")).toBeTruthy();
+    const timeEl = document.querySelector("time[datetime]");
+    expect(timeEl).toBeTruthy();
+    expect(timeEl!.getAttribute("datetime")).toBe("1970-01-01T00:00:00.000Z");
   });
 
   it("hides operator status and shortcut navigation before login", async () => {

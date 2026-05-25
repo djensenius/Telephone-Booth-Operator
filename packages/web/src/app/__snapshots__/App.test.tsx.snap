@@ -317,7 +317,7 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
     <time
       datetime="1970-01-01T00:00:00.000Z"
     >
-      Jan 1, 1970, 12:00 AM
+      {{BUILD_DATE}}
     </time>
   </footer>
   <aside

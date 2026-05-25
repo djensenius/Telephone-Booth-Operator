@@ -33,10 +33,9 @@ const loginSearchSchema = z.object({
   return_to: z.string().optional(),
 });
 
-const buildDateFormatter = new Intl.DateTimeFormat("en-US", {
+const buildDateFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
   timeStyle: "short",
-  timeZone: "UTC",
 });
 
 function BuildFooter(): JSX.Element {
