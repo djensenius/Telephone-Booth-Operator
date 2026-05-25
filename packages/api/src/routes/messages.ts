@@ -1,4 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
+import { Prisma } from "@prisma/client";
 import { MessageCreateSchema, MessageStatusSchema } from "@telephone-booth-operator/shared";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -90,31 +91,37 @@ messagesRouter.post("/", requireApiToken(), zValidator("json", MessageCreateSche
   }
 
   const blobName = messageBlobName(body.sha256);
-  const existingFile = await db.file.findUnique({ where: { sha256: body.sha256 } });
-  let file = existingFile;
-  if (file) {
-    const existingMessage = await db.message.findUnique({ where: { audioId: file.id } });
-    if (existingMessage) return c.json({ error: "message_already_exists" }, 409);
-  } else {
-    file = await db.file.create({
+  const file = await db.file.upsert({
+    where: { sha256: body.sha256 },
+    create: {
+      blobContainer: process.env.AZURE_BLOB_CONTAINER?.trim() || "booth-recordings",
+      blobKey: blobName,
+      sha256: body.sha256,
+      sizeBytes: 0,
+      durationMs: body.durationMs,
+      contentType: "audio/flac",
+    },
+    update: {},
+  });
+
+  const existingMessage = await db.message.findUnique({ where: { audioId: file.id } });
+  if (existingMessage) return c.json({ error: "message_already_exists" }, 409);
+
+  let message;
+  try {
+    message = await db.message.create({
       data: {
-        blobContainer: process.env.AZURE_BLOB_CONTAINER?.trim() || "booth-recordings",
-        blobKey: blobName,
-        sha256: body.sha256,
-        sizeBytes: 0,
-        durationMs: body.durationMs,
-        contentType: "audio/flac",
+        status: "uploading",
+        questionId: body.questionId ?? null,
+        audioId: file.id,
       },
     });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return c.json({ error: "message_already_exists" }, 409);
+    }
+    throw err;
   }
-
-  const message = await db.message.create({
-    data: {
-      status: "uploading",
-      questionId: body.questionId ?? null,
-      audioId: file.id,
-    },
-  });
   const sas = generateSasUrl(blobName, { permissions: "cw", contentType: "audio/flac" });
   return c.json({ id: message.id, uploadUrl: sas.url, blobName }, 201);
 });
