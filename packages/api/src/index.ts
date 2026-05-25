@@ -14,7 +14,7 @@ import { logger } from "hono/logger";
 import { pathToFileURL } from "node:url";
 import { startAiSweeper } from "./lib/ai/sweeper.js";
 import { startSnapshotPruner } from "./lib/snapshot-pruner.js";
-import { AuthConfigurationError, resolveAuthConfig } from "./lib/config.js";
+import { AuthConfigurationError, assertOidcIssuerAllowed, resolveAuthConfig } from "./lib/config.js";
 import { requireOperator, type AuthVariables } from "./lib/session.js";
 import apiTokensRouter from "./routes/api-tokens.js";
 import { authRoutes } from "./routes/auth.js";
@@ -81,6 +81,7 @@ const start = (): void => {
     if (authConfig.disabled && process.env.NODE_ENV === "production") {
       throw new AuthConfigurationError("AUTH_DISABLED=true is not allowed in production.");
     }
+    assertOidcIssuerAllowed(authConfig);
   } catch (error) {
     console.error(error instanceof Error ? error.message : "Invalid auth configuration.");
     process.exitCode = 1;

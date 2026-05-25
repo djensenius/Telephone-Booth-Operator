@@ -1,5 +1,25 @@
-import { afterEach, describe, expect, it } from "vite-plus/test";
-import { AuthConfigurationError, resolveAuthConfig } from "../src/lib/config.js";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+
+const { oidcMocks } = vi.hoisted(() => ({
+  oidcMocks: {
+    allowInsecureRequests: vi.fn(),
+    discovery: vi.fn(async () => ({ serverMetadata: () => ({}) })),
+  },
+}));
+
+vi.mock("openid-client", () => ({
+  ClientSecretPost: () => vi.fn(),
+  allowInsecureRequests: oidcMocks.allowInsecureRequests,
+  discovery: oidcMocks.discovery,
+}));
+
+import {
+  assertOidcIssuerAllowed,
+  AuthConfigurationError,
+  resolveAuthConfig,
+  resetAuthConfigForTests,
+} from "../src/lib/config.js";
+import { getOidcClient, resetOidcForTests } from "../src/lib/oidc.js";
 
 const baseEnv = {
   AUTHENTIK_ISSUER: "https://authentik.example/application/o/booth/",
@@ -10,9 +30,48 @@ const baseEnv = {
   AUTHENTIK_ALLOWED_GROUPS: "authentik-group",
 };
 
+const httpEnv = {
+  ...baseEnv,
+  AUTHENTIK_ISSUER: "http://authentik.example/application/o/booth/",
+};
+
+const ENV_KEYS = [
+  "AUTH_DISABLED",
+  "NODE_ENV",
+  "OIDC_ALLOW_HTTP_ISSUER",
+  "OIDC_ISSUER",
+  "OIDC_CLIENT_ID",
+  "OIDC_CLIENT_SECRET",
+  "OIDC_REDIRECT_URI",
+  "OIDC_POST_LOGOUT_REDIRECT_URI",
+  "OIDC_ALLOWED_GROUPS",
+  "AUTHENTIK_ISSUER",
+  "AUTHENTIK_CLIENT_ID",
+  "AUTHENTIK_CLIENT_SECRET",
+  "AUTHENTIK_REDIRECT_URI",
+  "AUTHENTIK_POST_LOGOUT_REDIRECT_URI",
+  "AUTHENTIK_ALLOWED_GROUPS",
+] as const;
+
 describe("OIDC config", () => {
+  const savedEnv: Record<string, string | undefined> = {};
+
+  for (const key of ENV_KEYS) {
+    savedEnv[key] = process.env[key];
+  }
+
   afterEach(() => {
-    delete process.env.AUTH_DISABLED;
+    for (const key of ENV_KEYS) {
+      if (savedEnv[key] === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = savedEnv[key];
+      }
+    }
+    oidcMocks.discovery.mockClear();
+    oidcMocks.allowInsecureRequests.mockClear();
+    resetOidcForTests();
+    resetAuthConfigForTests();
   });
 
   it("lets OIDC_* override AUTHENTIK_*", () => {
@@ -46,5 +105,49 @@ describe("OIDC config", () => {
       disabled: true,
       providerName: "Authentik",
     });
+  });
+
+  it("allows HTTP issuer in non-production environments", async () => {
+    process.env.NODE_ENV = "test";
+    process.env.OIDC_ISSUER = httpEnv.AUTHENTIK_ISSUER;
+    process.env.OIDC_CLIENT_ID = httpEnv.AUTHENTIK_CLIENT_ID;
+    process.env.OIDC_CLIENT_SECRET = httpEnv.AUTHENTIK_CLIENT_SECRET;
+    process.env.OIDC_REDIRECT_URI = httpEnv.AUTHENTIK_REDIRECT_URI;
+
+    const config = resolveAuthConfig(httpEnv);
+    expect(config.disabled).toBe(false);
+    if (config.disabled) throw new Error("unexpected");
+    expect(config.issuer).toBe("http://authentik.example/application/o/booth/");
+
+    await expect(getOidcClient()).resolves.toBeDefined();
+    expect(oidcMocks.discovery).toHaveBeenCalledOnce();
+    expect(oidcMocks.allowInsecureRequests).toHaveBeenCalledOnce();
+  });
+
+  it("rejects an HTTP issuer at startup in production without the escape hatch", () => {
+    process.env.NODE_ENV = "production";
+
+    const config = resolveAuthConfig(httpEnv);
+    expect(() => assertOidcIssuerAllowed(config)).toThrow(AuthConfigurationError);
+  });
+
+  it("allows an HTTP issuer at startup in production with the escape hatch", () => {
+    process.env.NODE_ENV = "production";
+    process.env.OIDC_ALLOW_HTTP_ISSUER = "true";
+
+    const config = resolveAuthConfig(httpEnv);
+    expect(() => assertOidcIssuerAllowed(config)).not.toThrow();
+  });
+
+  it("makes getOidcClient reject an HTTP issuer in production without the escape hatch", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.OIDC_ISSUER = httpEnv.AUTHENTIK_ISSUER;
+    process.env.OIDC_CLIENT_ID = httpEnv.AUTHENTIK_CLIENT_ID;
+    process.env.OIDC_CLIENT_SECRET = httpEnv.AUTHENTIK_CLIENT_SECRET;
+    process.env.OIDC_REDIRECT_URI = httpEnv.AUTHENTIK_REDIRECT_URI;
+
+    await expect(getOidcClient()).rejects.toThrow(AuthConfigurationError);
+    expect(oidcMocks.discovery).not.toHaveBeenCalled();
+    expect(oidcMocks.allowInsecureRequests).not.toHaveBeenCalled();
   });
 });
