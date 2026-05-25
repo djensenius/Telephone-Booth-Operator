@@ -53,12 +53,9 @@ export class MacAppModerationProvider implements ModerationProvider {
       body: JSON.stringify({ text: input.text }),
     });
     if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new ProviderError(
-        this.name,
-        `mac-app moderation failed: ${response.status} ${text.slice(0, 200)}`,
-        response.status,
-      );
+      // Discard response body — never include upstream text in errors.
+      await response.text().catch(() => "");
+      throw new ProviderError(this.name, "moderation_failed", response.status);
     }
     const raw = (await response.json().catch(() => ({}))) as MacAppModerationPayload;
     const recommendation =

@@ -44,12 +44,9 @@ export class MacAppTranscriptionProvider implements TranscriptionProvider {
       }),
     });
     if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new ProviderError(
-        this.name,
-        `mac-app transcription failed: ${response.status} ${text.slice(0, 200)}`,
-        response.status,
-      );
+      // Discard response body — never include upstream text in errors.
+      await response.text().catch(() => "");
+      throw new ProviderError(this.name, "transcription_failed", response.status);
     }
     const payload: unknown = await response.json().catch(() => ({}));
     const data = (typeof payload === "object" && payload !== null ? payload : {}) as {
@@ -57,7 +54,7 @@ export class MacAppTranscriptionProvider implements TranscriptionProvider {
       language?: unknown;
     };
     if (typeof data.text !== "string") {
-      throw new ProviderError(this.name, "mac-app transcription returned no text");
+      throw new ProviderError(this.name, "no_text_in_response");
     }
     // Allow empty transcripts through — the pipeline interprets an empty
     // string as a silent recording and advances the message into the
