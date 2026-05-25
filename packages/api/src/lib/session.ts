@@ -26,6 +26,7 @@ type TokenInput = Partial<TokenSet> & {
   id_token?: string;
   refresh_token?: string;
   expires_in?: number;
+  expiresIn?: () => number | undefined;
 };
 
 let generatedCookieSecret: string | null = null;
@@ -33,6 +34,7 @@ let warnedCookieSecret = false;
 let generatedEncryptionKey: Buffer | null = null;
 let warnedEncryptionKey = false;
 let cachedEncryptionKey: { raw: string; key: Buffer } | null = null;
+const pendingRefreshes = new Map<string, Promise<SessionUser | null>>();
 
 const warn = (message: string): void => {
   if (process.env.NODE_ENV !== "test") {
@@ -221,9 +223,17 @@ export const clearSessionCookie = (c: Context): void => {
   ]);
 };
 
-const tokenExpiresAt = (tokens: TokenInput): Date => {
-  const ttlSeconds =
-    tokens.expires_in ?? Number.parseInt(process.env.SESSION_TTL_SECONDS ?? "43200", 10);
+const ttlSecondsFromEnv = (name: string, fallback: number): number => {
+  const parsed = Number.parseInt(process.env[name] ?? String(fallback), 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const sessionExpiresAt = (): Date =>
+  new Date(Date.now() + Math.max(ttlSecondsFromEnv("SESSION_TTL_SECONDS", 43_200), 300) * 1000);
+
+const accessTokenExpiresAt = (tokens: TokenInput): Date | null => {
+  const ttlSeconds = tokens.expires_in ?? tokens.expiresIn?.();
+  if (ttlSeconds === undefined) return null;
   return new Date(Date.now() + Math.max(ttlSeconds, 60) * 1000);
 };
 
@@ -240,7 +250,8 @@ export const createSession = async (
       idToken: tokens.id_token ?? null,
       accessToken: tokens.access_token ?? null,
       refreshToken: encryptSessionSecret(tokens.refresh_token),
-      expiresAt: tokenExpiresAt(tokens),
+      accessTokenExpiresAt: accessTokenExpiresAt(tokens),
+      expiresAt: sessionExpiresAt(),
       ip: requestIp(request),
       userAgent: request.headers.get("user-agent"),
     },
@@ -272,6 +283,9 @@ export const readSessionFromCookieHeader = async (
 export const readSession = async (c: Context): Promise<SessionUser | null> =>
   readSessionFromCookieHeader(c.req.header("cookie"));
 
+export const sessionIsExpired = (session: Pick<OperatorSession, "expiresAt">): boolean =>
+  session.expiresAt.getTime() <= Date.now();
+
 export const destroySession = async (c: Context): Promise<SessionUser | null> => {
   const session = await readSession(c);
   clearSessionCookie(c);
@@ -284,8 +298,68 @@ export const destroySession = async (c: Context): Promise<SessionUser | null> =>
 const unauthorized = (c: Context) =>
   c.json({ error: "unauthenticated", login_url: "/v1/auth/login" }, 401);
 
-const refreshIfExpired = async (c: Context, session: SessionUser): Promise<SessionUser | null> => {
-  if (session.expiresAt.getTime() > Date.now() + 60_000) return session;
+const logRefreshFailure = (error: unknown): void => {
+  const payload =
+    error instanceof Error
+      ? {
+          level: "warn",
+          event: "auth_refresh_failed",
+          error: error.name,
+          message: error.message,
+        }
+      : {
+          level: "warn",
+          event: "auth_refresh_failed",
+          error: "UnknownError",
+        };
+  console.error(JSON.stringify(payload));
+};
+
+const refreshAccessToken = async (
+  session: SessionUser,
+  refreshToken: string,
+): Promise<SessionUser | null> => {
+  try {
+    const tokens = await refreshTokens(refreshToken);
+    return await db.operatorSession.update({
+      where: { id: session.id },
+      data: {
+        accessToken: tokens.access_token ?? session.accessToken,
+        idToken: tokens.id_token ?? session.idToken,
+        refreshToken: encryptSessionSecret(tokens.refresh_token ?? refreshToken),
+        accessTokenExpiresAt: accessTokenExpiresAt(tokens),
+        lastSeenAt: new Date(),
+      },
+      include: { user: true },
+    });
+  } catch (error) {
+    logRefreshFailure(error);
+    const current = await db.operatorSession.findUnique({
+      where: { id: session.id },
+      include: { user: true },
+    });
+    if (
+      current &&
+      !sessionIsExpired(current) &&
+      (!current.accessTokenExpiresAt ||
+        current.accessTokenExpiresAt.getTime() > Date.now() + 60_000)
+    ) {
+      return current;
+    }
+    return null;
+  }
+};
+
+const refreshIfAccessTokenExpired = async (
+  c: Context,
+  session: SessionUser,
+): Promise<SessionUser | null> => {
+  if (
+    !session.accessTokenExpiresAt ||
+    session.accessTokenExpiresAt.getTime() > Date.now() + 60_000
+  ) {
+    return session;
+  }
 
   const refreshToken = decryptSessionSecret(session.refreshToken);
   if (!refreshToken) {
@@ -293,25 +367,29 @@ const refreshIfExpired = async (c: Context, session: SessionUser): Promise<Sessi
     return null;
   }
 
-  try {
-    const tokens = await refreshTokens(refreshToken);
-    const updated = await db.operatorSession.update({
-      where: { id: session.id },
-      data: {
-        accessToken: tokens.access_token ?? session.accessToken,
-        idToken: tokens.id_token ?? session.idToken,
-        refreshToken: encryptSessionSecret(tokens.refresh_token ?? refreshToken),
-        expiresAt: tokenExpiresAt(tokens),
-        lastSeenAt: new Date(),
-      },
-      include: { user: true },
-    });
+  const refresh =
+    pendingRefreshes.get(session.id) ??
+    refreshAccessToken(session, refreshToken).finally(() => pendingRefreshes.delete(session.id));
+  pendingRefreshes.set(session.id, refresh);
+
+  const updated = await refresh;
+  if (updated) {
     setSessionCookie(c, updated.id, updated.expiresAt);
     return updated;
-  } catch {
+  }
+
+  await destroySession(c);
+  return null;
+};
+
+export const readValidSession = async (c: Context): Promise<SessionUser | null> => {
+  const session = await readSession(c);
+  if (!session) return null;
+  if (sessionIsExpired(session)) {
     await destroySession(c);
     return null;
   }
+  return refreshIfAccessTokenExpired(c, session);
 };
 
 const publicV1Route = (path: string, method: string): boolean => {
@@ -359,14 +437,11 @@ export const requireOperator =
       return;
     }
 
-    const session = await readSession(c);
+    const session = await readValidSession(c);
     if (!session) return unauthorized(c);
 
-    const refreshed = await refreshIfExpired(c, session);
-    if (!refreshed) return unauthorized(c);
-
-    c.set("user", refreshed.user);
-    c.set("session", refreshed);
+    c.set("user", session.user);
+    c.set("session", session);
     await next();
   };
 
@@ -376,6 +451,7 @@ export const resetSessionCryptoForTests = (): void => {
   generatedCookieSecret = null;
   generatedEncryptionKey = null;
   cachedEncryptionKey = null;
+  pendingRefreshes.clear();
   warnedCookieSecret = false;
   warnedEncryptionKey = false;
 };

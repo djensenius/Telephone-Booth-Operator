@@ -14,7 +14,7 @@ import {
 import {
   createSession,
   destroySession,
-  readSession,
+  readValidSession,
   setSessionCookie,
   type AuthVariables,
 } from "../lib/session.js";
@@ -119,7 +119,7 @@ const operatorMeFromUser = (user: {
   return OperatorMeSchema.parse(payload);
 };
 
-const operatorMe = (session: Awaited<ReturnType<typeof readSession>>) => {
+const operatorMe = (session: Awaited<ReturnType<typeof readValidSession>>) => {
   if (!session) return null;
   return operatorMeFromUser(session.user);
 };
@@ -221,7 +221,7 @@ authRoutes.get("/me", async (c) => {
     }
     return c.json(operatorMeFromUser(result.user));
   }
-  const session = await readSession(c);
+  const session = await readValidSession(c);
   const me = operatorMe(session);
   if (!me) {
     return c.json({ error: "unauthenticated", login_url: "/v1/auth/login" }, 401);

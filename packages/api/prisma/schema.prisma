@@ -165,19 +165,21 @@ model OperatorUser {
 }
 
 model OperatorSession {
-  id           String       @id
-  userId       String
-  user         OperatorUser @relation(fields: [userId], references: [id], onDelete: Cascade)
-  idToken      String?
-  accessToken  String?
-  refreshToken String?
-  expiresAt    DateTime
-  createdAt    DateTime     @default(now())
-  lastSeenAt   DateTime     @default(now())
-  ip           String?
-  userAgent    String?
+  id                   String       @id
+  userId               String
+  user                 OperatorUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  idToken              String?
+  accessToken          String?
+  refreshToken         String?
+  accessTokenExpiresAt DateTime?
+  expiresAt            DateTime
+  createdAt            DateTime     @default(now())
+  lastSeenAt           DateTime     @default(now())
+  ip                   String?
+  userAgent            String?
 
   @@index([userId])
+  @@index([accessTokenExpiresAt])
   @@index([expiresAt])
 }
 

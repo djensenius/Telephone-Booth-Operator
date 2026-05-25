@@ -9,6 +9,7 @@ import {
 } from "../components/booth/index.js";
 import { AboutScreen } from "../features/about/AboutScreen.js";
 import { LoginScreen } from "../features/auth/LoginScreen.js";
+import { LogoutButton } from "../features/auth/LogoutButton.js";
 import { RequireAuth } from "../features/auth/RequireAuth.js";
 import { useCurrentUser } from "../features/auth/useCurrentUser.js";
 import { DebugScreen } from "../features/debug/DebugScreen.js";
@@ -60,7 +61,7 @@ function AppLayout(): JSX.Element {
         Skip to content
       </a>
       <TelephoneBanner />
-      <div className="app-shell">
+      <div className={isAuthenticated ? "app-shell" : "app-shell app-shell--public"}>
         {isAuthenticated ? (
           <aside className="operator-sidebar" aria-label="Operator navigation">
             <BoothStatusBadge />
@@ -71,6 +72,10 @@ function AppLayout(): JSX.Element {
                   <li key={route.digit}>
                     {route.reserved === true ? (
                       <span className="operator-sidebar__reserved">{route.digit} · Reserved</span>
+                    ) : route.digit === "7" ? (
+                      <LogoutButton className="operator-sidebar__logout">
+                        {`${route.digit} · ${route.label}`}
+                      </LogoutButton>
                     ) : (
                       <a href={route.href}>{`${route.digit} · ${route.label}`}</a>
                     )}
