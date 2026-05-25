@@ -126,6 +126,19 @@ export const assertOidcIssuerAllowed = (
   }
 };
 
+export const assertAuthorizationConfigured = (
+  config: AuthConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): void => {
+  if (config.disabled) return;
+  if (env.NODE_ENV !== "production") return;
+  if (config.allowedGroups.length === 0 && config.allowedEmails.length === 0) {
+    throw new AuthConfigurationError(
+      "Production requires at least one authorization allow-list. Set OIDC_ALLOWED_GROUPS or OIDC_ALLOWED_EMAILS (or their AUTHENTIK_ equivalents).",
+    );
+  }
+};
+
 export const getAuthConfig = (): AuthConfig => {
   cachedConfig ??= resolveAuthConfig();
   return cachedConfig;

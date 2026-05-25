@@ -53,4 +53,17 @@ describe("auth guards", () => {
     expect(validateAuthorization(claims, ["operators"])).toMatch(/group/);
     expect(validateAuthorization(claims, ["admins"])).toBeNull();
   });
+
+  it("rejects access when no allow-lists are configured (fail closed)", () => {
+    process.env.AUTH_DISABLED = "false";
+    process.env.OIDC_ISSUER = "https://idp.example";
+    process.env.OIDC_CLIENT_ID = "client";
+    process.env.OIDC_CLIENT_SECRET = "secret";
+    process.env.OIDC_REDIRECT_URI = "https://api.example/v1/auth/callback";
+    delete process.env.OIDC_ALLOWED_EMAILS;
+    delete process.env.OIDC_ALLOWED_GROUPS;
+    resetAuthConfigForTests();
+
+    expect(validateAuthorization(claims, ["operators"])).toMatch(/allow-list/i);
+  });
 });

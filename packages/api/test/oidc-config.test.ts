@@ -14,6 +14,7 @@ vi.mock("openid-client", () => ({
 }));
 
 import {
+  assertAuthorizationConfigured,
   assertOidcIssuerAllowed,
   AuthConfigurationError,
   resolveAuthConfig,
@@ -149,5 +150,54 @@ describe("OIDC config", () => {
     await expect(getOidcClient()).rejects.toThrow(AuthConfigurationError);
     expect(oidcMocks.discovery).not.toHaveBeenCalled();
     expect(oidcMocks.allowInsecureRequests).not.toHaveBeenCalled();
+  });
+
+  it("rejects production startup when no allow-lists are configured", () => {
+    const config = resolveAuthConfig(baseEnv);
+    expect(config.disabled).toBe(false);
+    if (config.disabled) throw new Error("unexpected");
+
+    // Remove allowed groups to simulate misconfiguration
+    const noListConfig = resolveAuthConfig({
+      ...baseEnv,
+      AUTHENTIK_ALLOWED_GROUPS: "",
+    });
+    expect(noListConfig.disabled).toBe(false);
+    if (noListConfig.disabled) throw new Error("unexpected");
+
+    expect(() =>
+      assertAuthorizationConfigured(noListConfig, { NODE_ENV: "production" }),
+    ).toThrow(AuthConfigurationError);
+  });
+
+  it("allows production startup when allowed groups are configured", () => {
+    const config = resolveAuthConfig(baseEnv);
+    expect(() =>
+      assertAuthorizationConfigured(config, { NODE_ENV: "production" }),
+    ).not.toThrow();
+  });
+
+  it("allows production startup when only allowed emails are configured", () => {
+    const config = resolveAuthConfig({
+      ...baseEnv,
+      AUTHENTIK_ALLOWED_GROUPS: "",
+      OIDC_ALLOWED_EMAILS: "admin@example.com",
+    });
+    expect(() =>
+      assertAuthorizationConfigured(config, { NODE_ENV: "production" }),
+    ).not.toThrow();
+  });
+
+  it("skips allow-list check in non-production environments", () => {
+    const config = resolveAuthConfig({
+      ...baseEnv,
+      AUTHENTIK_ALLOWED_GROUPS: "",
+    });
+    expect(() =>
+      assertAuthorizationConfigured(config, { NODE_ENV: "test" }),
+    ).not.toThrow();
+    expect(() =>
+      assertAuthorizationConfigured(config, {}),
+    ).not.toThrow();
   });
 });
