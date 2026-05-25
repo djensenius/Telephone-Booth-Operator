@@ -1,6 +1,5 @@
-// Mac-app moderation stub. POSTs `{ text }` to the configured URL and expects
-// `{ flagged, recommendation, maxScore, categories, reasonSummary? }`.
-// Contract documented in `docs/transcription-providers.md`.
+// Mac-app moderation provider. POSTs OpenAI-shaped JSON to the Transcription
+// macOS app's OpenAI-compatible moderation endpoint.
 
 import type { ModerationInput, ModerationProvider, ModerationResult } from "./types.js";
 import { ProviderError } from "./types.js";
@@ -10,69 +9,128 @@ export interface MacAppModerationOptions {
   readonly token: string | null;
   readonly fetchImpl?: typeof fetch;
   readonly model?: string;
+  readonly rejectThreshold: number;
+  readonly approveThreshold: number;
 }
 
-interface MacAppModerationPayload {
-  readonly flagged?: unknown;
-  readonly recommendation?: unknown;
-  readonly maxScore?: unknown;
-  readonly categories?: unknown;
+interface OpenAiModerationCategoryMap {
+  readonly [category: string]: boolean;
+}
+
+interface OpenAiModerationScoreMap {
+  readonly [category: string]: number;
+}
+
+interface OpenAiModerationResult {
+  readonly flagged: boolean;
+  readonly categories: OpenAiModerationCategoryMap;
+  readonly category_scores: OpenAiModerationScoreMap;
   readonly reasonSummary?: unknown;
+  readonly reason_summary?: unknown;
 }
 
-const toCategoryMap = (raw: unknown): Record<string, number> => {
-  if (typeof raw !== "object" || raw === null) return {};
-  const map: Record<string, number> = {};
-  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof value === "number") map[key] = value;
-  }
-  return map;
+interface OpenAiModerationResponse {
+  readonly results?: readonly OpenAiModerationResult[];
+  readonly reasonSummary?: unknown;
+  readonly reason_summary?: unknown;
+}
+
+const moderationPath = "/v1/moderations";
+
+const endpointFromUrl = (rawUrl: string): string => {
+  const trimmed = rawUrl.trim().replace(/\/+$/, "");
+  if (trimmed.endsWith(moderationPath)) return trimmed;
+  if (trimmed.endsWith("/v1")) return `${trimmed}/moderations`;
+  return `${trimmed}${moderationPath}`;
+};
+
+const isModerationResponse = (payload: unknown): payload is OpenAiModerationResponse =>
+  typeof payload === "object" &&
+  payload !== null &&
+  Array.isArray((payload as { results?: unknown }).results);
+
+const readReasonSummary = (
+  payload: OpenAiModerationResponse | OpenAiModerationResult,
+): string | undefined => {
+  if (typeof payload.reasonSummary === "string") return payload.reasonSummary;
+  if (typeof payload.reason_summary === "string") return payload.reason_summary;
+  return undefined;
 };
 
 export class MacAppModerationProvider implements ModerationProvider {
   readonly name = "mac_app" as const;
   readonly model: string;
-  readonly #url: string;
+  readonly #endpoint: string;
   readonly #token: string | null;
   readonly #fetch: typeof fetch;
+  readonly #upstreamModel: string | null;
+  readonly #rejectThreshold: number;
+  readonly #approveThreshold: number;
 
   constructor(opts: MacAppModerationOptions) {
     this.model = opts.model ?? "mac-app";
-    this.#url = opts.url;
+    this.#endpoint = endpointFromUrl(opts.url);
     this.#token = opts.token;
     this.#fetch = opts.fetchImpl ?? fetch;
+    this.#upstreamModel = opts.model ?? null;
+    this.#rejectThreshold = opts.rejectThreshold;
+    this.#approveThreshold = opts.approveThreshold;
   }
 
   async moderate(input: ModerationInput): Promise<ModerationResult> {
-    const response = await this.#fetch(this.#url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...(this.#token ? { authorization: `Bearer ${this.#token}` } : {}),
-      },
-      body: JSON.stringify({ text: input.text }),
-    });
+    let response: Response;
+    try {
+      response = await this.#fetch(this.#endpoint, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(this.#token ? { authorization: `Bearer ${this.#token}` } : {}),
+        },
+        body: JSON.stringify({
+          ...(this.#upstreamModel ? { model: this.#upstreamModel } : {}),
+          input: input.text,
+        }),
+      });
+    } catch {
+      throw new ProviderError(this.name, "moderation_failed");
+    }
     if (!response.ok) {
       // Discard response body — never include upstream text in errors.
       await response.text().catch(() => "");
       throw new ProviderError(this.name, "moderation_failed", response.status);
     }
-    const raw = (await response.json().catch(() => ({}))) as MacAppModerationPayload;
-    const recommendation =
-      raw.recommendation === "approve" ||
-      raw.recommendation === "reject" ||
-      raw.recommendation === "review"
-        ? raw.recommendation
-        : "review";
-    const flagged = typeof raw.flagged === "boolean" ? raw.flagged : recommendation === "reject";
-    const maxScore =
-      typeof raw.maxScore === "number" && raw.maxScore >= 0 && raw.maxScore <= 1 ? raw.maxScore : 0;
+    const payload: unknown = await response.json().catch(() => ({}));
+    if (
+      !isModerationResponse(payload) ||
+      payload.results === undefined ||
+      payload.results.length === 0
+    ) {
+      throw new ProviderError(this.name, "no_results_in_response");
+    }
+    const first = payload.results[0];
+    if (first === undefined) {
+      throw new ProviderError(this.name, "no_results_in_response");
+    }
+    const scores = first.category_scores;
+    let maxScore = 0;
+    for (const value of Object.values(scores)) {
+      if (typeof value === "number" && value > maxScore) {
+        maxScore = value;
+      }
+    }
+    const recommendation: "approve" | "review" | "reject" =
+      first.flagged || maxScore >= this.#rejectThreshold
+        ? "reject"
+        : maxScore <= this.#approveThreshold
+          ? "approve"
+          : "review";
+    const reasonSummary = readReasonSummary(first) ?? readReasonSummary(payload);
     return {
-      flagged,
+      flagged: first.flagged,
       recommendation,
       maxScore,
-      categories: toCategoryMap(raw.categories),
-      ...(typeof raw.reasonSummary === "string" ? { reasonSummary: raw.reasonSummary } : {}),
+      categories: scores,
+      ...(reasonSummary === undefined ? {} : { reasonSummary }),
     };
   }
 }

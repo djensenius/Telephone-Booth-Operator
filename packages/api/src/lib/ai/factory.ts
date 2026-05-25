@@ -27,6 +27,7 @@ export const buildTranscriptionProvider = (
       return new MacAppTranscriptionProvider({
         url: config.transcriptionMacAppUrl,
         token: config.transcriptionMacAppToken,
+        maxAudioBytes: config.maxAudioBytes,
       });
   }
 };
@@ -51,6 +52,8 @@ export const buildModerationProvider = (
       return new MacAppModerationProvider({
         url: config.moderationMacAppUrl,
         token: config.moderationMacAppToken,
+        rejectThreshold: config.autoRejectThreshold,
+        approveThreshold: config.autoApproveThreshold,
       });
   }
 };
