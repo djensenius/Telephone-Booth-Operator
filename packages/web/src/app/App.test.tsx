@@ -111,7 +111,9 @@ describe("App shell", () => {
     renderShell();
     await screen.findByText("Status");
     expect(screen.getByText("Build date")).toBeTruthy();
-    expect(screen.getByText("Jan 1, 1970, 12:00 AM")).toBeTruthy();
+    const timeEl = document.querySelector("time[datetime]");
+    expect(timeEl).toBeTruthy();
+    expect(timeEl!.getAttribute("datetime")).toBe("1970-01-01T00:00:00.000Z");
   });
 
   it("hides operator status and shortcut navigation before login", async () => {
