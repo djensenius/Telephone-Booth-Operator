@@ -112,6 +112,20 @@ export const resolveAuthConfig = (env: NodeJS.ProcessEnv = process.env): AuthCon
 
 let cachedConfig: AuthConfig | null = null;
 
+export const isHttpOidcIssuer = (config: AuthConfig): config is OidcRuntimeConfig =>
+  !config.disabled && new URL(config.issuer).protocol === "http:";
+
+export const assertOidcIssuerAllowed = (
+  config: AuthConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): void => {
+  if (isHttpOidcIssuer(config) && env.NODE_ENV === "production" && env.OIDC_ALLOW_HTTP_ISSUER !== "true") {
+    throw new AuthConfigurationError(
+      "HTTP OIDC issuers are not allowed in production. Use an HTTPS issuer URL or set OIDC_ALLOW_HTTP_ISSUER=true (not recommended).",
+    );
+  }
+};
+
 export const getAuthConfig = (): AuthConfig => {
   cachedConfig ??= resolveAuthConfig();
   return cachedConfig;

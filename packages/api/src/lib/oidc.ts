@@ -6,7 +6,12 @@ import type {
   TokenEndpointResponse,
   TokenEndpointResponseHelpers,
 } from "openid-client";
-import { getRequiredOidcConfig, resetAuthConfigForTests } from "./config.js";
+import {
+  assertOidcIssuerAllowed,
+  getRequiredOidcConfig,
+  isHttpOidcIssuer,
+  resetAuthConfigForTests,
+} from "./config.js";
 
 export type Client = Configuration;
 export type TokenSet = TokenEndpointResponse & TokenEndpointResponseHelpers;
@@ -33,6 +38,8 @@ export const getOidcClient = async (): Promise<Client> => {
     return cachedClient.client;
   }
 
+  assertOidcIssuerAllowed(config);
+
   const client = await oidc.discovery(
     new URL(config.issuer),
     config.clientId,
@@ -44,15 +51,7 @@ export const getOidcClient = async (): Promise<Client> => {
     oidc.ClientSecretPost(config.clientSecret),
   );
 
-  if (new URL(config.issuer).protocol === "http:") {
-    const isProduction = process.env.NODE_ENV === "production";
-    const allowHttp = process.env.OIDC_ALLOW_HTTP_ISSUER === "true";
-    if (isProduction && !allowHttp) {
-      throw new Error(
-        "Refusing to use an HTTP OIDC issuer in production. " +
-          "Use an HTTPS issuer or set OIDC_ALLOW_HTTP_ISSUER=true (not recommended).",
-      );
-    }
+  if (isHttpOidcIssuer(config)) {
     oidc.allowInsecureRequests(client);
   }
 
