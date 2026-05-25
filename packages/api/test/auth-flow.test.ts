@@ -117,8 +117,8 @@ vi.mock("openid-client", () => ({
 import { app } from "../src/index.js";
 import { resetAuthConfigForTests } from "../src/lib/config.js";
 import { resetOidcForTests } from "../src/lib/oidc.js";
+import { decryptSessionSecret, resetSessionCryptoForTests } from "../src/lib/session.js";
 import { resetAuthRouteStateForTests } from "../src/routes/auth.js";
-import { resetSessionCryptoForTests } from "../src/lib/session.js";
 
 const cookieFrom = (res: Response): string => {
   const cookie = res.headers.get("set-cookie");
@@ -229,7 +229,8 @@ describe("auth flow", () => {
     expect(me.status).toBe(200);
     expect(openidMocks.refreshTokenGrant).toHaveBeenCalledTimes(1);
     const refreshedSession = onlySession();
-    expect(refreshedSession.accessToken).toBe("new-access-token");
+    expect(refreshedSession.accessToken).not.toBe("new-access-token");
+    expect(decryptSessionSecret(refreshedSession.accessToken as string)).toBe("new-access-token");
     expect(refreshedSession.expiresAt).toBe(originalSessionExpiry);
     expect(me.headers.get("set-cookie")).toContain("__Host-booth_session=");
   });
