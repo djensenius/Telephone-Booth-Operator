@@ -12,7 +12,8 @@ function jsonResponse(body: unknown): Response {
   });
 }
 
-function installFetch(): void {
+function installFetch(options: { readonly authenticated?: boolean } = {}): void {
+  const authenticated = options.authenticated ?? true;
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL) => {
@@ -20,13 +21,18 @@ function installFetch(): void {
         input instanceof URL ? input.toString() : typeof input === "string" ? input : input.url;
       if (url.endsWith("/v1/auth/me"))
         return Promise.resolve(
-          jsonResponse({
-            id: "user-1",
-            email: "operator@example.com",
-            name: "Jane Operator",
-            groups: [],
-            providerName: "Authentik",
-          }),
+          authenticated
+            ? jsonResponse({
+                id: "user-1",
+                email: "operator@example.com",
+                name: "Jane Operator",
+                groups: [],
+                providerName: "Authentik",
+              })
+            : new Response(JSON.stringify({ error: "unauthenticated" }), {
+                status: 401,
+                headers: { "Content-Type": "application/json" },
+              }),
         );
       if (url.endsWith("/v1/status/history?limit=50"))
         return Promise.resolve(
@@ -106,6 +112,15 @@ describe("App shell", () => {
     await screen.findByText("Status");
     expect(screen.getByText("Build date")).toBeTruthy();
     expect(screen.getByText("Jan 1, 1970, 12:00 AM")).toBeTruthy();
+  });
+
+  it("hides operator status and shortcut navigation before login", async () => {
+    installFetch({ authenticated: false });
+    renderShell("/login");
+    await screen.findByRole("heading", { name: "Sign in to connect" });
+    expect(screen.queryByText("Booth status")).toBeNull();
+    expect(screen.queryByText("Shortcuts")).toBeNull();
+    expect(screen.queryByLabelText("Operator navigation")).toBeNull();
   });
 
   it("has no critical axe violations", async () => {

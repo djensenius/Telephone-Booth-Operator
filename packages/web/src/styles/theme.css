@@ -620,18 +620,6 @@ textarea:focus-visible,
   fill: var(--accent-red);
 }
 
-.login-screen__phone-slot,
-.login-screen__phone-cord {
-  fill: none;
-  stroke: var(--surface-panel-raised);
-  stroke-linecap: round;
-  stroke-width: 8px;
-}
-
-.login-screen__phone-cord {
-  stroke-width: 6px;
-}
-
 .line-busy-placard {
   position: fixed;
   inset-block-start: 26%;

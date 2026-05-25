@@ -17,7 +17,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
   );
 }
 
-export function useNumericNavigation(): void {
+export function useNumericNavigation(enabled = true): void {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const chordPrefix = useRef(false);
@@ -115,10 +115,15 @@ export function useNumericNavigation(): void {
       }
     }
 
+    if (!enabled) {
+      clearChord();
+      return undefined;
+    }
+
     document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
       clearChord();
     };
-  }, [navigate, queryClient]);
+  }, [enabled, navigate, queryClient]);
 }
