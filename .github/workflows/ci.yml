@@ -46,12 +46,11 @@ jobs:
           node-version-file: ".node-version"
           cache: true
           run-install: false
-      - run: corepack enable && corepack prepare pnpm@9.15.0 --activate
       - run: vp install --frozen-lockfile
       - name: Prisma generate
-        run: pnpm --filter @telephone-booth-operator/api exec prisma generate
+        run: vp exec -F @telephone-booth-operator/api -- prisma generate
       - name: Prisma migrate (dry-run via deploy)
-        run: pnpm --filter @telephone-booth-operator/api exec prisma migrate deploy
+        run: vp exec -F @telephone-booth-operator/api -- prisma migrate deploy
       - run: vp run -r typecheck
       - run: vp run -r lint
       - run: vp run -r test
