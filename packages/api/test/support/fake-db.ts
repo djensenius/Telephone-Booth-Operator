@@ -844,6 +844,7 @@ export const fakeDb = {
     count: async ({ where = {} }: { where?: Record<string, unknown> } = {}) =>
       [...store.callSessions.values()].filter((session) => matchesWhere(session, where)).length,
   },
+  $transaction: async <T>(fn: (tx: typeof fakeDb) => Promise<T>): Promise<T> => fn(fakeDb),
 };
 
 const matchesWhere = (record: Record<string, unknown>, where: Record<string, unknown>): boolean => {
