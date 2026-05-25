@@ -31,6 +31,7 @@ jobs:
           node-version-file: ".node-version"
           cache: true
           run-install: false
+      - run: corepack enable && corepack prepare pnpm@9.15.0 --activate
       - run: vp install --frozen-lockfile
       - run: docker compose up -d azurite
       - name: Wait for services
