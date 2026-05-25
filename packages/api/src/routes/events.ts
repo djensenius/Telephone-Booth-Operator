@@ -192,8 +192,7 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
     return c.json({ error: "batch_too_large", limit: BOOTH_EVENT_BATCH_MAX }, 400);
   }
 
-  // 1. Upsert any call sessions the batch references. We do this *before*
-  //    the events insert so the FK is satisfied.
+  // 1. Collect session derivation data from the batch.
   const sessionInits = new Map<string, Partial<StoredCallSession>>();
   for (const event of events) {
     const start = callStartedData(event);
@@ -201,39 +200,7 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
     const end = callEndedData(event);
     if (end) sessionInits.set(end.id!, { ...sessionInits.get(end.id!), ...end });
   }
-  for (const init of sessionInits.values()) {
-    if (!init.id || !init.boothId || !init.bootId) continue;
-    const startedAt = init.startedAt ?? new Date();
-    await db.callSession.upsert({
-      where: { id: init.id },
-      create: {
-        id: init.id,
-        boothId: init.boothId,
-        bootId: init.bootId,
-        startedAt,
-        endedAt: init.endedAt ?? null,
-        digitsDialed: init.digitsDialed ?? null,
-        outcome: init.outcome ?? null,
-        recordingId: init.recordingId ?? null,
-        durationMs: init.durationMs ?? null,
-      },
-      update: {
-        // Never overwrite startedAt; never null-out fields that the event
-        // didn't carry.
-        ...(init.endedAt ? { endedAt: init.endedAt } : {}),
-        ...(init.digitsDialed !== undefined && init.digitsDialed !== null
-          ? { digitsDialed: init.digitsDialed }
-          : {}),
-        ...(init.outcome ? { outcome: init.outcome } : {}),
-        ...(init.recordingId ? { recordingId: init.recordingId } : {}),
-        ...(init.durationMs !== undefined && init.durationMs !== null
-          ? { durationMs: init.durationMs }
-          : {}),
-      },
-    });
-  }
 
-  // 2. Bulk insert the events idempotently on (boothId, eventId).
   const rows = events.map((event) => ({
     eventId: event.eventId,
     boothId: event.boothId,
@@ -244,15 +211,54 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
     recordingId: event.recordingId ?? null,
     payload: event.payload ?? {},
   }));
-  const inserted = await db.boothEvent.createMany({
-    data: rows,
-    skipDuplicates: true,
+
+  // 2. Atomically upsert sessions and insert events in a single transaction.
+  //    If either step fails the entire batch is rolled back — no orphan
+  //    sessions without source events.
+  const inserted = await db.$transaction(async (tx) => {
+    for (const init of sessionInits.values()) {
+      if (!init.id || !init.boothId || !init.bootId) continue;
+      const startedAt = init.startedAt ?? new Date();
+      await tx.callSession.upsert({
+        where: { id: init.id },
+        create: {
+          id: init.id,
+          boothId: init.boothId,
+          bootId: init.bootId,
+          startedAt,
+          endedAt: init.endedAt ?? null,
+          digitsDialed: init.digitsDialed ?? null,
+          outcome: init.outcome ?? null,
+          recordingId: init.recordingId ?? null,
+          durationMs: init.durationMs ?? null,
+        },
+        update: {
+          // Never overwrite startedAt; never null-out fields that the event
+          // didn't carry.
+          ...(init.endedAt ? { endedAt: init.endedAt } : {}),
+          ...(init.digitsDialed !== undefined && init.digitsDialed !== null
+            ? { digitsDialed: init.digitsDialed }
+            : {}),
+          ...(init.outcome ? { outcome: init.outcome } : {}),
+          ...(init.recordingId ? { recordingId: init.recordingId } : {}),
+          ...(init.durationMs !== undefined && init.durationMs !== null
+            ? { durationMs: init.durationMs }
+            : {}),
+        },
+      });
+    }
+
+    return tx.boothEvent.createMany({
+      data: rows,
+      skipDuplicates: true,
+    });
   });
+
   const accepted = inserted.count;
   const duplicates = events.length - accepted;
 
-  // 3. Broadcast newly-inserted events to SSE subscribers. We fetch them
-  //    back so subscribers see the operator-stamped `id` and `receivedAt`.
+  // 3. Broadcast newly-inserted events to SSE subscribers only after the
+  //    transaction has committed successfully.
   if (accepted > 0) {
     const recent = await db.boothEvent.findMany({
       where: {
