@@ -121,9 +121,33 @@ import { resetAuthRouteStateForTests } from "../src/routes/auth.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 
 const cookieFrom = (res: Response): string => {
-  const cookie = res.headers.get("set-cookie");
-  if (!cookie) throw new Error("missing set-cookie");
-  return cookie.split(";")[0] ?? cookie;
+  const cookies = res.headers.getSetCookie();
+  for (const entry of cookies) {
+    if (entry.startsWith("__Host-booth_session=")) {
+      return entry.split(";")[0] ?? entry;
+    }
+  }
+  for (const entry of cookies) {
+    if (entry.startsWith("booth_session=")) {
+      return entry.split(";")[0] ?? entry;
+    }
+  }
+  throw new Error("missing session cookie");
+};
+
+const loginTxCookieFrom = (res: Response): string => {
+  const cookies = res.headers.getSetCookie();
+  for (const entry of cookies) {
+    if (entry.startsWith("__Host-booth_login_tx=")) {
+      return entry.split(";")[0] ?? entry;
+    }
+  }
+  for (const entry of cookies) {
+    if (entry.startsWith("booth_login_tx=")) {
+      return entry.split(";")[0] ?? entry;
+    }
+  }
+  throw new Error("missing login-tx cookie");
 };
 
 const onlySession = (): Record<string, unknown> => {
@@ -162,9 +186,11 @@ describe("auth flow", () => {
     expect(login.status).toBe(302);
     expect(login.headers.get("location")).toContain("https://idp.example/authorize");
     expect(login.headers.get("location")).toContain("state=state-1");
+    const loginTxCookie = loginTxCookieFrom(login);
 
     const callback = await app.request(
       "http://127.0.0.1/v1/auth/callback?code=code-1&state=state-1",
+      { headers: { cookie: loginTxCookie } },
     );
     expect(callback.status, await callback.clone().text()).toBe(302);
     expect(callback.headers.get("location")).toBe("http://localhost:5173/dashboard");
@@ -215,9 +241,11 @@ describe("auth flow", () => {
   });
 
   it("refreshes an expired access token without shortening the browser session", async () => {
-    await app.request("/v1/auth/login");
+    const login = await app.request("/v1/auth/login");
+    const loginTxCookie = loginTxCookieFrom(login);
     const callback = await app.request(
       "http://127.0.0.1/v1/auth/callback?code=code-1&state=state-1",
+      { headers: { cookie: loginTxCookie } },
     );
     const cookie = cookieFrom(callback);
     const session = onlySession();
@@ -235,9 +263,11 @@ describe("auth flow", () => {
   });
 
   it("shares one refresh across parallel requests for the same session", async () => {
-    await app.request("/v1/auth/login");
+    const login = await app.request("/v1/auth/login");
+    const loginTxCookie = loginTxCookieFrom(login);
     const callback = await app.request(
       "http://127.0.0.1/v1/auth/callback?code=code-1&state=state-1",
+      { headers: { cookie: loginTxCookie } },
     );
     const cookie = cookieFrom(callback);
     const session = onlySession();
@@ -269,5 +299,32 @@ describe("auth flow", () => {
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
     expect(openidMocks.refreshTokenGrant).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects callback without login transaction cookie", async () => {
+    await app.request("/v1/auth/login");
+
+    const callback = await app.request(
+      "http://127.0.0.1/v1/auth/callback?code=code-1&state=state-1",
+    );
+
+    expect(callback.status).toBe(400);
+    const body = await callback.text();
+    expect(body).toContain("Login transaction cookie missing or mismatched");
+  });
+
+  it("rejects callback with mismatched login transaction cookie", async () => {
+    const login = await app.request("/v1/auth/login");
+    const loginTxCookie = loginTxCookieFrom(login);
+
+    // Use a different state value than the one in the cookie
+    const callback = await app.request(
+      "http://127.0.0.1/v1/auth/callback?code=code-1&state=wrong-state",
+      { headers: { cookie: loginTxCookie } },
+    );
+
+    expect(callback.status).toBe(400);
+    const body = await callback.text();
+    expect(body).toContain("Login transaction cookie missing or mismatched");
   });
 });

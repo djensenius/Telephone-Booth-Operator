@@ -16,6 +16,9 @@ import {
   destroySession,
   readValidSession,
   setSessionCookie,
+  signedCookieValue,
+  verifyCookieValue,
+  cookieValueFromHeader,
   type AuthVariables,
 } from "../lib/session.js";
 
@@ -52,6 +55,9 @@ const prunePendingLogins = (): void => {
   }
 };
 
+const LOGIN_TX_COOKIE_NAME = "__Host-booth_login_tx";
+const DEV_LOGIN_TX_COOKIE_NAME = "booth_login_tx";
+
 const safeReturnTo = (input: string | undefined): string => {
   if (!input) return "/";
   if (!input.startsWith("/") || input.startsWith("//")) return "/";
@@ -74,6 +80,72 @@ const webRedirectBase = (): URL => {
 
 const webRedirectUrl = (returnTo: string): string =>
   new URL(returnTo, webRedirectBase()).toString();
+
+const isLocalHostname = (hostname: string): boolean =>
+  hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+
+const isLocalFromUrl = (url: string): boolean => {
+  try {
+    return isLocalHostname(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+};
+
+const appendCookieHeader = (c: { header: (name: string, value: string, options?: { append: boolean }) => void }, parts: string[]): void => {
+  c.header("Set-Cookie", parts.join("; "), { append: true });
+};
+
+const setLoginTxCookie = (c: Parameters<typeof appendCookieHeader>[0] & { req: { url: string } }, state: string): void => {
+  const signed = encodeURIComponent(signedCookieValue(state));
+  const maxAge = String(Math.floor(pendingLoginTtlMs / 1000));
+  appendCookieHeader(c, [
+    `${LOGIN_TX_COOKIE_NAME}=${signed}`,
+    "Path=/v1/auth",
+    `Max-Age=${maxAge}`,
+    "HttpOnly",
+    "SameSite=Lax",
+    "Secure",
+  ]);
+
+  if (process.env.NODE_ENV === "production" || !isLocalFromUrl(c.req.url)) return;
+  appendCookieHeader(c, [
+    `${DEV_LOGIN_TX_COOKIE_NAME}=${signed}`,
+    "Path=/v1/auth",
+    `Max-Age=${maxAge}`,
+    "HttpOnly",
+    "SameSite=Lax",
+  ]);
+};
+
+const clearLoginTxCookie = (c: Parameters<typeof appendCookieHeader>[0] & { req: { url: string } }): void => {
+  appendCookieHeader(c, [
+    `${LOGIN_TX_COOKIE_NAME}=`,
+    "Path=/v1/auth",
+    "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
+    "HttpOnly",
+    "SameSite=Lax",
+    "Secure",
+  ]);
+
+  if (process.env.NODE_ENV === "production" || !isLocalFromUrl(c.req.url)) return;
+  appendCookieHeader(c, [
+    `${DEV_LOGIN_TX_COOKIE_NAME}=`,
+    "Path=/v1/auth",
+    "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
+    "HttpOnly",
+    "SameSite=Lax",
+  ]);
+};
+
+const readLoginTxCookie = (cookieHeader: string | undefined): string | null => {
+  const raw =
+    cookieValueFromHeader(cookieHeader, LOGIN_TX_COOKIE_NAME) ??
+    (process.env.NODE_ENV !== "production"
+      ? cookieValueFromHeader(cookieHeader, DEV_LOGIN_TX_COOKIE_NAME)
+      : undefined);
+  return verifyCookieValue(raw ? decodeURIComponent(raw) : undefined);
+};
 
 const html = (title: string, detail: string): string => `<!doctype html>
 <html lang="en">
@@ -146,16 +218,30 @@ authRoutes.get("/login", zValidator("query", loginQuerySchema), async (c) => {
   });
 
   await getOidcClient();
+  setLoginTxCookie(c, state);
   return c.redirect(buildAuthorizationUrl(state, nonce, codeVerifier).toString(), 302);
 });
 
 authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) => {
   const query = c.req.valid("query");
   if (query.error) {
+    clearLoginTxCookie(c);
     return c.html(html("OIDC login failed", query.error_description ?? query.error), 400);
   }
   if (!query.code || !query.state) {
+    clearLoginTxCookie(c);
     return c.html(html("OIDC login failed", "Missing code or state."), 400);
+  }
+
+  // Verify the login transaction cookie binds this callback to the browser
+  // that initiated the login request (prevents login-CSRF / session-fixation).
+  const txState = readLoginTxCookie(c.req.header("cookie"));
+  clearLoginTxCookie(c);
+  if (!txState || txState !== query.state) {
+    return c.html(
+      html("OIDC login failed", "Login transaction cookie missing or mismatched."),
+      400,
+    );
   }
 
   prunePendingLogins();
