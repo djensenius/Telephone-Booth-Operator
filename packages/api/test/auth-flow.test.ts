@@ -3,6 +3,33 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 const { fakeDb, openidMocks, store } = vi.hoisted(() => {
   const users = new Map<string, Record<string, unknown>>();
   const sessions = new Map<string, Record<string, unknown>>();
+  const tokenSet = (overrides: Record<string, unknown> = {}) => {
+    const result = {
+      access_token: "access-token",
+      refresh_token: "refresh-token",
+      id_token: "id-token",
+      token_type: "bearer",
+      expires_in: 300,
+      expiresIn: () => 300,
+      ...overrides,
+    };
+    Object.defineProperty(result, "claims", {
+      value: () => ({
+        iss: "https://idp.example",
+        sub: "oidc-sub-1",
+        aud: "client-id",
+        iat: 1,
+        exp: 9999999999,
+        nonce: "nonce-1",
+        email: "operator@example.com",
+        name: "Operator One",
+        groups: ["operators"],
+        picture: "https://example.com/avatar.png",
+      }),
+      writable: false,
+    });
+    return result;
+  };
 
   const withUser = (session: Record<string, unknown>) => ({
     ...session,
@@ -12,32 +39,15 @@ const { fakeDb, openidMocks, store } = vi.hoisted(() => {
   return {
     store: { users, sessions },
     openidMocks: {
-      authorizationCodeGrant: vi.fn(async () => {
-        const tokenSet = {
-          access_token: "access-token",
-          refresh_token: "refresh-token",
-          id_token: "id-token",
-          token_type: "bearer",
-          expires_in: 3600,
-          expiresIn: () => 3600,
-        };
-        Object.defineProperty(tokenSet, "claims", {
-          value: () => ({
-            iss: "https://idp.example",
-            sub: "oidc-sub-1",
-            aud: "client-id",
-            iat: 1,
-            exp: 9999999999,
-            nonce: "nonce-1",
-            email: "operator@example.com",
-            name: "Operator One",
-            groups: ["operators"],
-            picture: "https://example.com/avatar.png",
-          }),
-          writable: false,
-        });
-        return tokenSet;
-      }),
+      authorizationCodeGrant: vi.fn(async () => tokenSet()),
+      refreshTokenGrant: vi.fn(async () =>
+        tokenSet({
+          access_token: "new-access-token",
+          refresh_token: "new-refresh-token",
+          expires_in: 300,
+          expiresIn: () => 300,
+        }),
+      ),
     },
     fakeDb: {
       operatorUser: {
@@ -95,13 +105,7 @@ vi.mock("openid-client", () => ({
     return url;
   }),
   authorizationCodeGrant: openidMocks.authorizationCodeGrant,
-  refreshTokenGrant: vi.fn(async () => ({
-    access_token: "new-access-token",
-    token_type: "bearer",
-    expires_in: 3600,
-    claims: () => undefined,
-    expiresIn: () => 3600,
-  })),
+  refreshTokenGrant: openidMocks.refreshTokenGrant,
   buildEndSessionUrl: vi.fn((_config, params) => {
     const url = new URL("https://idp.example/logout");
     for (const [key, value] of Object.entries(params ?? {}))
@@ -122,14 +126,22 @@ const cookieFrom = (res: Response): string => {
   return cookie.split(";")[0] ?? cookie;
 };
 
+const onlySession = (): Record<string, unknown> => {
+  const session = store.sessions.values().next().value;
+  if (!session) throw new Error("missing session");
+  return session;
+};
+
 describe("auth flow", () => {
   beforeEach(() => {
     store.users.clear();
     store.sessions.clear();
     openidMocks.authorizationCodeGrant.mockClear();
+    openidMocks.refreshTokenGrant.mockClear();
     process.env.NODE_ENV = "test";
     process.env.SESSION_SECRET = "test-session-secret";
     process.env.SESSION_ENCRYPTION_KEY = Buffer.alloc(32, 9).toString("base64");
+    process.env.SESSION_TTL_SECONDS = "43200";
     process.env.OIDC_ISSUER = "https://idp.example";
     process.env.OIDC_CLIENT_ID = "client-id";
     process.env.OIDC_CLIENT_SECRET = "client-secret";
@@ -170,6 +182,13 @@ describe("auth flow", () => {
     const setCookie = callback.headers.get("set-cookie");
     expect(setCookie).toContain("Secure");
     expect(setCookie).toMatch(/(?:^|, )booth_session=/);
+    const storedSession = onlySession();
+    expect(storedSession.expiresAt).toBeInstanceOf(Date);
+    expect(storedSession.accessTokenExpiresAt).toBeInstanceOf(Date);
+    expect(
+      (storedSession.expiresAt as Date).getTime() -
+        (storedSession.accessTokenExpiresAt as Date).getTime(),
+    ).toBeGreaterThan(11 * 60 * 60 * 1000);
 
     const me = await app.request("/v1/auth/me", { headers: { cookie } });
     expect(me.status).toBe(200);
@@ -193,5 +212,62 @@ describe("auth flow", () => {
 
     expect(logout.status).toBe(302);
     expect(logout.headers.get("location")).toBe("http://localhost:5173/login");
+  });
+
+  it("refreshes an expired access token without shortening the browser session", async () => {
+    await app.request("/v1/auth/login");
+    const callback = await app.request(
+      "http://127.0.0.1/v1/auth/callback?code=code-1&state=state-1",
+    );
+    const cookie = cookieFrom(callback);
+    const session = onlySession();
+    session.accessTokenExpiresAt = new Date(Date.now() - 1000);
+    const originalSessionExpiry = session.expiresAt;
+
+    const me = await app.request("/v1/auth/me", { headers: { cookie } });
+
+    expect(me.status).toBe(200);
+    expect(openidMocks.refreshTokenGrant).toHaveBeenCalledTimes(1);
+    const refreshedSession = onlySession();
+    expect(refreshedSession.accessToken).toBe("new-access-token");
+    expect(refreshedSession.expiresAt).toBe(originalSessionExpiry);
+    expect(me.headers.get("set-cookie")).toContain("__Host-booth_session=");
+  });
+
+  it("shares one refresh across parallel requests for the same session", async () => {
+    await app.request("/v1/auth/login");
+    const callback = await app.request(
+      "http://127.0.0.1/v1/auth/callback?code=code-1&state=state-1",
+    );
+    const cookie = cookieFrom(callback);
+    const session = onlySession();
+    session.accessTokenExpiresAt = new Date(Date.now() - 1000);
+    openidMocks.refreshTokenGrant.mockImplementationOnce(
+      async () =>
+        new Promise((resolve) => {
+          setTimeout(
+            () =>
+              resolve({
+                access_token: "new-access-token",
+                refresh_token: "new-refresh-token",
+                id_token: "id-token",
+                token_type: "bearer",
+                expires_in: 300,
+                expiresIn: () => 300,
+                claims: () => undefined,
+              }),
+            10,
+          );
+        }),
+    );
+
+    const [first, second] = await Promise.all([
+      app.request("/v1/auth/me", { headers: { cookie } }),
+      app.request("/v1/auth/me", { headers: { cookie } }),
+    ]);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(openidMocks.refreshTokenGrant).toHaveBeenCalledTimes(1);
   });
 });

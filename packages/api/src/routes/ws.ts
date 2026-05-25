@@ -5,7 +5,11 @@ import { randomUUID } from "node:crypto";
 import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer } from "ws";
 import { wsBroadcaster } from "../lib/broadcaster.js";
-import { readSessionFromCookieHeader, type AuthVariables } from "../lib/session.js";
+import {
+  readSessionFromCookieHeader,
+  sessionIsExpired,
+  type AuthVariables,
+} from "../lib/session.js";
 
 export const wsRouter = new Hono<{ Variables: AuthVariables }>();
 
@@ -67,7 +71,7 @@ export const attachStatusWebSocket = (server: ServerType): void => {
     wss.handleUpgrade(request, socket, head, (ws) => {
       void (async () => {
         const session = await readSessionFromCookieHeader(request.headers.cookie);
-        if (!session || session.expiresAt.getTime() <= Date.now()) {
+        if (!session || sessionIsExpired(session)) {
           closePolicyViolation(ws);
           return;
         }

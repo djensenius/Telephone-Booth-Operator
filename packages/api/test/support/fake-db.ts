@@ -51,6 +51,7 @@ type FakeSession = {
     groups: string[];
     picture: string | null;
   };
+  accessTokenExpiresAt: Date | null;
   expiresAt: Date;
   createdAt: Date;
   lastSeenAt: Date;
@@ -173,6 +174,7 @@ export const seedSession = (): FakeSession => {
       groups: ["operators"],
       picture: null,
     },
+    accessTokenExpiresAt: new Date(Date.now() + 5 * 60 * 1000),
     expiresAt: new Date(Date.now() + 60 * 60 * 1000),
     createdAt: new Date(),
     lastSeenAt: new Date(),

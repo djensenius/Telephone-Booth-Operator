@@ -117,11 +117,17 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
             </a>
           </li>
           <li>
-            <a
-              href="/login"
+            <form
+              action="/v1/auth/logout"
+              method="post"
             >
-              7 · Auth / logout
-            </a>
+              <button
+                class="operator-sidebar__logout"
+                type="submit"
+              >
+                7 · Logout
+              </button>
+            </form>
           </li>
           <li>
             <span

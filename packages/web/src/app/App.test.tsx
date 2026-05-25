@@ -1,6 +1,6 @@
 import axe from "axe-core";
 import { createMemoryHistory } from "@tanstack/react-router";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { App } from "./App.js";
 import { createAppRouter } from "./router.js";
@@ -116,11 +116,26 @@ describe("App shell", () => {
 
   it("hides operator status and shortcut navigation before login", async () => {
     installFetch({ authenticated: false });
-    renderShell("/login");
+    const { container } = renderShell("/");
     await screen.findByRole("heading", { name: "Sign in to connect" });
+    expect(container.querySelector(".app-shell--public")).toBeTruthy();
     expect(screen.queryByText("Booth status")).toBeNull();
     expect(screen.queryByText("Shortcuts")).toBeNull();
     expect(screen.queryByLabelText("Operator navigation")).toBeNull();
+  });
+
+  it("submits shortcut 7 as logout instead of navigating to login", async () => {
+    renderShell();
+    const button = await screen.findByRole("button", { name: "7 · Logout" });
+    const form = button.closest("form");
+    if (!form) throw new Error("missing logout form");
+    expect(form).toMatchObject({
+      method: "post",
+      action: "http://localhost/v1/auth/logout",
+    });
+
+    fireEvent.submit(form);
+    expect(screen.getByRole("button", { name: "Clearing the line…" })).toBeTruthy();
   });
 
   it("has no critical axe violations", async () => {
