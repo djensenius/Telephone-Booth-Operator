@@ -369,19 +369,19 @@ export function useSystemCurrent(boothId: string | undefined) {
   });
 }
 
-export function useStatusCurrent() {
+export function useStatusCurrent(options?: { paused?: boolean }) {
   return useQuery({
     queryKey: apiQueryKeys.status,
     queryFn: status.current,
-    refetchInterval: 5_000,
+    refetchInterval: options?.paused ? false : 5_000,
   });
 }
 
-export function useStatusHistory() {
+export function useStatusHistory(options?: { paused?: boolean }) {
   return useQuery({
     queryKey: apiQueryKeys.statusHistory,
     queryFn: () => status.history({ limit: 50 }),
-    refetchInterval: 5_000,
+    refetchInterval: options?.paused ? false : 5_000,
   });
 }
 

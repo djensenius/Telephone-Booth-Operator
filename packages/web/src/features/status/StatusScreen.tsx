@@ -38,10 +38,10 @@ function wsUrl(): string {
 export function StatusScreen(): JSX.Element {
   const { setConnectionStatus, setLastError, setStatus } = useBoothStatus();
   const queryClient = useQueryClient();
-  const statusQuery = useStatusCurrent();
-  const historyQuery = useStatusHistory();
   const [liveStatus, setLiveStatus] = useState<BoothStatus | null>(null);
   const [wsState, setWsState] = useState("polling");
+  const statusQuery = useStatusCurrent({ paused: wsState === "live" });
+  const historyQuery = useStatusHistory({ paused: wsState === "live" });
 
   useEffect(() => setLiveStatus(statusQuery.data ?? null), [statusQuery.data]);
 
