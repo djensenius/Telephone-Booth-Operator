@@ -327,6 +327,25 @@ textarea:focus-visible,
   margin: 24px auto 0;
 }
 
+.build-footer {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  max-width: 1180px;
+  margin: 18px auto 0;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.build-footer time {
+  color: var(--text-secondary);
+}
+
 .operator-sidebar {
   display: flex;
   flex-direction: column;
