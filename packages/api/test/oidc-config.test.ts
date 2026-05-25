@@ -10,6 +10,11 @@ const baseEnv = {
   AUTHENTIK_ALLOWED_GROUPS: "authentik-group",
 };
 
+const httpEnv = {
+  ...baseEnv,
+  AUTHENTIK_ISSUER: "http://authentik.example/application/o/booth/",
+};
+
 describe("OIDC config", () => {
   afterEach(() => {
     delete process.env.AUTH_DISABLED;
@@ -46,5 +51,21 @@ describe("OIDC config", () => {
       disabled: true,
       providerName: "Authentik",
     });
+  });
+
+  it("allows HTTP issuer in non-production environments", () => {
+    const config = resolveAuthConfig(httpEnv);
+    expect(config.disabled).toBe(false);
+    if (config.disabled) throw new Error("unexpected");
+    expect(config.issuer).toBe("http://authentik.example/application/o/booth/");
+  });
+
+  it("resolves HTTP issuer config regardless of NODE_ENV (startup validates)", () => {
+    // resolveAuthConfig itself does not check NODE_ENV — that's done at startup.
+    // This ensures the config layer remains environment-agnostic.
+    const config = resolveAuthConfig(httpEnv);
+    expect(config.disabled).toBe(false);
+    if (config.disabled) throw new Error("unexpected");
+    expect(config.issuer.startsWith("http:")).toBe(true);
   });
 });

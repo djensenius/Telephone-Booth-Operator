@@ -81,6 +81,15 @@ const start = (): void => {
     if (authConfig.disabled && process.env.NODE_ENV === "production") {
       throw new AuthConfigurationError("AUTH_DISABLED=true is not allowed in production.");
     }
+    if (
+      !authConfig.disabled &&
+      process.env.NODE_ENV === "production" &&
+      new URL(authConfig.issuer).protocol === "http:"
+    ) {
+      throw new AuthConfigurationError(
+        "HTTP OIDC issuers are not allowed in production. Use an HTTPS issuer URL.",
+      );
+    }
   } catch (error) {
     console.error(error instanceof Error ? error.message : "Invalid auth configuration.");
     process.exitCode = 1;
