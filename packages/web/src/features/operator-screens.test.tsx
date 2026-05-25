@@ -60,16 +60,12 @@ const token = {
 let createdQuestion = false;
 let deletedMessages: string[] = [];
 let revokedToken = false;
-let loggedOut = false;
 let lastMessageUrl = "";
 let writeTextMock: ReturnType<typeof vi.fn>;
 
 const server = setupServer(
   http.get("http://localhost/v1/auth/me", () => HttpResponse.json(operator)),
-  http.post("http://localhost/v1/auth/logout", () => {
-    loggedOut = true;
-    return new HttpResponse(null, { status: 204 });
-  }),
+  http.post("http://localhost/v1/auth/logout", () => new HttpResponse(null, { status: 204 })),
   http.get("http://localhost/v1/status", () =>
     HttpResponse.json({
       state: "idle",
@@ -218,7 +214,6 @@ beforeEach(() => {
   createdQuestion = false;
   deletedMessages = [];
   revokedToken = false;
-  loggedOut = false;
   lastMessageUrl = "";
   installBrowserStubs();
   window.localStorage.clear();
@@ -234,6 +229,7 @@ describe("Auth feature", () => {
   it("renders the login call to action", async () => {
     renderPath("/login");
     expect(await screen.findByText("Sign in to connect")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe("You are not logged in.");
     expect(screen.getByText("Sign in with Authentik")).toBeTruthy();
   });
 
@@ -254,10 +250,18 @@ describe("Auth feature", () => {
     expect(screen.getByText("Authentik")).toBeTruthy();
   });
 
-  it("posts logout and clears the line", async () => {
+  it("submits logout as a top-level POST", async () => {
     renderPath("/settings");
-    fireEvent.click(await screen.findByText("Sign out"));
-    await waitFor(() => expect(loggedOut).toBe(true));
+    const button = await screen.findByText("Sign out");
+    const form = button.closest("form");
+    if (!form) throw new Error("missing logout form");
+    expect(form).toMatchObject({
+      method: "post",
+      action: "http://localhost/v1/auth/logout",
+    });
+
+    fireEvent.submit(form);
+    expect(screen.getByText("Clearing the line…")).toBeTruthy();
   });
 });
 

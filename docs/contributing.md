@@ -18,6 +18,13 @@ just docs-check     # markdownlint + lychee
 
 CI runs the same plus typedoc and an OpenAPI diff.
 
+## Before merging
+
+- Wait for the Copilot PR review to complete.
+- Address every actionable Copilot or human review comment before merging. If a
+  comment is a false positive, reply with the reason and resolve the thread.
+- Wait for all required CI jobs to pass.
+
 ## Adding a new OIDC provider doc
 
 If your provider isn't covered:

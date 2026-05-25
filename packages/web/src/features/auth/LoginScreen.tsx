@@ -22,6 +22,9 @@ export function LoginScreen(): JSX.Element {
         <div className="login-screen__copy">
           <p className="screen-kicker">Secure operator line</p>
           <h1>Sign in to connect</h1>
+          <p className="login-screen__status" role="status">
+            You are not logged in.
+          </p>
           <p>
             Authenticate with the operator identity provider to review calls, manage prompts, and
             monitor the installation.

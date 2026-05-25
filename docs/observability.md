@@ -10,7 +10,7 @@ external VictoriaMetrics instance; Grafana dashboards live under
 
 - **`BoothEvent`** — append-only event log. Idempotent on
   `(boothId, eventId)`. The booth generates `eventId =
-  "{bootId}:{telemetryRecordId}"` so retries are safe.
+"{bootId}:{telemetryRecordId}"` so retries are safe.
 - **`CallSession`** — derived from `call_started` / `call_ended` events.
   Lazily upserted at insert time. Holds the dialed-digits string,
   call outcome, recording id, and duration.

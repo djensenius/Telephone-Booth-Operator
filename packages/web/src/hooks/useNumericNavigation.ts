@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { auth } from "../lib/api-client.js";
+import { apiUrlFor } from "../lib/api-client.js";
 import { isNavigationDigit } from "../lib/navigation.js";
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -53,10 +53,14 @@ export function useNumericNavigation(enabled = true): void {
           void navigate({ to: "/about" });
           break;
         case "7":
-          void auth.logout().finally(() => {
-            queryClient.clear();
-            void navigate({ to: "/login", replace: true });
-          });
+          queryClient.clear();
+          {
+            const form = document.createElement("form");
+            form.method = "post";
+            form.action = apiUrlFor("/v1/auth/logout");
+            document.body.append(form);
+            form.submit();
+          }
           break;
         case "9":
           void navigate({ to: "/debug" });

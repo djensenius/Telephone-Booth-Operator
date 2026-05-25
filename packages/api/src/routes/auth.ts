@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { OperatorMeSchema } from "@telephone-booth-operator/shared";
 import { z } from "zod";
-import { getAuthConfig, getRequiredOidcConfig } from "../lib/config.js";
+import { getAuthConfig } from "../lib/config.js";
 import { verifyOperatorBearer } from "../lib/bearer-auth.js";
 import { buildAuthorizationUrl, endSessionUrl, exchangeCode, getOidcClient } from "../lib/oidc.js";
 import {
@@ -200,8 +200,8 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
 
 authRoutes.post("/logout", async (c) => {
   const session = await destroySession(c);
-  let redirectTo = getRequiredOidcConfig().postLogoutRedirectUri ?? "/";
-  if (session?.idToken) {
+  let redirectTo = webRedirectUrl("/login");
+  if (session?.idToken && !getAuthConfig().disabled) {
     await getOidcClient();
     redirectTo = endSessionUrl(session.idToken)?.toString() ?? redirectTo;
   }

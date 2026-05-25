@@ -44,6 +44,22 @@ messagesRouter.get("/", zValidator("query", listQuerySchema), async (c) => {
   return c.json({ items: messages.map((message) => serializeMessage(message as never)) });
 });
 
+messagesRouter.get("/random", requireApiToken(), async (c) => {
+  const where = { status: "approved" } as const;
+  const count = await db.message.count({ where });
+  if (count === 0) return c.json({ error: "no_messages_available" }, 404);
+
+  const skip = Math.floor(Math.random() * count);
+  const message = await db.message.findFirst({
+    where,
+    include: { audio: true },
+    orderBy: { id: "asc" },
+    skip,
+  });
+  if (!message) return c.json({ error: "no_messages_available" }, 404);
+  return c.json(serializeMessage(message as never));
+});
+
 messagesRouter.get("/:id", zValidator("param", idParamSchema), async (c) => {
   const { id } = c.req.valid("param");
   const message = await db.message.findUnique({

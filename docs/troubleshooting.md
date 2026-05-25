@@ -56,7 +56,7 @@ The DB has a `File` row but the blob is gone. Either:
 
 - Wrong sample rate negotiated by the Web Audio FLAC decoder — should
   be `48000`. Check the headers Azure returned with `curl -I "<download
-  SAS URL>"`; `Content-Type` must be `audio/flac` (or
+SAS URL>"`; `Content-Type` must be `audio/flac` (or
   `application/octet-stream`, which the UI also handles).
 - Browser cache stuck. Hard refresh.
 

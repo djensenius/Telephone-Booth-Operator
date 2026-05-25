@@ -26,7 +26,7 @@ vi.mock("../src/lib/require-api-token.js", () => ({
 import { createApp } from "../src/index.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { fakeBlobs, resetFakeAzure } from "./support/fake-azure.js";
-import { resetFakeDb } from "./support/fake-db.js";
+import { resetFakeDb, seedFile, seedMessage } from "./support/fake-db.js";
 import { operatorCookie, phoneHeaders } from "./support/http.js";
 
 const setup = () => {
@@ -96,5 +96,29 @@ describe("messages routes", () => {
       headers: { cookie },
     });
     expect(deleted.status).toBe(204);
+  });
+
+  it("returns a random approved message with audio sha for the phone client", async () => {
+    const app = createApp();
+    const audio = seedFile({ sha256: "c".repeat(64), durationMs: 4500 });
+    const message = seedMessage({ audioId: audio.id, status: "approved" });
+
+    const random = await app.request("/v1/messages/random", { headers: phoneHeaders });
+
+    expect(random.status, await random.clone().text()).toBe(200);
+    await expect(random.json()).resolves.toMatchObject({
+      id: message.id,
+      status: "approved",
+      audio: { sha256: "c".repeat(64), durationMs: 4500 },
+    });
+  });
+
+  it("returns 404 for random message when no approved messages exist", async () => {
+    const app = createApp();
+    seedMessage({ status: "received" });
+
+    const random = await app.request("/v1/messages/random", { headers: phoneHeaders });
+
+    expect(random.status).toBe(404);
   });
 });
