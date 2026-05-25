@@ -40,8 +40,10 @@ docker compose -f docker-compose.prod.yml up -d
 docker compose -f docker-compose.prod.yml --profile single-node up -d
 ```
 
-When you use the bundled single-node Postgres service, set `DATABASE_URL` to the
-Compose service name, for example
+When you use the bundled single-node Postgres service, you **must** set
+`POSTGRES_PASSWORD` in `.env` — Compose will refuse to start without it.
+Generate one with `openssl rand -base64 24`. Then set `DATABASE_URL` to match,
+for example
 `postgres://booth:${POSTGRES_PASSWORD}@db:5432/telephone_booth`. For managed
 Postgres, set `DATABASE_URL` to the external provider's TLS connection string.
 
