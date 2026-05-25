@@ -6,6 +6,11 @@ on:
         description: "Image tag (e.g. v0.1.0 or 'latest')."
         required: true
         type: string
+      vite-api-base-url:
+        description: "Optional API origin baked into the web image, e.g. https://api.example.com."
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -35,5 +40,7 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/telephone-booth-operator-${{ matrix.image }}:${{ inputs.tag }}
             ghcr.io/${{ github.repository_owner }}/telephone-booth-operator-${{ matrix.image }}:latest
+          build-args: |
+            VITE_API_BASE_URL=${{ matrix.image == 'web' && inputs['vite-api-base-url'] || '' }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,scope=${{ matrix.image }},mode=max

@@ -1,5 +1,6 @@
 import { useSearch } from "@tanstack/react-router";
 import { GlassPanel } from "../../components/booth/index.js";
+import { apiUrlFor } from "../../lib/api-client.js";
 
 function safeReturnTo(value: unknown): string {
   return typeof value === "string" && value.startsWith("/") && !value.startsWith("//")
@@ -12,7 +13,7 @@ export function LoginScreen(): JSX.Element {
   const returnTo = safeReturnTo(search.return_to);
 
   function beginLogin(): void {
-    window.location.href = `/v1/auth/login?return_to=${encodeURIComponent(returnTo)}`;
+    window.location.href = apiUrlFor(`/v1/auth/login?return_to=${encodeURIComponent(returnTo)}`);
   }
 
   return (

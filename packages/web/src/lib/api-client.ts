@@ -77,9 +77,15 @@ function isFormBody(body: unknown): body is BodyInit {
   return body instanceof FormData || body instanceof Blob || body instanceof URLSearchParams || typeof body === "string";
 }
 
-function urlFor(path: string): string {
+export function apiUrlFor(path: string): string {
   if (/^https?:\/\//.test(path)) return path;
   return `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+export function apiWebSocketUrlFor(path: string): string {
+  const url = new URL(apiUrlFor(path), window.location.origin);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
 }
 
 function query(params: Record<string, string | number | null | undefined>): string {
@@ -117,7 +123,7 @@ export async function apiFetch<T>(path: string, opts: ApiFetchOptions<T> = {}): 
     headers: requestHeaders,
     ...(requestBody === undefined ? {} : { body: requestBody }),
   };
-  const response = await fetch(urlFor(path), requestInit);
+  const response = await fetch(apiUrlFor(path), requestInit);
   const payload = await parseResponse(response);
   if (!response.ok) {
     const message = typeof payload === "object" && payload !== null && "error" in payload ? String(payload.error) : response.statusText;
@@ -194,7 +200,7 @@ export const apiTokens = {
 export const auth = {
   me: () => apiFetch<OperatorMe>("/v1/auth/me", { schema: OperatorMeSchema }),
   logout: async () => {
-    await fetch(urlFor("/v1/auth/logout"), { method: "POST", credentials: "include", redirect: "manual" });
+    await fetch(apiUrlFor("/v1/auth/logout"), { method: "POST", credentials: "include", redirect: "manual" });
   },
 };
 

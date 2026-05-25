@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { WsEnvelopeSchema, BoothStatusSchema } from "@telephone-booth-operator/shared";
 import type { BoothState, BoothStatus, BoothSystemSnapshot } from "@telephone-booth-operator/shared";
 import { GlassPanel, useBoothStatus } from "../../components/booth/index.js";
-import { apiQueryKeys, useStatusCurrent, useStatusHistory } from "../../lib/api-client.js";
+import { apiQueryKeys, apiWebSocketUrlFor, useStatusCurrent, useStatusHistory } from "../../lib/api-client.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
 
 function displayState(state: BoothState): string {
@@ -22,10 +22,7 @@ function boothDisplay(state: BoothState): "idle" | "playing" | "recording" | "er
 }
 
 function wsUrl(): string {
-  const base = typeof import.meta.env.VITE_API_BASE_URL === "string" ? import.meta.env.VITE_API_BASE_URL : window.location.origin;
-  const url = new URL("/v1/ws/status", base.length === 0 ? window.location.origin : base);
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  return url.toString();
+  return apiWebSocketUrlFor("/v1/ws/status");
 }
 
 export function StatusScreen(): JSX.Element {
