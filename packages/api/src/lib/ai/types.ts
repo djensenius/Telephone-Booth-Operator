@@ -44,10 +44,10 @@ export interface ModerationProvider {
 export class ProviderError extends Error {
   constructor(
     readonly provider: AiProvider,
-    message: string,
+    readonly errorCode: string,
     readonly status?: number,
   ) {
-    super(message);
+    super(`${provider}/${errorCode}${status ? `/${status}` : ""}`);
     this.name = "ProviderError";
   }
 }

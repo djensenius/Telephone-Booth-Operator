@@ -32,29 +32,19 @@ export class OpenAiTranscriptionProvider implements TranscriptionProvider {
   async transcribe(input: TranscriptionInput): Promise<TranscriptionResult> {
     const audioResponse = await this.#fetch(input.audioUrl);
     if (!audioResponse.ok) {
-      throw new ProviderError(
-        this.name,
-        `audio fetch failed: ${audioResponse.status}`,
-        audioResponse.status,
-      );
+      throw new ProviderError(this.name, "audio_fetch_failed", audioResponse.status);
     }
 
     const contentLength = Number(audioResponse.headers.get("content-length") ?? "0");
     if (contentLength > this.#maxAudioBytes) {
       // Abort the body to release the socket without buffering.
       await audioResponse.body?.cancel();
-      throw new ProviderError(
-        this.name,
-        `audio blob too large: ${contentLength} bytes exceeds ${this.#maxAudioBytes} limit`,
-      );
+      throw new ProviderError(this.name, "audio_too_large");
     }
 
     const audioBytes = await audioResponse.arrayBuffer();
     if (audioBytes.byteLength > this.#maxAudioBytes) {
-      throw new ProviderError(
-        this.name,
-        `audio blob too large: ${audioBytes.byteLength} bytes exceeds ${this.#maxAudioBytes} limit`,
-      );
+      throw new ProviderError(this.name, "audio_too_large");
     }
     const audioBlob = new Blob([audioBytes], { type: "audio/flac" });
 
@@ -69,12 +59,9 @@ export class OpenAiTranscriptionProvider implements TranscriptionProvider {
       body,
     });
     if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new ProviderError(
-        this.name,
-        `transcription failed: ${response.status} ${text.slice(0, 200)}`,
-        response.status,
-      );
+      // Discard response body — never include upstream text in errors.
+      await response.text().catch(() => "");
+      throw new ProviderError(this.name, "transcription_failed", response.status);
     }
     const payload = (await response.json().catch(() => ({}))) as {
       text?: unknown;

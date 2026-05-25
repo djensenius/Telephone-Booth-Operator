@@ -44,7 +44,7 @@ describe("OpenAiTranscriptionProvider", () => {
         sha256: "a".repeat(64),
         durationMs: 3000,
       }),
-    ).rejects.toThrow(/too large/);
+    ).rejects.toThrow(/audio_too_large/);
   });
 
   it("transcribes successfully when audio is within size limits", async () => {

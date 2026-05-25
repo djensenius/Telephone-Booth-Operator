@@ -64,12 +64,9 @@ export class OpenAiModerationProvider implements ModerationProvider {
       body: JSON.stringify({ model: this.model, input: input.text }),
     });
     if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new ProviderError(
-        this.name,
-        `moderation failed: ${response.status} ${text.slice(0, 200)}`,
-        response.status,
-      );
+      // Discard response body — never include upstream text in errors.
+      await response.text().catch(() => "");
+      throw new ProviderError(this.name, "moderation_failed", response.status);
     }
     const payload: unknown = await response.json().catch(() => ({}));
     if (
@@ -77,11 +74,11 @@ export class OpenAiModerationProvider implements ModerationProvider {
       payload.results === undefined ||
       payload.results.length === 0
     ) {
-      throw new ProviderError(this.name, "moderation returned no results");
+      throw new ProviderError(this.name, "no_results_in_response");
     }
     const first = payload.results[0];
     if (first === undefined) {
-      throw new ProviderError(this.name, "moderation returned no results");
+      throw new ProviderError(this.name, "no_results_in_response");
     }
     const scores = first.category_scores;
     let maxScore = 0;

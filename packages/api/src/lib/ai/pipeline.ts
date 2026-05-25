@@ -14,14 +14,18 @@ import { serializeMessage } from "../serializers.js";
 import { resolveAiConfig, type AiConfig } from "./config.js";
 import { buildModerationProvider, buildTranscriptionProvider } from "./factory.js";
 import type { ModerationProvider, TranscriptionProvider } from "./types.js";
+import { ProviderError } from "./types.js";
 
-const TRANSCRIPT_PREVIEW_LIMIT = 80;
-
-const previewTranscript = (text: string): string => {
-  const trimmed = text.replace(/\s+/g, " ").trim();
-  return trimmed.length <= TRANSCRIPT_PREVIEW_LIMIT
-    ? trimmed
-    : `${trimmed.slice(0, TRANSCRIPT_PREVIEW_LIMIT - 1)}…`;
+// Build a sanitized error string safe for persistence and logging.
+// Never includes transcript text, response bodies, or SAS URLs.
+const sanitizeError = (error: unknown): string => {
+  if (error instanceof ProviderError) {
+    return error.message; // Already structured: "provider/code/status"
+  }
+  if (error instanceof Error) {
+    return `unknown_error/${error.name}`;
+  }
+  return "unknown_error";
 };
 
 const log = (
@@ -255,7 +259,6 @@ export const runTranscription = async (
       provider: provider.name,
       model: provider.model,
       latencyMs: Date.now() - startedAt,
-      preview: previewTranscript(result.text),
     });
     await broadcastMessage(message.id);
     if (!opts.skipDownstream) {
@@ -275,7 +278,7 @@ export const runTranscription = async (
     }
     return { outcome: "created", transcriptionId: pending.id };
   } catch (error) {
-    const reason = error instanceof Error ? error.message : "transcription failed";
+    const reason = sanitizeError(error);
     await db.transcription.update({
       where: { id: pending.id },
       data: {
@@ -391,7 +394,7 @@ export const runModeration = async (opts: RunModerationOptions): Promise<string 
     await broadcastMessage(opts.messageId);
     return pending.id;
   } catch (error) {
-    const reason = error instanceof Error ? error.message : "moderation failed";
+    const reason = sanitizeError(error);
     await db.moderation.update({
       where: { id: pending.id },
       data: {
@@ -426,7 +429,7 @@ export const runModeration = async (opts: RunModerationOptions): Promise<string 
 export const kickPipelineForMessage = (messageId: string): void => {
   setImmediate(() => {
     void runTranscription({ messageId }).catch((error: unknown) => {
-      const reason = error instanceof Error ? error.message : "pipeline failed";
+      const reason = sanitizeError(error);
       log("error", "ai.pipeline.unhandled", { messageId, reason });
     });
   });

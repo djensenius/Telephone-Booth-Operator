@@ -298,7 +298,7 @@ describe("AI pipeline", () => {
     expect(withRelations.status).toBe("pending");
     expect(withRelations.moderations).toHaveLength(1);
     expect(withRelations.moderations[0]?.status).toBe("failed");
-    expect(withRelations.moderations[0]?.error).toContain("upstream blew up");
+    expect(withRelations.moderations[0]?.error).toContain("unknown_error");
   });
 
   it("records a transcription failure and does not auto-decide when the provider throws", async () => {
@@ -325,7 +325,7 @@ describe("AI pipeline", () => {
     };
     expect(withRelations.status).toBe("received");
     expect(withRelations.transcriptions[0]?.status).toBe("failed");
-    expect(withRelations.transcriptions[0]?.error).toContain("upstream blew up");
+    expect(withRelations.transcriptions[0]?.error).toContain("unknown_error");
     expect(withRelations.moderations).toHaveLength(0);
   });
 
