@@ -476,7 +476,14 @@ export function createDebugClient(options: CreateDebugClientOptions): DebugClien
           if (typeof event.data !== "string") {
             return;
           }
-          const record = parseJsonRecord(JSON.parse(event.data) as unknown);
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(event.data);
+          } catch {
+            emit({ lastError: "Malformed telemetry frame (invalid JSON)" });
+            return;
+          }
+          const record = parseJsonRecord(parsed);
           if (record === null) {
             return;
           }
