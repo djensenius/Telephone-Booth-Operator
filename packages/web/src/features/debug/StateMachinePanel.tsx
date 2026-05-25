@@ -59,9 +59,13 @@ export function StateMachinePanel({ status, transitions }: StateMachinePanelProp
           <dd>{status?.currentMessageId ?? "none"}</dd>
         </div>
       </dl>
-      {status?.lastError === null || status?.lastError === undefined ? null : <p className="debug-callout">Last error: {status.lastError}</p>}
+      {status?.lastError === null || status?.lastError === undefined ? null : (
+        <p className="debug-callout">Last error: {status.lastError}</p>
+      )}
       <p className="sr-only" aria-live="polite">
-        {latestTransition === undefined ? "No state transitions yet" : `State changed from ${latestTransition.from} to ${latestTransition.to}`}
+        {latestTransition === undefined
+          ? "No state transitions yet"
+          : `State changed from ${latestTransition.from} to ${latestTransition.to}`}
       </p>
       <div className="debug-table-wrap" tabIndex={0} aria-label="Last 50 state transitions">
         <table className="debug-table">

@@ -26,10 +26,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v2
+      - uses: voidzero-dev/setup-vp@v1
         with:
-          experimental: true
-      - run: pnpm install --frozen-lockfile
+          node-version-file: ".node-version"
+          cache: true
+          run-install: false
+      - run: vp install --frozen-lockfile
       - run: docker compose up -d azurite
       - name: Wait for services
         run: |
@@ -56,12 +58,12 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
         working-directory: packages/web
       - if: steps.probe.outputs.no-specs != 'true'
-        run: pnpm -r build
+        run: vp run -r build
       - if: steps.probe.outputs.no-specs != 'true'
         name: Start API + Web
         run: |
           pnpm --filter @telephone-booth-operator/api start &
-          pnpm --filter @telephone-booth-operator/web preview --port 5173 &
+          pnpm --filter @telephone-booth-operator/web preview -- --port 5173 &
           sleep 5
         env:
           DATABASE_URL: postgres://booth:booth@localhost:5432/telephone_booth

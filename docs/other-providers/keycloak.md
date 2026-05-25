@@ -12,14 +12,14 @@ Equivalent of [`../authentik-setup.md`](../authentik-setup.md) for
 
 > _Clients → Create client_
 
-| Field                            | Value                                                       |
-| -------------------------------- | ----------------------------------------------------------- |
-| Client type                      | OpenID Connect                                              |
-| Client ID                        | `telephone-booth-operator`                                  |
-| Client authentication            | **On** (confidential)                                       |
-| Valid redirect URIs              | `http://localhost:8787/v1/auth/callback`, prod equivalent   |
-| Standard flow                    | **On** (Authorization Code)                                 |
-| Direct access grants             | Off                                                         |
+| Field                 | Value                                                     |
+| --------------------- | --------------------------------------------------------- |
+| Client type           | OpenID Connect                                            |
+| Client ID             | `telephone-booth-operator`                                |
+| Client authentication | **On** (confidential)                                     |
+| Valid redirect URIs   | `http://localhost:8787/v1/auth/callback`, prod equivalent |
+| Standard flow         | **On** (Authorization Code)                               |
+| Direct access grants  | Off                                                       |
 
 Save. Under **Credentials** copy the client secret.
 
@@ -30,14 +30,14 @@ Keycloak doesn't include `groups` in the ID token by default.
 > _Client → Client scopes → `telephone-booth-operator-dedicated` →
 > Add mapper → By configuration → Group Membership_
 
-| Field        | Value      |
-| ------------ | ---------- |
-| Name         | `groups`   |
-| Token Claim Name | `groups` |
-| Full group path  | **Off** (so values are just `telephone-booth-operators`) |
-| Add to ID token  | **On**  |
-| Add to userinfo  | **On**  |
-| Add to access token | optional |
+| Field               | Value                                                    |
+| ------------------- | -------------------------------------------------------- |
+| Name                | `groups`                                                 |
+| Token Claim Name    | `groups`                                                 |
+| Full group path     | **Off** (so values are just `telephone-booth-operators`) |
+| Add to ID token     | **On**                                                   |
+| Add to userinfo     | **On**                                                   |
+| Add to access token | optional                                                 |
 
 ## 4. `.env`
 

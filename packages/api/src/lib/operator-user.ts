@@ -30,10 +30,7 @@ export const pictureFromClaims = (claims: IDTokenClaims): string | null => {
   }
 };
 
-export const validateAuthorization = (
-  claims: IDTokenClaims,
-  groups: string[],
-): string | null => {
+export const validateAuthorization = (claims: IDTokenClaims, groups: string[]): string | null => {
   const config = getRequiredOidcConfig();
   const email = claimString(claims, "email")?.toLowerCase();
 
@@ -92,10 +89,7 @@ export const authorizeAndUpsertOperator = async (
     return { ok: false, status: 400, reason: "missing_sub_claim" };
   }
 
-  const name =
-    claimString(claims, "name") ??
-    claimString(claims, "preferred_username") ??
-    email;
+  const name = claimString(claims, "name") ?? claimString(claims, "preferred_username") ?? email;
   const picture = pictureFromClaims(claims);
   const updateData: {
     email: string;

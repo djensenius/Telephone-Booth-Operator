@@ -6,12 +6,21 @@ import { db } from "../db.js";
 import { resolveAiConfig } from "./config.js";
 import { kickPipelineForMessage } from "./pipeline.js";
 
-const findStrandedMessages = async (limit: number, intervalMs: number): Promise<readonly string[]> => {
+const findStrandedMessages = async (
+  limit: number,
+  intervalMs: number,
+): Promise<readonly string[]> => {
   const messages = await db.message.findMany({
     where: { status: "received" },
     orderBy: { createdAt: "desc" },
     take: limit,
-    include: { transcriptions: { select: { id: true, status: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 1 } },
+    include: {
+      transcriptions: {
+        select: { id: true, status: true, createdAt: true },
+        orderBy: { createdAt: "desc" },
+        take: 1,
+      },
+    },
   });
   // A transcription row is considered stuck if it has been pending longer than
   // twice the sweeper interval. This covers the case where the API crashed
@@ -19,7 +28,9 @@ const findStrandedMessages = async (limit: number, intervalMs: number): Promise<
   const pendingStaleAfter = Date.now() - intervalMs * 2;
   const stranded: string[] = [];
   for (const message of messages) {
-    const latest = (message as unknown as { transcriptions: Array<{ status: string; createdAt: Date }> }).transcriptions[0];
+    const latest = (
+      message as unknown as { transcriptions: Array<{ status: string; createdAt: Date }> }
+    ).transcriptions[0];
     if (!latest || latest.status === "failed") {
       stranded.push(message.id);
     } else if (latest.status === "pending" && latest.createdAt.getTime() < pendingStaleAfter) {

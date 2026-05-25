@@ -1,9 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { WsEnvelopeSchema, BoothStatusSchema } from "@telephone-booth-operator/shared";
-import type { BoothState, BoothStatus, BoothSystemSnapshot } from "@telephone-booth-operator/shared";
+import type {
+  BoothState,
+  BoothStatus,
+  BoothSystemSnapshot,
+} from "@telephone-booth-operator/shared";
 import { GlassPanel, useBoothStatus } from "../../components/booth/index.js";
-import { apiQueryKeys, apiWebSocketUrlFor, useStatusCurrent, useStatusHistory } from "../../lib/api-client.js";
+import {
+  apiQueryKeys,
+  apiWebSocketUrlFor,
+  useStatusCurrent,
+  useStatusHistory,
+} from "../../lib/api-client.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
 
 function displayState(state: BoothState): string {
@@ -17,7 +26,8 @@ function hookLabel(state: BoothState): "On hook" | "Off hook" {
 function boothDisplay(state: BoothState): "idle" | "playing" | "recording" | "error" {
   if (state === "error") return "error";
   if (state === "recording" || state === "uploading") return "recording";
-  if (state === "playingMessage" || state === "playingQuestion" || state === "playingInstructions") return "playing";
+  if (state === "playingMessage" || state === "playingQuestion" || state === "playingInstructions")
+    return "playing";
   return "idle";
 }
 
@@ -57,12 +67,22 @@ export function StatusScreen(): JSX.Element {
           const status = envelope.data.status;
           setLiveStatus(status);
           queryClient.setQueryData(apiQueryKeys.status, status);
-          queryClient.setQueryData(apiQueryKeys.statusHistory, (current: { readonly items: readonly BoothStatus[] } | undefined) => ({ items: [status, ...(current?.items ?? [])].slice(0, 50) }));
-        } else if (envelope.data.kind === "system") {
-          queryClient.setQueryData<{ boothId: string; snapshot: BoothSystemSnapshot; receivedAt: string }>(
-            ["system", envelope.data.boothId],
-            { boothId: envelope.data.boothId, snapshot: envelope.data.snapshot, receivedAt: envelope.data.receivedAt },
+          queryClient.setQueryData(
+            apiQueryKeys.statusHistory,
+            (current: { readonly items: readonly BoothStatus[] } | undefined) => ({
+              items: [status, ...(current?.items ?? [])].slice(0, 50),
+            }),
           );
+        } else if (envelope.data.kind === "system") {
+          queryClient.setQueryData<{
+            boothId: string;
+            snapshot: BoothSystemSnapshot;
+            receivedAt: string;
+          }>(["system", envelope.data.boothId], {
+            boothId: envelope.data.boothId,
+            snapshot: envelope.data.snapshot,
+            receivedAt: envelope.data.receivedAt,
+          });
         } else if (envelope.data.kind === "message") {
           const message = envelope.data.message;
           queryClient.setQueryData(apiQueryKeys.message(message.id), message);
@@ -99,13 +119,22 @@ export function StatusScreen(): JSX.Element {
     <GlassPanel title="Live status panel" className="feature-screen status-screen">
       <p className="screen-kicker">Digit 1</p>
       <h1>Status</h1>
-      <p>The switchboard watches the phone client state machine and keeps the console status in step.</p>
+      <p>
+        The switchboard watches the phone client state machine and keeps the console status in step.
+      </p>
       {statusQuery.isLoading && current === null ? <FeatureSkeleton /> : null}
       {statusQuery.error ? <FeatureError message="Could not read the booth status line." /> : null}
-      {current === null && !statusQuery.isLoading ? <FeatureEmpty title="No signal yet">No status snapshots have arrived from the booth.</FeatureEmpty> : null}
+      {current === null && !statusQuery.isLoading ? (
+        <FeatureEmpty title="No signal yet">
+          No status snapshots have arrived from the booth.
+        </FeatureEmpty>
+      ) : null}
       {current === null ? null : (
         <>
-          <section className={`status-indicator status-indicator--${hookLabel(current.state) === "On hook" ? "on" : "off"}`} aria-label="Hook position">
+          <section
+            className={`status-indicator status-indicator--${hookLabel(current.state) === "On hook" ? "on" : "off"}`}
+            aria-label="Hook position"
+          >
             <div>
               <p className="screen-kicker">Receiver</p>
               <strong>{hookLabel(current.state)}</strong>
@@ -114,17 +143,36 @@ export function StatusScreen(): JSX.Element {
           </section>
           <details className="feature-help">
             <summary>What is this?</summary>
-            <p>The phone client reports each state as the handset moves from hook, to dial tone, to question playback, beep, recording, upload, and message playback.</p>
+            <p>
+              The phone client reports each state as the handset moves from hook, to dial tone, to
+              question playback, beep, recording, upload, and message playback.
+            </p>
           </details>
           <dl className="status-grid">
-            <div><dt>Booth state</dt><dd>{displayState(current.state)}</dd></div>
-            <div><dt>Line</dt><dd>{wsState}</dd></div>
-            <div><dt>Last error</dt><dd>{current.lastError ?? "Clear"}</dd></div>
+            <div>
+              <dt>Booth state</dt>
+              <dd>{displayState(current.state)}</dd>
+            </div>
+            <div>
+              <dt>Line</dt>
+              <dd>{wsState}</dd>
+            </div>
+            <div>
+              <dt>Last error</dt>
+              <dd>{current.lastError ?? "Clear"}</dd>
+            </div>
           </dl>
           <div className="feature-table-wrap">
             <table className="feature-table">
               <caption>Last 50 status snapshots</caption>
-              <thead><tr><th>Time</th><th>State</th><th>Question</th><th>Message</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>State</th>
+                  <th>Question</th>
+                  <th>Message</th>
+                </tr>
+              </thead>
               <tbody>
                 {history.map((item) => (
                   <tr key={`${item.updatedAt}-${item.state}`}>

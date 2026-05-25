@@ -55,10 +55,15 @@ export function BoothStatusProvider({
   initialLastError = null,
 }: BoothStatusProviderProps): JSX.Element {
   const [status, setStatus] = useState<BoothDisplayStatus>(initialStatus);
-  const [connectionStatus, setConnectionStatus] = useState<BoothConnectionStatus>(initialConnectionStatus);
+  const [connectionStatus, setConnectionStatus] =
+    useState<BoothConnectionStatus>(initialConnectionStatus);
   const [lastError, setLastError] = useState<string | null>(initialLastError);
-  const [mutedState, setMutedState] = useState(() => readBooleanSetting("booth.audio.muted", false));
-  const [overrideState, setOverrideState] = useState(() => readBooleanSetting("booth.motion.override", false));
+  const [mutedState, setMutedState] = useState(() =>
+    readBooleanSetting("booth.audio.muted", false),
+  );
+  const [overrideState, setOverrideState] = useState(() =>
+    readBooleanSetting("booth.motion.override", false),
+  );
 
   const value = useMemo<BoothStatusContextValue>(() => {
     function setMuted(muted: boolean): void {

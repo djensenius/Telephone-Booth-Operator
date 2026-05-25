@@ -76,10 +76,10 @@ docker compose -f docker-compose.prod.yml logs --no-color api | pino-pretty
 
 ## Health checks
 
-| URL                                  | Expected                              |
-| ------------------------------------ | ------------------------------------- |
-| `https://operator.example.com/healthz` | `{"status":"ok","version":"..."}`    |
-| `https://operator.example.com/v1/auth/me` (with session cookie) | Your profile + groups |
+| URL                                                             | Expected                          |
+| --------------------------------------------------------------- | --------------------------------- |
+| `https://operator.example.com/healthz`                          | `{"status":"ok","version":"..."}` |
+| `https://operator.example.com/v1/auth/me` (with session cookie) | Your profile + groups             |
 
 Both are safe to wire into uptime monitoring.
 

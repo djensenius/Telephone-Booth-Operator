@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { resetAuthConfigForTests } from "../src/lib/config.js";
 import { createApp } from "../src/index.js";
 import { validateAuthorization } from "../src/routes/auth.js";

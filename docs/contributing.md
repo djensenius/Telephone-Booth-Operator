@@ -44,7 +44,7 @@ If your provider isn't covered:
 2. Implement the handler in `packages/api/src/routes/`.
 3. Regenerate the TS client (`just openapi-gen`).
 4. Wire up the frontend.
-5. Write a Vitest test covering the happy path and one auth-failure path.
+5. Write a Vite+ test covering the happy path and one auth-failure path.
 
 ## Style
 
@@ -53,4 +53,4 @@ If your provider isn't covered:
 - React: no class components.
 - CSS: design tokens from `styles/theme.css` only. No raw hex in
   component CSS.
-- ESLint config is shared via the root and is `--max-warnings=0` in CI.
+- Oxlint/Oxfmt config is shared through the root Vite+ config.

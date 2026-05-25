@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const { fakeDb, store } = vi.hoisted(() => {
   const users = new Map<string, Record<string, unknown>>();

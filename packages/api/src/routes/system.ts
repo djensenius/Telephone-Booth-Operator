@@ -8,11 +8,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { wsBroadcaster } from "../lib/broadcaster.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
-import {
-  getSystemSnapshot,
-  listSystemSnapshots,
-  setSystemSnapshot,
-} from "../lib/system-cache.js";
+import { getSystemSnapshot, listSystemSnapshots, setSystemSnapshot } from "../lib/system-cache.js";
 import { requireOperator, type AuthVariables } from "../lib/session.js";
 
 const putBodySchema = z.object({

@@ -1,17 +1,28 @@
 import { serve } from "@hono/node-server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { WebSocket } from "ws";
 
 vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.js")).fakeDb }));
-vi.mock("../src/lib/azure-blob.js", async () => (await import("./support/fake-azure.js")).fakeAzureModule);
+vi.mock(
+  "../src/lib/azure-blob.js",
+  async () => (await import("./support/fake-azure.js")).fakeAzureModule,
+);
 vi.mock("../src/lib/require-api-token.js", () => ({
-  requireApiToken: () => async (c: { req: { header: (name: string) => string | undefined }; json: (body: unknown, status?: number) => Response }, next: () => Promise<void>) => {
-    if (c.req.header("authorization") === "Bearer test-token") {
-      await next();
-      return;
-    }
-    return c.json({ error: "invalid_token" }, 401);
-  },
+  requireApiToken:
+    () =>
+    async (
+      c: {
+        req: { header: (name: string) => string | undefined };
+        json: (body: unknown, status?: number) => Response;
+      },
+      next: () => Promise<void>,
+    ) => {
+      if (c.req.header("authorization") === "Bearer test-token") {
+        await next();
+        return;
+      }
+      return c.json({ error: "invalid_token" }, 401);
+    },
 }));
 
 import { createApp } from "../src/index.js";

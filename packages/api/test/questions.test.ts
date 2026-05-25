@@ -1,15 +1,26 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.js")).fakeDb }));
-vi.mock("../src/lib/azure-blob.js", async () => (await import("./support/fake-azure.js")).fakeAzureModule);
+vi.mock(
+  "../src/lib/azure-blob.js",
+  async () => (await import("./support/fake-azure.js")).fakeAzureModule,
+);
 vi.mock("../src/lib/require-api-token.js", () => ({
-  requireApiToken: () => async (c: { req: { header: (name: string) => string | undefined }; json: (body: unknown, status?: number) => Response }, next: () => Promise<void>) => {
-    if (c.req.header("authorization") === "Bearer test-token") {
-      await next();
-      return;
-    }
-    return c.json({ error: "invalid_token" }, 401);
-  },
+  requireApiToken:
+    () =>
+    async (
+      c: {
+        req: { header: (name: string) => string | undefined };
+        json: (body: unknown, status?: number) => Response;
+      },
+      next: () => Promise<void>,
+    ) => {
+      if (c.req.header("authorization") === "Bearer test-token") {
+        await next();
+        return;
+      }
+      return c.json({ error: "invalid_token" }, 401);
+    },
 }));
 
 import { createApp } from "../src/index.js";
@@ -57,7 +68,10 @@ describe("questions routes", () => {
 
     const list = await app.request("/v1/questions?limit=10", { headers: { cookie } });
     expect(list.status).toBe(200);
-    await expect(list.json()).resolves.toMatchObject({ items: [{ id: question.id }], nextCursor: null });
+    await expect(list.json()).resolves.toMatchObject({
+      items: [{ id: question.id }],
+      nextCursor: null,
+    });
 
     const missingBearer = await app.request("/v1/questions/random");
     expect(missingBearer.status).toBe(401);
@@ -66,7 +80,10 @@ describe("questions routes", () => {
     expect(random.status).toBe(200);
     await expect(random.json()).resolves.toMatchObject({ id: question.id });
 
-    const deleted = await app.request(`/v1/questions/${question.id}`, { method: "DELETE", headers: { cookie } });
+    const deleted = await app.request(`/v1/questions/${question.id}`, {
+      method: "DELETE",
+      headers: { cookie },
+    });
     expect(deleted.status).toBe(204);
 
     const none = await app.request("/v1/questions/random", { headers: phoneHeaders });

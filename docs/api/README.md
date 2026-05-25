@@ -35,7 +35,7 @@ openapi-typescript packages/api/openapi.yaml -o packages/web/src/api/schema.gen.
 ```
 
 The generated file is `.gitignore`d; the dev server regenerates it on
-boot, and CI regenerates it as part of `pnpm -r build`.
+boot, and CI regenerates it as part of `vp run -r build`.
 
 ## Versioning
 

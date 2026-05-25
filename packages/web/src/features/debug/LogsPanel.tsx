@@ -15,7 +15,12 @@ export function LogsPanel({ logs, level, onLevelChange }: LogsPanelProps): JSX.E
   const listRef = useRef<HTMLDivElement | null>(null);
   const filteredLogs = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    const matches = needle.length === 0 ? logs : logs.filter((entry) => `${entry.level} ${entry.target} ${entry.message}`.toLowerCase().includes(needle));
+    const matches =
+      needle.length === 0
+        ? logs
+        : logs.filter((entry) =>
+            `${entry.level} ${entry.target} ${entry.message}`.toLowerCase().includes(needle),
+          );
     return matches.slice(-200);
   }, [logs, search]);
 
@@ -40,25 +45,45 @@ export function LogsPanel({ logs, level, onLevelChange }: LogsPanelProps): JSX.E
           Level
           <select value={level} onChange={(event) => onLevelChange(event.currentTarget.value)}>
             {LEVELS.map((candidate) => (
-              <option key={candidate} value={candidate}>{candidate}</option>
+              <option key={candidate} value={candidate}>
+                {candidate}
+              </option>
             ))}
           </select>
         </label>
         <label>
           Search
-          <input type="search" value={search} onChange={(event) => setSearch(event.currentTarget.value)} placeholder="busy, hook, upload" />
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.currentTarget.value)}
+            placeholder="busy, hook, upload"
+          />
         </label>
         <label className="debug-checkbox">
-          <input type="checkbox" checked={autoTail} onChange={(event) => setAutoTail(event.currentTarget.checked)} />
+          <input
+            type="checkbox"
+            checked={autoTail}
+            onChange={(event) => setAutoTail(event.currentTarget.checked)}
+          />
           Auto-tail
         </label>
       </div>
-      <div className="debug-log-list" ref={listRef} role="log" aria-live={autoTail ? "polite" : "off"} tabIndex={0}>
+      <div
+        className="debug-log-list"
+        ref={listRef}
+        role="log"
+        aria-live={autoTail ? "polite" : "off"}
+        tabIndex={0}
+      >
         {filteredLogs.length === 0 ? (
           <p>No log entries match this filter.</p>
         ) : (
           filteredLogs.map((entry) => (
-            <article className={`debug-log-entry debug-log-entry--${entry.level}`} key={`${entry.ts}-${entry.target}-${entry.message}`}>
+            <article
+              className={`debug-log-entry debug-log-entry--${entry.level}`}
+              key={`${entry.ts}-${entry.target}-${entry.message}`}
+            >
               <time>{entry.ts}</time>
               <strong>{entry.level}</strong>
               <span>{entry.target}</span>

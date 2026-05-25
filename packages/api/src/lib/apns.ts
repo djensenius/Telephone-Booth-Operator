@@ -43,7 +43,12 @@ class NoopApnsSender implements ApnsSender {
 }
 
 const apnsEnvConfigured = (): boolean =>
-  Boolean(process.env.APNS_TEAM_ID && process.env.APNS_KEY_ID && process.env.APNS_AUTH_KEY && process.env.APNS_BUNDLE_ID);
+  Boolean(
+    process.env.APNS_TEAM_ID &&
+    process.env.APNS_KEY_ID &&
+    process.env.APNS_AUTH_KEY &&
+    process.env.APNS_BUNDLE_ID,
+  );
 
 let activeSender: ApnsSender = new NoopApnsSender();
 let senderInjectedForTests = false;
@@ -79,10 +84,7 @@ export const findTargetDevices = async (
     .map(({ id, apnsToken, platform }) => ({ id, apnsToken, platform }));
 };
 
-const prefersNotification = (
-  raw: unknown,
-  key: keyof MobileDevicePreferences,
-): boolean => {
+const prefersNotification = (raw: unknown, key: keyof MobileDevicePreferences): boolean => {
   const defaults: MobileDevicePreferences = {
     callStarted: true,
     messageReceived: true,

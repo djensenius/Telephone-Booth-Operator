@@ -14,8 +14,8 @@ const bearerTokenFromHeader = (authorization: string | undefined): string | null
   return token;
 };
 
-export const requireApiToken = (): MiddlewareHandler<{ Variables: ApiTokenVariables }> =>
-  async (c, next) => {
+export const requireApiToken =
+  (): MiddlewareHandler<{ Variables: ApiTokenVariables }> => async (c, next) => {
     const plaintext = bearerTokenFromHeader(c.req.header("authorization"));
     if (!plaintext) return c.json({ error: "invalid_token" }, 401);
 

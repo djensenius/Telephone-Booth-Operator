@@ -16,12 +16,17 @@ function transportLabel(value: DebugConnectionChange["transport"]): string {
   }
 }
 
-export function ConnectionStatusBar({ connection, hasPrefs }: ConnectionStatusBarProps): JSX.Element {
+export function ConnectionStatusBar({
+  connection,
+  hasPrefs,
+}: ConnectionStatusBarProps): JSX.Element {
   const latency = connection.latencyMs === null ? "—" : `${connection.latencyMs} ms`;
   return (
     <section className="debug-status-bar" aria-label="Phone client connection" aria-live="polite">
       <div>
-        <span className={`debug-chip debug-chip--${connection.transport}`}>{hasPrefs ? transportLabel(connection.transport) : "Connection not configured"}</span>
+        <span className={`debug-chip debug-chip--${connection.transport}`}>
+          {hasPrefs ? transportLabel(connection.transport) : "Connection not configured"}
+        </span>
       </div>
       <dl className="debug-status-bar__metrics">
         <div>
@@ -33,7 +38,9 @@ export function ConnectionStatusBar({ connection, hasPrefs }: ConnectionStatusBa
           <dd>{connection.wsState}</dd>
         </div>
       </dl>
-      {connection.lastError === undefined ? null : <p className="debug-status-bar__error">Line is busy: {connection.lastError}</p>}
+      {connection.lastError === undefined ? null : (
+        <p className="debug-status-bar__error">Line is busy: {connection.lastError}</p>
+      )}
     </section>
   );
 }

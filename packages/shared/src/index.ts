@@ -18,7 +18,13 @@ export const BoothStateSchema = z.enum([
 ]);
 export type BoothState = z.infer<typeof BoothStateSchema>;
 
-export const MessageStatusSchema = z.enum(["uploading", "received", "pending", "approved", "rejected"]);
+export const MessageStatusSchema = z.enum([
+  "uploading",
+  "received",
+  "pending",
+  "approved",
+  "rejected",
+]);
 export type MessageStatus = z.infer<typeof MessageStatusSchema>;
 
 export const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -187,7 +193,10 @@ export const ApiTokenSchema = z.object({
 });
 export type ApiToken = z.infer<typeof ApiTokenSchema>;
 
-export const ApiTokenCreatedSchema = ApiTokenSchema.omit({ lastUsedAt: true, revokedAt: true }).extend({
+export const ApiTokenCreatedSchema = ApiTokenSchema.omit({
+  lastUsedAt: true,
+  revokedAt: true,
+}).extend({
   plaintext: z.string(),
 });
 export type ApiTokenCreated = z.infer<typeof ApiTokenCreatedSchema>;

@@ -15,7 +15,7 @@
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
     "types": ["vite/client"],
-    "outDir": "dist"
+    "noEmit": true
   },
   "include": ["src", "../shared/src"]
 }

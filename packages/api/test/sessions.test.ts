@@ -1,15 +1,26 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.js")).fakeDb }));
-vi.mock("../src/lib/azure-blob.js", async () => (await import("./support/fake-azure.js")).fakeAzureModule);
+vi.mock(
+  "../src/lib/azure-blob.js",
+  async () => (await import("./support/fake-azure.js")).fakeAzureModule,
+);
 vi.mock("../src/lib/require-api-token.js", () => ({
-  requireApiToken: () => async (c: { req: { header: (name: string) => string | undefined }; json: (body: unknown, status?: number) => Response }, next: () => Promise<void>) => {
-    if (c.req.header("authorization") === "Bearer test-token") {
-      await next();
-      return;
-    }
-    return c.json({ error: "invalid_token" }, 401);
-  },
+  requireApiToken:
+    () =>
+    async (
+      c: {
+        req: { header: (name: string) => string | undefined };
+        json: (body: unknown, status?: number) => Response;
+      },
+      next: () => Promise<void>,
+    ) => {
+      if (c.req.header("authorization") === "Bearer test-token") {
+        await next();
+        return;
+      }
+      return c.json({ error: "invalid_token" }, 401);
+    },
 }));
 
 import { randomUUID } from "node:crypto";
@@ -42,8 +53,24 @@ describe("sessions routes", () => {
       headers: { "content-type": "application/json", ...phoneHeaders },
       body: JSON.stringify({
         events: [
-          { eventId: "s", boothId: "booth-01", bootId, type: "call_started", occurredAt: t0, sessionId, payload: {} },
-          { eventId: "d", boothId: "booth-01", bootId, type: "digit_dialed", occurredAt: t1, sessionId, payload: { digit: 1 } },
+          {
+            eventId: "s",
+            boothId: "booth-01",
+            bootId,
+            type: "call_started",
+            occurredAt: t0,
+            sessionId,
+            payload: {},
+          },
+          {
+            eventId: "d",
+            boothId: "booth-01",
+            bootId,
+            type: "digit_dialed",
+            occurredAt: t1,
+            sessionId,
+            payload: { digit: 1 },
+          },
           {
             eventId: "e",
             boothId: "booth-01",
@@ -60,7 +87,9 @@ describe("sessions routes", () => {
     const cookie = operatorCookie();
     const list = await app.request("/v1/sessions", { headers: { cookie } });
     expect(list.status).toBe(200);
-    const listJson = (await list.json()) as { items: Array<{ id: string; outcome: string | null }> };
+    const listJson = (await list.json()) as {
+      items: Array<{ id: string; outcome: string | null }>;
+    };
     expect(listJson.items).toHaveLength(1);
     expect(listJson.items[0]!.id).toBe(sessionId);
     expect(listJson.items[0]!.outcome).toBe("hung_up_before_dial");

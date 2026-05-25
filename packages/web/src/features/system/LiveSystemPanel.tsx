@@ -49,12 +49,25 @@ export function LiveSystemPanel({ boothId = DEFAULT_BOOTH_ID }: LiveSystemPanelP
   const rows = useMemo(() => {
     if (!snapshot) return [];
     return [
-      { label: "CPU temperature", value: snapshot.cpuTemperatureCelsius != null ? `${fmtNumber(snapshot.cpuTemperatureCelsius, 1)} °C` : "—" },
-      { label: "CPU usage", value: snapshot.cpuUsageRatio != null ? `${(snapshot.cpuUsageRatio * 100).toFixed(0)}%` : "—" },
+      {
+        label: "CPU temperature",
+        value:
+          snapshot.cpuTemperatureCelsius != null
+            ? `${fmtNumber(snapshot.cpuTemperatureCelsius, 1)} °C`
+            : "—",
+      },
+      {
+        label: "CPU usage",
+        value:
+          snapshot.cpuUsageRatio != null ? `${(snapshot.cpuUsageRatio * 100).toFixed(0)}%` : "—",
+      },
       { label: "Load (1m)", value: fmtNumber(snapshot.loadAverage1m) },
       { label: "Load (5m)", value: fmtNumber(snapshot.loadAverage5m) },
       { label: "Load (15m)", value: fmtNumber(snapshot.loadAverage15m) },
-      { label: "Memory", value: `${fmtBytes(snapshot.memoryUsedBytes)} / ${fmtBytes(snapshot.memoryTotalBytes)} (${fmtPercent(snapshot.memoryUsedBytes, snapshot.memoryTotalBytes)})` },
+      {
+        label: "Memory",
+        value: `${fmtBytes(snapshot.memoryUsedBytes)} / ${fmtBytes(snapshot.memoryTotalBytes)} (${fmtPercent(snapshot.memoryUsedBytes, snapshot.memoryTotalBytes)})`,
+      },
       { label: "Uptime", value: fmtUptime(snapshot.uptimeSeconds) },
       { label: "Hostname", value: snapshot.hostname ?? "—" },
       { label: "OS", value: snapshot.osVersion ?? "—" },
@@ -72,7 +85,10 @@ export function LiveSystemPanel({ boothId = DEFAULT_BOOTH_ID }: LiveSystemPanelP
               ? `up${snapshot.tailscaleHostname ? ` (${snapshot.tailscaleHostname})` : ""}`
               : "down",
       },
-      { label: "Throttling", value: snapshot.throttlingFlags?.length ? snapshot.throttlingFlags.join(", ") : "none" },
+      {
+        label: "Throttling",
+        value: snapshot.throttlingFlags?.length ? snapshot.throttlingFlags.join(", ") : "none",
+      },
     ];
   }, [snapshot]);
 
@@ -92,7 +108,8 @@ export function LiveSystemPanel({ boothId = DEFAULT_BOOTH_ID }: LiveSystemPanelP
       {query.error ? <FeatureError message="Could not read the booth's vitals." /> : null}
       {!query.isLoading && !query.error && !snapshot ? (
         <FeatureEmpty title="No snapshot yet">
-          The booth has not pushed a system snapshot since the operator restarted. Snapshots arrive every five seconds when the booth is online.
+          The booth has not pushed a system snapshot since the operator restarted. Snapshots arrive
+          every five seconds when the booth is online.
         </FeatureEmpty>
       ) : null}
       {snapshot ? (
@@ -110,7 +127,10 @@ export function LiveSystemPanel({ boothId = DEFAULT_BOOTH_ID }: LiveSystemPanelP
                 <ul>
                   {snapshot.disks.map((disk) => (
                     <li key={disk.mountpoint}>
-                      <code>{disk.mountpoint}</code> — {fmtBytes(disk.totalBytes - disk.availableBytes)} used of {fmtBytes(disk.totalBytes)} ({fmtPercent(disk.totalBytes - disk.availableBytes, disk.totalBytes)})
+                      <code>{disk.mountpoint}</code> —{" "}
+                      {fmtBytes(disk.totalBytes - disk.availableBytes)} used of{" "}
+                      {fmtBytes(disk.totalBytes)} (
+                      {fmtPercent(disk.totalBytes - disk.availableBytes, disk.totalBytes)})
                     </li>
                   ))}
                 </ul>
@@ -124,7 +144,8 @@ export function LiveSystemPanel({ boothId = DEFAULT_BOOTH_ID }: LiveSystemPanelP
                 <ul>
                   {snapshot.networkInterfaces.map((iface) => (
                     <li key={iface.name}>
-                      <code>{iface.name}</code> — rx {fmtBytes(iface.receivedBytes)} · tx {fmtBytes(iface.transmittedBytes)}
+                      <code>{iface.name}</code> — rx {fmtBytes(iface.receivedBytes)} · tx{" "}
+                      {fmtBytes(iface.transmittedBytes)}
                     </li>
                   ))}
                 </ul>

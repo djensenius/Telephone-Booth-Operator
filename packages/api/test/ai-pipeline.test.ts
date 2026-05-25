@@ -1,7 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.js")).fakeDb }));
-vi.mock("../src/lib/azure-blob.js", async () => (await import("./support/fake-azure.js")).fakeAzureModule);
+vi.mock(
+  "../src/lib/azure-blob.js",
+  async () => (await import("./support/fake-azure.js")).fakeAzureModule,
+);
 
 import { runModeration, runTranscription, type PipelineDeps } from "../src/lib/ai/pipeline.js";
 import type { ModerationProvider, TranscriptionProvider } from "../src/lib/ai/types.js";
@@ -67,8 +70,14 @@ const baseDeps = (overrides: Partial<PipelineDeps> = {}): PipelineDeps => ({
     sweeperIntervalSeconds: 60,
     ...(overrides.config ?? {}),
   },
-  transcriptionProvider: "transcriptionProvider" in overrides ? overrides.transcriptionProvider ?? null : fakeTranscription("hello"),
-  moderationProvider: "moderationProvider" in overrides ? overrides.moderationProvider ?? null : fakeModeration({ flagged: false, recommendation: "approve", maxScore: 0.05 }),
+  transcriptionProvider:
+    "transcriptionProvider" in overrides
+      ? (overrides.transcriptionProvider ?? null)
+      : fakeTranscription("hello"),
+  moderationProvider:
+    "moderationProvider" in overrides
+      ? (overrides.moderationProvider ?? null)
+      : fakeModeration({ flagged: false, recommendation: "approve", maxScore: 0.05 }),
 });
 
 describe("AI pipeline", () => {
@@ -81,8 +90,15 @@ describe("AI pipeline", () => {
     const id = await seedReceivedMessage();
     await runTranscription({ messageId: id, deps: baseDeps() });
 
-    const message = await fakeDb.message.findUnique({ where: { id }, include: { audio: true, transcriptions: true, moderations: true } });
-    const withRelations = message as unknown as { status: string; transcriptions: Array<{ status: string; text: string | null }>; moderations: Array<{ status: string; recommendation: string | null }> };
+    const message = await fakeDb.message.findUnique({
+      where: { id },
+      include: { audio: true, transcriptions: true, moderations: true },
+    });
+    const withRelations = message as unknown as {
+      status: string;
+      transcriptions: Array<{ status: string; text: string | null }>;
+      moderations: Array<{ status: string; recommendation: string | null }>;
+    };
     expect(withRelations.status).toBe("pending");
     expect(withRelations.transcriptions[0]?.status).toBe("succeeded");
     expect(withRelations.transcriptions[0]?.text).toBe("hello");
@@ -94,10 +110,18 @@ describe("AI pipeline", () => {
     const id = await seedReceivedMessage();
     await runTranscription({
       messageId: id,
-      deps: baseDeps({ transcriptionProvider: null, config: { transcriptionProvider: "disabled" } as never }),
+      deps: baseDeps({
+        transcriptionProvider: null,
+        config: { transcriptionProvider: "disabled" } as never,
+      }),
     });
-    const message = await fakeDb.message.findUnique({ where: { id }, include: { audio: true, transcriptions: true, moderations: true } });
-    const withRelations = message as unknown as { transcriptions: Array<{ status: string; error: string | null; provider: string }> };
+    const message = await fakeDb.message.findUnique({
+      where: { id },
+      include: { audio: true, transcriptions: true, moderations: true },
+    });
+    const withRelations = message as unknown as {
+      transcriptions: Array<{ status: string; error: string | null; provider: string }>;
+    };
     expect(withRelations.transcriptions[0]?.status).toBe("failed");
     expect(withRelations.transcriptions[0]?.error).toMatch(/disabled/);
   });
@@ -107,12 +131,22 @@ describe("AI pipeline", () => {
     await runTranscription({
       messageId: id,
       deps: baseDeps({
-        moderationProvider: fakeModeration({ flagged: true, recommendation: "reject", maxScore: 0.92, reasonSummary: "hate" }),
+        moderationProvider: fakeModeration({
+          flagged: true,
+          recommendation: "reject",
+          maxScore: 0.92,
+          reasonSummary: "hate",
+        }),
         config: { autoDecisionMode: "auto_reject" } as never,
       }),
     });
     const message = await fakeDb.message.findUnique({ where: { id }, include: { audio: true } });
-    const withRelations = message as unknown as { status: string; notes: string | null; decidedById: string | null; decidedAt: Date | null };
+    const withRelations = message as unknown as {
+      status: string;
+      notes: string | null;
+      decidedById: string | null;
+      decidedAt: Date | null;
+    };
     expect(withRelations.status).toBe("rejected");
     expect(withRelations.decidedById).toBeNull();
     expect(withRelations.decidedAt).not.toBeNull();
@@ -124,7 +158,11 @@ describe("AI pipeline", () => {
     await runTranscription({
       messageId: id,
       deps: baseDeps({
-        moderationProvider: fakeModeration({ flagged: false, recommendation: "approve", maxScore: 0.02 }),
+        moderationProvider: fakeModeration({
+          flagged: false,
+          recommendation: "approve",
+          maxScore: 0.02,
+        }),
         config: { autoDecisionMode: "auto_both" } as never,
       }),
     });
@@ -139,7 +177,11 @@ describe("AI pipeline", () => {
     await runTranscription({
       messageId: id,
       deps: baseDeps({
-        moderationProvider: fakeModeration({ flagged: false, recommendation: "review", maxScore: 0.4 }),
+        moderationProvider: fakeModeration({
+          flagged: false,
+          recommendation: "review",
+          maxScore: 0.4,
+        }),
         config: { autoDecisionMode: "auto_both" } as never,
       }),
     });
@@ -149,19 +191,37 @@ describe("AI pipeline", () => {
 
   it("runModeration returns null when there is no succeeded transcription", async () => {
     const id = await seedReceivedMessage();
-    const result = await runModeration({ messageId: id, deps: baseDeps(), requestedByUserId: null });
+    const result = await runModeration({
+      messageId: id,
+      deps: baseDeps(),
+      requestedByUserId: null,
+    });
     expect(result).toBeNull();
   });
 
   it("advances silent (empty-transcript) messages to pending without running moderation", async () => {
     const id = await seedReceivedMessage();
-    const moderation = fakeModeration({ flagged: false, recommendation: "approve", maxScore: 0.05 });
+    const moderation = fakeModeration({
+      flagged: false,
+      recommendation: "approve",
+      maxScore: 0.05,
+    });
     await runTranscription({
       messageId: id,
-      deps: baseDeps({ transcriptionProvider: fakeTranscription("   "), moderationProvider: moderation }),
+      deps: baseDeps({
+        transcriptionProvider: fakeTranscription("   "),
+        moderationProvider: moderation,
+      }),
     });
-    const message = await fakeDb.message.findUnique({ where: { id }, include: { audio: true, transcriptions: true, moderations: true } });
-    const withRelations = message as unknown as { status: string; transcriptions: Array<{ status: string }>; moderations: Array<unknown> };
+    const message = await fakeDb.message.findUnique({
+      where: { id },
+      include: { audio: true, transcriptions: true, moderations: true },
+    });
+    const withRelations = message as unknown as {
+      status: string;
+      transcriptions: Array<{ status: string }>;
+      moderations: Array<unknown>;
+    };
     expect(withRelations.status).toBe("pending");
     expect(withRelations.transcriptions[0]?.status).toBe("succeeded");
     expect(withRelations.moderations).toHaveLength(0);
@@ -177,7 +237,10 @@ describe("AI pipeline", () => {
         config: { moderationProvider: "disabled" } as never,
       }),
     });
-    const message = await fakeDb.message.findUnique({ where: { id }, include: { audio: true, transcriptions: true, moderations: true } });
+    const message = await fakeDb.message.findUnique({
+      where: { id },
+      include: { audio: true, transcriptions: true, moderations: true },
+    });
     const withRelations = message as unknown as {
       status: string;
       transcriptions: Array<{ status: string }>;
@@ -198,10 +261,16 @@ describe("AI pipeline", () => {
     // Operator re-runs moderation, but the provider is now disabled.
     await runModeration({
       messageId: id,
-      deps: baseDeps({ moderationProvider: null, config: { moderationProvider: "disabled" } as never }),
+      deps: baseDeps({
+        moderationProvider: null,
+        config: { moderationProvider: "disabled" } as never,
+      }),
       requestedByUserId: null,
     });
-    const message = await fakeDb.message.findUnique({ where: { id }, include: { audio: true, transcriptions: true, moderations: true } });
+    const message = await fakeDb.message.findUnique({
+      where: { id },
+      include: { audio: true, transcriptions: true, moderations: true },
+    });
     const withRelations = message as unknown as { status: string };
     expect(withRelations.status).toBe("approved");
   });
@@ -211,10 +280,15 @@ describe("AI pipeline", () => {
     const moderationProvider: ModerationProvider = {
       name: "openai",
       model: "omni-moderation-latest",
-      moderate: vi.fn(async () => { throw new Error("upstream blew up"); }),
+      moderate: vi.fn(async () => {
+        throw new Error("upstream blew up");
+      }),
     };
     await runTranscription({ messageId: id, deps: baseDeps({ moderationProvider }) });
-    const message = await fakeDb.message.findUnique({ where: { id }, include: { audio: true, transcriptions: true, moderations: true } });
+    const message = await fakeDb.message.findUnique({
+      where: { id },
+      include: { audio: true, transcriptions: true, moderations: true },
+    });
     const withRelations = message as unknown as {
       status: string;
       moderations: Array<{ status: string; error: string | null }>;
@@ -230,11 +304,23 @@ describe("AI pipeline", () => {
     const failingProvider: TranscriptionProvider = {
       name: "openai",
       model: "whisper-1",
-      transcribe: vi.fn(async () => { throw new Error("upstream blew up"); }),
+      transcribe: vi.fn(async () => {
+        throw new Error("upstream blew up");
+      }),
     };
-    await runTranscription({ messageId: id, deps: baseDeps({ transcriptionProvider: failingProvider }) });
-    const message = await fakeDb.message.findUnique({ where: { id }, include: { audio: true, transcriptions: true, moderations: true } });
-    const withRelations = message as unknown as { status: string; transcriptions: Array<{ status: string; error: string | null }>; moderations: Array<unknown> };
+    await runTranscription({
+      messageId: id,
+      deps: baseDeps({ transcriptionProvider: failingProvider }),
+    });
+    const message = await fakeDb.message.findUnique({
+      where: { id },
+      include: { audio: true, transcriptions: true, moderations: true },
+    });
+    const withRelations = message as unknown as {
+      status: string;
+      transcriptions: Array<{ status: string; error: string | null }>;
+      moderations: Array<unknown>;
+    };
     expect(withRelations.status).toBe("received");
     expect(withRelations.transcriptions[0]?.status).toBe("failed");
     expect(withRelations.transcriptions[0]?.error).toContain("upstream blew up");

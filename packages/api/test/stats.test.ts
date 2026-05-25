@@ -1,7 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.js")).fakeDb }));
-vi.mock("../src/lib/azure-blob.js", async () => (await import("./support/fake-azure.js")).fakeAzureModule);
+vi.mock(
+  "../src/lib/azure-blob.js",
+  async () => (await import("./support/fake-azure.js")).fakeAzureModule,
+);
 
 vi.mock("../src/lib/oidc.js", () => ({
   getOidcClient: vi.fn(async () => ({
@@ -14,10 +17,7 @@ vi.mock("../src/lib/oidc.js", () => ({
 }));
 
 import { createApp } from "../src/index.js";
-import {
-  __setBearerVerifierForTests,
-  resetBearerAuthForTests,
-} from "../src/lib/bearer-auth.js";
+import { __setBearerVerifierForTests, resetBearerAuthForTests } from "../src/lib/bearer-auth.js";
 import { resetAuthConfigForTests } from "../src/lib/config.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { resetStatsCacheForTests } from "../src/routes/stats.js";
@@ -64,7 +64,9 @@ const setupEnv = () => {
 const installValidBearer = () => {
   __setBearerVerifierForTests({
     jwks: () => ({ kid: "test-key" }) as unknown as never,
-    jwtVerify: (async () => ({ payload: BEARER_CLAIMS })) as unknown as typeof import("jose").jwtVerify,
+    jwtVerify: (async () => ({
+      payload: BEARER_CLAIMS,
+    })) as unknown as typeof import("jose").jwtVerify,
   });
 };
 

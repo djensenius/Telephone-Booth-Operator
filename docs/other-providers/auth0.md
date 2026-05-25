@@ -5,11 +5,11 @@
 > _Auth0 dashboard → Applications → Create application_ →
 > **Regular Web Application** → Auth0 Quick Start: skip.
 
-| Setting              | Value                                                                 |
-| -------------------- | --------------------------------------------------------------------- |
-| Allowed Callback URLs| `http://localhost:8787/v1/auth/callback`<br>`https://operator.example.com/v1/auth/callback` |
-| Allowed Logout URLs  | `http://localhost:5173`, prod equivalent                              |
-| Token Endpoint Auth  | `Post`                                                                |
+| Setting               | Value                                                                                       |
+| --------------------- | ------------------------------------------------------------------------------------------- |
+| Allowed Callback URLs | `http://localhost:8787/v1/auth/callback`<br>`https://operator.example.com/v1/auth/callback` |
+| Allowed Logout URLs   | `http://localhost:5173`, prod equivalent                                                    |
+| Token Endpoint Auth   | `Post`                                                                                      |
 
 Copy **Domain**, **Client ID**, and **Client Secret**.
 

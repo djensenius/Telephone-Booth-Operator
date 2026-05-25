@@ -1,15 +1,26 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.js")).fakeDb }));
-vi.mock("../src/lib/azure-blob.js", async () => (await import("./support/fake-azure.js")).fakeAzureModule);
+vi.mock(
+  "../src/lib/azure-blob.js",
+  async () => (await import("./support/fake-azure.js")).fakeAzureModule,
+);
 vi.mock("../src/lib/require-api-token.js", () => ({
-  requireApiToken: () => async (c: { req: { header: (name: string) => string | undefined }; json: (body: unknown, status?: number) => Response }, next: () => Promise<void>) => {
-    if (c.req.header("authorization") === "Bearer test-token") {
-      await next();
-      return;
-    }
-    return c.json({ error: "invalid_token" }, 401);
-  },
+  requireApiToken:
+    () =>
+    async (
+      c: {
+        req: { header: (name: string) => string | undefined };
+        json: (body: unknown, status?: number) => Response;
+      },
+      next: () => Promise<void>,
+    ) => {
+      if (c.req.header("authorization") === "Bearer test-token") {
+        await next();
+        return;
+      }
+      return c.json({ error: "invalid_token" }, 401);
+    },
 }));
 
 import { createApp } from "../src/index.js";
@@ -70,13 +81,20 @@ describe("messages routes", () => {
     expect(list.status).toBe(200);
     const listed = await list.json();
     expect(listed.items).toHaveLength(1);
-    expect(listed.items[0]).toMatchObject({ id: slot.id, status: "received", audio: { sha256, durationMs: 3000 } });
+    expect(listed.items[0]).toMatchObject({
+      id: slot.id,
+      status: "received",
+      audio: { sha256, durationMs: 3000 },
+    });
 
     const detail = await app.request(`/v1/messages/${slot.id}`, { headers: { cookie } });
     expect(detail.status).toBe(200);
     await expect(detail.json()).resolves.toMatchObject({ id: slot.id, status: "received" });
 
-    const deleted = await app.request(`/v1/messages/${slot.id}`, { method: "DELETE", headers: { cookie } });
+    const deleted = await app.request(`/v1/messages/${slot.id}`, {
+      method: "DELETE",
+      headers: { cookie },
+    });
     expect(deleted.status).toBe(204);
   });
 });

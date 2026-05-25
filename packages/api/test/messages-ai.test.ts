@@ -1,15 +1,26 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.js")).fakeDb }));
-vi.mock("../src/lib/azure-blob.js", async () => (await import("./support/fake-azure.js")).fakeAzureModule);
+vi.mock(
+  "../src/lib/azure-blob.js",
+  async () => (await import("./support/fake-azure.js")).fakeAzureModule,
+);
 vi.mock("../src/lib/require-api-token.js", () => ({
-  requireApiToken: () => async (c: { req: { header: (name: string) => string | undefined }; json: (body: unknown, status?: number) => Response }, next: () => Promise<void>) => {
-    if (c.req.header("authorization") === "Bearer test-token") {
-      await next();
-      return;
-    }
-    return c.json({ error: "invalid_token" }, 401);
-  },
+  requireApiToken:
+    () =>
+    async (
+      c: {
+        req: { header: (name: string) => string | undefined };
+        json: (body: unknown, status?: number) => Response;
+      },
+      next: () => Promise<void>,
+    ) => {
+      if (c.req.header("authorization") === "Bearer test-token") {
+        await next();
+        return;
+      }
+      return c.json({ error: "invalid_token" }, 401);
+    },
 }));
 
 import { createApp } from "../src/index.js";
@@ -41,7 +52,12 @@ const seedReceivedMessage = async (app: ReturnType<typeof createApp>): Promise<s
   });
   expect(initiated.status, await initiated.clone().text()).toBe(201);
   const slot = await initiated.json();
-  fakeBlobs.set(slot.blobName, { exists: true, sizeBytes: 4242, contentType: "audio/flac", sha256 });
+  fakeBlobs.set(slot.blobName, {
+    exists: true,
+    sizeBytes: 4242,
+    contentType: "audio/flac",
+    sha256,
+  });
   const completed = await app.request(`/v1/messages/${slot.id}/complete`, {
     method: "POST",
     headers: phoneHeaders,
@@ -131,9 +147,14 @@ describe("messages AI routes", () => {
     const detail = await app.request(`/v1/messages/${id}`, { headers: { cookie } });
     expect(detail.status).toBe(200);
     const detailBody = await detail.json();
-    expect(detailBody.latestTranscription).toMatchObject({ status: "failed", provider: "disabled" });
+    expect(detailBody.latestTranscription).toMatchObject({
+      status: "failed",
+      provider: "disabled",
+    });
 
-    const list = await app.request(`/v1/messages?status=received&limit=10`, { headers: { cookie } });
+    const list = await app.request(`/v1/messages?status=received&limit=10`, {
+      headers: { cookie },
+    });
     expect(list.status).toBe(200);
     const listBody = await list.json();
     expect(listBody.items[0]?.latestTranscription).toMatchObject({ status: "failed" });

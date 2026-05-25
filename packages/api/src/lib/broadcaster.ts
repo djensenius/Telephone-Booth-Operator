@@ -1,7 +1,17 @@
 import type { BoothSystemSnapshot, Message } from "@telephone-booth-operator/shared";
 
 export type BoothStatusEvent = {
-  state: "idle" | "dialTone" | "dialing" | "playingQuestion" | "beep" | "recording" | "uploading" | "playingMessage" | "playingInstructions" | "error";
+  state:
+    | "idle"
+    | "dialTone"
+    | "dialing"
+    | "playingQuestion"
+    | "beep"
+    | "recording"
+    | "uploading"
+    | "playingMessage"
+    | "playingInstructions"
+    | "error";
   updatedAt: string;
   currentQuestionId?: string | null;
   currentMessageId?: string | null;

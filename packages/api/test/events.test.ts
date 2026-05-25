@@ -1,15 +1,26 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.js")).fakeDb }));
-vi.mock("../src/lib/azure-blob.js", async () => (await import("./support/fake-azure.js")).fakeAzureModule);
+vi.mock(
+  "../src/lib/azure-blob.js",
+  async () => (await import("./support/fake-azure.js")).fakeAzureModule,
+);
 vi.mock("../src/lib/require-api-token.js", () => ({
-  requireApiToken: () => async (c: { req: { header: (name: string) => string | undefined }; json: (body: unknown, status?: number) => Response }, next: () => Promise<void>) => {
-    if (c.req.header("authorization") === "Bearer test-token") {
-      await next();
-      return;
-    }
-    return c.json({ error: "invalid_token" }, 401);
-  },
+  requireApiToken:
+    () =>
+    async (
+      c: {
+        req: { header: (name: string) => string | undefined };
+        json: (body: unknown, status?: number) => Response;
+      },
+      next: () => Promise<void>,
+    ) => {
+      if (c.req.header("authorization") === "Bearer test-token") {
+        await next();
+        return;
+      }
+      return c.json({ error: "invalid_token" }, 401);
+    },
 }));
 
 import { randomUUID } from "node:crypto";
@@ -127,9 +138,24 @@ describe("GET /v1/events", () => {
     const bootId = randomUUID();
     // Seed 3 events by POSTing them.
     const events = [
-      sampleEvent({ eventId: "a", bootId, type: "digit_dialed", occurredAt: new Date(Date.now() - 3000).toISOString() }),
-      sampleEvent({ eventId: "b", bootId, type: "digit_dialed", occurredAt: new Date(Date.now() - 2000).toISOString() }),
-      sampleEvent({ eventId: "c", bootId, type: "state_transition", occurredAt: new Date(Date.now() - 1000).toISOString() }),
+      sampleEvent({
+        eventId: "a",
+        bootId,
+        type: "digit_dialed",
+        occurredAt: new Date(Date.now() - 3000).toISOString(),
+      }),
+      sampleEvent({
+        eventId: "b",
+        bootId,
+        type: "digit_dialed",
+        occurredAt: new Date(Date.now() - 2000).toISOString(),
+      }),
+      sampleEvent({
+        eventId: "c",
+        bootId,
+        type: "state_transition",
+        occurredAt: new Date(Date.now() - 1000).toISOString(),
+      }),
     ];
     await app.request("/v1/events", {
       method: "POST",
@@ -140,7 +166,10 @@ describe("GET /v1/events", () => {
     const cookie = operatorCookie();
     const all = await app.request("/v1/events?limit=10", { headers: { cookie } });
     expect(all.status).toBe(200);
-    const allJson = (await all.json()) as { items: Array<{ eventId: string }>; nextCursor: string | null };
+    const allJson = (await all.json()) as {
+      items: Array<{ eventId: string }>;
+      nextCursor: string | null;
+    };
     expect(allJson.items).toHaveLength(3);
     expect(allJson.nextCursor).toBeNull();
 
@@ -149,11 +178,20 @@ describe("GET /v1/events", () => {
     expect(filteredJson.items.map((event) => event.eventId).sort()).toEqual(["a", "b"]);
 
     const firstPage = await app.request("/v1/events?limit=2", { headers: { cookie } });
-    const firstJson = (await firstPage.json()) as { items: Array<{ eventId: string }>; nextCursor: string | null };
+    const firstJson = (await firstPage.json()) as {
+      items: Array<{ eventId: string }>;
+      nextCursor: string | null;
+    };
     expect(firstJson.items).toHaveLength(2);
     expect(firstJson.nextCursor).not.toBeNull();
-    const secondPage = await app.request(`/v1/events?limit=2&cursor=${encodeURIComponent(firstJson.nextCursor!)}`, { headers: { cookie } });
-    const secondJson = (await secondPage.json()) as { items: Array<{ eventId: string }>; nextCursor: string | null };
+    const secondPage = await app.request(
+      `/v1/events?limit=2&cursor=${encodeURIComponent(firstJson.nextCursor!)}`,
+      { headers: { cookie } },
+    );
+    const secondJson = (await secondPage.json()) as {
+      items: Array<{ eventId: string }>;
+      nextCursor: string | null;
+    };
     expect(secondJson.items).toHaveLength(1);
   });
 });

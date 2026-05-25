@@ -51,17 +51,23 @@ const trimmedOrNull = (raw: string | undefined): string | null => {
 export const resolveAiConfig = (): AiConfig => {
   const env = process.env;
   return {
-    transcriptionProvider: TranscriptionProviderEnum.catch("disabled" as const).parse(env.TRANSCRIPTION_PROVIDER ?? "disabled"),
+    transcriptionProvider: TranscriptionProviderEnum.catch("disabled" as const).parse(
+      env.TRANSCRIPTION_PROVIDER ?? "disabled",
+    ),
     transcriptionOpenAiModel: trimmedOrNull(env.TRANSCRIPTION_OPENAI_MODEL) ?? "whisper-1",
     transcriptionMacAppUrl: trimmedOrNull(env.TRANSCRIPTION_MAC_APP_URL),
     transcriptionMacAppToken: trimmedOrNull(env.TRANSCRIPTION_MAC_APP_TOKEN),
-    moderationProvider: ModerationProviderEnum.catch("disabled" as const).parse(env.MODERATION_PROVIDER ?? "disabled"),
+    moderationProvider: ModerationProviderEnum.catch("disabled" as const).parse(
+      env.MODERATION_PROVIDER ?? "disabled",
+    ),
     moderationOpenAiModel: trimmedOrNull(env.MODERATION_OPENAI_MODEL) ?? "omni-moderation-latest",
     moderationMacAppUrl: trimmedOrNull(env.MODERATION_MAC_APP_URL),
     moderationMacAppToken: trimmedOrNull(env.MODERATION_MAC_APP_TOKEN),
     openAiApiKey: trimmedOrNull(env.OPENAI_API_KEY),
     openAiBaseUrl: trimmedOrNull(env.OPENAI_BASE_URL) ?? "https://api.openai.com",
-    autoDecisionMode: AutoDecisionModeEnum.catch("always_pending" as const).parse(env.AUTO_DECISION_MODE ?? "always_pending"),
+    autoDecisionMode: AutoDecisionModeEnum.catch("always_pending" as const).parse(
+      env.AUTO_DECISION_MODE ?? "always_pending",
+    ),
     autoRejectThreshold: parseFloat01(env.AUTO_REJECT_THRESHOLD, 0.85),
     autoApproveThreshold: parseFloat01(env.AUTO_APPROVE_THRESHOLD, 0.15),
     sweeperIntervalSeconds: parseInteger(env.AI_SWEEPER_INTERVAL_SECONDS, 60),

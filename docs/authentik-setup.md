@@ -24,18 +24,18 @@ later is a no-code change.
 
 > _Applications → Providers → Create → OAuth2/OpenID Provider_
 
-| Field                    | Value                                                                 |
-| ------------------------ | --------------------------------------------------------------------- |
-| Name                     | `telephone-booth-operator`                                            |
-| Authorization flow       | `default-authorization-flow (Authorize Application)`                  |
-| Client type              | **Confidential**                                                      |
-| Client ID                | _auto-generated; copy it_                                             |
-| Client Secret            | _auto-generated; copy it_                                             |
-| Redirect URIs            | `http://localhost:8787/v1/auth/callback`<br>`https://operator.example.com/v1/auth/callback` (prod) |
-| Signing Key              | _default (RSA)_                                                       |
-| Subject mode             | **Based on the User's hashed ID** (stable, opaque `sub`)              |
-| Include claims in id_token | **Yes**                                                             |
-| Scopes                   | `openid` `profile` `email` `offline_access`                          |
+| Field                      | Value                                                                                              |
+| -------------------------- | -------------------------------------------------------------------------------------------------- |
+| Name                       | `telephone-booth-operator`                                                                         |
+| Authorization flow         | `default-authorization-flow (Authorize Application)`                                               |
+| Client type                | **Confidential**                                                                                   |
+| Client ID                  | _auto-generated; copy it_                                                                          |
+| Client Secret              | _auto-generated; copy it_                                                                          |
+| Redirect URIs              | `http://localhost:8787/v1/auth/callback`<br>`https://operator.example.com/v1/auth/callback` (prod) |
+| Signing Key                | _default (RSA)_                                                                                    |
+| Subject mode               | **Based on the User's hashed ID** (stable, opaque `sub`)                                           |
+| Include claims in id_token | **Yes**                                                                                            |
+| Scopes                     | `openid` `profile` `email` `offline_access`                                                        |
 
 Save. Make sure the provider includes a scope mapping that emits a
 `groups` claim in both the ID token and access token. Authentik's default
@@ -63,12 +63,12 @@ those names matches `AUTHENTIK_ALLOWED_GROUPS` / `OIDC_ALLOWED_GROUPS`
 
 > _Applications → Applications → Create_
 
-| Field       | Value                                                                                 |
-| ----------- | ------------------------------------------------------------------------------------- |
-| Name        | `Telephone Booth Operator`                                                            |
-| Slug        | `telephone-booth-operator`                                                            |
-| Provider    | `telephone-booth-operator` (from step 2)                                              |
-| Launch URL  | `https://operator.example.com` (or `http://localhost:5173` for dev)                   |
+| Field      | Value                                                               |
+| ---------- | ------------------------------------------------------------------- |
+| Name       | `Telephone Booth Operator`                                          |
+| Slug       | `telephone-booth-operator`                                          |
+| Provider   | `telephone-booth-operator` (from step 2)                            |
+| Launch URL | `https://operator.example.com` (or `http://localhost:5173` for dev) |
 
 ### Policy bindings (belt-and-suspenders authorization)
 
@@ -133,13 +133,13 @@ so users should also be logged out before rotation.
 
 ## 7. Troubleshooting
 
-| Symptom                                | Likely cause                                              |
-| -------------------------------------- | --------------------------------------------------------- |
-| `invalid_redirect_uri`                 | Missing entry in step 2; redirect must match exactly      |
+| Symptom                                | Likely cause                                                                                       |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `invalid_redirect_uri`                 | Missing entry in step 2; redirect must match exactly                                               |
 | `missing groups claim`                 | Provider isn't including the default `profile` group mapping, or the custom mapping isn't attached |
-| `Operator credentials required` screen | User isn't in `telephone-booth-operators`                 |
-| `iat` / clock-skew errors              | Pi/server clocks differ; install `chrony` or `systemd-timesyncd` |
-| Cookies missing in prod                | Operator UI not served over HTTPS; `Secure` cookies are dropped |
+| `Operator credentials required` screen | User isn't in `telephone-booth-operators`                                                          |
+| `iat` / clock-skew errors              | Pi/server clocks differ; install `chrony` or `systemd-timesyncd`                                   |
+| Cookies missing in prod                | Operator UI not served over HTTPS; `Secure` cookies are dropped                                    |
 
 If you've ruled out the above, set `LOG_LEVEL=debug` in the API container
 and look at the auth callback handler's structured logs.

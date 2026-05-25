@@ -43,7 +43,14 @@ export type FakeStatus = {
 type FakeSession = {
   id: string;
   userId: string;
-  user: { id: string; oidcSub: string; email: string; name: string; groups: string[]; picture: string | null };
+  user: {
+    id: string;
+    oidcSub: string;
+    email: string;
+    name: string;
+    groups: string[];
+    picture: string | null;
+  };
   expiresAt: Date;
   createdAt: Date;
   lastSeenAt: Date;
@@ -244,28 +251,41 @@ export const resetFakeDb = (): void => {
   store.moderations.clear();
 };
 
-const attachAi = (message: FakeMessage, include?: { audio?: boolean; transcriptions?: unknown; moderations?: unknown }) => {
+const attachAi = (
+  message: FakeMessage,
+  include?: { audio?: boolean; transcriptions?: unknown; moderations?: unknown },
+) => {
   let base: FakeMessage | (FakeMessage & { audio: FakeFile }) = message;
   if (include?.audio) {
     base = attachAudio(message);
   }
   if (include?.transcriptions !== undefined) {
-    const tConfig = include.transcriptions as { orderBy?: { createdAt?: "asc" | "desc" }; take?: number } | true;
-    let transcriptions = [...store.transcriptions.values()].filter((row) => row.messageId === message.id);
+    const tConfig = include.transcriptions as
+      | { orderBy?: { createdAt?: "asc" | "desc" }; take?: number }
+      | true;
+    let transcriptions = [...store.transcriptions.values()].filter(
+      (row) => row.messageId === message.id,
+    );
     const tOrder = typeof tConfig === "object" ? tConfig.orderBy?.createdAt : undefined;
     transcriptions = transcriptions.sort((a, b) =>
-      tOrder === "asc" ? a.createdAt.getTime() - b.createdAt.getTime() : b.createdAt.getTime() - a.createdAt.getTime(),
+      tOrder === "asc"
+        ? a.createdAt.getTime() - b.createdAt.getTime()
+        : b.createdAt.getTime() - a.createdAt.getTime(),
     );
     const take = typeof tConfig === "object" ? tConfig.take : undefined;
     if (typeof take === "number") transcriptions = transcriptions.slice(0, take);
     (base as Record<string, unknown>).transcriptions = transcriptions;
   }
   if (include?.moderations !== undefined) {
-    const mConfig = include.moderations as { orderBy?: { createdAt?: "asc" | "desc" }; take?: number } | true;
+    const mConfig = include.moderations as
+      | { orderBy?: { createdAt?: "asc" | "desc" }; take?: number }
+      | true;
     let moderations = [...store.moderations.values()].filter((row) => row.messageId === message.id);
     const mOrder = typeof mConfig === "object" ? mConfig.orderBy?.createdAt : undefined;
     moderations = moderations.sort((a, b) =>
-      mOrder === "asc" ? a.createdAt.getTime() - b.createdAt.getTime() : b.createdAt.getTime() - a.createdAt.getTime(),
+      mOrder === "asc"
+        ? a.createdAt.getTime() - b.createdAt.getTime()
+        : b.createdAt.getTime() - a.createdAt.getTime(),
     );
     const take = typeof mConfig === "object" ? mConfig.take : undefined;
     if (typeof take === "number") moderations = moderations.slice(0, take);
@@ -297,10 +317,16 @@ export const fakeDb = {
     },
   },
   file: {
-    findUnique: async ({ where }: { where: { id?: string; sha256?: string; blobKey?: string } }) => {
+    findUnique: async ({
+      where,
+    }: {
+      where: { id?: string; sha256?: string; blobKey?: string };
+    }) => {
       if (where.id) return store.files.get(where.id) ?? null;
-      if (where.sha256) return [...store.files.values()].find((file) => file.sha256 === where.sha256) ?? null;
-      if (where.blobKey) return [...store.files.values()].find((file) => file.blobKey === where.blobKey) ?? null;
+      if (where.sha256)
+        return [...store.files.values()].find((file) => file.sha256 === where.sha256) ?? null;
+      if (where.blobKey)
+        return [...store.files.values()].find((file) => file.blobKey === where.blobKey) ?? null;
       return null;
     },
     create: async ({ data }: { data: Partial<FakeFile> & Omit<FakeFile, "id" | "createdAt"> }) => {
@@ -317,8 +343,15 @@ export const fakeDb = {
     },
   },
   question: {
-    findUnique: async ({ where }: { where: { id: string } }) => store.questions.get(where.id) ?? null,
-    create: async ({ data, include }: { data: { prompt: string; audioId: string }; include?: { audio?: boolean } }) => {
+    findUnique: async ({ where }: { where: { id: string } }) =>
+      store.questions.get(where.id) ?? null,
+    create: async ({
+      data,
+      include,
+    }: {
+      data: { prompt: string; audioId: string };
+      include?: { audio?: boolean };
+    }) => {
       const question: FakeQuestion = {
         id: randomUUID(),
         prompt: data.prompt,
@@ -329,8 +362,20 @@ export const fakeDb = {
       store.questions.set(question.id, question);
       return include?.audio ? attachAudio(question) : question;
     },
-    findMany: async ({ cursor, skip = 0, take, include }: { cursor?: { id: string }; skip?: number; take: number; include?: { audio?: boolean } }) => {
-      let questions = [...store.questions.values()].filter((question) => question.retiredAt === null).sort(byCreatedDesc);
+    findMany: async ({
+      cursor,
+      skip = 0,
+      take,
+      include,
+    }: {
+      cursor?: { id: string };
+      skip?: number;
+      take: number;
+      include?: { audio?: boolean };
+    }) => {
+      let questions = [...store.questions.values()]
+        .filter((question) => question.retiredAt === null)
+        .sort(byCreatedDesc);
       if (cursor) {
         const index = questions.findIndex((question) => question.id === cursor.id);
         questions = index >= 0 ? questions.slice(index + skip) : questions;
@@ -338,9 +383,12 @@ export const fakeDb = {
       const selected = questions.slice(0, take);
       return include?.audio ? selected.map(attachAudio) : selected;
     },
-    count: async () => [...store.questions.values()].filter((question) => question.retiredAt === null).length,
+    count: async () =>
+      [...store.questions.values()].filter((question) => question.retiredAt === null).length,
     findFirst: async ({ skip = 0, include }: { skip?: number; include?: { audio?: boolean } }) => {
-      const question = [...store.questions.values()].filter((item) => item.retiredAt === null).sort((a, b) => a.id.localeCompare(b.id))[skip];
+      const question = [...store.questions.values()]
+        .filter((item) => item.retiredAt === null)
+        .sort((a, b) => a.id.localeCompare(b.id))[skip];
       if (!question) return null;
       return include?.audio ? attachAudio(question) : question;
     },
@@ -353,7 +401,15 @@ export const fakeDb = {
     },
   },
   message: {
-    findUnique: async ({ where, include, select }: { where: { id?: string; audioId?: string }; include?: { audio?: boolean; transcriptions?: unknown; moderations?: unknown }; select?: { id?: boolean; status?: boolean } }) => {
+    findUnique: async ({
+      where,
+      include,
+      select,
+    }: {
+      where: { id?: string; audioId?: string };
+      include?: { audio?: boolean; transcriptions?: unknown; moderations?: unknown };
+      select?: { id?: boolean; status?: boolean };
+    }) => {
       const message = where.id
         ? store.messages.get(where.id)
         : [...store.messages.values()].find((item) => item.audioId === where.audioId);
@@ -367,16 +423,31 @@ export const fakeDb = {
       if (include) return attachAi(message, include);
       return message;
     },
-    findMany: async ({ where = {}, include, take, orderBy }: { where?: { status?: string; createdAt?: { gte: Date } }; include?: { audio?: boolean; transcriptions?: unknown; moderations?: unknown }; take: number; orderBy?: unknown }) => {
+    findMany: async ({
+      where = {},
+      include,
+      take,
+      orderBy,
+    }: {
+      where?: { status?: string; createdAt?: { gte: Date } };
+      include?: { audio?: boolean; transcriptions?: unknown; moderations?: unknown };
+      take: number;
+      orderBy?: unknown;
+    }) => {
       void orderBy;
       let messages = [...store.messages.values()];
       if (where.status) messages = messages.filter((message) => message.status === where.status);
-      if (where.createdAt?.gte) messages = messages.filter((message) => message.createdAt >= where.createdAt.gte);
+      if (where.createdAt?.gte)
+        messages = messages.filter((message) => message.createdAt >= where.createdAt.gte);
       messages = messages.sort(byCreatedDesc).slice(0, take);
       if (include) return messages.map((message) => attachAi(message, include));
       return messages;
     },
-    create: async ({ data }: { data: { status: string; questionId?: string | null; audioId: string } }) => {
+    create: async ({
+      data,
+    }: {
+      data: { status: string; questionId?: string | null; audioId: string };
+    }) => {
       const message: FakeMessage = {
         id: randomUUID(),
         status: data.status,
@@ -404,25 +475,37 @@ export const fakeDb = {
       store.messages.delete(where.id);
       return existing;
     },
-    findFirst: async ({ orderBy, select }: { orderBy?: { createdAt?: "asc" | "desc" }; select?: { id?: boolean } } = {}) => {
+    findFirst: async ({
+      orderBy,
+      select,
+    }: { orderBy?: { createdAt?: "asc" | "desc" }; select?: { id?: boolean } } = {}) => {
       const order = orderBy?.createdAt ?? "desc";
       const messages = [...store.messages.values()].sort((a, b) =>
-        order === "asc" ? a.createdAt.getTime() - b.createdAt.getTime() : b.createdAt.getTime() - a.createdAt.getTime(),
+        order === "asc"
+          ? a.createdAt.getTime() - b.createdAt.getTime()
+          : b.createdAt.getTime() - a.createdAt.getTime(),
       );
       const first = messages[0];
       if (!first) return null;
       if (select?.id) return { id: first.id };
       return first;
     },
-    count: async ({ where = {} }: { where?: { status?: string; createdAt?: { gte: Date } } } = {}) => {
+    count: async ({
+      where = {},
+    }: { where?: { status?: string; createdAt?: { gte: Date } } } = {}) => {
       let messages = [...store.messages.values()];
       if (where.status) messages = messages.filter((message) => message.status === where.status);
-      if (where.createdAt?.gte) messages = messages.filter((message) => message.createdAt >= where.createdAt.gte);
+      if (where.createdAt?.gte)
+        messages = messages.filter((message) => message.createdAt >= where.createdAt.gte);
       return messages.length;
     },
   },
   transcription: {
-    create: async ({ data }: { data: Partial<FakeTranscription> & { messageId: string; provider: string } }) => {
+    create: async ({
+      data,
+    }: {
+      data: Partial<FakeTranscription> & { messageId: string; provider: string };
+    }) => {
       const row: FakeTranscription = {
         id: randomUUID(),
         messageId: data.messageId,
@@ -441,30 +524,68 @@ export const fakeDb = {
       store.transcriptions.set(row.id, row);
       return row;
     },
-    update: async ({ where, data }: { where: { id: string }; data: Partial<FakeTranscription> }) => {
+    update: async ({
+      where,
+      data,
+    }: {
+      where: { id: string };
+      data: Partial<FakeTranscription>;
+    }) => {
       const existing = store.transcriptions.get(where.id);
       if (!existing) throw new Error("transcription not found");
       const updated = { ...existing, ...data };
       store.transcriptions.set(where.id, updated);
       return updated;
     },
-    findUnique: async ({ where }: { where: { id: string } }) => store.transcriptions.get(where.id) ?? null,
-    findFirst: async ({ where, orderBy }: { where: { messageId: string; status?: string }; orderBy?: { createdAt?: "asc" | "desc" } }) => {
+    findUnique: async ({ where }: { where: { id: string } }) =>
+      store.transcriptions.get(where.id) ?? null,
+    findFirst: async ({
+      where,
+      orderBy,
+    }: {
+      where: { messageId: string; status?: string };
+      orderBy?: { createdAt?: "asc" | "desc" };
+    }) => {
       const order = orderBy?.createdAt ?? "desc";
-      const rows = [...store.transcriptions.values()].filter((row) => row.messageId === where.messageId && (where.status ? row.status === where.status : true));
-      rows.sort((a, b) => order === "asc" ? a.createdAt.getTime() - b.createdAt.getTime() : b.createdAt.getTime() - a.createdAt.getTime());
+      const rows = [...store.transcriptions.values()].filter(
+        (row) =>
+          row.messageId === where.messageId && (where.status ? row.status === where.status : true),
+      );
+      rows.sort((a, b) =>
+        order === "asc"
+          ? a.createdAt.getTime() - b.createdAt.getTime()
+          : b.createdAt.getTime() - a.createdAt.getTime(),
+      );
       return rows[0] ?? null;
     },
-    findMany: async ({ where, orderBy, take }: { where: { messageId: string }; orderBy?: { createdAt?: "asc" | "desc" }; take?: number }) => {
+    findMany: async ({
+      where,
+      orderBy,
+      take,
+    }: {
+      where: { messageId: string };
+      orderBy?: { createdAt?: "asc" | "desc" };
+      take?: number;
+    }) => {
       const order = orderBy?.createdAt ?? "desc";
-      let rows = [...store.transcriptions.values()].filter((row) => row.messageId === where.messageId);
-      rows.sort((a, b) => order === "asc" ? a.createdAt.getTime() - b.createdAt.getTime() : b.createdAt.getTime() - a.createdAt.getTime());
+      let rows = [...store.transcriptions.values()].filter(
+        (row) => row.messageId === where.messageId,
+      );
+      rows.sort((a, b) =>
+        order === "asc"
+          ? a.createdAt.getTime() - b.createdAt.getTime()
+          : b.createdAt.getTime() - a.createdAt.getTime(),
+      );
       if (typeof take === "number") rows = rows.slice(0, take);
       return rows;
     },
   },
   moderation: {
-    create: async ({ data }: { data: Partial<FakeModeration> & { messageId: string; provider: string } }) => {
+    create: async ({
+      data,
+    }: {
+      data: Partial<FakeModeration> & { messageId: string; provider: string };
+    }) => {
       const row: FakeModeration = {
         id: randomUUID(),
         messageId: data.messageId,
@@ -493,41 +614,92 @@ export const fakeDb = {
       store.moderations.set(where.id, updated);
       return updated;
     },
-    findUnique: async ({ where }: { where: { id: string } }) => store.moderations.get(where.id) ?? null,
-    findFirst: async ({ where, orderBy }: { where: { messageId: string }; orderBy?: { createdAt?: "asc" | "desc" } }) => {
+    findUnique: async ({ where }: { where: { id: string } }) =>
+      store.moderations.get(where.id) ?? null,
+    findFirst: async ({
+      where,
+      orderBy,
+    }: {
+      where: { messageId: string };
+      orderBy?: { createdAt?: "asc" | "desc" };
+    }) => {
       const order = orderBy?.createdAt ?? "desc";
-      const rows = [...store.moderations.values()].filter((row) => row.messageId === where.messageId);
-      rows.sort((a, b) => order === "asc" ? a.createdAt.getTime() - b.createdAt.getTime() : b.createdAt.getTime() - a.createdAt.getTime());
+      const rows = [...store.moderations.values()].filter(
+        (row) => row.messageId === where.messageId,
+      );
+      rows.sort((a, b) =>
+        order === "asc"
+          ? a.createdAt.getTime() - b.createdAt.getTime()
+          : b.createdAt.getTime() - a.createdAt.getTime(),
+      );
       return rows[0] ?? null;
     },
-    findMany: async ({ where, orderBy, take }: { where: { messageId: string }; orderBy?: { createdAt?: "asc" | "desc" }; take?: number }) => {
+    findMany: async ({
+      where,
+      orderBy,
+      take,
+    }: {
+      where: { messageId: string };
+      orderBy?: { createdAt?: "asc" | "desc" };
+      take?: number;
+    }) => {
       const order = orderBy?.createdAt ?? "desc";
       let rows = [...store.moderations.values()].filter((row) => row.messageId === where.messageId);
-      rows.sort((a, b) => order === "asc" ? a.createdAt.getTime() - b.createdAt.getTime() : b.createdAt.getTime() - a.createdAt.getTime());
+      rows.sort((a, b) =>
+        order === "asc"
+          ? a.createdAt.getTime() - b.createdAt.getTime()
+          : b.createdAt.getTime() - a.createdAt.getTime(),
+      );
       if (typeof take === "number") rows = rows.slice(0, take);
       return rows;
     },
   },
   boothStatusSnapshot: {
     create: async ({ data }: { data: Omit<FakeStatus, "id"> }) => {
-      const snapshot: FakeStatus = { id: store.statuses.length + 1, ...data, updatedAt: cloneDate(data.updatedAt) };
+      const snapshot: FakeStatus = {
+        id: store.statuses.length + 1,
+        ...data,
+        updatedAt: cloneDate(data.updatedAt),
+      };
       store.statuses.push(snapshot);
       return snapshot;
     },
-    findFirst: async () => [...store.statuses].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0] ?? null,
-    findMany: async ({ where = {}, take }: { where?: { updatedAt?: { gte: Date } }; take: number }) => {
+    findFirst: async () =>
+      [...store.statuses].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0] ?? null,
+    findMany: async ({
+      where = {},
+      take,
+    }: {
+      where?: { updatedAt?: { gte: Date } };
+      take: number;
+    }) => {
       let statuses = [...store.statuses];
-      if (where.updatedAt?.gte) statuses = statuses.filter((status) => status.updatedAt >= where.updatedAt.gte);
+      if (where.updatedAt?.gte)
+        statuses = statuses.filter((status) => status.updatedAt >= where.updatedAt.gte);
       return statuses.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime()).slice(0, take);
     },
   },
   operatorSession: {
-    findUnique: async ({ where, include }: { where: { id: string }; include?: { user?: boolean } }) => {
+    findUnique: async ({
+      where,
+      include,
+    }: {
+      where: { id: string };
+      include?: { user?: boolean };
+    }) => {
       const session = store.sessions.get(where.id);
       if (!session) return null;
       return include?.user ? session : { ...session, user: undefined };
     },
-    update: async ({ where, data, include }: { where: { id: string }; data: Partial<FakeSession>; include?: { user?: boolean } }) => {
+    update: async ({
+      where,
+      data,
+      include,
+    }: {
+      where: { id: string };
+      data: Partial<FakeSession>;
+      include?: { user?: boolean };
+    }) => {
       const existing = store.sessions.get(where.id);
       if (!existing) throw new Error("session not found");
       const updated = { ...existing, ...data };
@@ -576,7 +748,8 @@ export const fakeDb = {
     },
   },
   callSession: {
-    findUnique: async ({ where }: { where: { id: string } }) => store.callSessions.get(where.id) ?? null,
+    findUnique: async ({ where }: { where: { id: string } }) =>
+      store.callSessions.get(where.id) ?? null,
     findMany: async ({
       where = {},
       orderBy,
@@ -586,7 +759,9 @@ export const fakeDb = {
       orderBy?: unknown;
       take?: number;
     }) => {
-      let sessions = [...store.callSessions.values()].filter((session) => matchesWhere(session, where));
+      let sessions = [...store.callSessions.values()].filter((session) =>
+        matchesWhere(session, where),
+      );
       sessions = sortCallSessions(sessions, orderBy);
       if (typeof take === "number") sessions = sessions.slice(0, take);
       return sessions;

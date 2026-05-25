@@ -1,9 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const { fakeDb, store, argonHash, argonVerify } = vi.hoisted(() => {
   const tokens = new Map<string, Record<string, unknown>>();
   const argonHash = vi.fn(async (plaintext: string) => `hash:${plaintext}`);
-  const argonVerify = vi.fn(async (hash: string, plaintext: string) => hash === `hash:${plaintext}`);
+  const argonVerify = vi.fn(
+    async (hash: string, plaintext: string) => hash === `hash:${plaintext}`,
+  );
 
   return {
     store: { tokens },
@@ -13,7 +15,9 @@ const { fakeDb, store, argonHash, argonVerify } = vi.hoisted(() => {
       apiToken: {
         findUnique: vi.fn(async ({ where }) => {
           if (where.id) return tokens.get(where.id) ?? null;
-          return Array.from(tokens.values()).find((token) => token.lookupId === where.lookupId) ?? null;
+          return (
+            Array.from(tokens.values()).find((token) => token.lookupId === where.lookupId) ?? null
+          );
         }),
         update: vi.fn(async ({ where, data }) => {
           const row = tokens.get(where.id);

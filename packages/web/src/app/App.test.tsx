@@ -1,22 +1,60 @@
 import axe from "axe-core";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { App } from "./App.js";
 import { createAppRouter } from "./router.js";
 
 function jsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
 }
 
 function installFetch(): void {
-  vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-    const url = input instanceof URL ? input.toString() : typeof input === "string" ? input : input.url;
-    if (url.endsWith("/v1/auth/me")) return Promise.resolve(jsonResponse({ id: "user-1", email: "operator@example.com", name: "Jane Operator", groups: [], providerName: "Authentik" }));
-    if (url.endsWith("/v1/status/history?limit=50")) return Promise.resolve(jsonResponse({ items: [{ state: "idle", updatedAt: "2026-01-01T00:00:00.000Z", currentQuestionId: null, currentMessageId: null, lastError: null }] }));
-    if (url.endsWith("/v1/status")) return Promise.resolve(jsonResponse({ state: "idle", updatedAt: "2026-01-01T00:00:00.000Z", currentQuestionId: null, currentMessageId: null, lastError: null }));
-    return Promise.resolve(jsonResponse({ ok: true }));
-  }));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url =
+        input instanceof URL ? input.toString() : typeof input === "string" ? input : input.url;
+      if (url.endsWith("/v1/auth/me"))
+        return Promise.resolve(
+          jsonResponse({
+            id: "user-1",
+            email: "operator@example.com",
+            name: "Jane Operator",
+            groups: [],
+            providerName: "Authentik",
+          }),
+        );
+      if (url.endsWith("/v1/status/history?limit=50"))
+        return Promise.resolve(
+          jsonResponse({
+            items: [
+              {
+                state: "idle",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+                currentQuestionId: null,
+                currentMessageId: null,
+                lastError: null,
+              },
+            ],
+          }),
+        );
+      if (url.endsWith("/v1/status"))
+        return Promise.resolve(
+          jsonResponse({
+            state: "idle",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+            currentQuestionId: null,
+            currentMessageId: null,
+            lastError: null,
+          }),
+        );
+      return Promise.resolve(jsonResponse({ ok: true }));
+    }),
+  );
 }
 
 function installMatchMedia(): void {
@@ -67,7 +105,9 @@ describe("App shell", () => {
     const { container } = renderShell();
     await screen.findByText("Status");
     const results = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
-    const criticalViolations = results.violations.filter((violation) => violation.impact === "critical");
+    const criticalViolations = results.violations.filter(
+      (violation) => violation.impact === "critical",
+    );
     expect(criticalViolations).toHaveLength(0);
   });
 });

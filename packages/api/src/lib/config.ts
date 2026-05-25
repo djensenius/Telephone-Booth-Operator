@@ -49,9 +49,7 @@ const csv = (input: string | undefined): string[] =>
     .map((entry) => entry.trim())
     .filter(Boolean);
 
-export const resolveAuthConfig = (
-  env: NodeJS.ProcessEnv = process.env,
-): AuthConfig => {
+export const resolveAuthConfig = (env: NodeJS.ProcessEnv = process.env): AuthConfig => {
   const providerName = first(env.OIDC_PROVIDER_NAME, env.AUTHENTIK_PROVIDER_NAME) ?? "Authentik";
 
   if (env.AUTH_DISABLED === "true") {
@@ -95,15 +93,11 @@ export const resolveAuthConfig = (
     clientSecret: clientSecret!,
     redirectUri: redirectUri!,
     postLogoutRedirectUri:
-      first(
-        env.OIDC_POST_LOGOUT_REDIRECT_URI,
-        env.AUTHENTIK_POST_LOGOUT_REDIRECT_URI,
-      ) ?? null,
-    scopes:
-      first(env.OIDC_SCOPES, env.AUTHENTIK_SCOPES) ?? DEFAULT_SCOPES,
+      first(env.OIDC_POST_LOGOUT_REDIRECT_URI, env.AUTHENTIK_POST_LOGOUT_REDIRECT_URI) ?? null,
+    scopes: first(env.OIDC_SCOPES, env.AUTHENTIK_SCOPES) ?? DEFAULT_SCOPES,
     allowedGroups,
-    allowedEmails: csv(first(env.OIDC_ALLOWED_EMAILS, env.AUTHENTIK_ALLOWED_EMAILS)).map(
-      (email) => email.toLowerCase(),
+    allowedEmails: csv(first(env.OIDC_ALLOWED_EMAILS, env.AUTHENTIK_ALLOWED_EMAILS)).map((email) =>
+      email.toLowerCase(),
     ),
     mobileAudiences: csv(
       first(

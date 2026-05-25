@@ -5,7 +5,7 @@ export type SoundName = "dial-click" | "dial-tone" | "ring" | "line-busy" | "han
 const soundUrls: Record<SoundName, string> = {
   "dial-click": new URL("../sounds/dial-click.flac", import.meta.url).href,
   "dial-tone": new URL("../sounds/dial-tone.flac", import.meta.url).href,
-  "ring": new URL("../sounds/ring.flac", import.meta.url).href,
+  ring: new URL("../sounds/ring.flac", import.meta.url).href,
   "line-busy": new URL("../sounds/line-busy.flac", import.meta.url).href,
   "handset-pickup": new URL("../sounds/handset-pickup.flac", import.meta.url).href,
 };
@@ -51,7 +51,11 @@ export function playSound(name: SoundName, options: PlaySoundOptions): void {
 }
 
 export function playDialClicks(steps: number, options: PlaySoundOptions): void {
-  if (steps <= 0 || options.muted || (getReducedMotionPreference() && !options.allowReducedMotionAudio)) {
+  if (
+    steps <= 0 ||
+    options.muted ||
+    (getReducedMotionPreference() && !options.allowReducedMotionAudio)
+  ) {
     return;
   }
   for (let step = 0; step < steps; step += 1) {

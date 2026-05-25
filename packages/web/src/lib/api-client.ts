@@ -61,7 +61,10 @@ export interface ApiFetchOptions<T> extends Omit<RequestInit, "body"> {
 }
 
 const StatusHistorySchema = z.object({ items: z.array(BoothStatusSchema) });
-const QuestionListSchema = z.object({ items: z.array(QuestionSchema), nextCursor: z.string().uuid().nullable() });
+const QuestionListSchema = z.object({
+  items: z.array(QuestionSchema),
+  nextCursor: z.string().uuid().nullable(),
+});
 const MessageListSchema = z.object({ items: z.array(MessageSchema) });
 const ApiTokenListSchema = z.array(ApiTokenSchema);
 const ApiTokenUsageListSchema = z.array(ApiTokenUsageBucketSchema);
@@ -70,11 +73,17 @@ export type StatusHistory = z.infer<typeof StatusHistorySchema>;
 export type QuestionList = z.infer<typeof QuestionListSchema>;
 export type MessageList = z.infer<typeof MessageListSchema>;
 
-const rawApiBaseUrl = typeof import.meta.env.VITE_API_BASE_URL === "string" ? import.meta.env.VITE_API_BASE_URL : "";
+const rawApiBaseUrl =
+  typeof import.meta.env.VITE_API_BASE_URL === "string" ? import.meta.env.VITE_API_BASE_URL : "";
 const API_BASE_URL = rawApiBaseUrl.replace(/\/+$/, "");
 
 function isFormBody(body: unknown): body is BodyInit {
-  return body instanceof FormData || body instanceof Blob || body instanceof URLSearchParams || typeof body === "string";
+  return (
+    body instanceof FormData ||
+    body instanceof Blob ||
+    body instanceof URLSearchParams ||
+    typeof body === "string"
+  );
 }
 
 export function apiUrlFor(path: string): string {
@@ -126,7 +135,10 @@ export async function apiFetch<T>(path: string, opts: ApiFetchOptions<T> = {}): 
   const response = await fetch(apiUrlFor(path), requestInit);
   const payload = await parseResponse(response);
   if (!response.ok) {
-    const message = typeof payload === "object" && payload !== null && "error" in payload ? String(payload.error) : response.statusText;
+    const message =
+      typeof payload === "object" && payload !== null && "error" in payload
+        ? String(payload.error)
+        : response.statusText;
     throw new ApiError(response.status, message || `HTTP ${response.status}`, payload);
   }
   return schema === undefined ? (payload as T) : schema.parse(payload);
@@ -140,7 +152,9 @@ async function blobArrayBuffer(file: Blob): Promise<ArrayBuffer> {
       if (reader.result instanceof ArrayBuffer) resolve(reader.result);
       else reject(new Error("Could not read blob as bytes."));
     });
-    reader.addEventListener("error", () => reject(reader.error ?? new Error("Could not read blob.")));
+    reader.addEventListener("error", () =>
+      reject(reader.error ?? new Error("Could not read blob.")),
+    );
     reader.readAsArrayBuffer(file);
   });
 }
@@ -168,39 +182,90 @@ export async function uploadBlobToSas(uploadUrl: string, file: Blob): Promise<vo
 
 export const status = {
   current: () => apiFetch<BoothStatus>("/v1/status", { schema: BoothStatusSchema }),
-  history: (params: { readonly since?: string; readonly limit?: number } = {}) => apiFetch<StatusHistory>(`/v1/status/history${query({ since: params.since, limit: params.limit ?? 50 })}`, { schema: StatusHistorySchema }),
+  history: (params: { readonly since?: string; readonly limit?: number } = {}) =>
+    apiFetch<StatusHistory>(
+      `/v1/status/history${query({ since: params.since, limit: params.limit ?? 50 })}`,
+      { schema: StatusHistorySchema },
+    ),
 };
 
 export const uploads = {
-  sas: (input: UploadSasRequest) => apiFetch<UploadSlot>("/v1/uploads/sas", { method: "POST", body: UploadSasRequestSchema.parse(input), schema: UploadSlotSchema }),
+  sas: (input: UploadSasRequest) =>
+    apiFetch<UploadSlot>("/v1/uploads/sas", {
+      method: "POST",
+      body: UploadSasRequestSchema.parse(input),
+      schema: UploadSlotSchema,
+    }),
 };
 
 export const questions = {
-  list: (params: { readonly cursor?: string; readonly limit?: number } = {}) => apiFetch<QuestionList>(`/v1/questions${query({ cursor: params.cursor, limit: params.limit ?? 50 })}`, { schema: QuestionListSchema }),
-  create: (input: QuestionCreate) => apiFetch<Question>("/v1/questions", { method: "POST", body: QuestionCreateSchema.parse(input), schema: QuestionSchema }),
+  list: (params: { readonly cursor?: string; readonly limit?: number } = {}) =>
+    apiFetch<QuestionList>(
+      `/v1/questions${query({ cursor: params.cursor, limit: params.limit ?? 50 })}`,
+      { schema: QuestionListSchema },
+    ),
+  create: (input: QuestionCreate) =>
+    apiFetch<Question>("/v1/questions", {
+      method: "POST",
+      body: QuestionCreateSchema.parse(input),
+      schema: QuestionSchema,
+    }),
   delete: (id: string) => apiFetch<void>(`/v1/questions/${id}`, { method: "DELETE" }),
 };
 
 export const messages = {
-  list: (params: { readonly status?: MessageStatus; readonly since?: string; readonly limit?: number } = {}) => apiFetch<MessageList>(`/v1/messages${query({ status: params.status, since: params.since, limit: params.limit ?? 50 })}`, { schema: MessageListSchema }),
+  list: (
+    params: {
+      readonly status?: MessageStatus;
+      readonly since?: string;
+      readonly limit?: number;
+    } = {},
+  ) =>
+    apiFetch<MessageList>(
+      `/v1/messages${query({ status: params.status, since: params.since, limit: params.limit ?? 50 })}`,
+      { schema: MessageListSchema },
+    ),
   get: (id: string) => apiFetch<Message>(`/v1/messages/${id}`, { schema: MessageSchema }),
   delete: (id: string) => apiFetch<void>(`/v1/messages/${id}`, { method: "DELETE" }),
-  transcriptions: (id: string) => apiFetch<TranscriptionList>(`/v1/messages/${id}/transcriptions`, { schema: TranscriptionListSchema }),
-  transcribe: (id: string) => apiFetch<Transcription>(`/v1/messages/${id}/transcribe`, { method: "POST", schema: TranscriptionSchema }),
-  moderate: (id: string) => apiFetch<Moderation>(`/v1/messages/${id}/moderate`, { method: "POST", schema: ModerationSchema }),
+  transcriptions: (id: string) =>
+    apiFetch<TranscriptionList>(`/v1/messages/${id}/transcriptions`, {
+      schema: TranscriptionListSchema,
+    }),
+  transcribe: (id: string) =>
+    apiFetch<Transcription>(`/v1/messages/${id}/transcribe`, {
+      method: "POST",
+      schema: TranscriptionSchema,
+    }),
+  moderate: (id: string) =>
+    apiFetch<Moderation>(`/v1/messages/${id}/moderate`, {
+      method: "POST",
+      schema: ModerationSchema,
+    }),
 };
 
 export const apiTokens = {
   list: () => apiFetch<readonly ApiToken[]>("/v1/api-tokens", { schema: ApiTokenListSchema }),
-  create: (input: CreateApiTokenRequest) => apiFetch<ApiTokenCreated>("/v1/api-tokens", { method: "POST", body: CreateApiTokenRequestSchema.parse(input), schema: ApiTokenCreatedSchema }),
+  create: (input: CreateApiTokenRequest) =>
+    apiFetch<ApiTokenCreated>("/v1/api-tokens", {
+      method: "POST",
+      body: CreateApiTokenRequestSchema.parse(input),
+      schema: ApiTokenCreatedSchema,
+    }),
   revoke: (id: string) => apiFetch<void>(`/v1/api-tokens/${id}`, { method: "DELETE" }),
-  usage: (id: string, days = 30) => apiFetch<readonly ApiTokenUsageBucket[]>(`/v1/api-tokens/${id}/usage${query({ days })}`, { schema: ApiTokenUsageListSchema }),
+  usage: (id: string, days = 30) =>
+    apiFetch<readonly ApiTokenUsageBucket[]>(`/v1/api-tokens/${id}/usage${query({ days })}`, {
+      schema: ApiTokenUsageListSchema,
+    }),
 };
 
 export const auth = {
   me: () => apiFetch<OperatorMe>("/v1/auth/me", { schema: OperatorMeSchema }),
   logout: async () => {
-    await fetch(apiUrlFor("/v1/auth/logout"), { method: "POST", credentials: "include", redirect: "manual" });
+    await fetch(apiUrlFor("/v1/auth/logout"), {
+      method: "POST",
+      credentials: "include",
+      redirect: "manual",
+    });
   },
 };
 
@@ -229,15 +294,23 @@ const buildEventsQuery = (params: EventsListParams): string => {
 
 export const events = {
   list: (params: EventsListParams = {}) =>
-    apiFetch<BoothEventList>(`/v1/events${buildEventsQuery(params)}`, { schema: BoothEventListSchema }),
+    apiFetch<BoothEventList>(`/v1/events${buildEventsQuery(params)}`, {
+      schema: BoothEventListSchema,
+    }),
 };
 
 export const sessions = {
-  list: (params: { readonly boothId?: string; readonly cursor?: string; readonly limit?: number } = {}) =>
-    apiFetch<CallSessionList>(`/v1/sessions${query({ boothId: params.boothId, cursor: params.cursor, limit: params.limit ?? 100 })}`, {
-      schema: CallSessionListSchema,
-    }),
-  get: (id: string) => apiFetch<CallSessionDetail>(`/v1/sessions/${id}`, { schema: CallSessionDetailSchema }),
+  list: (
+    params: { readonly boothId?: string; readonly cursor?: string; readonly limit?: number } = {},
+  ) =>
+    apiFetch<CallSessionList>(
+      `/v1/sessions${query({ boothId: params.boothId, cursor: params.cursor, limit: params.limit ?? 100 })}`,
+      {
+        schema: CallSessionListSchema,
+      },
+    ),
+  get: (id: string) =>
+    apiFetch<CallSessionDetail>(`/v1/sessions/${id}`, { schema: CallSessionDetailSchema }),
 };
 
 export const system = {
@@ -264,7 +337,11 @@ export const apiQueryKeys = {
 };
 
 export function useEventsList(params: EventsListParams = {}) {
-  return useQuery({ queryKey: apiQueryKeys.events(params), queryFn: () => events.list(params), refetchInterval: 10_000 });
+  return useQuery({
+    queryKey: apiQueryKeys.events(params),
+    queryFn: () => events.list(params),
+    refetchInterval: 10_000,
+  });
 }
 
 export function useSessionsList(boothId?: string) {
@@ -293,30 +370,56 @@ export function useSystemCurrent(boothId: string | undefined) {
 }
 
 export function useStatusCurrent() {
-  return useQuery({ queryKey: apiQueryKeys.status, queryFn: status.current, refetchInterval: 5_000 });
+  return useQuery({
+    queryKey: apiQueryKeys.status,
+    queryFn: status.current,
+    refetchInterval: 5_000,
+  });
 }
 
 export function useStatusHistory() {
-  return useQuery({ queryKey: apiQueryKeys.statusHistory, queryFn: () => status.history({ limit: 50 }), refetchInterval: 5_000 });
+  return useQuery({
+    queryKey: apiQueryKeys.statusHistory,
+    queryFn: () => status.history({ limit: 50 }),
+    refetchInterval: 5_000,
+  });
 }
 
 export function useQuestionsList() {
-  return useQuery({ queryKey: apiQueryKeys.questions, queryFn: () => questions.list({ limit: 100 }) });
+  return useQuery({
+    queryKey: apiQueryKeys.questions,
+    queryFn: () => questions.list({ limit: 100 }),
+  });
 }
 
 export function useCreateQuestion() {
   const queryClient = useQueryClient();
-  return useMutation({ mutationFn: questions.create, onSuccess: () => void queryClient.invalidateQueries({ queryKey: apiQueryKeys.questions }) });
+  return useMutation({
+    mutationFn: questions.create,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: apiQueryKeys.questions }),
+  });
 }
 
 export function useDeleteQuestion() {
   const queryClient = useQueryClient();
-  return useMutation({ mutationFn: questions.delete, onSuccess: () => void queryClient.invalidateQueries({ queryKey: apiQueryKeys.questions }) });
+  return useMutation({
+    mutationFn: questions.delete,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: apiQueryKeys.questions }),
+  });
 }
 
 export function useMessagesList(filter: MessageStatus | "all") {
-  const statusFilter = MessageStatusSchema.safeParse(filter).success ? (filter as MessageStatus) : undefined;
-  return useQuery({ queryKey: apiQueryKeys.messages(filter), queryFn: () => messages.list({ ...(statusFilter === undefined ? {} : { status: statusFilter }), limit: 100 }) });
+  const statusFilter = MessageStatusSchema.safeParse(filter).success
+    ? (filter as MessageStatus)
+    : undefined;
+  return useQuery({
+    queryKey: apiQueryKeys.messages(filter),
+    queryFn: () =>
+      messages.list({
+        ...(statusFilter === undefined ? {} : { status: statusFilter }),
+        limit: 100,
+      }),
+  });
 }
 
 export function useMessage(id: string) {
@@ -344,7 +447,10 @@ export function useDeleteMessages() {
 }
 
 export function useMessageTranscriptions(id: string) {
-  return useQuery({ queryKey: apiQueryKeys.transcriptions(id), queryFn: () => messages.transcriptions(id) });
+  return useQuery({
+    queryKey: apiQueryKeys.transcriptions(id),
+    queryFn: () => messages.transcriptions(id),
+  });
 }
 
 export function useRetranscribeMessage() {
@@ -376,16 +482,26 @@ export function useApiTokensList() {
 
 export function useCreateApiToken() {
   const queryClient = useQueryClient();
-  return useMutation({ mutationFn: apiTokens.create, onSuccess: () => void queryClient.invalidateQueries({ queryKey: apiQueryKeys.tokens }) });
+  return useMutation({
+    mutationFn: apiTokens.create,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: apiQueryKeys.tokens }),
+  });
 }
 
 export function useRevokeApiToken() {
   const queryClient = useQueryClient();
-  return useMutation({ mutationFn: apiTokens.revoke, onSuccess: () => void queryClient.invalidateQueries({ queryKey: apiQueryKeys.tokens }) });
+  return useMutation({
+    mutationFn: apiTokens.revoke,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: apiQueryKeys.tokens }),
+  });
 }
 
 export function useApiTokenUsage(id: string) {
-  return useQuery({ queryKey: apiQueryKeys.tokenUsage(id), queryFn: () => apiTokens.usage(id), staleTime: 30_000 });
+  return useQuery({
+    queryKey: apiQueryKeys.tokenUsage(id),
+    queryFn: () => apiTokens.usage(id),
+    staleTime: 30_000,
+  });
 }
 
 export function useAuthMeQuery() {

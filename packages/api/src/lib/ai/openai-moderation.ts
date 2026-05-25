@@ -32,7 +32,9 @@ interface OpenAiModerationResponse {
 }
 
 const isModerationResponse = (payload: unknown): payload is OpenAiModerationResponse =>
-  typeof payload === "object" && payload !== null && Array.isArray((payload as { results?: unknown }).results);
+  typeof payload === "object" &&
+  payload !== null &&
+  Array.isArray((payload as { results?: unknown }).results);
 
 export class OpenAiModerationProvider implements ModerationProvider {
   readonly name = "openai" as const;
@@ -63,10 +65,18 @@ export class OpenAiModerationProvider implements ModerationProvider {
     });
     if (!response.ok) {
       const text = await response.text().catch(() => "");
-      throw new ProviderError(this.name, `moderation failed: ${response.status} ${text.slice(0, 200)}`, response.status);
+      throw new ProviderError(
+        this.name,
+        `moderation failed: ${response.status} ${text.slice(0, 200)}`,
+        response.status,
+      );
     }
     const payload: unknown = await response.json().catch(() => ({}));
-    if (!isModerationResponse(payload) || payload.results === undefined || payload.results.length === 0) {
+    if (
+      !isModerationResponse(payload) ||
+      payload.results === undefined ||
+      payload.results.length === 0
+    ) {
       throw new ProviderError(this.name, "moderation returned no results");
     }
     const first = payload.results[0];
@@ -91,11 +101,12 @@ export class OpenAiModerationProvider implements ModerationProvider {
         : maxScore <= this.#approveThreshold
           ? "approve"
           : "review";
-    const reasonSummary = flaggedCategories.length > 0
-      ? flaggedCategories.join(", ")
-      : topCategory && maxScore > 0
-        ? `${topCategory} (${maxScore.toFixed(2)})`
-        : undefined;
+    const reasonSummary =
+      flaggedCategories.length > 0
+        ? flaggedCategories.join(", ")
+        : topCategory && maxScore > 0
+          ? `${topCategory} (${maxScore.toFixed(2)})`
+          : undefined;
     return {
       flagged: first.flagged,
       recommendation,

@@ -81,7 +81,8 @@ container-level lifecycle policy in the Azure portal:
 ```json
 {
   "rules": [
-    { "enabled": true,
+    {
+      "enabled": true,
       "name": "messages-cool-after-30d",
       "type": "Lifecycle",
       "definition": {

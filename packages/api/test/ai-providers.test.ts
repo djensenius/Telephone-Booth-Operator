@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { OpenAiModerationProvider } from "../src/lib/ai/openai-moderation.js";
 import { OpenAiTranscriptionProvider } from "../src/lib/ai/openai-transcription.js";
 
@@ -52,15 +52,29 @@ describe("OpenAiTranscriptionProvider", () => {
       model: "whisper-1",
       fetchImpl: fakeFetch,
     });
-    await expect(provider.transcribe({ audioUrl: "https://blob/audio.flac", sha256: "x".repeat(64), durationMs: null })).rejects.toMatchObject({ provider: "openai" });
+    await expect(
+      provider.transcribe({
+        audioUrl: "https://blob/audio.flac",
+        sha256: "x".repeat(64),
+        durationMs: null,
+      }),
+    ).rejects.toMatchObject({ provider: "openai" });
   });
 });
 
 describe("OpenAiModerationProvider", () => {
   it("maps a clean response to recommendation 'approve'", async () => {
-    const fakeFetch: typeof fetch = vi.fn(async () => jsonResponse({
-      results: [{ flagged: false, categories: { hate: false, violence: false }, category_scores: { hate: 0.01, violence: 0.05 } }],
-    }));
+    const fakeFetch: typeof fetch = vi.fn(async () =>
+      jsonResponse({
+        results: [
+          {
+            flagged: false,
+            categories: { hate: false, violence: false },
+            category_scores: { hate: 0.01, violence: 0.05 },
+          },
+        ],
+      }),
+    );
     const provider = new OpenAiModerationProvider({
       apiKey: "sk-test",
       baseUrl: "https://api.openai.com",
@@ -76,9 +90,10 @@ describe("OpenAiModerationProvider", () => {
   });
 
   it("maps a flagged response to recommendation 'reject'", async () => {
-    const fakeFetch: typeof fetch = async () => jsonResponse({
-      results: [{ flagged: true, categories: { hate: true }, category_scores: { hate: 0.92 } }],
-    });
+    const fakeFetch: typeof fetch = async () =>
+      jsonResponse({
+        results: [{ flagged: true, categories: { hate: true }, category_scores: { hate: 0.92 } }],
+      });
     const provider = new OpenAiModerationProvider({
       apiKey: "sk-test",
       baseUrl: "https://api.openai.com",
@@ -93,9 +108,10 @@ describe("OpenAiModerationProvider", () => {
   });
 
   it("maps a borderline response to recommendation 'review'", async () => {
-    const fakeFetch: typeof fetch = async () => jsonResponse({
-      results: [{ flagged: false, categories: { hate: false }, category_scores: { hate: 0.4 } }],
-    });
+    const fakeFetch: typeof fetch = async () =>
+      jsonResponse({
+        results: [{ flagged: false, categories: { hate: false }, category_scores: { hate: 0.4 } }],
+      });
     const provider = new OpenAiModerationProvider({
       apiKey: "sk-test",
       baseUrl: "https://api.openai.com",
@@ -118,6 +134,9 @@ describe("OpenAiModerationProvider", () => {
       rejectThreshold: 0.85,
       approveThreshold: 0.15,
     });
-    await expect(provider.moderate({ text: "hello" })).rejects.toMatchObject({ provider: "openai", status: 429 });
+    await expect(provider.moderate({ text: "hello" })).rejects.toMatchObject({
+      provider: "openai",
+      status: 429,
+    });
   });
 });

@@ -78,7 +78,7 @@ pipeline does with `Message.status` after both steps succeed:
   `pending` so they show up in the operator queue, but never
   auto-approves or auto-rejects.
 - `auto_reject` — if `recommendation = reject` (or `maxScore >=
-  AUTO_REJECT_THRESHOLD`, default `0.85`), the message is auto-rejected.
+AUTO_REJECT_THRESHOLD`, default `0.85`), the message is auto-rejected.
   Otherwise it lands in `pending`.
 - `auto_both` — also auto-approves when `flagged = false` and
   `maxScore <= AUTO_APPROVE_THRESHOLD` (default `0.15`). Borderline

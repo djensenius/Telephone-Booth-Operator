@@ -86,7 +86,7 @@ export const verifyOperatorBearer = async (token: string): Promise<BearerVerifyR
   return { ok: true, user: result.user, payload };
 };
 
-// Test-only escape hatch so vitest specs can inject a fake JWKS + verifier
+// Test-only escape hatch so specs can inject a fake JWKS + verifier
 // without standing up a real Authentik instance.
 export const __setBearerVerifierForTests = (overrides: {
   jwks?: (url: URL) => JWTVerifyGetKey;

@@ -1,7 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.js")).fakeDb }));
-vi.mock("../src/lib/azure-blob.js", async () => (await import("./support/fake-azure.js")).fakeAzureModule);
+vi.mock(
+  "../src/lib/azure-blob.js",
+  async () => (await import("./support/fake-azure.js")).fakeAzureModule,
+);
 
 import { createApp } from "../src/index.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
@@ -28,7 +31,12 @@ describe("uploads routes", () => {
     const res = await app.request("/v1/uploads/sas", {
       method: "POST",
       headers: { "content-type": "application/json", cookie: operatorCookie() },
-      body: JSON.stringify({ kind: "question-audio", sha256, sizeBytes: 100, contentType: "audio/flac" }),
+      body: JSON.stringify({
+        kind: "question-audio",
+        sha256,
+        sizeBytes: 100,
+        contentType: "audio/flac",
+      }),
     });
     expect(res.status, await res.clone().text()).toBe(201);
     const body = await res.json();
@@ -44,7 +52,12 @@ describe("uploads routes", () => {
     const res = await app.request("/v1/uploads/sas", {
       method: "POST",
       headers: { "content-type": "application/json", cookie: operatorCookie() },
-      body: JSON.stringify({ kind: "message", sha256: "not-a-sha", sizeBytes: 100, contentType: "audio/flac" }),
+      body: JSON.stringify({
+        kind: "message",
+        sha256: "not-a-sha",
+        sizeBytes: 100,
+        contentType: "audio/flac",
+      }),
     });
     expect(res.status).toBe(400);
   });

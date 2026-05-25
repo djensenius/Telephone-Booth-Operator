@@ -2,8 +2,8 @@ name: openapi-sync
 on:
   pull_request:
     paths:
-      - 'packages/api/openapi.yaml'
-      - '.github/workflows/openapi-sync.yml'
+      - "packages/api/openapi.yaml"
+      - ".github/workflows/openapi-sync.yml"
 
 jobs:
   diff:
@@ -14,7 +14,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - name: Validate
         run: npx --yes @redocly/cli@latest lint packages/api/openapi.yaml
       - name: Diff
