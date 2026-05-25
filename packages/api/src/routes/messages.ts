@@ -2,6 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import { MessageCreateSchema, MessageStatusSchema } from "@telephone-booth-operator/shared";
 import { Hono } from "hono";
 import { z } from "zod";
+import { resolveAiConfig } from "../lib/ai/config.js";
 import { kickPipelineForMessage, runModeration, runTranscription } from "../lib/ai/pipeline.js";
 import { fanOutNotification } from "../lib/apns.js";
 import { generateSasUrl, headBlob } from "../lib/azure-blob.js";
@@ -132,6 +133,11 @@ messagesRouter.post(
     if (!blob.exists) return c.json({ error: "blob_not_found" }, 409);
     if (blob.sha256 && blob.sha256 !== message.audio.sha256)
       return c.json({ error: "sha256_mismatch" }, 422);
+
+    const { maxAudioBytes } = resolveAiConfig();
+    if (blob.sizeBytes > maxAudioBytes) {
+      return c.json({ error: "audio_too_large", maxBytes: maxAudioBytes }, 413);
+    }
 
     await db.file.update({
       where: { id: message.audio.id },

@@ -68,6 +68,7 @@ const baseDeps = (overrides: Partial<PipelineDeps> = {}): PipelineDeps => ({
     autoRejectThreshold: 0.85,
     autoApproveThreshold: 0.15,
     sweeperIntervalSeconds: 60,
+    maxAudioBytes: 26_214_400,
     ...(overrides.config ?? {}),
   },
   transcriptionProvider:
@@ -325,5 +326,39 @@ describe("AI pipeline", () => {
     expect(withRelations.transcriptions[0]?.status).toBe("failed");
     expect(withRelations.transcriptions[0]?.error).toContain("upstream blew up");
     expect(withRelations.moderations).toHaveLength(0);
+  });
+
+  it("rejects transcription when audio file exceeds maxAudioBytes", async () => {
+    const file = await fakeDb.file.create({
+      data: {
+        blobContainer: "messages",
+        blobKey: "messages/aa/big.flac",
+        sha256: "f".repeat(64),
+        sizeBytes: 50_000_000,
+        durationMs: 3000,
+        contentType: "audio/flac",
+      },
+    });
+    const message = await fakeDb.message.create({
+      data: { status: "received", audioId: file.id },
+    });
+    const provider = fakeTranscription("hi");
+    await runTranscription({
+      messageId: message.id,
+      deps: baseDeps({
+        transcriptionProvider: provider,
+        config: { maxAudioBytes: 25_000_000 } as never,
+      }),
+    });
+    const updated = await fakeDb.message.findUnique({
+      where: { id: message.id },
+      include: { audio: true, transcriptions: true },
+    });
+    const withRelations = updated as unknown as {
+      transcriptions: Array<{ status: string; error: string | null }>;
+    };
+    expect(withRelations.transcriptions[0]?.status).toBe("failed");
+    expect(withRelations.transcriptions[0]?.error).toMatch(/too large/);
+    expect(provider.transcribe).not.toHaveBeenCalled();
   });
 });

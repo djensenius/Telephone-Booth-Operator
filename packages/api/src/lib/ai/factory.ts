@@ -20,6 +20,7 @@ export const buildTranscriptionProvider = (
         apiKey: config.openAiApiKey,
         baseUrl: config.openAiBaseUrl,
         model: config.transcriptionOpenAiModel,
+        maxAudioBytes: config.maxAudioBytes,
       });
     case "mac_app":
       if (!config.transcriptionMacAppUrl) return null;

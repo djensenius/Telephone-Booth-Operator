@@ -129,9 +129,12 @@ export const MessageSchema = z.object({
 });
 export type Message = z.infer<typeof MessageSchema>;
 
+// 5 minutes — generous upper bound for booth recordings.
+export const MAX_AUDIO_DURATION_MS = 300_000;
+
 export const MessageCreateSchema = z.object({
   questionId: z.string().uuid().optional(),
-  durationMs: z.number().int().positive(),
+  durationMs: z.number().int().positive().max(MAX_AUDIO_DURATION_MS),
   sha256: Sha256Schema,
 });
 export type MessageCreate = z.infer<typeof MessageCreateSchema>;

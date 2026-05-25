@@ -98,6 +98,47 @@ describe("messages routes", () => {
     expect(deleted.status).toBe(204);
   });
 
+  it("returns 413 when uploaded blob exceeds MAX_AUDIO_BYTES", async () => {
+    process.env.MAX_AUDIO_BYTES = "1000";
+    const app = createApp();
+    const sha256 = "d".repeat(64);
+
+    const initiated = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({ durationMs: 3000, sha256 }),
+    });
+    expect(initiated.status).toBe(201);
+    const slot = await initiated.json();
+
+    fakeBlobs.set(slot.blobName, {
+      exists: true,
+      sizeBytes: 5000,
+      contentType: "audio/flac",
+      sha256,
+    });
+
+    const completed = await app.request(`/v1/messages/${slot.id}/complete`, {
+      method: "POST",
+      headers: phoneHeaders,
+    });
+    expect(completed.status).toBe(413);
+    await expect(completed.json()).resolves.toMatchObject({ error: "audio_too_large" });
+    delete process.env.MAX_AUDIO_BYTES;
+  });
+
+  it("rejects message creation when durationMs exceeds the cap", async () => {
+    const app = createApp();
+    const sha256 = "e".repeat(64);
+
+    const res = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({ durationMs: 999_999, sha256 }),
+    });
+    expect(res.status).toBe(400);
+  });
+
   it("returns a random approved message with audio sha for the phone client", async () => {
     const app = createApp();
     const audio = seedFile({ sha256: "c".repeat(64), durationMs: 4500 });
