@@ -138,7 +138,8 @@ messagesRouter.post(
 
     const blob = await headBlob(message.audio.blobKey);
     if (!blob.exists) return c.json({ error: "blob_not_found" }, 409);
-    if (blob.sha256 && blob.sha256 !== message.audio.sha256)
+    if (!blob.sha256) return c.json({ error: "sha256_metadata_missing" }, 422);
+    if (blob.sha256 !== message.audio.sha256)
       return c.json({ error: "sha256_mismatch" }, 422);
 
     const { maxAudioBytes } = resolveAiConfig();
