@@ -68,6 +68,7 @@ const baseDeps = (overrides: Partial<PipelineDeps> = {}): PipelineDeps => ({
     autoRejectThreshold: 0.85,
     autoApproveThreshold: 0.15,
     sweeperIntervalSeconds: 60,
+    sweeperStaleThresholdSeconds: 300,
     ...(overrides.config ?? {}),
   },
   transcriptionProvider:
@@ -325,5 +326,64 @@ describe("AI pipeline", () => {
     expect(withRelations.transcriptions[0]?.status).toBe("failed");
     expect(withRelations.transcriptions[0]?.error).toContain("upstream blew up");
     expect(withRelations.moderations).toHaveLength(0);
+  });
+
+  it("skips transcription when a recent pending transcription already exists", async () => {
+    const id = await seedReceivedMessage();
+    // Seed a pending transcription that is younger than the stale threshold
+    await fakeDb.transcription.create({
+      data: {
+        messageId: id,
+        provider: "openai",
+        model: "whisper-1",
+        status: "pending",
+        durationMs: 3000,
+        requestedById: null,
+      },
+    });
+    const result = await runTranscription({ messageId: id, deps: baseDeps() });
+    expect(result).toBeNull();
+    // No new transcription row should have been created
+    const message = await fakeDb.message.findUnique({
+      where: { id },
+      include: { audio: true, transcriptions: true, moderations: true },
+    });
+    const withRelations = message as unknown as {
+      transcriptions: Array<{ status: string }>;
+    };
+    expect(withRelations.transcriptions).toHaveLength(1);
+    expect(withRelations.transcriptions[0]?.status).toBe("pending");
+  });
+
+  it("supersedes a stale pending transcription and creates a new attempt", async () => {
+    const id = await seedReceivedMessage();
+    // Seed a pending transcription older than the stale threshold (300s default)
+    const staleDate = new Date(Date.now() - 400_000);
+    await fakeDb.transcription.create({
+      data: {
+        messageId: id,
+        provider: "openai",
+        model: "whisper-1",
+        status: "pending",
+        durationMs: 3000,
+        requestedById: null,
+        createdAt: staleDate,
+      },
+    });
+    const result = await runTranscription({ messageId: id, deps: baseDeps() });
+    expect(result).not.toBeNull();
+    const message = await fakeDb.message.findUnique({
+      where: { id },
+      include: { audio: true, transcriptions: true, moderations: true },
+    });
+    const withRelations = message as unknown as {
+      transcriptions: Array<{ status: string; error: string | null }>;
+    };
+    // Should have 2 rows: the stale one marked failed and the new successful one
+    expect(withRelations.transcriptions).toHaveLength(2);
+    const staleRow = withRelations.transcriptions.find((t) => t.error?.includes("stale"));
+    expect(staleRow?.status).toBe("failed");
+    const newRow = withRelations.transcriptions.find((t) => t.status === "succeeded");
+    expect(newRow).toBeDefined();
   });
 });

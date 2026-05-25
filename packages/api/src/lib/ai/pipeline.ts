@@ -158,6 +158,40 @@ export const runTranscription = async (opts: RunTranscriptionOptions): Promise<s
     return failed.id;
   }
 
+  // Guard: only one active pending transcription per message at a time.
+  const staleThresholdMs = deps.config.sweeperStaleThresholdSeconds * 1000;
+  const existingPending = await db.transcription.findFirst({
+    where: { messageId: message.id, status: "pending" },
+    orderBy: { createdAt: "desc" },
+  });
+  if (existingPending) {
+    const age = Date.now() - existingPending.createdAt.getTime();
+    if (age < staleThresholdMs) {
+      log("info", "ai.transcription.skipped", {
+        messageId: message.id,
+        reason: "pending transcription already active",
+        existingId: existingPending.id,
+        ageMs: age,
+      });
+      return null;
+    }
+    // The existing pending row is older than the stale threshold — the
+    // original provider call likely crashed. Mark it failed and proceed.
+    await db.transcription.update({
+      where: { id: existingPending.id },
+      data: {
+        status: "failed",
+        error: "stale — superseded by sweeper retry",
+        completedAt: new Date(),
+      },
+    });
+    log("warn", "ai.transcription.stale_superseded", {
+      messageId: message.id,
+      supersededId: existingPending.id,
+      ageMs: age,
+    });
+  }
+
   const pending = await db.transcription.create({
     data: {
       messageId: message.id,

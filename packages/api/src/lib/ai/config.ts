@@ -41,6 +41,7 @@ export interface AiConfig {
   readonly autoRejectThreshold: number;
   readonly autoApproveThreshold: number;
   readonly sweeperIntervalSeconds: number;
+  readonly sweeperStaleThresholdSeconds: number;
 }
 
 const trimmedOrNull = (raw: string | undefined): string | null => {
@@ -71,5 +72,6 @@ export const resolveAiConfig = (): AiConfig => {
     autoRejectThreshold: parseFloat01(env.AUTO_REJECT_THRESHOLD, 0.85),
     autoApproveThreshold: parseFloat01(env.AUTO_APPROVE_THRESHOLD, 0.15),
     sweeperIntervalSeconds: parseInteger(env.AI_SWEEPER_INTERVAL_SECONDS, 60),
+    sweeperStaleThresholdSeconds: parseInteger(env.AI_SWEEPER_STALE_THRESHOLD_SECONDS, 300, 10),
   };
 };

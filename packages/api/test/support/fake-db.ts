@@ -535,7 +535,7 @@ export const fakeDb = {
         latencyMs: data.latencyMs ?? null,
         error: data.error ?? null,
         requestedById: data.requestedById ?? null,
-        createdAt: new Date(),
+        createdAt: data.createdAt ?? new Date(),
         completedAt: data.completedAt ?? null,
       };
       store.transcriptions.set(row.id, row);
