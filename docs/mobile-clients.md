@@ -81,7 +81,7 @@ to drive the full OIDC PKCE Authorization-Code grant:
 2. App opens `https://authentik.example/application/o/authorize/?...` with
    `response_type=code`, `client_id=telephone-booth-operator-mobile`,
    `redirect_uri=tboperator://oauth/callback`, `scope=openid profile email
-offline_access`, `code_challenge`, `code_challenge_method=S256`,
+   offline_access`, `code_challenge`, `code_challenge_method=S256`,
    `state`, `nonce`.
 3. User authenticates in the system browser; Authentik redirects back to
    `tboperator://oauth/callback?code=...&state=...`.
