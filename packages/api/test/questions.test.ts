@@ -78,7 +78,10 @@ describe("questions routes", () => {
 
     const random = await app.request("/v1/questions/random", { headers: phoneHeaders });
     expect(random.status).toBe(200);
-    await expect(random.json()).resolves.toMatchObject({ id: question.id });
+    await expect(random.json()).resolves.toMatchObject({
+      id: question.id,
+      audio: { sha256: "1".repeat(64), durationMs: 2500 },
+    });
 
     const deleted = await app.request(`/v1/questions/${question.id}`, {
       method: "DELETE",

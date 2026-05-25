@@ -476,18 +476,33 @@ export const fakeDb = {
       return existing;
     },
     findFirst: async ({
+      where = {},
+      include,
       orderBy,
       select,
-    }: { orderBy?: { createdAt?: "asc" | "desc" }; select?: { id?: boolean } } = {}) => {
+      skip = 0,
+    }: {
+      where?: { status?: string };
+      include?: { audio?: boolean; transcriptions?: unknown; moderations?: unknown };
+      orderBy?: { createdAt?: "asc" | "desc"; id?: "asc" | "desc" };
+      select?: { id?: boolean };
+      skip?: number;
+    } = {}) => {
       const order = orderBy?.createdAt ?? "desc";
-      const messages = [...store.messages.values()].sort((a, b) =>
-        order === "asc"
+      let messages = [...store.messages.values()];
+      if (where.status) messages = messages.filter((message) => message.status === where.status);
+      messages = messages.sort((a, b) => {
+        if (orderBy?.id) {
+          return orderBy.id === "asc" ? a.id.localeCompare(b.id) : b.id.localeCompare(a.id);
+        }
+        return order === "asc"
           ? a.createdAt.getTime() - b.createdAt.getTime()
-          : b.createdAt.getTime() - a.createdAt.getTime(),
-      );
-      const first = messages[0];
+          : b.createdAt.getTime() - a.createdAt.getTime();
+      });
+      const first = messages[skip];
       if (!first) return null;
       if (select?.id) return { id: first.id };
+      if (include) return attachAi(first, include);
       return first;
     },
     count: async ({

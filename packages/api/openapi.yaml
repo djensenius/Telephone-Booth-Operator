@@ -195,6 +195,20 @@ paths:
         "404": { description: question not found }
         "409": { description: duplicate message }
 
+  /v1/messages/random:
+    get:
+      summary: A random approved message for the phone client to play.
+      tags: [messages]
+      security:
+        - apiToken: []
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Message" }
+        "404": { description: no approved messages available }
+
   /v1/messages/{id}:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }

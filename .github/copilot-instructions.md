@@ -16,6 +16,9 @@ inside this repository. Read them in full before proposing changes.
   changelog entries.** No "generated with Copilot", "written by AI", etc.
 - **Do not invent attributions, names, emails, or issue/PR numbers.** If a real
   number isn't available, omit the reference.
+- **Wait for Copilot PR review before merging.** Do not merge until the
+  Copilot PR review has completed, all actionable Copilot feedback is addressed,
+  and false positives have a reply explaining why they are not being changed.
 - Keep commit messages factual and human-voiced; prefer Conventional Commits
   (`feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`) but they are not
   strictly enforced. See [`docs/contributing.md`](../docs/contributing.md).

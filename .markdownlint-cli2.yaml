@@ -14,6 +14,8 @@ config:
       - sup
   MD024:
     siblings_only: true
+  # Do not require padded/aligned table columns; compact tables are intentional.
+  MD060: false
   MD041: false
 globs:
   - "docs/**/*.md"

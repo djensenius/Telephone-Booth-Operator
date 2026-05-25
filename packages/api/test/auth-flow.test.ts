@@ -187,4 +187,11 @@ describe("auth flow", () => {
     expect(logout.headers.get("location")).toContain("https://idp.example/logout");
     expect(store.sessions.size).toBe(0);
   });
+
+  it("sends logged-out operators back to the web login screen", async () => {
+    const logout = await app.request("/v1/auth/logout", { method: "POST" });
+
+    expect(logout.status).toBe(302);
+    expect(logout.headers.get("location")).toBe("http://localhost:5173/login");
+  });
 });
