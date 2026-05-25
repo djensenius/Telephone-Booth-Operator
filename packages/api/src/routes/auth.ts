@@ -101,7 +101,7 @@ const setLoginTxCookie = (c: Parameters<typeof appendCookieHeader>[0] & { req: {
   const maxAge = String(Math.floor(pendingLoginTtlMs / 1000));
   appendCookieHeader(c, [
     `${LOGIN_TX_COOKIE_NAME}=${signed}`,
-    "Path=/v1/auth",
+    "Path=/",
     `Max-Age=${maxAge}`,
     "HttpOnly",
     "SameSite=Lax",
@@ -111,7 +111,7 @@ const setLoginTxCookie = (c: Parameters<typeof appendCookieHeader>[0] & { req: {
   if (process.env.NODE_ENV === "production" || !isLocalFromUrl(c.req.url)) return;
   appendCookieHeader(c, [
     `${DEV_LOGIN_TX_COOKIE_NAME}=${signed}`,
-    "Path=/v1/auth",
+    "Path=/",
     `Max-Age=${maxAge}`,
     "HttpOnly",
     "SameSite=Lax",
@@ -121,7 +121,7 @@ const setLoginTxCookie = (c: Parameters<typeof appendCookieHeader>[0] & { req: {
 const clearLoginTxCookie = (c: Parameters<typeof appendCookieHeader>[0] & { req: { url: string } }): void => {
   appendCookieHeader(c, [
     `${LOGIN_TX_COOKIE_NAME}=`,
-    "Path=/v1/auth",
+    "Path=/",
     "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
     "HttpOnly",
     "SameSite=Lax",
@@ -131,7 +131,7 @@ const clearLoginTxCookie = (c: Parameters<typeof appendCookieHeader>[0] & { req:
   if (process.env.NODE_ENV === "production" || !isLocalFromUrl(c.req.url)) return;
   appendCookieHeader(c, [
     `${DEV_LOGIN_TX_COOKIE_NAME}=`,
-    "Path=/v1/auth",
+    "Path=/",
     "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
     "HttpOnly",
     "SameSite=Lax",
@@ -144,7 +144,7 @@ const readLoginTxCookie = (cookieHeader: string | undefined): string | null => {
     (process.env.NODE_ENV !== "production"
       ? cookieValueFromHeader(cookieHeader, DEV_LOGIN_TX_COOKIE_NAME)
       : undefined);
-  return verifyCookieValue(raw ? decodeURIComponent(raw) : undefined);
+  return verifyCookieValue(raw);
 };
 
 const html = (title: string, detail: string): string => `<!doctype html>
