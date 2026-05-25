@@ -76,13 +76,18 @@ export const buildAuthorizationUrl = (state: string, nonce: string, codeVerifier
   });
 };
 
-const paramsToUrl = (params: ExchangeParams): URL | Request => {
-  if (params instanceof URL || params instanceof Request) return params;
-  if (typeof params === "string") return new URL(params);
-
+const callbackUrlForGrant = (params: ExchangeParams): URL => {
   const config = getRequiredOidcConfig();
   const url = new URL(config.redirectUri);
-  url.search = params.toString();
+  if (params instanceof Request) {
+    url.search = new URL(params.url).search;
+  } else if (params instanceof URL) {
+    url.search = params.search;
+  } else if (typeof params === "string") {
+    url.search = new URL(params).search;
+  } else {
+    url.search = params.toString();
+  }
   return url;
 };
 
@@ -92,12 +97,16 @@ export const exchangeCode = async (
   expectedState: string,
   expectedNonce: string,
 ): Promise<CodeExchangeResult> => {
-  const tokens = await oidc.authorizationCodeGrant(await getOidcClient(), paramsToUrl(params), {
-    expectedNonce,
-    expectedState,
-    idTokenExpected: true,
-    pkceCodeVerifier: codeVerifier,
-  });
+  const tokens = await oidc.authorizationCodeGrant(
+    await getOidcClient(),
+    callbackUrlForGrant(params),
+    {
+      expectedNonce,
+      expectedState,
+      idTokenExpected: true,
+      pkceCodeVerifier: codeVerifier,
+    },
+  );
   const claims = tokens.claims();
   if (!claims) {
     throw new Error("OIDC provider did not return an ID token.");

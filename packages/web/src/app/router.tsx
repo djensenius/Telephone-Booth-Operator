@@ -10,6 +10,7 @@ import {
 import { AboutScreen } from "../features/about/AboutScreen.js";
 import { LoginScreen } from "../features/auth/LoginScreen.js";
 import { RequireAuth } from "../features/auth/RequireAuth.js";
+import { useCurrentUser } from "../features/auth/useCurrentUser.js";
 import { DebugScreen } from "../features/debug/DebugScreen.js";
 import { EventsScreen } from "../features/events/EventsScreen.js";
 import { MessageDetail } from "../features/messages/MessageDetail.js";
@@ -51,7 +52,8 @@ function BuildFooter(): JSX.Element {
 }
 
 function AppLayout(): JSX.Element {
-  useNumericNavigation();
+  const { isAuthenticated } = useCurrentUser();
+  useNumericNavigation(isAuthenticated);
   return (
     <BoothFrame>
       <a className="skip-link" href="#main-content">
@@ -59,37 +61,39 @@ function AppLayout(): JSX.Element {
       </a>
       <TelephoneBanner />
       <div className="app-shell">
-        <aside className="operator-sidebar" aria-label="Operator navigation">
-          <BoothStatusBadge />
-          <nav className="operator-sidebar__nav" aria-label="Digit shortcut routes">
-            <h2>Shortcuts</h2>
-            <ul>
-              {DIGIT_ROUTES.map((route) => (
-                <li key={route.digit}>
-                  {route.reserved === true ? (
-                    <span className="operator-sidebar__reserved">{route.digit} · Reserved</span>
-                  ) : (
-                    <a href={route.href}>{`${route.digit} · ${route.label}`}</a>
-                  )}
+        {isAuthenticated ? (
+          <aside className="operator-sidebar" aria-label="Operator navigation">
+            <BoothStatusBadge />
+            <nav className="operator-sidebar__nav" aria-label="Digit shortcut routes">
+              <h2>Shortcuts</h2>
+              <ul>
+                {DIGIT_ROUTES.map((route) => (
+                  <li key={route.digit}>
+                    {route.reserved === true ? (
+                      <span className="operator-sidebar__reserved">{route.digit} · Reserved</span>
+                    ) : (
+                      <a href={route.href}>{`${route.digit} · ${route.label}`}</a>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </nav>
+            <nav className="operator-sidebar__nav" aria-label="Observability routes">
+              <h2>Observability</h2>
+              <ul>
+                <li>
+                  <a href="/system">Live system</a>
                 </li>
-              ))}
-            </ul>
-          </nav>
-          <nav className="operator-sidebar__nav" aria-label="Observability routes">
-            <h2>Observability</h2>
-            <ul>
-              <li>
-                <a href="/system">Live system</a>
-              </li>
-              <li>
-                <a href="/events">Events</a>
-              </li>
-              <li>
-                <a href="/sessions">Sessions</a>
-              </li>
-            </ul>
-          </nav>
-        </aside>
+                <li>
+                  <a href="/events">Events</a>
+                </li>
+                <li>
+                  <a href="/sessions">Sessions</a>
+                </li>
+              </ul>
+            </nav>
+          </aside>
+        ) : null}
         <main className="app-shell__main" id="main-content" tabIndex={-1}>
           <Outlet />
         </main>

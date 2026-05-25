@@ -15,6 +15,14 @@ operator backend is sending. Check `AUTHENTIK_REDIRECT_URI` (or
 `OIDC_REDIRECT_URI`) against the URI list in your IdP's client config.
 Trailing slashes matter.
 
+## OIDC callback says "The login response could not be validated"
+
+Check the API logs for `auth_callback_failed`; the logged OIDC error usually
+points at the exact config value to fix. Common causes are an `AUTHENTIK_ISSUER`
+or `OIDC_ISSUER` that doesn't exactly match the issuer in discovery, an
+incorrect client secret, or a browser-visible callback URL that differs from
+`AUTHENTIK_REDIRECT_URI` / `OIDC_REDIRECT_URI`.
+
 ## ID token validates but `groups: []`
 
 Your IdP isn't including the groups claim. See the provider-specific

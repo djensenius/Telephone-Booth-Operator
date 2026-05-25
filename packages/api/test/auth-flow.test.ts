@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-const { fakeDb, store } = vi.hoisted(() => {
+const { fakeDb, openidMocks, store } = vi.hoisted(() => {
   const users = new Map<string, Record<string, unknown>>();
   const sessions = new Map<string, Record<string, unknown>>();
 
@@ -11,6 +11,34 @@ const { fakeDb, store } = vi.hoisted(() => {
 
   return {
     store: { users, sessions },
+    openidMocks: {
+      authorizationCodeGrant: vi.fn(async () => {
+        const tokenSet = {
+          access_token: "access-token",
+          refresh_token: "refresh-token",
+          id_token: "id-token",
+          token_type: "bearer",
+          expires_in: 3600,
+          expiresIn: () => 3600,
+        };
+        Object.defineProperty(tokenSet, "claims", {
+          value: () => ({
+            iss: "https://idp.example",
+            sub: "oidc-sub-1",
+            aud: "client-id",
+            iat: 1,
+            exp: 9999999999,
+            nonce: "nonce-1",
+            email: "operator@example.com",
+            name: "Operator One",
+            groups: ["operators"],
+            picture: "https://example.com/avatar.png",
+          }),
+          writable: false,
+        });
+        return tokenSet;
+      }),
+    },
     fakeDb: {
       operatorUser: {
         upsert: vi.fn(async ({ where, create, update }) => {
@@ -66,32 +94,7 @@ vi.mock("openid-client", () => ({
     for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
     return url;
   }),
-  authorizationCodeGrant: vi.fn(async () => {
-    const tokenSet = {
-      access_token: "access-token",
-      refresh_token: "refresh-token",
-      id_token: "id-token",
-      token_type: "bearer",
-      expires_in: 3600,
-      expiresIn: () => 3600,
-    };
-    Object.defineProperty(tokenSet, "claims", {
-      value: () => ({
-        iss: "https://idp.example",
-        sub: "oidc-sub-1",
-        aud: "client-id",
-        iat: 1,
-        exp: 9999999999,
-        nonce: "nonce-1",
-        email: "operator@example.com",
-        name: "Operator One",
-        groups: ["operators"],
-        picture: "https://example.com/avatar.png",
-      }),
-      writable: false,
-    });
-    return tokenSet;
-  }),
+  authorizationCodeGrant: openidMocks.authorizationCodeGrant,
   refreshTokenGrant: vi.fn(async () => ({
     access_token: "new-access-token",
     token_type: "bearer",
@@ -123,6 +126,7 @@ describe("auth flow", () => {
   beforeEach(() => {
     store.users.clear();
     store.sessions.clear();
+    openidMocks.authorizationCodeGrant.mockClear();
     process.env.NODE_ENV = "test";
     process.env.SESSION_SECRET = "test-session-secret";
     process.env.SESSION_ENCRYPTION_KEY = Buffer.alloc(32, 9).toString("base64");
@@ -147,9 +151,20 @@ describe("auth flow", () => {
     expect(login.headers.get("location")).toContain("https://idp.example/authorize");
     expect(login.headers.get("location")).toContain("state=state-1");
 
-    const callback = await app.request("/v1/auth/callback?code=code-1&state=state-1");
+    const callback = await app.request(
+      "http://127.0.0.1/v1/auth/callback?code=code-1&state=state-1",
+    );
     expect(callback.status, await callback.clone().text()).toBe(302);
     expect(callback.headers.get("location")).toBe("http://localhost:5173/dashboard");
+    expect(openidMocks.authorizationCodeGrant).toHaveBeenCalledWith(
+      expect.anything(),
+      new URL("http://localhost/v1/auth/callback?code=code-1&state=state-1"),
+      expect.objectContaining({
+        expectedNonce: "nonce-1",
+        expectedState: "state-1",
+        pkceCodeVerifier: "verifier-1",
+      }),
+    );
     const cookie = cookieFrom(callback);
     expect(cookie).toContain("__Host-booth_session=");
     const setCookie = callback.headers.get("set-cookie");

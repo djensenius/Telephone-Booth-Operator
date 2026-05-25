@@ -40,8 +40,6 @@ export function LoginScreen(): JSX.Element {
               className="login-screen__phone-body"
               d="M50 66h80l14 48c2 8-4 16-12 16H48c-8 0-14-8-12-16l14-48Z"
             />
-            <path className="login-screen__phone-slot" d="M64 88h52" />
-            <path className="login-screen__phone-cord" d="M116 92c18 8 14 28 30 30" />
           </svg>
         </div>
       </div>
