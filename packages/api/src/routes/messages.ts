@@ -1,4 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
+import { Prisma } from "@prisma/client";
 import { MessageCreateSchema, MessageStatusSchema } from "@telephone-booth-operator/shared";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -91,31 +92,37 @@ messagesRouter.post("/", requireApiToken(), zValidator("json", MessageCreateSche
   }
 
   const blobName = messageBlobName(body.sha256);
-  const existingFile = await db.file.findUnique({ where: { sha256: body.sha256 } });
-  let file = existingFile;
-  if (file) {
-    const existingMessage = await db.message.findUnique({ where: { audioId: file.id } });
-    if (existingMessage) return c.json({ error: "message_already_exists" }, 409);
-  } else {
-    file = await db.file.create({
+  const file = await db.file.upsert({
+    where: { sha256: body.sha256 },
+    create: {
+      blobContainer: process.env.AZURE_BLOB_CONTAINER?.trim() || "booth-recordings",
+      blobKey: blobName,
+      sha256: body.sha256,
+      sizeBytes: 0,
+      durationMs: body.durationMs,
+      contentType: "audio/flac",
+    },
+    update: {},
+  });
+
+  const existingMessage = await db.message.findUnique({ where: { audioId: file.id } });
+  if (existingMessage) return c.json({ error: "message_already_exists" }, 409);
+
+  let message;
+  try {
+    message = await db.message.create({
       data: {
-        blobContainer: process.env.AZURE_BLOB_CONTAINER?.trim() || "booth-recordings",
-        blobKey: blobName,
-        sha256: body.sha256,
-        sizeBytes: 0,
-        durationMs: body.durationMs,
-        contentType: "audio/flac",
+        status: "uploading",
+        questionId: body.questionId ?? null,
+        audioId: file.id,
       },
     });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return c.json({ error: "message_already_exists" }, 409);
+    }
+    throw err;
   }
-
-  const message = await db.message.create({
-    data: {
-      status: "uploading",
-      questionId: body.questionId ?? null,
-      audioId: file.id,
-    },
-  });
   const sas = generateSasUrl(blobName, { permissions: "cw", contentType: "audio/flac" });
   return c.json({ id: message.id, uploadUrl: sas.url, blobName }, 201);
 });
@@ -146,24 +153,38 @@ messagesRouter.post(
         contentType: blob.contentType ?? message.audio.contentType,
       },
     });
+
+    // Idempotent transition: only move from "uploading" → "received".
+    // If the message already advanced past "uploading" (e.g. retry after
+    // timeout), skip the pipeline and return the current state.
     const receivedAt = new Date();
-    const updated = await db.message.update({
-      where: { id },
+    const { count } = await db.message.updateMany({
+      where: { id, status: "uploading" },
       data: { status: "received", receivedAt },
     });
+
+    if (count === 0) {
+      const current = await db.message.findUnique({ where: { id } });
+      return c.json({
+        id: current!.id,
+        status: current!.status,
+        receivedAt: current!.receivedAt?.toISOString() ?? null,
+      });
+    }
+
     // Fire-and-forget. The pipeline catches its own errors and updates the
     // DB asynchronously; the booth's `/complete` call does not wait on AI.
-    kickPipelineForMessage(updated.id);
+    kickPipelineForMessage(id);
     // Push fan-out: notify mobile devices that a new message has landed.
     void fanOutNotification({
       preferenceKey: "messageReceived",
       title: "New booth message",
       body: "A new recording is ready to moderate.",
-      threadId: `message:${updated.id}`,
+      threadId: `message:${id}`,
       category: "BOOTH_MESSAGE",
-      data: { messageId: updated.id },
+      data: { messageId: id },
     });
-    return c.json({ id: updated.id, status: "received", receivedAt: receivedAt.toISOString() });
+    return c.json({ id, status: "received", receivedAt: receivedAt.toISOString() });
   },
 );
 
@@ -183,12 +204,22 @@ messagesRouter.post("/:id/transcribe", zValidator("param", idParamSchema), async
   const message = await db.message.findUnique({ where: { id }, select: { id: true } });
   if (!message) return c.json({ error: "not_found" }, 404);
   const user = c.get("user") as { id: string } | undefined;
-  const transcriptionId = await runTranscription({
+  const transcriptionResult = await runTranscription({
     messageId: id,
     requestedByUserId: user?.id ?? null,
   });
-  if (!transcriptionId) return c.json({ error: "not_found" }, 404);
-  const row = await db.transcription.findUnique({ where: { id: transcriptionId } });
+  if (transcriptionResult.outcome === "not_found") {
+    return c.json({ error: "not_found" }, 404);
+  }
+  if (transcriptionResult.outcome === "skipped") {
+    return c.json(
+      { error: "transcription_already_pending", transcriptionId: transcriptionResult.existingId },
+      409,
+    );
+  }
+  const row = await db.transcription.findUnique({
+    where: { id: transcriptionResult.transcriptionId },
+  });
   if (!row) return c.json({ error: "not_found" }, 404);
   return c.json(serializeTranscription(row), 202);
 });

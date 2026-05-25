@@ -139,6 +139,45 @@ describe("messages routes", () => {
     expect(res.status).toBe(400);
   });
 
+  it("duplicate /complete is idempotent and does not reset status", async () => {
+    const app = createApp();
+    const sha256 = "d".repeat(64);
+
+    const initiated = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({ durationMs: 2000, sha256 }),
+    });
+    expect(initiated.status).toBe(201);
+    const slot = await initiated.json();
+
+    fakeBlobs.set(slot.blobName, {
+      exists: true,
+      sizeBytes: 1234,
+      contentType: "audio/flac",
+      sha256,
+    });
+
+    // First /complete transitions uploading → received
+    const first = await app.request(`/v1/messages/${slot.id}/complete`, {
+      method: "POST",
+      headers: phoneHeaders,
+    });
+    expect(first.status).toBe(200);
+    await expect(first.json()).resolves.toMatchObject({ id: slot.id, status: "received" });
+
+    // Second /complete is a no-op retry — should not reset state
+    const second = await app.request(`/v1/messages/${slot.id}/complete`, {
+      method: "POST",
+      headers: phoneHeaders,
+    });
+    expect(second.status).toBe(200);
+    const body = await second.json();
+    expect(body.id).toBe(slot.id);
+    // Status should still be "received" (not rolled back to "uploading")
+    expect(body.status).toBe("received");
+  });
+
   it("returns a random approved message with audio sha for the phone client", async () => {
     const app = createApp();
     const audio = seedFile({ sha256: "c".repeat(64), durationMs: 4500 });
@@ -161,5 +200,26 @@ describe("messages routes", () => {
     const random = await app.request("/v1/messages/random", { headers: phoneHeaders });
 
     expect(random.status).toBe(404);
+  });
+
+  it("returns 409 when two concurrent requests create a message with the same sha256", async () => {
+    const app = createApp();
+    const sha256 = "d".repeat(64);
+
+    const [first, second] = await Promise.all([
+      app.request("/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ durationMs: 2000, sha256 }),
+      }),
+      app.request("/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ durationMs: 2000, sha256 }),
+      }),
+    ]);
+
+    const statuses = [first.status, second.status].sort();
+    expect(statuses).toEqual([201, 409]);
   });
 });

@@ -45,6 +45,7 @@ export interface AiConfig {
   readonly autoApproveThreshold: number;
   readonly sweeperIntervalSeconds: number;
   readonly maxAudioBytes: number;
+  readonly sweeperStaleThresholdSeconds: number;
 }
 
 const trimmedOrNull = (raw: string | undefined): string | null => {
@@ -76,5 +77,6 @@ export const resolveAiConfig = (): AiConfig => {
     autoApproveThreshold: parseFloat01(env.AUTO_APPROVE_THRESHOLD, 0.15),
     sweeperIntervalSeconds: parseInteger(env.AI_SWEEPER_INTERVAL_SECONDS, 60),
     maxAudioBytes: parseInteger(env.MAX_AUDIO_BYTES, DEFAULT_MAX_AUDIO_BYTES, 1),
+    sweeperStaleThresholdSeconds: parseInteger(env.AI_SWEEPER_STALE_THRESHOLD_SECONDS, 300, 10),
   };
 };

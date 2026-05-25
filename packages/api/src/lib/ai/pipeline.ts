@@ -136,11 +136,18 @@ export interface RunTranscriptionOptions {
   readonly skipDownstream?: boolean;
 }
 
-export const runTranscription = async (opts: RunTranscriptionOptions): Promise<string | null> => {
+export type TranscriptionResult =
+  | { outcome: "created"; transcriptionId: string }
+  | { outcome: "skipped"; existingId: string }
+  | { outcome: "not_found" };
+
+export const runTranscription = async (
+  opts: RunTranscriptionOptions,
+): Promise<TranscriptionResult> => {
   const deps = opts.deps ?? buildDefaultPipelineDeps();
   const provider = deps.transcriptionProvider;
   const message = await loadMessage(opts.messageId);
-  if (!message) return null;
+  if (!message) return { outcome: "not_found" };
 
   if (!provider) {
     const failed = await db.transcription.create({
@@ -155,7 +162,41 @@ export const runTranscription = async (opts: RunTranscriptionOptions): Promise<s
       },
     });
     await broadcastMessage(message.id);
-    return failed.id;
+    return { outcome: "created", transcriptionId: failed.id };
+  }
+
+  // Guard: only one active pending transcription per message at a time.
+  const staleThresholdMs = deps.config.sweeperStaleThresholdSeconds * 1000;
+  const existingPending = await db.transcription.findFirst({
+    where: { messageId: message.id, status: "pending" },
+    orderBy: { createdAt: "desc" },
+  });
+  if (existingPending) {
+    const age = Date.now() - existingPending.createdAt.getTime();
+    if (age < staleThresholdMs) {
+      log("info", "ai.transcription.skipped", {
+        messageId: message.id,
+        reason: "pending transcription already active",
+        existingId: existingPending.id,
+        ageMs: age,
+      });
+      return { outcome: "skipped", existingId: existingPending.id };
+    }
+    // The existing pending row is older than the stale threshold — the
+    // original provider call likely crashed. Mark it failed and proceed.
+    await db.transcription.update({
+      where: { id: existingPending.id },
+      data: {
+        status: "failed",
+        error: "stale — superseded by newer attempt",
+        completedAt: new Date(),
+      },
+    });
+    log("warn", "ai.transcription.stale_superseded", {
+      messageId: message.id,
+      supersededId: existingPending.id,
+      ageMs: age,
+    });
   }
 
   if (message.audio.sizeBytes > 0 && message.audio.sizeBytes > deps.config.maxAudioBytes) {
@@ -176,7 +217,7 @@ export const runTranscription = async (opts: RunTranscriptionOptions): Promise<s
       maxBytes: deps.config.maxAudioBytes,
     });
     await broadcastMessage(message.id);
-    return failed.id;
+    return { outcome: "created", transcriptionId: failed.id };
   }
 
   const pending = await db.transcription.create({
@@ -232,7 +273,7 @@ export const runTranscription = async (opts: RunTranscriptionOptions): Promise<s
         await broadcastMessage(message.id);
       }
     }
-    return pending.id;
+    return { outcome: "created", transcriptionId: pending.id };
   } catch (error) {
     const reason = error instanceof Error ? error.message : "transcription failed";
     await db.transcription.update({
@@ -250,7 +291,7 @@ export const runTranscription = async (opts: RunTranscriptionOptions): Promise<s
       reason,
     });
     await broadcastMessage(message.id);
-    return pending.id;
+    return { outcome: "created", transcriptionId: pending.id };
   }
 };
 

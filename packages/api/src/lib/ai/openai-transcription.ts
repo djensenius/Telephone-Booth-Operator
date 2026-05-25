@@ -3,6 +3,7 @@
 
 import type { TranscriptionInput, TranscriptionProvider, TranscriptionResult } from "./types.js";
 import { ProviderError } from "./types.js";
+import { DEFAULT_MAX_AUDIO_BYTES } from "./config.js";
 
 export interface OpenAiTranscriptionOptions {
   readonly apiKey: string;
@@ -25,7 +26,7 @@ export class OpenAiTranscriptionProvider implements TranscriptionProvider {
     this.#apiKey = opts.apiKey;
     this.#baseUrl = opts.baseUrl.replace(/\/+$/, "");
     this.#fetch = opts.fetchImpl ?? fetch;
-    this.#maxAudioBytes = opts.maxAudioBytes ?? 26_214_400;
+    this.#maxAudioBytes = opts.maxAudioBytes ?? DEFAULT_MAX_AUDIO_BYTES;
   }
 
   async transcribe(input: TranscriptionInput): Promise<TranscriptionResult> {

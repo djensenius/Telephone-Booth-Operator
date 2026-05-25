@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { Prisma } from "@prisma/client";
 
 export type FakeFile = {
   id: string;
@@ -336,6 +337,20 @@ export const fakeDb = {
       store.files.set(file.id, file);
       return file;
     },
+    upsert: async ({
+      where,
+      create: createData,
+    }: {
+      where: { sha256: string };
+      create: Partial<FakeFile> & Omit<FakeFile, "id" | "createdAt">;
+      update: Partial<FakeFile>;
+    }) => {
+      const existing = [...store.files.values()].find((f) => f.sha256 === where.sha256);
+      if (existing) return existing;
+      const file = fileFromData(createData);
+      store.files.set(file.id, file);
+      return file;
+    },
     update: async ({ where, data }: { where: { id: string }; data: Partial<FakeFile> }) => {
       const existing = store.files.get(where.id);
       if (!existing) throw new Error("file not found");
@@ -450,6 +465,14 @@ export const fakeDb = {
     }: {
       data: { status: string; questionId?: string | null; audioId: string };
     }) => {
+      const duplicate = [...store.messages.values()].find((m) => m.audioId === data.audioId);
+      if (duplicate) {
+        throw new Prisma.PrismaClientKnownRequestError("Unique constraint failed on the fields: (`audioId`)", {
+          code: "P2002",
+          clientVersion: "5.0.0",
+          meta: { target: ["audioId"] },
+        });
+      }
       const message: FakeMessage = {
         id: randomUUID(),
         status: data.status,
@@ -470,6 +493,20 @@ export const fakeDb = {
       const updated = { ...existing, ...data };
       store.messages.set(where.id, updated);
       return updated;
+    },
+    updateMany: async ({
+      where,
+      data,
+    }: {
+      where: { id: string; status?: string };
+      data: Partial<FakeMessage>;
+    }) => {
+      const existing = store.messages.get(where.id);
+      if (!existing) return { count: 0 };
+      if (where.status && existing.status !== where.status) return { count: 0 };
+      const updated = { ...existing, ...data };
+      store.messages.set(where.id, updated);
+      return { count: 1 };
     },
     delete: async ({ where }: { where: { id: string } }) => {
       const existing = store.messages.get(where.id);
@@ -535,7 +572,7 @@ export const fakeDb = {
         latencyMs: data.latencyMs ?? null,
         error: data.error ?? null,
         requestedById: data.requestedById ?? null,
-        createdAt: new Date(),
+        createdAt: data.createdAt ?? new Date(),
         completedAt: data.completedAt ?? null,
       };
       store.transcriptions.set(row.id, row);
@@ -844,6 +881,7 @@ export const fakeDb = {
     count: async ({ where = {} }: { where?: Record<string, unknown> } = {}) =>
       [...store.callSessions.values()].filter((session) => matchesWhere(session, where)).length,
   },
+  $transaction: async <T>(fn: (tx: typeof fakeDb) => Promise<T>): Promise<T> => fn(fakeDb),
 };
 
 const matchesWhere = (record: Record<string, unknown>, where: Record<string, unknown>): boolean => {

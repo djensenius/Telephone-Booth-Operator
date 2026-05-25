@@ -8,7 +8,7 @@ import { kickPipelineForMessage } from "./pipeline.js";
 
 const findStrandedMessages = async (
   limit: number,
-  intervalMs: number,
+  staleThresholdMs: number,
 ): Promise<readonly string[]> => {
   const messages = await db.message.findMany({
     where: { status: "received" },
@@ -23,9 +23,9 @@ const findStrandedMessages = async (
     },
   });
   // A transcription row is considered stuck if it has been pending longer than
-  // twice the sweeper interval. This covers the case where the API crashed
+  // the configured stale threshold. This covers the case where the API crashed
   // after writing the pending row but before the provider returned.
-  const pendingStaleAfter = Date.now() - intervalMs * 2;
+  const pendingStaleAfter = Date.now() - staleThresholdMs;
   const stranded: string[] = [];
   for (const message of messages) {
     const latest = (
@@ -49,12 +49,13 @@ export const startAiSweeper = (): SweeperHandle | null => {
   if (config.transcriptionProvider === "disabled") return null;
 
   const intervalMs = Math.max(5, config.sweeperIntervalSeconds) * 1000;
+  const staleThresholdMs = config.sweeperStaleThresholdSeconds * 1000;
   let stopped = false;
 
   const tick = async (): Promise<void> => {
     if (stopped) return;
     try {
-      const stranded = await findStrandedMessages(20, intervalMs);
+      const stranded = await findStrandedMessages(20, staleThresholdMs);
       for (const id of stranded) kickPipelineForMessage(id);
     } catch (error) {
       const reason = error instanceof Error ? error.message : "sweeper failed";
