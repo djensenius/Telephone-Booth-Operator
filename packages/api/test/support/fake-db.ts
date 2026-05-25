@@ -471,6 +471,20 @@ export const fakeDb = {
       store.messages.set(where.id, updated);
       return updated;
     },
+    updateMany: async ({
+      where,
+      data,
+    }: {
+      where: { id: string; status?: string };
+      data: Partial<FakeMessage>;
+    }) => {
+      const existing = store.messages.get(where.id);
+      if (!existing) return { count: 0 };
+      if (where.status && existing.status !== where.status) return { count: 0 };
+      const updated = { ...existing, ...data };
+      store.messages.set(where.id, updated);
+      return { count: 1 };
+    },
     delete: async ({ where }: { where: { id: string } }) => {
       const existing = store.messages.get(where.id);
       if (!existing) throw new Error("message not found");
