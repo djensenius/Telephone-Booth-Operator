@@ -34,6 +34,12 @@ export const validateAuthorization = (claims: IDTokenClaims, groups: string[]): 
   const config = getRequiredOidcConfig();
   const email = claimString(claims, "email")?.toLowerCase();
 
+  // Fail closed: if no allow-lists are configured, reject access rather than
+  // silently granting operator privileges to any authenticated user.
+  if (config.allowedGroups.length === 0 && config.allowedEmails.length === 0) {
+    return "No operator allow-list is configured. Access denied.";
+  }
+
   if (config.allowedEmails.length > 0 && (!email || !config.allowedEmails.includes(email))) {
     return "This email is not authorized for this booth.";
   }
