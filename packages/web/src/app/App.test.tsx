@@ -104,7 +104,12 @@ describe("App shell", () => {
   it("matches the themed shell snapshot", async () => {
     const { container } = renderShell();
     await screen.findByText("Status");
+    // Exclude locale-dependent build date text from snapshot comparison
+    const timeEl = container.querySelector(".build-footer time");
+    const originalText = timeEl?.textContent;
+    if (timeEl) timeEl.textContent = "{{BUILD_DATE}}";
     expect(container.firstChild).toMatchSnapshot();
+    if (timeEl) timeEl.textContent = originalText ?? "";
   });
 
   it("shows the build date in the app shell", async () => {
