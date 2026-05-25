@@ -1,4 +1,5 @@
 import type { BoothSystemSnapshot, Message } from "@telephone-booth-operator/shared";
+import { log } from "./logger.js";
 
 export type BoothStatusEvent = {
   state:
@@ -39,7 +40,14 @@ export class Broadcaster<T> {
   }
 
   broadcast(event: T): void {
-    for (const cb of this.#subscribers.values()) cb(event);
+    for (const [clientId, cb] of this.#subscribers.entries()) {
+      try {
+        cb(event);
+      } catch (err: unknown) {
+        this.#subscribers.delete(clientId);
+        log.warn({ clientId, err }, "subscriber callback threw; unsubscribed");
+      }
+    }
   }
 
   get size(): number {
