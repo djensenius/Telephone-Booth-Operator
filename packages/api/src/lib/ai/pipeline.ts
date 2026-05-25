@@ -199,6 +199,27 @@ export const runTranscription = async (
     });
   }
 
+  if (message.audio.sizeBytes > 0 && message.audio.sizeBytes > deps.config.maxAudioBytes) {
+    const failed = await db.transcription.create({
+      data: {
+        messageId: message.id,
+        provider: provider.name,
+        model: provider.model,
+        status: "failed",
+        error: `audio too large: ${message.audio.sizeBytes} bytes exceeds ${deps.config.maxAudioBytes} limit`,
+        requestedById: opts.requestedByUserId ?? null,
+        completedAt: new Date(),
+      },
+    });
+    log("warn", "ai.transcription.rejected_size", {
+      messageId: message.id,
+      sizeBytes: message.audio.sizeBytes,
+      maxBytes: deps.config.maxAudioBytes,
+    });
+    await broadcastMessage(message.id);
+    return { outcome: "created", transcriptionId: failed.id };
+  }
+
   const pending = await db.transcription.create({
     data: {
       messageId: message.id,

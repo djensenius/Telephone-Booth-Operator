@@ -3,11 +3,13 @@
 
 import type { TranscriptionInput, TranscriptionProvider, TranscriptionResult } from "./types.js";
 import { ProviderError } from "./types.js";
+import { DEFAULT_MAX_AUDIO_BYTES } from "./config.js";
 
 export interface OpenAiTranscriptionOptions {
   readonly apiKey: string;
   readonly baseUrl: string;
   readonly model: string;
+  readonly maxAudioBytes?: number;
   readonly fetchImpl?: typeof fetch;
 }
 
@@ -17,12 +19,14 @@ export class OpenAiTranscriptionProvider implements TranscriptionProvider {
   readonly #apiKey: string;
   readonly #baseUrl: string;
   readonly #fetch: typeof fetch;
+  readonly #maxAudioBytes: number;
 
   constructor(opts: OpenAiTranscriptionOptions) {
     this.model = opts.model;
     this.#apiKey = opts.apiKey;
     this.#baseUrl = opts.baseUrl.replace(/\/+$/, "");
     this.#fetch = opts.fetchImpl ?? fetch;
+    this.#maxAudioBytes = opts.maxAudioBytes ?? DEFAULT_MAX_AUDIO_BYTES;
   }
 
   async transcribe(input: TranscriptionInput): Promise<TranscriptionResult> {
@@ -34,7 +38,24 @@ export class OpenAiTranscriptionProvider implements TranscriptionProvider {
         audioResponse.status,
       );
     }
+
+    const contentLength = Number(audioResponse.headers.get("content-length") ?? "0");
+    if (contentLength > this.#maxAudioBytes) {
+      // Abort the body to release the socket without buffering.
+      await audioResponse.body?.cancel();
+      throw new ProviderError(
+        this.name,
+        `audio blob too large: ${contentLength} bytes exceeds ${this.#maxAudioBytes} limit`,
+      );
+    }
+
     const audioBytes = await audioResponse.arrayBuffer();
+    if (audioBytes.byteLength > this.#maxAudioBytes) {
+      throw new ProviderError(
+        this.name,
+        `audio blob too large: ${audioBytes.byteLength} bytes exceeds ${this.#maxAudioBytes} limit`,
+      );
+    }
     const audioBlob = new Blob([audioBytes], { type: "audio/flac" });
 
     const body = new FormData();

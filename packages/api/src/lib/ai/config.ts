@@ -26,6 +26,9 @@ const parseInteger = (raw: string | undefined, fallback: number, min = 1): numbe
   return parsed;
 };
 
+// 25 MiB — matches OpenAI Whisper's upload limit.
+export const DEFAULT_MAX_AUDIO_BYTES = 26_214_400;
+
 export interface AiConfig {
   readonly transcriptionProvider: TranscriptionProviderName;
   readonly transcriptionOpenAiModel: string;
@@ -41,6 +44,7 @@ export interface AiConfig {
   readonly autoRejectThreshold: number;
   readonly autoApproveThreshold: number;
   readonly sweeperIntervalSeconds: number;
+  readonly maxAudioBytes: number;
   readonly sweeperStaleThresholdSeconds: number;
 }
 
@@ -72,6 +76,7 @@ export const resolveAiConfig = (): AiConfig => {
     autoRejectThreshold: parseFloat01(env.AUTO_REJECT_THRESHOLD, 0.85),
     autoApproveThreshold: parseFloat01(env.AUTO_APPROVE_THRESHOLD, 0.15),
     sweeperIntervalSeconds: parseInteger(env.AI_SWEEPER_INTERVAL_SECONDS, 60),
+    maxAudioBytes: parseInteger(env.MAX_AUDIO_BYTES, DEFAULT_MAX_AUDIO_BYTES, 1),
     sweeperStaleThresholdSeconds: parseInteger(env.AI_SWEEPER_STALE_THRESHOLD_SECONDS, 300, 10),
   };
 };
