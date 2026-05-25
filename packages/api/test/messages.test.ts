@@ -160,4 +160,25 @@ describe("messages routes", () => {
 
     expect(random.status).toBe(404);
   });
+
+  it("returns 409 when two concurrent requests create a message with the same sha256", async () => {
+    const app = createApp();
+    const sha256 = "d".repeat(64);
+
+    const [first, second] = await Promise.all([
+      app.request("/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ durationMs: 2000, sha256 }),
+      }),
+      app.request("/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ durationMs: 2000, sha256 }),
+      }),
+    ]);
+
+    const statuses = [first.status, second.status].sort();
+    expect(statuses).toEqual([201, 409]);
+  });
 });
