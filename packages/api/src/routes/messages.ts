@@ -177,12 +177,22 @@ messagesRouter.post("/:id/transcribe", zValidator("param", idParamSchema), async
   const message = await db.message.findUnique({ where: { id }, select: { id: true } });
   if (!message) return c.json({ error: "not_found" }, 404);
   const user = c.get("user") as { id: string } | undefined;
-  const transcriptionId = await runTranscription({
+  const transcriptionResult = await runTranscription({
     messageId: id,
     requestedByUserId: user?.id ?? null,
   });
-  if (!transcriptionId) return c.json({ error: "not_found" }, 404);
-  const row = await db.transcription.findUnique({ where: { id: transcriptionId } });
+  if (transcriptionResult.outcome === "not_found") {
+    return c.json({ error: "not_found" }, 404);
+  }
+  if (transcriptionResult.outcome === "skipped") {
+    return c.json(
+      { error: "transcription_already_pending", transcriptionId: transcriptionResult.existingId },
+      409,
+    );
+  }
+  const row = await db.transcription.findUnique({
+    where: { id: transcriptionResult.transcriptionId },
+  });
   if (!row) return c.json({ error: "not_found" }, 404);
   return c.json(serializeTranscription(row), 202);
 });

@@ -342,7 +342,7 @@ describe("AI pipeline", () => {
       },
     });
     const result = await runTranscription({ messageId: id, deps: baseDeps() });
-    expect(result).toBeNull();
+    expect(result).toEqual({ outcome: "skipped", existingId: expect.any(String) });
     // No new transcription row should have been created
     const message = await fakeDb.message.findUnique({
       where: { id },
@@ -371,7 +371,7 @@ describe("AI pipeline", () => {
       },
     });
     const result = await runTranscription({ messageId: id, deps: baseDeps() });
-    expect(result).not.toBeNull();
+    expect(result).toEqual({ outcome: "created", transcriptionId: expect.any(String) });
     const message = await fakeDb.message.findUnique({
       where: { id },
       include: { audio: true, transcriptions: true, moderations: true },
@@ -381,7 +381,7 @@ describe("AI pipeline", () => {
     };
     // Should have 2 rows: the stale one marked failed and the new successful one
     expect(withRelations.transcriptions).toHaveLength(2);
-    const staleRow = withRelations.transcriptions.find((t) => t.error?.includes("stale"));
+    const staleRow = withRelations.transcriptions.find((t) => t.error?.includes("superseded by newer attempt"));
     expect(staleRow?.status).toBe("failed");
     const newRow = withRelations.transcriptions.find((t) => t.status === "succeeded");
     expect(newRow).toBeDefined();

@@ -136,11 +136,18 @@ export interface RunTranscriptionOptions {
   readonly skipDownstream?: boolean;
 }
 
-export const runTranscription = async (opts: RunTranscriptionOptions): Promise<string | null> => {
+export type TranscriptionResult =
+  | { outcome: "created"; transcriptionId: string }
+  | { outcome: "skipped"; existingId: string }
+  | { outcome: "not_found" };
+
+export const runTranscription = async (
+  opts: RunTranscriptionOptions,
+): Promise<TranscriptionResult> => {
   const deps = opts.deps ?? buildDefaultPipelineDeps();
   const provider = deps.transcriptionProvider;
   const message = await loadMessage(opts.messageId);
-  if (!message) return null;
+  if (!message) return { outcome: "not_found" };
 
   if (!provider) {
     const failed = await db.transcription.create({
@@ -155,7 +162,7 @@ export const runTranscription = async (opts: RunTranscriptionOptions): Promise<s
       },
     });
     await broadcastMessage(message.id);
-    return failed.id;
+    return { outcome: "created", transcriptionId: failed.id };
   }
 
   // Guard: only one active pending transcription per message at a time.
@@ -173,7 +180,7 @@ export const runTranscription = async (opts: RunTranscriptionOptions): Promise<s
         existingId: existingPending.id,
         ageMs: age,
       });
-      return null;
+      return { outcome: "skipped", existingId: existingPending.id };
     }
     // The existing pending row is older than the stale threshold — the
     // original provider call likely crashed. Mark it failed and proceed.
@@ -181,7 +188,7 @@ export const runTranscription = async (opts: RunTranscriptionOptions): Promise<s
       where: { id: existingPending.id },
       data: {
         status: "failed",
-        error: "stale — superseded by sweeper retry",
+        error: "stale — superseded by newer attempt",
         completedAt: new Date(),
       },
     });
@@ -245,7 +252,7 @@ export const runTranscription = async (opts: RunTranscriptionOptions): Promise<s
         await broadcastMessage(message.id);
       }
     }
-    return pending.id;
+    return { outcome: "created", transcriptionId: pending.id };
   } catch (error) {
     const reason = error instanceof Error ? error.message : "transcription failed";
     await db.transcription.update({
@@ -263,7 +270,7 @@ export const runTranscription = async (opts: RunTranscriptionOptions): Promise<s
       reason,
     });
     await broadcastMessage(message.id);
-    return pending.id;
+    return { outcome: "created", transcriptionId: pending.id };
   }
 };
 
