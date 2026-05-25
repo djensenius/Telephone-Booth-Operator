@@ -686,14 +686,53 @@ export const fakeDb = {
     findMany: async ({
       where = {},
       take,
+      skip = 0,
+      orderBy,
+      select,
     }: {
-      where?: { updatedAt?: { gte: Date } };
-      take: number;
+      where?: { updatedAt?: { gte?: Date; lt?: Date }; id?: { lt?: number } };
+      take?: number;
+      skip?: number;
+      orderBy?: { updatedAt?: "asc" | "desc" };
+      select?: { id?: boolean; updatedAt?: boolean };
     }) => {
       let statuses = [...store.statuses];
       if (where.updatedAt?.gte)
-        statuses = statuses.filter((status) => status.updatedAt >= where.updatedAt.gte);
-      return statuses.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime()).slice(0, take);
+        statuses = statuses.filter((status) => status.updatedAt >= where.updatedAt!.gte!);
+      if (where.updatedAt?.lt)
+        statuses = statuses.filter((status) => status.updatedAt < where.updatedAt!.lt!);
+      if (where.id?.lt) statuses = statuses.filter((status) => status.id < where.id!.lt!);
+      const dir = orderBy?.updatedAt === "asc" ? 1 : -1;
+      statuses = statuses.sort((a, b) => dir * (a.updatedAt.getTime() - b.updatedAt.getTime()));
+      statuses = statuses.slice(skip, take !== undefined ? skip + take : undefined);
+      if (select) {
+        return statuses.map((s) => {
+          const out: Record<string, unknown> = {};
+          if (select.id) out.id = s.id;
+          if (select.updatedAt) out.updatedAt = s.updatedAt;
+          return out;
+        });
+      }
+      return statuses;
+    },
+    count: async () => store.statuses.length,
+    deleteMany: async ({
+      where = {},
+    }: {
+      where?: { updatedAt?: { lt?: Date }; id?: { lt?: number } };
+    }) => {
+      const before = store.statuses.length;
+      const keep = store.statuses.filter((s) => {
+        if (where.updatedAt?.lt && s.updatedAt >= where.updatedAt.lt) return true;
+        if (where.id?.lt && s.id >= where.id.lt) return true;
+        // Must fail BOTH conditions to be deleted
+        const failsTime = where.updatedAt?.lt ? s.updatedAt < where.updatedAt.lt : true;
+        const failsId = where.id?.lt ? s.id < where.id.lt : true;
+        return !(failsTime && failsId);
+      });
+      store.statuses.length = 0;
+      store.statuses.push(...keep);
+      return { count: before - store.statuses.length };
     },
   },
   operatorSession: {
