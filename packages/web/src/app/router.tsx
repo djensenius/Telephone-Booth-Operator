@@ -31,6 +31,25 @@ const loginSearchSchema = z.object({
   return_to: z.string().optional(),
 });
 
+const buildDateFormatter = new Intl.DateTimeFormat("en-US", {
+  dateStyle: "medium",
+  timeStyle: "short",
+  timeZone: "UTC",
+});
+
+function BuildFooter(): JSX.Element {
+  const buildDateIso = import.meta.env.VITE_BUILD_DATE ?? "1970-01-01T00:00:00.000Z";
+  const buildDate = new Date(buildDateIso);
+  const formattedBuildDate = buildDateFormatter.format(buildDate);
+
+  return (
+    <footer className="build-footer" aria-label="Build information">
+      <span>Build date</span>
+      <time dateTime={buildDateIso}>{formattedBuildDate}</time>
+    </footer>
+  );
+}
+
 function AppLayout(): JSX.Element {
   useNumericNavigation();
   return (
@@ -75,6 +94,7 @@ function AppLayout(): JSX.Element {
           <Outlet />
         </main>
       </div>
+      <BuildFooter />
       <LineBusyPlacard />
     </BoothFrame>
   );

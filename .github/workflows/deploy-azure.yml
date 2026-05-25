@@ -26,20 +26,20 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ env.IMAGE_TAG }}
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push API image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: packages/api/Dockerfile
@@ -52,7 +52,7 @@ jobs:
           cache-to: type=gha,scope=api,mode=max
 
       - name: Build and push web image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: packages/web/Dockerfile
@@ -66,7 +66,7 @@ jobs:
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
 
-      - uses: azure/login@v2
+      - uses: azure/login@v3
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -81,13 +81,14 @@ jobs:
           az containerapp job update \
             --resource-group "$RESOURCE_GROUP" \
             --name "$MIGRATE_JOB" \
-            --image "${API_IMAGE}:${IMAGE_TAG}"
+            --image "${API_IMAGE}:${IMAGE_TAG}" \
+            --output none
 
           execution_name="$(
             az containerapp job start \
               --resource-group "$RESOURCE_GROUP" \
               --name "$MIGRATE_JOB" \
-              --query executionName \
+              --query name \
               --output tsv
           )"
 
@@ -95,8 +96,8 @@ jobs:
             status="$(
               az containerapp job execution show \
                 --resource-group "$RESOURCE_GROUP" \
-                --job-name "$MIGRATE_JOB" \
-                --name "$execution_name" \
+                --name "$MIGRATE_JOB" \
+                --job-execution-name "$execution_name" \
                 --query properties.status \
                 --output tsv
             )"
@@ -110,6 +111,7 @@ jobs:
                   --resource-group "$RESOURCE_GROUP" \
                   --name "$MIGRATE_JOB" \
                   --execution "$execution_name" \
+                  --container "$MIGRATE_JOB" \
                   --tail 100
                 exit 1
                 ;;

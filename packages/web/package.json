@@ -38,7 +38,7 @@
     "jsdom": "^25.0.1",
     "msw": "^2.6.8",
     "openapi-typescript": "^7.4.3",
-    "typescript": "^5.6.3",
+    "typescript": "^6.0.3",
     "vite": "^8.0.14",
     "vite-plus": "^0.1.22"
   }
