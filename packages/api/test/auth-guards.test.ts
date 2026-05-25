@@ -62,6 +62,9 @@ describe("auth guards", () => {
     process.env.OIDC_REDIRECT_URI = "https://api.example/v1/auth/callback";
     delete process.env.OIDC_ALLOWED_EMAILS;
     delete process.env.OIDC_ALLOWED_GROUPS;
+    delete process.env.AUTHENTIK_ALLOWED_EMAILS;
+    delete process.env.AUTHENTIK_ALLOWED_GROUPS;
+    delete process.env.AUTHENTIK_REQUIRED_GROUP;
     resetAuthConfigForTests();
 
     expect(validateAuthorization(claims, ["operators"])).toMatch(/allow-list/i);
