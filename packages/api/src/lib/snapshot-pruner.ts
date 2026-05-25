@@ -32,9 +32,9 @@ export const pruneSnapshots = async (config?: PrunerConfig): Promise<number> => 
 
   if (keepBoundary.length === 0) return 0;
 
+  const boundary = keepBoundary[0]!;
   // Delete rows that are both older than the retention cutoff AND outside
   // the min-keep boundary (i.e. not among the most recent `minKeep` rows).
-  const boundary = keepBoundary[0];
   const deleteCutoff = boundary.updatedAt < cutoff ? cutoff : boundary.updatedAt;
 
   const result = await db.boothStatusSnapshot.deleteMany({
