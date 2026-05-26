@@ -526,6 +526,33 @@ textarea:focus-visible,
   animation: console-blink 700ms steps(2, jump-none) infinite;
 }
 
+.booth-status-badge__staleness {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 500;
+  opacity: 0.85;
+  margin-top: 2px;
+}
+
+.booth-status-badge--stale-warning .booth-status-badge__dot {
+  background: var(--accent-yellow);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--accent-yellow) 58%, transparent);
+}
+
+.booth-status-badge--stale-warning .booth-status-badge__staleness {
+  color: var(--accent-yellow);
+}
+
+.booth-status-badge--stale-offline .booth-status-badge__dot {
+  background: var(--accent-red);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--accent-red) 58%, transparent);
+  animation: console-blink 700ms steps(2, jump-none) infinite;
+}
+
+.booth-status-badge--stale-offline .booth-status-badge__staleness {
+  color: var(--accent-red);
+}
+
 .app-shell__main {
   min-width: 0;
 }
