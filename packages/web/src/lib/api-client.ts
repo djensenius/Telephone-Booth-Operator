@@ -365,7 +365,7 @@ export function useSystemCurrent(boothId: string | undefined) {
     queryKey: apiQueryKeys.system(boothId ?? ""),
     queryFn: () => system.current(boothId ?? ""),
     enabled: typeof boothId === "string" && boothId.length > 0,
-    refetchInterval: 10_000,
+    refetchInterval: 5_000,
   });
 }
 

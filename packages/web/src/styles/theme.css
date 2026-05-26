@@ -553,6 +553,124 @@ textarea:focus-visible,
   color: var(--accent-red);
 }
 
+/* Live vitals strip — sidebar-resident, Pi-Hole-style at-a-glance dashboard
+   that mirrors the booth's `PUT /v1/system` snapshot. Outer container reuses
+   the same surface/border treatment as `.operator-sidebar__nav` (declared
+   in the shared selector above) and adds layout + tile styling here. */
+.operator-sidebar .system-vitals-strip {
+  padding: 14px 16px 12px;
+  background: color-mix(in srgb, var(--surface-panel) 92%, transparent);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(16px);
+}
+
+.system-vitals-strip__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.system-vitals-strip__header h2 {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+.system-vitals-strip__link {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color 160ms ease;
+}
+
+.system-vitals-strip__link:hover,
+.system-vitals-strip__link:focus-visible {
+  color: var(--accent-red-soft);
+}
+
+.system-vitals-strip__tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.system-vitals-strip__tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--surface-panel-raised) 82%, transparent);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  min-width: 0;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.system-vitals-strip__tile-label {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.system-vitals-strip__tile-value {
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.system-vitals-strip__tile--warn {
+  background: color-mix(in srgb, var(--accent-yellow) 14%, var(--surface-panel-raised));
+  border-color: color-mix(in srgb, var(--accent-yellow) 48%, var(--border-subtle));
+}
+
+.system-vitals-strip__tile--warn .system-vitals-strip__tile-value {
+  color: var(--accent-yellow);
+}
+
+.system-vitals-strip__tile--crit {
+  background: color-mix(in srgb, var(--accent-red) 16%, var(--surface-panel-raised));
+  border-color: color-mix(in srgb, var(--accent-red) 56%, var(--border-subtle));
+}
+
+.system-vitals-strip__tile--crit .system-vitals-strip__tile-value {
+  color: var(--accent-red);
+}
+
+.system-vitals-strip__footer {
+  margin-top: 10px;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.system-vitals-strip__footer--muted {
+  opacity: 0.7;
+}
+
 .app-shell__main {
   min-width: 0;
 }
@@ -1259,12 +1377,17 @@ textarea:focus-visible,
 @media (prefers-contrast: more) {
   .glass-panel,
   .operator-sidebar__nav,
+  .operator-sidebar .system-vitals-strip,
   .debug-status-bar,
   .debug-panel,
   .settings-connection {
     background: var(--surface-panel-raised);
     border-color: var(--text-primary);
     box-shadow: none;
+  }
+
+  .system-vitals-strip__tile {
+    border-color: var(--text-primary);
   }
 }
 
