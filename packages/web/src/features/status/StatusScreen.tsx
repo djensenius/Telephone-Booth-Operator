@@ -36,14 +36,20 @@ function wsUrl(): string {
 }
 
 export function StatusScreen(): JSX.Element {
-  const { setConnectionStatus, setLastError, setRuntimeMode, setStatus } = useBoothStatus();
+  const { setConnectionStatus, setLastError, setLastStatusAt, setRuntimeMode, setStatus } =
+    useBoothStatus();
   const queryClient = useQueryClient();
   const [liveStatus, setLiveStatus] = useState<BoothStatus | null>(null);
   const [wsState, setWsState] = useState("polling");
   const statusQuery = useStatusCurrent({ paused: wsState === "live" });
   const historyQuery = useStatusHistory({ paused: wsState === "live" });
 
-  useEffect(() => setLiveStatus(statusQuery.data ?? null), [statusQuery.data]);
+  useEffect(() => {
+    setLiveStatus(statusQuery.data ?? null);
+    if (statusQuery.data?.updatedAt) {
+      setLastStatusAt(new Date(statusQuery.data.updatedAt));
+    }
+  }, [statusQuery.data, setLastStatusAt]);
 
   useEffect(() => {
     if (typeof WebSocket === "undefined") return undefined;
@@ -66,6 +72,7 @@ export function StatusScreen(): JSX.Element {
         if (envelope.data.kind === "status") {
           const status = envelope.data.status;
           setLiveStatus(status);
+          setLastStatusAt(new Date(status.updatedAt));
           queryClient.setQueryData(apiQueryKeys.status, status);
           queryClient.setQueryData(
             apiQueryKeys.statusHistory,
@@ -96,6 +103,7 @@ export function StatusScreen(): JSX.Element {
       const legacy = BoothStatusSchema.safeParse(raw);
       if (legacy.success) {
         setLiveStatus(legacy.data);
+        setLastStatusAt(new Date(legacy.data.updatedAt));
         queryClient.setQueryData(apiQueryKeys.status, legacy.data);
       }
     });
@@ -106,7 +114,7 @@ export function StatusScreen(): JSX.Element {
     });
     socket.addEventListener("close", () => setWsState("polling"));
     return () => socket.close();
-  }, [queryClient, setConnectionStatus, setLastError]);
+  }, [queryClient, setConnectionStatus, setLastError, setLastStatusAt]);
 
   useEffect(() => {
     if (liveStatus) setStatus(boothDisplay(liveStatus.state));

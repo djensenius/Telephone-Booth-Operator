@@ -526,6 +526,33 @@ textarea:focus-visible,
   animation: console-blink 700ms steps(2, jump-none) infinite;
 }
 
+.booth-status-badge__staleness {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 500;
+  opacity: 0.85;
+  margin-top: 2px;
+}
+
+.booth-status-badge--stale-warning .booth-status-badge__dot {
+  background: var(--color-warn, #f5a623);
+  box-shadow: 0 0 6px var(--color-warn, #f5a623);
+}
+
+.booth-status-badge--stale-warning .booth-status-badge__staleness {
+  color: var(--color-warn, #f5a623);
+}
+
+.booth-status-badge--stale-offline .booth-status-badge__dot {
+  background: var(--color-error, #e74c3c);
+  box-shadow: 0 0 6px var(--color-error, #e74c3c);
+  animation: console-blink 700ms steps(2, jump-none) infinite;
+}
+
+.booth-status-badge--stale-offline .booth-status-badge__staleness {
+  color: var(--color-error, #e74c3c);
+}
+
 .app-shell__main {
   min-width: 0;
 }
