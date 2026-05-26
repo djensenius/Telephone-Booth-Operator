@@ -142,11 +142,13 @@ jobs:
           az containerapp update \
             --resource-group "$RESOURCE_GROUP" \
             --name "$API_APP" \
-            --image "${API_IMAGE}:${IMAGE_TAG}"
+            --image "${API_IMAGE}:${IMAGE_TAG}" \
+            --min-replicas 1
           az containerapp update \
             --resource-group "$RESOURCE_GROUP" \
             --name "$WEB_APP" \
-            --image "${WEB_IMAGE}:${IMAGE_TAG}"
+            --image "${WEB_IMAGE}:${IMAGE_TAG}" \
+            --min-replicas 1
 
       - name: Smoke test
         env:
