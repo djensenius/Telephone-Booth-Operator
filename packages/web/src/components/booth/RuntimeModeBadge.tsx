@@ -15,13 +15,24 @@ const TITLES: Record<BoothRuntimeMode, string> = {
 export interface RuntimeModeBadgeProps {
   readonly mode: BoothRuntimeMode | null | undefined;
   readonly className?: string;
+  /**
+   * When true, the badge skips the implicit `role="status"` live region so it
+   * can be nested inside another `role="status"` container (e.g.
+   * `BoothStatusBadge`) without causing screen readers to double-announce
+   * updates. Defaults to `false`, which preserves standalone announcement.
+   */
+  readonly nested?: boolean;
 }
 
 // Compact pill that flags non-production booths. We only render anything for
 // `mock` / `simulator` — a `real` booth is the default and shouldn't add
 // chrome to every status panel. Returns null otherwise so callers can drop
 // it inline next to a heading without conditional wrapping.
-export function RuntimeModeBadge({ mode, className }: RuntimeModeBadgeProps): JSX.Element | null {
+export function RuntimeModeBadge({
+  mode,
+  className,
+  nested = false,
+}: RuntimeModeBadgeProps): JSX.Element | null {
   if (mode == null || mode === "real") return null;
   const classes = ["runtime-mode-badge", `runtime-mode-badge--${mode}`, className]
     .filter(Boolean)
@@ -29,7 +40,7 @@ export function RuntimeModeBadge({ mode, className }: RuntimeModeBadgeProps): JS
   return (
     <span
       className={classes}
-      role="status"
+      role={nested ? undefined : "status"}
       aria-label={`Booth runtime mode: ${mode}`}
       title={TITLES[mode]}
       data-mode={mode}

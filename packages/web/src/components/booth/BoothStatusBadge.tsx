@@ -18,7 +18,7 @@ export function BoothStatusBadge(): JSX.Element {
         <span className="booth-status-badge__label">Booth status</span>
         <strong>{STATUS_LABELS[status]}</strong>
       </span>
-      <RuntimeModeBadge mode={runtimeMode} className="booth-status-badge__mode" />
+      <RuntimeModeBadge mode={runtimeMode} className="booth-status-badge__mode" nested />
     </div>
   );
 }

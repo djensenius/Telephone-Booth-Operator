@@ -478,8 +478,8 @@ textarea:focus-visible,
 }
 
 .runtime-mode-badge--simulator {
-  background: color-mix(in srgb, var(--accent-cyan, var(--accent-green)) 18%, transparent);
-  border-color: color-mix(in srgb, var(--accent-cyan, var(--accent-green)) 55%, transparent);
+  background: color-mix(in srgb, var(--accent-blue) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent-blue) 55%, transparent);
 }
 
 .booth-status-badge__dot {

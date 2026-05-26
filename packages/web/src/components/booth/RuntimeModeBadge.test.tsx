@@ -32,4 +32,13 @@ describe("RuntimeModeBadge", () => {
     render(<RuntimeModeBadge mode="mock" className="custom-class" />);
     expect(screen.getByRole("status").className).toContain("custom-class");
   });
+
+  it("omits the status role when nested inside another live region", () => {
+    // Used by BoothStatusBadge, which is itself a role="status" container.
+    // Nested live regions can cause screen readers to double-announce updates.
+    render(<RuntimeModeBadge mode="mock" nested />);
+    expect(screen.queryByRole("status")).toBeNull();
+    const badge = screen.getByLabelText("Booth runtime mode: mock");
+    expect(badge.textContent).toBe("MOCK");
+  });
 });
