@@ -43,6 +43,12 @@ enum ModerationRecommendation {
   reject
 }
 
+enum RuntimeMode {
+  real
+  mock
+  simulator
+}
+
 model Question {
   id        String    @id @default(uuid()) @db.Uuid
   prompt    String    @unique
@@ -86,12 +92,13 @@ model File {
 }
 
 model BoothStatusSnapshot {
-  id                Int        @id @default(autoincrement())
+  id                Int          @id @default(autoincrement())
   state             BoothState
-  currentQuestionId String?    @db.Uuid
-  currentMessageId  String?    @db.Uuid
+  currentQuestionId String?      @db.Uuid
+  currentMessageId  String?      @db.Uuid
   lastError         String?
-  updatedAt         DateTime   @default(now())
+  runtimeMode       RuntimeMode?
+  updatedAt         DateTime     @default(now())
 
   @@index([updatedAt])
 }

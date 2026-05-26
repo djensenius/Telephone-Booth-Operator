@@ -447,7 +447,7 @@ textarea:focus-visible,
 
 .booth-status-badge {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
   padding: 14px 16px;
@@ -455,6 +455,31 @@ textarea:focus-visible,
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
+}
+
+.booth-status-badge__mode {
+  justify-self: end;
+}
+
+.runtime-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-yellow) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-yellow) 55%, transparent);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.runtime-mode-badge--simulator {
+  background: color-mix(in srgb, var(--accent-cyan, var(--accent-green)) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent-cyan, var(--accent-green)) 55%, transparent);
 }
 
 .booth-status-badge__dot {

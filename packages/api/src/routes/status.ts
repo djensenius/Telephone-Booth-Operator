@@ -31,6 +31,7 @@ statusRouter.put("/", requireApiToken(), zValidator("json", StatusUpdateSchema),
       currentQuestionId: update.currentQuestionId ?? null,
       currentMessageId: update.currentMessageId ?? null,
       lastError: update.lastError ?? null,
+      runtimeMode: update.runtimeMode ?? null,
       updatedAt: update.updatedAt ? new Date(update.updatedAt) : new Date(),
     },
   });

@@ -3,16 +3,19 @@ import type { PropsWithChildren } from "react";
 
 export type BoothDisplayStatus = "idle" | "playing" | "recording" | "error";
 export type BoothConnectionStatus = "connected" | "disconnected";
+export type BoothRuntimeMode = "real" | "mock" | "simulator";
 
 export interface BoothStatusContextValue {
   readonly status: BoothDisplayStatus;
   readonly connectionStatus: BoothConnectionStatus;
   readonly lastError: string | null;
+  readonly runtimeMode: BoothRuntimeMode | null;
   readonly muted: boolean;
   readonly reducedMotionOverride: boolean;
   readonly setStatus: (status: BoothDisplayStatus) => void;
   readonly setConnectionStatus: (status: BoothConnectionStatus) => void;
   readonly setLastError: (error: string | null) => void;
+  readonly setRuntimeMode: (mode: BoothRuntimeMode | null) => void;
   readonly setMuted: (muted: boolean) => void;
   readonly setReducedMotionOverride: (enabled: boolean) => void;
 }
@@ -46,6 +49,7 @@ export interface BoothStatusProviderProps extends PropsWithChildren {
   readonly initialStatus?: BoothDisplayStatus;
   readonly initialConnectionStatus?: BoothConnectionStatus;
   readonly initialLastError?: string | null;
+  readonly initialRuntimeMode?: BoothRuntimeMode | null;
 }
 
 export function BoothStatusProvider({
@@ -53,11 +57,13 @@ export function BoothStatusProvider({
   initialStatus = "idle",
   initialConnectionStatus = "connected",
   initialLastError = null,
+  initialRuntimeMode = null,
 }: BoothStatusProviderProps): JSX.Element {
   const [status, setStatus] = useState<BoothDisplayStatus>(initialStatus);
   const [connectionStatus, setConnectionStatus] =
     useState<BoothConnectionStatus>(initialConnectionStatus);
   const [lastError, setLastError] = useState<string | null>(initialLastError);
+  const [runtimeMode, setRuntimeMode] = useState<BoothRuntimeMode | null>(initialRuntimeMode);
   const [mutedState, setMutedState] = useState(() =>
     readBooleanSetting("booth.audio.muted", false),
   );
@@ -80,15 +86,17 @@ export function BoothStatusProvider({
       status,
       connectionStatus,
       lastError,
+      runtimeMode,
       muted: mutedState,
       reducedMotionOverride: overrideState,
       setStatus,
       setConnectionStatus,
       setLastError,
+      setRuntimeMode,
       setMuted,
       setReducedMotionOverride,
     };
-  }, [connectionStatus, lastError, mutedState, overrideState, status]);
+  }, [connectionStatus, lastError, mutedState, overrideState, runtimeMode, status]);
 
   return <BoothStatusContext.Provider value={value}>{children}</BoothStatusContext.Provider>;
 }

@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { BoothSystemSnapshot } from "@telephone-booth-operator/shared";
-import { GlassPanel } from "../../components/booth/index.js";
+import { GlassPanel, RuntimeModeBadge } from "../../components/booth/index.js";
+import type { BoothRuntimeMode } from "../../components/booth/index.js";
 import { useSystemCurrent } from "../../lib/api-client.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
 
@@ -95,7 +96,13 @@ export function LiveSystemPanel({ boothId = DEFAULT_BOOTH_ID }: LiveSystemPanelP
   return (
     <GlassPanel title="Live system" className="feature-screen live-system-panel">
       <header className="live-system-panel__header">
-        <h2>Live system</h2>
+        <div className="live-system-panel__heading">
+          <h2>Live system</h2>
+          <RuntimeModeBadge
+            mode={(snapshot?.runtimeMode ?? null) as BoothRuntimeMode | null}
+            className="live-system-panel__mode"
+          />
+        </div>
         <p className="live-system-panel__subtitle">
           {receivedAt
             ? `Updated ${new Date(receivedAt).toLocaleTimeString()}`
