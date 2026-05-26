@@ -38,6 +38,7 @@ export type FakeStatus = {
   currentQuestionId: string | null;
   currentMessageId: string | null;
   lastError: string | null;
+  runtimeMode: "real" | "mock" | "simulator" | null;
   updatedAt: Date;
 };
 
@@ -219,6 +220,7 @@ export const seedStatus = (overrides: Partial<FakeStatus> = {}): FakeStatus => {
     currentQuestionId: overrides.currentQuestionId ?? null,
     currentMessageId: overrides.currentMessageId ?? null,
     lastError: overrides.lastError ?? null,
+    runtimeMode: overrides.runtimeMode ?? null,
     updatedAt: overrides.updatedAt ?? new Date(),
   };
   store.statuses.push(status);

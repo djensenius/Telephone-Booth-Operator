@@ -17,6 +17,7 @@ export type BoothStatusEvent = {
   currentQuestionId?: string | null;
   currentMessageId?: string | null;
   lastError?: string | null;
+  runtimeMode?: "real" | "mock" | "simulator" | null;
 };
 
 // Discriminated union mirroring `@telephone-booth-operator/shared`

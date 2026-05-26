@@ -86,4 +86,25 @@ describe("system routes", () => {
     expect(list.status).toBe(200);
     await expect(list.json()).resolves.toMatchObject({ items: [{ boothId: "booth-01" }] });
   });
+
+  it("preserves runtimeMode on the snapshot through cache + GET", async () => {
+    const app = createApp();
+    const put = await app.request("/v1/system", {
+      method: "PUT",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({
+        boothId: "booth-01",
+        snapshot: { ...sampleSnapshot, runtimeMode: "simulator" },
+      }),
+    });
+    expect(put.status).toBe(204);
+
+    const cookie = operatorCookie();
+    const got = await app.request("/v1/system/current?boothId=booth-01", { headers: { cookie } });
+    expect(got.status).toBe(200);
+    await expect(got.json()).resolves.toMatchObject({
+      boothId: "booth-01",
+      snapshot: { runtimeMode: "simulator" },
+    });
+  });
 });

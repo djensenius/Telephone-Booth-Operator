@@ -77,4 +77,40 @@ describe("status routes", () => {
     expect(body.items).toHaveLength(1);
     expect(body.items[0]).toMatchObject({ state: "recording" });
   });
+
+  it("persists and echoes the booth runtimeMode", async () => {
+    const app = createApp();
+
+    const put = await app.request("/v1/status", {
+      method: "PUT",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({ state: "idle", runtimeMode: "mock" }),
+    });
+    expect(put.status).toBe(204);
+
+    const latest = await app.request("/v1/status");
+    expect(latest.status).toBe(200);
+    await expect(latest.json()).resolves.toMatchObject({ state: "idle", runtimeMode: "mock" });
+
+    // Simulator wins over mock — the booth side resolves that and just sends
+    // the resulting mode; the operator must persist whatever it receives.
+    const sim = await app.request("/v1/status", {
+      method: "PUT",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({ state: "idle", runtimeMode: "simulator" }),
+    });
+    expect(sim.status).toBe(204);
+    const latestSim = await app.request("/v1/status");
+    await expect(latestSim.json()).resolves.toMatchObject({ runtimeMode: "simulator" });
+  });
+
+  it("rejects an invalid runtimeMode value", async () => {
+    const app = createApp();
+    const bad = await app.request("/v1/status", {
+      method: "PUT",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({ state: "idle", runtimeMode: "production" }),
+    });
+    expect(bad.status).toBe(400);
+  });
 });

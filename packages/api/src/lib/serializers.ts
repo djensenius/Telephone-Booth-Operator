@@ -112,6 +112,7 @@ export const serializeStatus = (snapshot: BoothStatusSnapshot): BoothStatusEvent
   currentQuestionId: snapshot.currentQuestionId,
   currentMessageId: snapshot.currentMessageId,
   lastError: snapshot.lastError,
+  runtimeMode: snapshot.runtimeMode,
 });
 
 export const defaultStatus = (): BoothStatusEvent => ({
@@ -120,6 +121,7 @@ export const defaultStatus = (): BoothStatusEvent => ({
   currentQuestionId: null,
   currentMessageId: null,
   lastError: null,
+  runtimeMode: null,
 });
 
 export const serializeBoothEvent = (event: PrismaBoothEvent): BoothEventRecord => ({

@@ -36,7 +36,7 @@ function wsUrl(): string {
 }
 
 export function StatusScreen(): JSX.Element {
-  const { setConnectionStatus, setLastError, setStatus } = useBoothStatus();
+  const { setConnectionStatus, setLastError, setRuntimeMode, setStatus } = useBoothStatus();
   const queryClient = useQueryClient();
   const [liveStatus, setLiveStatus] = useState<BoothStatus | null>(null);
   const [wsState, setWsState] = useState("polling");
@@ -111,6 +111,10 @@ export function StatusScreen(): JSX.Element {
   useEffect(() => {
     if (liveStatus) setStatus(boothDisplay(liveStatus.state));
   }, [liveStatus, setStatus]);
+
+  useEffect(() => {
+    setRuntimeMode(liveStatus?.runtimeMode ?? null);
+  }, [liveStatus, setRuntimeMode]);
 
   const history = useMemo(() => historyQuery.data?.items ?? [], [historyQuery.data]);
   const current = liveStatus ?? history[0] ?? null;

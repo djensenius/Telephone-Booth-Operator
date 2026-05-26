@@ -88,12 +88,22 @@ export const ModerationSchema = z.object({
 });
 export type Moderation = z.infer<typeof ModerationSchema>;
 
+// How the booth is being driven. `real` is a normal production booth with
+// `booth-pi` HAL adapters; `mock` is the in-memory `booth-mock` adapters
+// (no rotary phone wired in); `simulator` is the interactive `ratatui` TUI
+// (which can itself sit on top of either mock or real adapters — TUI input
+// is the user-visible fact, so simulator wins over mock when both are set).
+// Optional on the wire so older booths predating this field still validate.
+export const RuntimeModeSchema = z.enum(["real", "mock", "simulator"]);
+export type RuntimeMode = z.infer<typeof RuntimeModeSchema>;
+
 export const BoothStatusSchema = z.object({
   state: BoothStateSchema,
   updatedAt: z.string().datetime(),
   currentQuestionId: z.string().uuid().nullable().optional(),
   currentMessageId: z.string().uuid().nullable().optional(),
   lastError: z.string().nullable().optional(),
+  runtimeMode: RuntimeModeSchema.nullable().optional(),
 });
 export type BoothStatus = z.infer<typeof BoothStatusSchema>;
 
@@ -369,6 +379,7 @@ export const BoothSystemSnapshotSchema = z
     tailscaleConnected: z.boolean().nullable().optional(),
     tailscaleHostname: z.string().nullable().optional(),
     throttlingFlags: z.array(z.string()).nullable().optional(),
+    runtimeMode: RuntimeModeSchema.nullable().optional(),
   })
   .passthrough();
 export type BoothSystemSnapshot = z.infer<typeof BoothSystemSnapshotSchema>;
