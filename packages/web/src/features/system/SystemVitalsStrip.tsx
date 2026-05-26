@@ -100,6 +100,28 @@ export function SystemVitalsStrip({
         ? "Booth offline"
         : "Awaiting first snapshot";
 
+  // Severity announcement for assistive technology. We deliberately do NOT
+  // place `aria-live` on the tile grid itself, because the strip re-renders
+  // every 5 s — broadcasting every numeric tick to screen-reader users would
+  // be relentless. Instead we summarise the highest tile severity in a
+  // visually-hidden live region so SR users only hear "warning" / "critical"
+  // when the booth's health changes, not on every refetch.
+  const tempSev = temperatureSeverity(snapshot?.cpuTemperatureCelsius);
+  const memSev = memorySeverity(snapshot?.memoryUsedBytes, snapshot?.memoryTotalBytes);
+  const loadSev = loadSeverity(snapshot?.loadAverage1m, cpuCores);
+  const throttleSev: Severity = snapshot?.throttlingFlags?.length ? "warn" : "ok";
+  const tailscaleSev: Severity = snapshot?.tailscaleConnected === false ? "crit" : "ok";
+  const aggregateSeverity: Severity = (
+    [tempSev, memSev, loadSev, throttleSev, tailscaleSev] as readonly Severity[]
+  ).reduce<Severity>((acc, s) => (s === "crit" ? "crit" : s === "warn" && acc === "ok" ? "warn" : acc), "ok");
+  const liveSummary = isEmpty
+    ? ""
+    : aggregateSeverity === "crit"
+      ? "Booth vitals critical"
+      : aggregateSeverity === "warn"
+        ? "Booth vitals warning"
+        : "Booth vitals nominal";
+
   return (
     <section className="system-vitals-strip" aria-label="Live booth vitals">
       <header className="system-vitals-strip__header">
@@ -108,7 +130,10 @@ export function SystemVitalsStrip({
           Details →
         </a>
       </header>
-      <div className="system-vitals-strip__tiles" aria-live="polite">
+      <span className="sr-only" aria-live="polite">
+        {liveSummary}
+      </span>
+      <div className="system-vitals-strip__tiles">
         <VitalTile
           label="CPU temp"
           value={
@@ -116,7 +141,7 @@ export function SystemVitalsStrip({
               ? `${fmtNumber(snapshot.cpuTemperatureCelsius, 1)}°C`
               : "—"
           }
-          severity={temperatureSeverity(snapshot?.cpuTemperatureCelsius)}
+          severity={tempSev}
           hint={`CPU temperature (warn ≥${TEMP_WARN_C}°C, crit ≥${TEMP_CRIT_C}°C)`}
         />
         <VitalTile
@@ -131,7 +156,7 @@ export function SystemVitalsStrip({
         <VitalTile
           label="Load 1m"
           value={fmtNumber(snapshot?.loadAverage1m)}
-          severity={loadSeverity(snapshot?.loadAverage1m, cpuCores)}
+          severity={loadSev}
           hint={
             cpuCores
               ? `1-minute load average (${cpuCores} cores)`
@@ -141,7 +166,7 @@ export function SystemVitalsStrip({
         <VitalTile
           label="Memory"
           value={fmtPercent(snapshot?.memoryUsedBytes, snapshot?.memoryTotalBytes)}
-          severity={memorySeverity(snapshot?.memoryUsedBytes, snapshot?.memoryTotalBytes)}
+          severity={memSev}
           hint={
             snapshot?.memoryUsedBytes != null && snapshot.memoryTotalBytes != null
               ? `${fmtBytes(snapshot.memoryUsedBytes)} of ${fmtBytes(snapshot.memoryTotalBytes)} in use`

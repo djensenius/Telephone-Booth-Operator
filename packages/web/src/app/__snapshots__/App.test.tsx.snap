@@ -83,8 +83,11 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
             Details →
           </a>
         </header>
-        <div
+        <span
           aria-live="polite"
+          class="sr-only"
+        />
+        <div
           class="system-vitals-strip__tiles"
         >
           <div
