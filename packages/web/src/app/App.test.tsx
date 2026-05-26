@@ -58,6 +58,13 @@ function installFetch(options: { readonly authenticated?: boolean } = {}): void 
             lastError: null,
           }),
         );
+      if (url.endsWith("/v1/system/current"))
+        return Promise.resolve(
+          new Response(JSON.stringify({ error: "not found" }), {
+            status: 404,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
       return Promise.resolve(jsonResponse({ ok: true }));
     }),
   );
@@ -102,14 +109,66 @@ describe("App shell", () => {
   });
 
   it("matches the themed shell snapshot", async () => {
-    const { container } = renderShell();
-    await screen.findByText("Status");
-    // Exclude locale-dependent build date text from snapshot comparison
-    const timeEl = container.querySelector(".build-footer time");
-    const originalText = timeEl?.textContent;
-    if (timeEl) timeEl.textContent = "{{BUILD_DATE}}";
-    expect(container.firstChild).toMatchSnapshot();
-    if (timeEl) timeEl.textContent = originalText ?? "";
+    // Pin wall clock to match the mock /v1/status updatedAt so the booth-status
+    // staleness computation is deterministic regardless of whether the status
+    // query resolves before the snapshot is captured.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-01-01T00:00:01.000Z"));
+    try {
+      const { container } = renderShell();
+      await screen.findByText("Status");
+
+      // The following DOM regions transition between several visual states
+      // depending on how many in-flight fetch/WS microtasks have resolved by
+      // the time the snapshot is captured (CPU- and scheduler-dependent).
+      // Replace each with a stable placeholder so the snapshot is asserting
+      // on app-shell structure rather than on async timing.
+      const timeEl = container.querySelector(".build-footer time");
+      const originalText = timeEl?.textContent;
+      if (timeEl) timeEl.textContent = "{{BUILD_DATE}}";
+
+      const lineDdAll = Array.from(container.querySelectorAll("dl dd"));
+      const restoreLineText: Array<[Element, string | null]> = [];
+      for (const dd of lineDdAll) {
+        const text = dd.textContent ?? "";
+        if (text === "connecting" || text === "polling" || text === "disconnected") {
+          restoreLineText.push([dd, dd.textContent]);
+          dd.textContent = "{{LINE_TRANSPORT}}";
+        }
+      }
+
+      const busyAside = container.querySelector(".line-busy-placard");
+      const busyOriginalClass = busyAside?.getAttribute("class") ?? null;
+      const busyOriginalAriaHidden = busyAside?.getAttribute("aria-hidden") ?? null;
+      if (busyAside) {
+        busyAside.setAttribute("class", "line-busy-placard");
+        busyAside.setAttribute("aria-hidden", "true");
+      }
+
+      const vitalsFooter = container.querySelector(".system-vitals-strip__footer");
+      const vitalsOriginalClass = vitalsFooter?.getAttribute("class") ?? null;
+      const vitalsOriginalText = vitalsFooter?.textContent ?? null;
+      if (vitalsFooter) {
+        vitalsFooter.setAttribute(
+          "class",
+          "system-vitals-strip__footer system-vitals-strip__footer--muted",
+        );
+        vitalsFooter.textContent = "{{VITALS_STATE}}";
+      }
+
+      expect(container.firstChild).toMatchSnapshot();
+
+      if (timeEl) timeEl.textContent = originalText ?? "";
+      for (const [dd, original] of restoreLineText) dd.textContent = original ?? "";
+      if (busyAside && busyOriginalClass !== null) busyAside.setAttribute("class", busyOriginalClass);
+      if (busyAside && busyOriginalAriaHidden !== null)
+        busyAside.setAttribute("aria-hidden", busyOriginalAriaHidden);
+      if (vitalsFooter && vitalsOriginalClass !== null)
+        vitalsFooter.setAttribute("class", vitalsOriginalClass);
+      if (vitalsFooter && vitalsOriginalText !== null) vitalsFooter.textContent = vitalsOriginalText;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows the build date in the app shell", async () => {

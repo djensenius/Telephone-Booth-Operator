@@ -48,7 +48,7 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
       class="operator-sidebar"
     >
       <div
-        class="booth-status-badge booth-status-badge--idle booth-status-badge--stale-offline"
+        class="booth-status-badge booth-status-badge--idle"
         role="status"
       >
         <span
@@ -64,12 +64,6 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
           <strong>
             Idle
           </strong>
-          <span
-            aria-live="polite"
-            class="booth-status-badge__staleness"
-          >
-            Booth offline
-          </span>
         </span>
       </div>
       <section
@@ -172,7 +166,7 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
         <footer
           class="system-vitals-strip__footer system-vitals-strip__footer--muted"
         >
-          Connecting…
+          {{VITALS_STATE}}
         </footer>
       </section>
       <nav
@@ -358,7 +352,7 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
               Line
             </dt>
             <dd>
-              connecting
+              {{LINE_TRANSPORT}}
             </dd>
           </div>
           <div>
