@@ -88,6 +88,13 @@ const server = setupServer(
       ],
     }),
   ),
+  // The vitals strip in the sidebar polls this on every authenticated page.
+  // Stub it so test runs aren't littered with unhandled-request warnings;
+  // individual tests can override with `server.use(...)` when they need
+  // populated snapshot data.
+  http.get("http://localhost/v1/system/current", () =>
+    HttpResponse.json({ error: "no snapshot" }, { status: 404 }),
+  ),
   http.get("http://localhost/v1/questions", () =>
     HttpResponse.json({
       items: createdQuestion ? [questionTwo, question] : [question],

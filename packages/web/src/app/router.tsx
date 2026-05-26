@@ -21,6 +21,7 @@ import { SessionDetailScreen, SessionsScreen } from "../features/sessions/Sessio
 import { SettingsScreen } from "../features/settings/SettingsScreen.js";
 import { StatusScreen } from "../features/status/StatusScreen.js";
 import { LiveSystemPanel } from "../features/system/LiveSystemPanel.js";
+import { SystemVitalsStrip } from "../features/system/SystemVitalsStrip.js";
 import { TokensScreen } from "../features/tokens/TokensScreen.js";
 import { useNumericNavigation } from "../hooks/useNumericNavigation.js";
 import { DIGIT_ROUTES, isMessageFilter } from "../lib/navigation.js";
@@ -64,6 +65,7 @@ function AppLayout(): JSX.Element {
         {isAuthenticated ? (
           <aside className="operator-sidebar" aria-label="Operator navigation">
             <BoothStatusBadge />
+            <SystemVitalsStrip />
             <nav className="operator-sidebar__nav" aria-label="Digit shortcut routes">
               <h2>Shortcuts</h2>
               <ul>

@@ -66,6 +66,112 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
           </strong>
         </span>
       </div>
+      <section
+        aria-label="Live booth vitals"
+        class="system-vitals-strip"
+      >
+        <header
+          class="system-vitals-strip__header"
+        >
+          <h2>
+            Live vitals
+          </h2>
+          <a
+            class="system-vitals-strip__link"
+            href="/system"
+          >
+            Details →
+          </a>
+        </header>
+        <span
+          aria-live="polite"
+          class="sr-only"
+        />
+        <div
+          class="system-vitals-strip__tiles"
+        >
+          <div
+            class="system-vitals-strip__tile system-vitals-strip__tile--ok"
+            title="CPU temperature (warn ≥60°C, crit ≥75°C)"
+          >
+            <span
+              class="system-vitals-strip__tile-label"
+            >
+              CPU temp
+            </span>
+            <span
+              class="system-vitals-strip__tile-value"
+            >
+              —
+            </span>
+          </div>
+          <div
+            class="system-vitals-strip__tile system-vitals-strip__tile--ok"
+            title="Average CPU usage across all cores"
+          >
+            <span
+              class="system-vitals-strip__tile-label"
+            >
+              CPU
+            </span>
+            <span
+              class="system-vitals-strip__tile-value"
+            >
+              —
+            </span>
+          </div>
+          <div
+            class="system-vitals-strip__tile system-vitals-strip__tile--ok"
+            title="1-minute load average"
+          >
+            <span
+              class="system-vitals-strip__tile-label"
+            >
+              Load 1m
+            </span>
+            <span
+              class="system-vitals-strip__tile-value"
+            >
+              —
+            </span>
+          </div>
+          <div
+            class="system-vitals-strip__tile system-vitals-strip__tile--ok"
+            title="Memory utilisation"
+          >
+            <span
+              class="system-vitals-strip__tile-label"
+            >
+              Memory
+            </span>
+            <span
+              class="system-vitals-strip__tile-value"
+            >
+              —
+            </span>
+          </div>
+          <div
+            class="system-vitals-strip__tile system-vitals-strip__tile--ok"
+            title="Host uptime since last boot"
+          >
+            <span
+              class="system-vitals-strip__tile-label"
+            >
+              Uptime
+            </span>
+            <span
+              class="system-vitals-strip__tile-value"
+            >
+              —
+            </span>
+          </div>
+        </div>
+        <footer
+          class="system-vitals-strip__footer system-vitals-strip__footer--muted"
+        >
+          {{VITALS_STATE}}
+        </footer>
+      </section>
       <nav
         aria-label="Digit shortcut routes"
         class="operator-sidebar__nav"
@@ -249,7 +355,7 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
               Line
             </dt>
             <dd>
-              connecting
+              {{LINE_TRANSPORT}}
             </dd>
           </div>
           <div>
