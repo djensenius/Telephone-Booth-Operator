@@ -269,6 +269,13 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
         <ul>
           <li>
             <a
+              href="/stats"
+            >
+              Stats
+            </a>
+          </li>
+          <li>
+            <a
               href="/system"
             >
               Live system

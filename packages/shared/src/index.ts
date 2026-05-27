@@ -460,3 +460,125 @@ export const UpdateMobileDevicePreferencesSchema = z.object({
   preferences: MobileDevicePreferencesSchema.partial().optional(),
 });
 export type UpdateMobileDevicePreferences = z.infer<typeof UpdateMobileDevicePreferencesSchema>;
+
+// -----------------------------------------------------------------------------
+// Usage statistics overview. See packages/api/src/routes/stats.ts (the
+// `/v1/stats/overview` handler) for the producer and packages/web/src/features
+// /stats for the primary consumer. Mobile app mirrors these structures.
+//
+// All bucketing is done in server UTC; clients are expected to reformat for
+// the device locale. The `timezone` field on the envelope makes that
+// explicit so consumers don't have to guess.
+// -----------------------------------------------------------------------------
+
+export const StatsWindowSchema = z.enum(["24h", "7d", "30d", "all"]);
+export type StatsWindow = z.infer<typeof StatsWindowSchema>;
+
+export const STATS_WINDOW_VALUES = StatsWindowSchema.options;
+
+// Map a window enum to a millisecond duration, or null for "all" (no lower
+// bound). Exported so the API and tests share one source of truth.
+export const statsWindowDurationMs = (window: StatsWindow): number | null => {
+  switch (window) {
+    case "24h":
+      return 24 * 60 * 60 * 1000;
+    case "7d":
+      return 7 * 24 * 60 * 60 * 1000;
+    case "30d":
+      return 30 * 24 * 60 * 60 * 1000;
+    case "all":
+      return null;
+  }
+};
+
+export const StatsCallsPerDaySchema = z.object({
+  date: z.string(), // YYYY-MM-DD (UTC)
+  total: z.number().int().nonnegative(),
+  completed: z.number().int().nonnegative(),
+});
+export type StatsCallsPerDay = z.infer<typeof StatsCallsPerDaySchema>;
+
+export const StatsHourlyBucketSchema = z.object({
+  hour: z.number().int().min(0).max(23),
+  calls: z.number().int().nonnegative(),
+  messages: z.number().int().nonnegative(),
+});
+export type StatsHourlyBucket = z.infer<typeof StatsHourlyBucketSchema>;
+
+export const StatsTopQuestionSchema = z.object({
+  questionId: z.string().uuid(),
+  prompt: z.string(),
+  messageCount: z.number().int().nonnegative(),
+  lastUsedAt: z.string().datetime().nullable(),
+  retiredAt: z.string().datetime().nullable(),
+});
+export type StatsTopQuestion = z.infer<typeof StatsTopQuestionSchema>;
+
+export const StatsBoothBreakdownSchema = z.object({
+  boothId: z.string(),
+  calls: z.number().int().nonnegative(),
+  messages: z.number().int().nonnegative().nullable(),
+  lastSeenAt: z.string().datetime().nullable(),
+});
+export type StatsBoothBreakdown = z.infer<typeof StatsBoothBreakdownSchema>;
+
+// Day-of-week index: 0 = Sunday, 6 = Saturday (matches JS Date.getUTCDay()).
+export const StatsBusiestSchema = z.object({
+  hour: z.number().int().min(0).max(23).nullable(),
+  dayOfWeek: z.number().int().min(0).max(6).nullable(),
+});
+export type StatsBusiest = z.infer<typeof StatsBusiestSchema>;
+
+export const StatsOverviewSchema = z.object({
+  window: StatsWindowSchema,
+  rangeStart: z.string().datetime().nullable(),
+  rangeEnd: z.string().datetime(),
+  generatedAt: z.string().datetime(),
+  timezone: z.literal("UTC"),
+  calls: z.object({
+    total: z.number().int().nonnegative(),
+    completed: z.number().int().nonnegative(),
+    inProgress: z.number().int().nonnegative(),
+    averageDurationMs: z.number().nonnegative().nullable(),
+    longestDurationMs: z.number().nonnegative().nullable(),
+    // Keyed by CallOutcome string. The producer emits the raw outcome value
+    // verbatim — new server-side enum members appear as their own keys
+    // rather than being normalised, so clients should render unrecognised
+    // keys directly. The literal "unknown" key is only emitted when the DB
+    // value was null.
+    outcomes: z.record(z.number().int().nonnegative()),
+    perDay: z.array(StatsCallsPerDaySchema),
+  }),
+  messages: z.object({
+    total: z.number().int().nonnegative(),
+    // Keyed by MessageStatus string. As with `outcomes`, unrecognised
+    // server-side values appear under their raw key — clients should
+    // render whatever key arrives rather than special-casing "unknown".
+    byStatus: z.record(z.number().int().nonnegative()),
+    averageDurationMs: z.number().nonnegative().nullable(),
+  }),
+  playback: z.object({
+    // Count of state_transition events landing on `playing_message`. The
+    // booth telemetry does not currently carry a message id on transitions
+    // so we cannot report uniqueMessagesPlayed yet.
+    totalPlaybacks: z.number().int().nonnegative(),
+  }),
+  pickupsHangups: z.object({
+    pickups: z.number().int().nonnegative(),
+    hangups: z.number().int().nonnegative(),
+    // 10-entry zero-filled record keyed "0".."9".
+    digitsDialed: z.record(z.number().int().nonnegative()),
+  }),
+  uploads: z.object({
+    succeeded: z.number().int().nonnegative(),
+    failed: z.number().int().nonnegative(),
+    // null when there were zero attempts in the window.
+    failureRate: z.number().min(0).max(1).nullable(),
+  }),
+  topQuestions: z.array(StatsTopQuestionSchema),
+  hourly: z.array(StatsHourlyBucketSchema),
+  busiest: StatsBusiestSchema,
+  lastActivityAt: z.string().datetime().nullable(),
+  boothBreakdown: z.array(StatsBoothBreakdownSchema),
+});
+export type StatsOverview = z.infer<typeof StatsOverviewSchema>;
