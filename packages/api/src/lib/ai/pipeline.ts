@@ -337,15 +337,39 @@ export const runTranslation = async (
   if (isEnglishLanguage(transcription.language)) {
     return { outcome: "skipped", reason: "english" };
   }
+  // Never overwrite an already-finalized translation. If a pull worker (or
+  // an earlier in-process run) already wrote `succeeded`, return as-is so
+  // a sweeper / retry / parallel run can't downgrade the row back to
+  // `pending` and clobber the worker's translatedText / model fields.
+  if (transcription.translationStatus === "succeeded") {
+    return { outcome: "succeeded" };
+  }
+  // Likewise, don't trample an in-flight pull-worker lease. The worker will
+  // either succeed (case above on the next run) or fail and reset the row.
+  if (
+    transcription.translationStatus === "pending" &&
+    transcription.translationLeaseExpiresAt &&
+    transcription.translationLeaseExpiresAt.getTime() > Date.now()
+  ) {
+    return { outcome: "deferred", reason: "pending_pull" };
+  }
 
   const provider = deps.translationProvider;
   if (!provider) {
     // No in-process provider — defer to the pull worker. Mark the row so the
     // jobs API can lease it; the worker will post a result back via
-    // `/v1/jobs/:id/succeed`.
+    // `/v1/jobs/:id/succeed`. Use updateMany so we never flip a row that
+    // a worker has just finalized in the moment between the read above and
+    // this write.
     if (transcription.translationStatus !== "pending") {
-      await db.transcription.update({
-        where: { id: transcription.id },
+      await db.transcription.updateMany({
+        where: {
+          id: transcription.id,
+          OR: [
+            { translationStatus: null },
+            { translationStatus: "failed" },
+          ],
+        },
         data: {
           translationStatus: "pending",
           translationProvider: deps.config.translationProvider,
@@ -356,15 +380,26 @@ export const runTranslation = async (
     return { outcome: "deferred", reason: "pending_pull" };
   }
 
-  // Mark pending before we call out, then update with the result.
-  await db.transcription.update({
-    where: { id: transcription.id },
+  // Atomic claim: only proceed if the row is still null/failed. If a worker
+  // raced in and set `pending` (or even `succeeded`) we bail out cleanly.
+  const claimed = await db.transcription.updateMany({
+    where: {
+      id: transcription.id,
+      OR: [
+        { translationStatus: null },
+        { translationStatus: "failed" },
+      ],
+    },
     data: {
       translationStatus: "pending",
       translationProvider: provider.name,
       translationModel: provider.model,
     },
   });
+  if (claimed.count === 0) {
+    // Someone else (worker or a concurrent in-process run) owns the row.
+    return { outcome: "deferred", reason: "pending_pull" };
+  }
   await broadcastMessage(opts.messageId);
 
   const startedAt = Date.now();
@@ -373,8 +408,15 @@ export const runTranslation = async (
       text,
       sourceLanguage: transcription.language,
     });
-    await db.transcription.update({
-      where: { id: transcription.id },
+    // Only write the result if we still own the row (status === pending and
+    // provider === ours). A pull-worker /succeed posted in the meantime
+    // would have flipped status to `succeeded`; we leave that result alone.
+    await db.transcription.updateMany({
+      where: {
+        id: transcription.id,
+        translationStatus: "pending",
+        translationProvider: provider.name,
+      },
       data: {
         translationStatus: "succeeded",
         translatedText: result.text,
@@ -394,8 +436,12 @@ export const runTranslation = async (
     return { outcome: "succeeded" };
   } catch (error) {
     const reason = sanitizeError(error);
-    await db.transcription.update({
-      where: { id: transcription.id },
+    await db.transcription.updateMany({
+      where: {
+        id: transcription.id,
+        translationStatus: "pending",
+        translationProvider: provider.name,
+      },
       data: {
         translationStatus: "failed",
         translationError: reason,
@@ -421,25 +467,27 @@ const runTranslationThenModeration = async (opts: {
   transcriptionId: string;
   deps: PipelineDeps;
 }): Promise<void> => {
-  const outcome = await runTranslation({
+  await runTranslation({
     messageId: opts.messageId,
     transcriptionId: opts.transcriptionId,
     deps: opts.deps,
   });
-  // If translation is deferred (no in-process provider) we still kick off
-  // moderation against the original text so the existing push-mode pipeline
-  // is not stalled waiting on a pull worker that may never run. The pull
-  // worker can still translate later; it does not affect the moderation
-  // verdict already produced.
-  if (outcome.outcome === "deferred" || outcome.outcome === "succeeded" ||
-      outcome.outcome === "skipped" || outcome.outcome === "failed") {
-    await runModeration({
-      messageId: opts.messageId,
-      transcriptionId: opts.transcriptionId,
-      deps: opts.deps,
-      requestedByUserId: null,
-    });
-  }
+  // We always proceed to moderation regardless of the translation outcome:
+  //   - succeeded → moderation runs against translated text.
+  //   - skipped (English / not_found / disabled) → moderation runs against
+  //     the original transcript.
+  //   - deferred (no in-process provider; pull worker will translate later)
+  //     → moderation runs now against original text so the push pipeline
+  //     isn't stalled; the worker's later translation does not retroactively
+  //     change the moderation verdict.
+  //   - failed → moderation runs against original text; the failure is
+  //     surfaced on the transcription row for human review.
+  await runModeration({
+    messageId: opts.messageId,
+    transcriptionId: opts.transcriptionId,
+    deps: opts.deps,
+    requestedByUserId: null,
+  });
 };
 
 export interface RunModerationOptions {

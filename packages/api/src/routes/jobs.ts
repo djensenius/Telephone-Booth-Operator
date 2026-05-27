@@ -250,6 +250,17 @@ const claimModeration = async (
       id: candidate.id,
       status: "pending",
       OR: [{ leaseExpiresAt: null }, { leaseExpiresAt: { lt: now } }],
+      // Re-assert the translation-not-pending guard atomically so a
+      // concurrent re-translation can't sneak the row into the moderation
+      // queue between the findFirst above and the updateMany here.
+      transcription: {
+        is: {
+          OR: [
+            { translationStatus: null },
+            { translationStatus: { not: "pending" } },
+          ],
+        },
+      },
     },
     data: {
       leaseToken,

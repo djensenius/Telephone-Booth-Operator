@@ -854,13 +854,14 @@ export const fakeDb = {
       where: Predicate;
       data: Record<string, unknown>;
     }) => {
-      const relations = {
-        transcription: (_key: string) =>
-          // unused for moderation.updateMany today; placeholder.
-          null,
-      };
       let count = 0;
       for (const row of store.moderations.values()) {
+        const relations = {
+          transcription: (_key: string) =>
+            row.transcriptionId
+              ? store.transcriptions.get(row.transcriptionId) ?? null
+              : null,
+        };
         if (matchPredicate(row as unknown as Record<string, unknown>, where, relations)) {
           store.moderations.set(row.id, applyUpdate(row, data));
           count += 1;

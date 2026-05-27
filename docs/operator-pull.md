@@ -100,6 +100,12 @@ On success, the Operator:
 - if the recording is silent (`text` empty), nudges the message to
   `pending` so it appears in the operator queue immediately.
 
+> **Always send `language`.** A missing / null `language` is treated as
+> English, which **skips translation** and moderates the original text. If
+> your transcription provider doesn't emit a language tag, supply an
+> explicit one (e.g. `"und"` or a best-guess BCP-47 code) so the Operator
+> can route the row through translation correctly.
+
 ### `translation`
 
 ```json
