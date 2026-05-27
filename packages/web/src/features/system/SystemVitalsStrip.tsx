@@ -10,7 +10,10 @@
 // authenticated page it refreshes at the polling cadence (5 s, matching the
 // booth's `PUT /v1/system` interval).
 
-import type { BoothSystemSnapshot } from "@telephone-booth-operator/shared";
+import type {
+  BoothSystemSnapshot,
+  BoothThrottlingFlags,
+} from "@telephone-booth-operator/shared";
 import { useSystemCurrent } from "../../lib/api-client.js";
 import { fmtBytes, fmtNumber, fmtPercent, fmtUptime } from "./format.js";
 
@@ -24,6 +27,21 @@ const MEMORY_WARN_RATIO = 0.85;
 const MEMORY_CRIT_RATIO = 0.95;
 
 type Severity = "ok" | "warn" | "crit";
+
+// Map the six boolean Pi throttling flags to short display labels matching
+// what `vcgencmd get_throttled` reports. Only currently-asserted flags are
+// returned so the tile can render a count + tooltip without leaking the
+// internal field names.
+function collectThrottlingFlags(flags: BoothThrottlingFlags): string[] {
+  const labels: string[] = [];
+  if (flags.undervoltage) labels.push("under-voltage");
+  if (flags.armFreqCapped) labels.push("arm-freq-capped");
+  if (flags.throttled) labels.push("throttled");
+  if (flags.softTempLimit) labels.push("soft-temp-limit");
+  if (flags.undervoltageOccurred) labels.push("under-voltage-occurred");
+  if (flags.throttledOccurred) labels.push("throttled-occurred");
+  return labels;
+}
 
 function temperatureSeverity(value: number | null | undefined): Severity {
   if (typeof value !== "number") return "ok";
@@ -84,10 +102,31 @@ export function SystemVitalsStrip({
   const snapshot = query.data?.snapshot as BoothSystemSnapshot | undefined;
   const receivedAt = query.data?.receivedAt;
 
+  // Pull commonly-used nested fields up so the JSX below stays readable. The
+  // canonical wire format groups CPU/memory/etc into sub-objects (mirroring
+  // the Rust `booth-hal::SystemSnapshot` struct), so every read goes through
+  // optional chaining.
+  const cpu = snapshot?.cpu;
+  const memory = snapshot?.memory;
+  const tailscale = snapshot?.tailscale;
+  const throttling = snapshot?.throttling;
+  const temperatureCelsius = snapshot?.temperatureCelsius;
+  const memoryUsedBytes = memory?.usedBytes ?? null;
+  const memoryTotalBytes = memory?.totalBytes ?? null;
+  const cpuUsageRatio = cpu?.usageRatio ?? null;
+  const loadAvg1m = cpu?.loadAvg1m ?? null;
+  // Prefer the explicit `physicalCores` field, but fall back to the length of
+  // the per-core usage array if the adapter only filled in one or the other.
   const cpuCores =
-    Array.isArray(snapshot?.cpuUsageRatioPerCore) && snapshot.cpuUsageRatioPerCore.length > 0
-      ? snapshot.cpuUsageRatioPerCore.length
-      : null;
+    typeof cpu?.physicalCores === "number" && cpu.physicalCores > 0
+      ? cpu.physicalCores
+      : Array.isArray(cpu?.perCoreUsageRatio) && cpu.perCoreUsageRatio.length > 0
+        ? cpu.perCoreUsageRatio.length
+        : null;
+  // Collect any throttling flags that are currently asserted so the tile can
+  // show a count + tooltip without leaking the Pi-specific field names into
+  // the UI.
+  const activeThrottlingFlags = throttling ? collectThrottlingFlags(throttling) : [];
 
   // Show a placeholder strip when there's nothing cached yet so the layout
   // doesn't pop in once the first refetch resolves.
@@ -106,11 +145,11 @@ export function SystemVitalsStrip({
   // be relentless. Instead we summarise the highest tile severity in a
   // visually-hidden live region so SR users only hear "warning" / "critical"
   // when the booth's health changes, not on every refetch.
-  const tempSev = temperatureSeverity(snapshot?.cpuTemperatureCelsius);
-  const memSev = memorySeverity(snapshot?.memoryUsedBytes, snapshot?.memoryTotalBytes);
-  const loadSev = loadSeverity(snapshot?.loadAverage1m, cpuCores);
-  const throttleSev: Severity = snapshot?.throttlingFlags?.length ? "warn" : "ok";
-  const tailscaleSev: Severity = snapshot?.tailscaleConnected === false ? "crit" : "ok";
+  const tempSev = temperatureSeverity(temperatureCelsius);
+  const memSev = memorySeverity(memoryUsedBytes, memoryTotalBytes);
+  const loadSev = loadSeverity(loadAvg1m, cpuCores);
+  const throttleSev: Severity = activeThrottlingFlags.length > 0 ? "warn" : "ok";
+  const tailscaleSev: Severity = tailscale?.connected === false ? "crit" : "ok";
   const aggregateSeverity: Severity = (
     [tempSev, memSev, loadSev, throttleSev, tailscaleSev] as readonly Severity[]
   ).reduce<Severity>((acc, s) => (s === "crit" ? "crit" : s === "warn" && acc === "ok" ? "warn" : acc), "ok");
@@ -137,8 +176,8 @@ export function SystemVitalsStrip({
         <VitalTile
           label="CPU temp"
           value={
-            typeof snapshot?.cpuTemperatureCelsius === "number"
-              ? `${fmtNumber(snapshot.cpuTemperatureCelsius, 1)}°C`
+            typeof temperatureCelsius === "number"
+              ? `${fmtNumber(temperatureCelsius, 1)}°C`
               : "—"
           }
           severity={tempSev}
@@ -147,15 +186,13 @@ export function SystemVitalsStrip({
         <VitalTile
           label="CPU"
           value={
-            typeof snapshot?.cpuUsageRatio === "number"
-              ? `${(snapshot.cpuUsageRatio * 100).toFixed(0)}%`
-              : "—"
+            typeof cpuUsageRatio === "number" ? `${(cpuUsageRatio * 100).toFixed(0)}%` : "—"
           }
           hint="Average CPU usage across all cores"
         />
         <VitalTile
           label="Load 1m"
-          value={fmtNumber(snapshot?.loadAverage1m)}
+          value={fmtNumber(loadAvg1m)}
           severity={loadSev}
           hint={
             cpuCores
@@ -165,11 +202,11 @@ export function SystemVitalsStrip({
         />
         <VitalTile
           label="Memory"
-          value={fmtPercent(snapshot?.memoryUsedBytes, snapshot?.memoryTotalBytes)}
+          value={fmtPercent(memoryUsedBytes, memoryTotalBytes)}
           severity={memSev}
           hint={
-            snapshot?.memoryUsedBytes != null && snapshot.memoryTotalBytes != null
-              ? `${fmtBytes(snapshot.memoryUsedBytes)} of ${fmtBytes(snapshot.memoryTotalBytes)} in use`
+            memoryUsedBytes != null && memoryTotalBytes != null
+              ? `${fmtBytes(memoryUsedBytes)} of ${fmtBytes(memoryTotalBytes)} in use`
               : "Memory utilisation"
           }
         />
@@ -178,15 +215,15 @@ export function SystemVitalsStrip({
           value={fmtUptime(snapshot?.uptimeSeconds)}
           hint="Host uptime since last boot"
         />
-        {snapshot?.throttlingFlags?.length ? (
+        {activeThrottlingFlags.length > 0 ? (
           <VitalTile
             label="Throttling"
-            value={`${snapshot.throttlingFlags.length}`}
+            value={`${activeThrottlingFlags.length}`}
             severity="warn"
-            hint={`Pi reports: ${snapshot.throttlingFlags.join(", ")}`}
+            hint={`Pi reports: ${activeThrottlingFlags.join(", ")}`}
           />
         ) : null}
-        {snapshot?.tailscaleConnected === false ? (
+        {tailscale?.connected === false ? (
           <VitalTile
             label="Tailscale"
             value="down"

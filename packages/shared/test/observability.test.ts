@@ -120,39 +120,78 @@ describe("CallSessionSchema", () => {
 });
 
 describe("BoothSystemSnapshotSchema", () => {
-  it("accepts the minimal required fields", () => {
-    const parsed = BoothSystemSnapshotSchema.parse({
-      boothId: "booth-01",
-      capturedAt: "2026-06-01T00:00:00.000Z",
-    });
-    expect(parsed.boothId).toBe("booth-01");
+  it("accepts an empty snapshot (everything optional, forward-compat)", () => {
+    const parsed = BoothSystemSnapshotSchema.parse({});
+    expect(parsed).toEqual({});
   });
 
-  it("accepts a rich snapshot", () => {
+  it("accepts a rich nested snapshot mirroring the Rust wire format", () => {
     const parsed = BoothSystemSnapshotSchema.parse({
-      boothId: "booth-01",
-      capturedAt: "2026-06-01T00:00:00.000Z",
+      cpu: {
+        usageRatio: 0.21,
+        perCoreUsageRatio: [0.2, 0.22, 0.21, 0.2],
+        physicalCores: 4,
+        loadAvg1m: 0.5,
+        loadAvg5m: 0.4,
+        loadAvg15m: 0.3,
+      },
+      temperatureCelsius: 47.3,
+      memory: {
+        totalBytes: 4_000_000_000,
+        usedBytes: 100_000_000,
+        swapTotalBytes: 2_000_000_000,
+        swapUsedBytes: 0,
+      },
+      disks: [
+        {
+          mountPoint: "/",
+          filesystem: "ext4",
+          totalBytes: 30_000_000_000,
+          availableBytes: 20_000_000_000,
+        },
+      ],
+      networks: [{ interface: "eth0", receiveBytesTotal: 1000, transmitBytesTotal: 2000 }],
       uptimeSeconds: 3600,
-      cpuTemperatureCelsius: 47.3,
-      cpuUsageRatio: 0.21,
-      loadAverage1m: 0.5,
-      memoryUsedBytes: 100_000_000,
-      memoryTotalBytes: 4_000_000_000,
-      disks: [{ mountpoint: "/", totalBytes: 30_000_000_000, availableBytes: 20_000_000_000 }],
-      networkInterfaces: [{ name: "eth0", receivedBytes: 1000, transmittedBytes: 2000 }],
-      tailscaleConnected: true,
-      throttlingFlags: [],
+      process: { residentBytes: 14_426_112, virtualBytes: 922_062_848, uptimeSeconds: 5 },
+      audio: { inputDevice: "USB Audio", outputDevice: "USB Audio" },
+      tailscale: { connected: true, hostname: "telephone-booth" },
+      throttling: {
+        undervoltage: false,
+        armFreqCapped: false,
+        throttled: false,
+        softTempLimit: false,
+        undervoltageOccurred: false,
+        throttledOccurred: false,
+      },
+      runtimeMode: "real" as const,
     });
-    expect(parsed.disks?.[0]?.mountpoint).toBe("/");
+    expect(parsed.disks?.[0]?.mountPoint).toBe("/");
+    expect(parsed.networks?.[0]?.interface).toBe("eth0");
+    expect(parsed.cpu?.physicalCores).toBe(4);
+    expect(parsed.throttling?.undervoltage).toBe(false);
   });
 
   it("tolerates unknown forward-compat fields via passthrough", () => {
     const parsed = BoothSystemSnapshotSchema.parse({
-      boothId: "booth-01",
-      capturedAt: "2026-06-01T00:00:00.000Z",
       futureField: 42,
+      cpu: { usageRatio: 0.1, unknownCpuField: "ok" },
     });
     expect((parsed as Record<string, unknown>).futureField).toBe(42);
+    expect((parsed.cpu as Record<string, unknown> | undefined)?.unknownCpuField).toBe("ok");
+  });
+
+  it("rejects disk entries missing mountPoint", () => {
+    expect(() =>
+      BoothSystemSnapshotSchema.parse({
+        disks: [{ totalBytes: 1, availableBytes: 1 }],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects throttling supplied as a string array (old wire format)", () => {
+    expect(() =>
+      BoothSystemSnapshotSchema.parse({ throttling: ["under-voltage"] }),
+    ).toThrow();
   });
 });
 
@@ -169,10 +208,7 @@ describe("WsEnvelopeSchema", () => {
     const parsed = WsEnvelopeSchema.parse({
       kind: "system",
       boothId: "booth-01",
-      snapshot: {
-        boothId: "booth-01",
-        capturedAt: "2026-06-01T00:00:00.000Z",
-      },
+      snapshot: { temperatureCelsius: 48 },
       receivedAt: "2026-06-01T00:00:01.000Z",
     });
     expect(parsed.kind).toBe("system");

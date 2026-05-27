@@ -331,54 +331,118 @@ export const CallSessionDetailSchema = CallSessionSchema.extend({
 });
 export type CallSessionDetail = z.infer<typeof CallSessionDetailSchema>;
 
-// Live system snapshot pushed by the booth via `PUT /v1/system`. All fields
-// are nullable so the schema is forward-compatible with new metrics. Mirrors
-// the Rust `booth-hal::SystemSnapshot` struct.
+// Live system snapshot pushed by the booth via `PUT /v1/system`. Mirrors the
+// Rust `booth-hal::SystemSnapshot` struct as it appears on the wire (camelCase
+// via `#[serde(rename_all = "camelCase")]`). Every top-level snapshot field
+// is optional so the schema is forward-compatible with new metrics and
+// tolerates host adapters that can only fill in a subset of the fields.
+// Disk and network *entries* still require their identifying field
+// (`mountPoint` / `interface`) plus core counters, because an entry without
+// those would have no meaning — adapters that can't supply them should omit
+// the entry rather than emit a partial one. Every object is `.passthrough()`
+// so unknown future keys are preserved end-to-end.
+//
+// The envelope-level `boothId` lives on `BoothSystemSnapshotEnvelopeSchema`
+// below — it is NOT a snapshot field. Likewise the server stamps `receivedAt`
+// when it accepts the PUT; the booth does not include a client-side timestamp.
+export const BoothCpuStatsSchema = z
+  .object({
+    usageRatio: z.number().min(0).max(1).nullable().optional(),
+    perCoreUsageRatio: z.array(z.number().min(0).max(1)).nullable().optional(),
+    physicalCores: z.number().int().nonnegative().nullable().optional(),
+    loadAvg1m: z.number().nullable().optional(),
+    loadAvg5m: z.number().nullable().optional(),
+    loadAvg15m: z.number().nullable().optional(),
+  })
+  .passthrough();
+export type BoothCpuStats = z.infer<typeof BoothCpuStatsSchema>;
+
+export const BoothMemoryStatsSchema = z
+  .object({
+    totalBytes: z.number().nonnegative().nullable().optional(),
+    usedBytes: z.number().nonnegative().nullable().optional(),
+    swapTotalBytes: z.number().nonnegative().nullable().optional(),
+    swapUsedBytes: z.number().nonnegative().nullable().optional(),
+  })
+  .passthrough();
+export type BoothMemoryStats = z.infer<typeof BoothMemoryStatsSchema>;
+
+export const BoothDiskStatsSchema = z
+  .object({
+    mountPoint: z.string(),
+    filesystem: z.string().nullable().optional(),
+    totalBytes: z.number().nonnegative(),
+    availableBytes: z.number().nonnegative(),
+  })
+  .passthrough();
+export type BoothDiskStats = z.infer<typeof BoothDiskStatsSchema>;
+
+export const BoothNetworkStatsSchema = z
+  .object({
+    interface: z.string(),
+    receiveBytesTotal: z.number().nonnegative(),
+    transmitBytesTotal: z.number().nonnegative(),
+  })
+  .passthrough();
+export type BoothNetworkStats = z.infer<typeof BoothNetworkStatsSchema>;
+
+export const BoothProcessStatsSchema = z
+  .object({
+    residentBytes: z.number().nonnegative().nullable().optional(),
+    virtualBytes: z.number().nonnegative().nullable().optional(),
+    openFds: z.number().nonnegative().nullable().optional(),
+    threads: z.number().nonnegative().nullable().optional(),
+    uptimeSeconds: z.number().nonnegative().nullable().optional(),
+  })
+  .passthrough();
+export type BoothProcessStats = z.infer<typeof BoothProcessStatsSchema>;
+
+export const BoothAudioStatsSchema = z
+  .object({
+    inputDevice: z.string().nullable().optional(),
+    outputDevice: z.string().nullable().optional(),
+    sampleRateHz: z.number().int().nonnegative().nullable().optional(),
+  })
+  .passthrough();
+export type BoothAudioStats = z.infer<typeof BoothAudioStatsSchema>;
+
+export const BoothTailscaleStatsSchema = z
+  .object({
+    connected: z.boolean().nullable().optional(),
+    peerCount: z.number().int().nonnegative().nullable().optional(),
+    hostname: z.string().nullable().optional(),
+    exitNode: z.string().nullable().optional(),
+  })
+  .passthrough();
+export type BoothTailscaleStats = z.infer<typeof BoothTailscaleStatsSchema>;
+
+// Mirrors the six boolean Pi throttling flags reported by `vcgencmd
+// get_throttled`. Adapters that can't read these (non-Pi hosts) omit the
+// whole object.
+export const BoothThrottlingFlagsSchema = z
+  .object({
+    undervoltage: z.boolean().nullable().optional(),
+    armFreqCapped: z.boolean().nullable().optional(),
+    throttled: z.boolean().nullable().optional(),
+    softTempLimit: z.boolean().nullable().optional(),
+    undervoltageOccurred: z.boolean().nullable().optional(),
+    throttledOccurred: z.boolean().nullable().optional(),
+  })
+  .passthrough();
+export type BoothThrottlingFlags = z.infer<typeof BoothThrottlingFlagsSchema>;
+
 export const BoothSystemSnapshotSchema = z
   .object({
-    boothId: z.string(),
-    capturedAt: z.string().datetime(),
+    cpu: BoothCpuStatsSchema.nullable().optional(),
+    temperatureCelsius: z.number().nullable().optional(),
+    memory: BoothMemoryStatsSchema.nullable().optional(),
+    disks: z.array(BoothDiskStatsSchema).nullable().optional(),
+    networks: z.array(BoothNetworkStatsSchema).nullable().optional(),
     uptimeSeconds: z.number().nonnegative().nullable().optional(),
-    hostname: z.string().nullable().optional(),
-    osVersion: z.string().nullable().optional(),
-    kernelVersion: z.string().nullable().optional(),
-    cpuTemperatureCelsius: z.number().nullable().optional(),
-    cpuUsageRatio: z.number().min(0).max(1).nullable().optional(),
-    cpuUsageRatioPerCore: z.array(z.number().min(0).max(1)).nullable().optional(),
-    loadAverage1m: z.number().nullable().optional(),
-    loadAverage5m: z.number().nullable().optional(),
-    loadAverage15m: z.number().nullable().optional(),
-    memoryUsedBytes: z.number().nonnegative().nullable().optional(),
-    memoryTotalBytes: z.number().nonnegative().nullable().optional(),
-    swapUsedBytes: z.number().nonnegative().nullable().optional(),
-    swapTotalBytes: z.number().nonnegative().nullable().optional(),
-    disks: z
-      .array(
-        z.object({
-          mountpoint: z.string(),
-          totalBytes: z.number().nonnegative(),
-          availableBytes: z.number().nonnegative(),
-        }),
-      )
-      .nullable()
-      .optional(),
-    networkInterfaces: z
-      .array(
-        z.object({
-          name: z.string(),
-          receivedBytes: z.number().nonnegative(),
-          transmittedBytes: z.number().nonnegative(),
-        }),
-      )
-      .nullable()
-      .optional(),
-    audioInputDevice: z.string().nullable().optional(),
-    audioOutputDevice: z.string().nullable().optional(),
-    audioInputDbfs: z.number().nullable().optional(),
-    audioOutputDbfs: z.number().nullable().optional(),
-    tailscaleConnected: z.boolean().nullable().optional(),
-    tailscaleHostname: z.string().nullable().optional(),
-    throttlingFlags: z.array(z.string()).nullable().optional(),
+    process: BoothProcessStatsSchema.nullable().optional(),
+    audio: BoothAudioStatsSchema.nullable().optional(),
+    tailscale: BoothTailscaleStatsSchema.nullable().optional(),
+    throttling: BoothThrottlingFlagsSchema.nullable().optional(),
     runtimeMode: RuntimeModeSchema.nullable().optional(),
   })
   .passthrough();
