@@ -4,9 +4,11 @@
 import { resolveAiConfig, type AiConfig } from "./config.js";
 import { MacAppModerationProvider } from "./mac-app-moderation.js";
 import { MacAppTranscriptionProvider } from "./mac-app-transcription.js";
+import { MacAppTranslationProvider } from "./mac-app-translation.js";
 import { OpenAiModerationProvider } from "./openai-moderation.js";
 import { OpenAiTranscriptionProvider } from "./openai-transcription.js";
-import type { ModerationProvider, TranscriptionProvider } from "./types.js";
+import { OpenAiTranslationProvider } from "./openai-translation.js";
+import type { ModerationProvider, TranscriptionProvider, TranslationProvider } from "./types.js";
 
 export const buildTranscriptionProvider = (
   config: AiConfig = resolveAiConfig(),
@@ -28,6 +30,28 @@ export const buildTranscriptionProvider = (
         url: config.transcriptionMacAppUrl,
         token: config.transcriptionMacAppToken,
         maxAudioBytes: config.maxAudioBytes,
+      });
+  }
+};
+
+export const buildTranslationProvider = (
+  config: AiConfig = resolveAiConfig(),
+): TranslationProvider | null => {
+  switch (config.translationProvider) {
+    case "disabled":
+      return null;
+    case "openai":
+      if (!config.openAiApiKey) return null;
+      return new OpenAiTranslationProvider({
+        apiKey: config.openAiApiKey,
+        baseUrl: config.openAiBaseUrl,
+        model: config.translationOpenAiModel,
+      });
+    case "mac_app":
+      if (!config.translationMacAppUrl) return null;
+      return new MacAppTranslationProvider({
+        url: config.translationMacAppUrl,
+        token: config.translationMacAppToken,
       });
   }
 };

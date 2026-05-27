@@ -29,7 +29,16 @@ function transcriptSnippet(transcription: Transcription | null | undefined): str
   if (!transcription) return "—";
   if (transcription.status === "pending") return "Transcribing…";
   if (transcription.status === "failed") return "Transcription failed";
-  const text = transcription.text?.replace(/\s+/g, " ").trim() ?? "";
+  // Prefer translated text in the list snippet so operators read the same
+  // copy that drives moderation; full original text is still visible in the
+  // detail view via MessageDetail.
+  const candidate =
+    transcription.translationStatus === "succeeded" &&
+    typeof transcription.translatedText === "string" &&
+    transcription.translatedText.trim().length > 0
+      ? transcription.translatedText
+      : transcription.text;
+  const text = candidate?.replace(/\s+/g, " ").trim() ?? "";
   if (text.length === 0) return "Silence";
   return text.length <= TRANSCRIPT_SNIPPET_CHARS
     ? text

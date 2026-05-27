@@ -470,6 +470,130 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/ApiTokenUsageBucket" }
 
+  /v1/jobs/next:
+    get:
+      summary: Lease the next pending pull-worker job.
+      description: |
+        The Mac transcription app polls this endpoint every few seconds.
+        Returns 200 with a job envelope (kind = transcription | translation
+        | moderation) when something is leasable, or 204 when the queue is
+        empty. Each successful response issues a fresh `leaseToken` that the
+        worker must echo back on /succeed, /fail, or /heartbeat for the same
+        job id. Calls authenticate with an operator-issued API token, same
+        scheme used by phone clients.
+      tags: [jobs]
+      security:
+        - apiToken: []
+      parameters:
+        - name: kinds
+          in: query
+          description: Comma-separated subset (default = all kinds).
+          schema: { type: string, example: "transcription,translation,moderation" }
+        - name: leaseSeconds
+          in: query
+          schema: { type: integer, minimum: 10, maximum: 3600, default: 60 }
+      responses:
+        "200":
+          description: A job was leased.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JobEnvelope" }
+        "204": { description: No pending work. }
+
+  /v1/jobs/{id}/heartbeat:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      summary: Extend the lease on an in-flight job.
+      tags: [jobs]
+      security:
+        - apiToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [leaseToken]
+              properties:
+                leaseToken: { type: string }
+                leaseSeconds:
+                  { type: integer, minimum: 10, maximum: 3600, default: 60 }
+      responses:
+        "200":
+          description: Lease extended.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  leaseExpiresAt: { type: string, format: date-time }
+        "409":
+          description:
+            Lease lost — another worker re-leased the job or the row is no
+            longer pending. Stop work and discard the result.
+
+  /v1/jobs/{id}/succeed:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      summary: Submit a successful job result.
+      description: |
+        The body shape depends on the job kind encoded in the id prefix
+        (`transcription-…`, `translation-…`, or `moderation-…`). All three
+        require the `leaseToken` returned by the original /next response.
+      tags: [jobs]
+      security:
+        - apiToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/SucceedTranscriptionBody"
+                - $ref: "#/components/schemas/SucceedTranslationBody"
+                - $ref: "#/components/schemas/SucceedModerationBody"
+      responses:
+        "200": { description: Result accepted. }
+        "409": { description: Lease lost. }
+
+  /v1/jobs/{id}/fail:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      summary: Report that a leased job could not be completed.
+      description: |
+        Bumps the row's `attemptCount` and clears the lease so the worker (or
+        another worker) can re-lease it. After 5 attempts the row is marked
+        permanently failed and the response includes `terminal: true`.
+      tags: [jobs]
+      security:
+        - apiToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [leaseToken, errorCode]
+              properties:
+                leaseToken: { type: string }
+                errorCode: { type: string, maxLength: 128 }
+                errorMessage: { type: string, maxLength: 2000 }
+      responses:
+        "200":
+          description: Failure recorded.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  terminal: { type: boolean }
+        "409": { description: Lease lost. }
+
   /v1/ws/status:
     get:
       summary: WebSocket — operator UI subscribes to live status push.
@@ -777,6 +901,74 @@ components:
         status: { type: string, enum: [ok] }
         version: { type: string }
         time: { type: string, format: date-time }
+    JobEnvelope:
+      type: object
+      required: [id, kind, leaseToken, attempt]
+      properties:
+        id:
+          type: string
+          description: "`{kind}-{rowId}` opaque to the worker."
+        kind: { type: string, enum: [transcription, translation, moderation] }
+        leaseToken: { type: string }
+        leaseExpiresAt: { type: [string, "null"], format: date-time }
+        attempt: { type: integer, minimum: 1 }
+        transcription:
+          type: [object, "null"]
+          properties:
+            messageId: { type: string, format: uuid }
+            audioUrl: { type: string, format: uri }
+            sha256: { type: string }
+            durationMs: { type: [integer, "null"] }
+            contentType: { type: [string, "null"] }
+            filename: { type: [string, "null"] }
+            model: { type: [string, "null"] }
+            language: { type: [string, "null"] }
+        translation:
+          type: [object, "null"]
+          properties:
+            messageId: { type: string, format: uuid }
+            transcriptionId: { type: string, format: uuid }
+            text: { type: string }
+            sourceLanguage: { type: [string, "null"] }
+            targetLanguage: { type: string, default: "en" }
+            model: { type: [string, "null"] }
+        moderation:
+          type: [object, "null"]
+          properties:
+            messageId: { type: string, format: uuid }
+            transcriptionId: { type: [string, "null"], format: uuid }
+            text: { type: string }
+            model: { type: [string, "null"] }
+    SucceedTranscriptionBody:
+      type: object
+      required: [leaseToken, text]
+      properties:
+        leaseToken: { type: string }
+        text: { type: string }
+        language: { type: [string, "null"] }
+        model: { type: [string, "null"] }
+    SucceedTranslationBody:
+      type: object
+      required: [leaseToken, translatedText]
+      properties:
+        leaseToken: { type: string }
+        translatedText: { type: string }
+        sourceLanguage: { type: [string, "null"] }
+        targetLanguage: { type: [string, "null"] }
+        model: { type: [string, "null"] }
+    SucceedModerationBody:
+      type: object
+      required: [leaseToken, flagged, recommendation, maxScore]
+      properties:
+        leaseToken: { type: string }
+        flagged: { type: boolean }
+        recommendation: { type: string, enum: [approve, review, reject] }
+        maxScore: { type: number, minimum: 0, maximum: 1 }
+        categories:
+          type: object
+          additionalProperties: { type: number }
+        reasonSummary: { type: string }
+        model: { type: [string, "null"] }
     BoothState:
       type: string
       enum:
