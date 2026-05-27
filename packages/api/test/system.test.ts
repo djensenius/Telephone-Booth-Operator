@@ -40,12 +40,9 @@ const setup = () => {
 };
 
 const sampleSnapshot = {
-  boothId: "booth-01",
-  capturedAt: new Date().toISOString(),
-  cpuTemperatureCelsius: 48.5,
-  loadAverage1m: 0.12,
-  memoryUsedBytes: 1024,
-  memoryTotalBytes: 2048,
+  cpu: { usageRatio: 0.12, loadAvg1m: 0.12, physicalCores: 4 },
+  temperatureCelsius: 48.5,
+  memory: { totalBytes: 2048, usedBytes: 1024 },
   uptimeSeconds: 60,
 };
 

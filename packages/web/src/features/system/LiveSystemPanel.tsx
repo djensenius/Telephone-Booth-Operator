@@ -1,5 +1,8 @@
 import { useMemo } from "react";
-import type { BoothSystemSnapshot } from "@telephone-booth-operator/shared";
+import type {
+  BoothSystemSnapshot,
+  BoothThrottlingFlags,
+} from "@telephone-booth-operator/shared";
 import { GlassPanel, RuntimeModeBadge } from "../../components/booth/index.js";
 import type { BoothRuntimeMode } from "../../components/booth/index.js";
 import { useSystemCurrent } from "../../lib/api-client.js";
@@ -7,6 +10,21 @@ import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureSt
 import { fmtBytes, fmtNumber, fmtPercent, fmtUptime } from "./format.js";
 
 const DEFAULT_BOOTH_ID = "booth-01";
+
+// Map the Pi throttling flags struct to a human-readable summary. Only
+// currently-asserted flags are included; "occurred" variants ride along so
+// operators can spot transient brown-outs even after the booth recovers.
+function summarizeThrottling(flags: BoothThrottlingFlags | null | undefined): string {
+  if (!flags) return "—";
+  const labels: string[] = [];
+  if (flags.undervoltage) labels.push("under-voltage");
+  if (flags.armFreqCapped) labels.push("arm-freq-capped");
+  if (flags.throttled) labels.push("throttled");
+  if (flags.softTempLimit) labels.push("soft-temp-limit");
+  if (flags.undervoltageOccurred) labels.push("under-voltage-occurred");
+  if (flags.throttledOccurred) labels.push("throttled-occurred");
+  return labels.length > 0 ? labels.join(", ") : "none";
+}
 
 interface LiveSystemPanelProps {
   readonly boothId?: string;
@@ -19,46 +37,51 @@ export function LiveSystemPanel({ boothId = DEFAULT_BOOTH_ID }: LiveSystemPanelP
 
   const rows = useMemo(() => {
     if (!snapshot) return [];
+    const cpu = snapshot.cpu;
+    const memory = snapshot.memory;
+    const audio = snapshot.audio;
+    const tailscale = snapshot.tailscale;
+    const memoryUsedBytes = memory?.usedBytes ?? null;
+    const memoryTotalBytes = memory?.totalBytes ?? null;
     return [
       {
         label: "CPU temperature",
         value:
-          snapshot.cpuTemperatureCelsius != null
-            ? `${fmtNumber(snapshot.cpuTemperatureCelsius, 1)} °C`
+          snapshot.temperatureCelsius != null
+            ? `${fmtNumber(snapshot.temperatureCelsius, 1)} °C`
             : "—",
       },
       {
         label: "CPU usage",
-        value:
-          snapshot.cpuUsageRatio != null ? `${(snapshot.cpuUsageRatio * 100).toFixed(0)}%` : "—",
+        value: cpu?.usageRatio != null ? `${(cpu.usageRatio * 100).toFixed(0)}%` : "—",
       },
-      { label: "Load (1m)", value: fmtNumber(snapshot.loadAverage1m) },
-      { label: "Load (5m)", value: fmtNumber(snapshot.loadAverage5m) },
-      { label: "Load (15m)", value: fmtNumber(snapshot.loadAverage15m) },
+      { label: "Load (1m)", value: fmtNumber(cpu?.loadAvg1m) },
+      { label: "Load (5m)", value: fmtNumber(cpu?.loadAvg5m) },
+      { label: "Load (15m)", value: fmtNumber(cpu?.loadAvg15m) },
       {
         label: "Memory",
-        value: `${fmtBytes(snapshot.memoryUsedBytes)} / ${fmtBytes(snapshot.memoryTotalBytes)} (${fmtPercent(snapshot.memoryUsedBytes, snapshot.memoryTotalBytes)})`,
+        value: `${fmtBytes(memoryUsedBytes)} / ${fmtBytes(memoryTotalBytes)} (${fmtPercent(memoryUsedBytes, memoryTotalBytes)})`,
       },
       { label: "Uptime", value: fmtUptime(snapshot.uptimeSeconds) },
-      { label: "Hostname", value: snapshot.hostname ?? "—" },
-      { label: "OS", value: snapshot.osVersion ?? "—" },
-      { label: "Kernel", value: snapshot.kernelVersion ?? "—" },
-      { label: "Audio input device", value: snapshot.audioInputDevice ?? "—" },
-      { label: "Audio output device", value: snapshot.audioOutputDevice ?? "—" },
-      { label: "Audio input dBFS", value: fmtNumber(snapshot.audioInputDbfs, 1) },
-      { label: "Audio output dBFS", value: fmtNumber(snapshot.audioOutputDbfs, 1) },
+      { label: "Audio input device", value: audio?.inputDevice ?? "—" },
+      { label: "Audio output device", value: audio?.outputDevice ?? "—" },
+      {
+        label: "Audio sample rate",
+        value:
+          typeof audio?.sampleRateHz === "number" ? `${audio.sampleRateHz} Hz` : "—",
+      },
       {
         label: "Tailscale",
         value:
-          snapshot.tailscaleConnected == null
+          tailscale?.connected == null
             ? "—"
-            : snapshot.tailscaleConnected
-              ? `up${snapshot.tailscaleHostname ? ` (${snapshot.tailscaleHostname})` : ""}`
+            : tailscale.connected
+              ? `up${tailscale.hostname ? ` (${tailscale.hostname})` : ""}`
               : "down",
       },
       {
         label: "Throttling",
-        value: snapshot.throttlingFlags?.length ? snapshot.throttlingFlags.join(", ") : "none",
+        value: summarizeThrottling(snapshot.throttling),
       },
     ];
   }, [snapshot]);
@@ -103,8 +126,9 @@ export function LiveSystemPanel({ boothId = DEFAULT_BOOTH_ID }: LiveSystemPanelP
               <dd>
                 <ul>
                   {snapshot.disks.map((disk) => (
-                    <li key={disk.mountpoint}>
-                      <code>{disk.mountpoint}</code> —{" "}
+                    <li key={disk.mountPoint}>
+                      <code>{disk.mountPoint}</code>
+                      {disk.filesystem ? ` (${disk.filesystem})` : ""} —{" "}
                       {fmtBytes(disk.totalBytes - disk.availableBytes)} used of{" "}
                       {fmtBytes(disk.totalBytes)} (
                       {fmtPercent(disk.totalBytes - disk.availableBytes, disk.totalBytes)})
@@ -114,15 +138,15 @@ export function LiveSystemPanel({ boothId = DEFAULT_BOOTH_ID }: LiveSystemPanelP
               </dd>
             </div>
           ) : null}
-          {snapshot.networkInterfaces?.length ? (
+          {snapshot.networks?.length ? (
             <div className="live-system-panel__row live-system-panel__row--wide">
               <dt>Network</dt>
               <dd>
                 <ul>
-                  {snapshot.networkInterfaces.map((iface) => (
-                    <li key={iface.name}>
-                      <code>{iface.name}</code> — rx {fmtBytes(iface.receivedBytes)} · tx{" "}
-                      {fmtBytes(iface.transmittedBytes)}
+                  {snapshot.networks.map((iface) => (
+                    <li key={iface.interface}>
+                      <code>{iface.interface}</code> — rx {fmtBytes(iface.receiveBytesTotal)} · tx{" "}
+                      {fmtBytes(iface.transmitBytesTotal)}
                     </li>
                   ))}
                 </ul>

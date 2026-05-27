@@ -18,19 +18,21 @@ function renderStrip(envelope?: BoothSystemSnapshotEnvelope) {
 }
 
 const baseSnapshot = {
-  boothId: "booth-01",
-  capturedAt: "2026-05-27T00:00:00.000Z",
-  cpuTemperatureCelsius: 48,
-  cpuUsageRatio: 0.23,
-  cpuUsageRatioPerCore: [0.2, 0.25, 0.21, 0.26],
-  loadAverage1m: 0.5,
-  loadAverage5m: 0.4,
-  loadAverage15m: 0.3,
-  memoryUsedBytes: 1_073_741_824,
-  memoryTotalBytes: 4_294_967_296,
+  cpu: {
+    usageRatio: 0.23,
+    perCoreUsageRatio: [0.2, 0.25, 0.21, 0.26],
+    physicalCores: 4,
+    loadAvg1m: 0.5,
+    loadAvg5m: 0.4,
+    loadAvg15m: 0.3,
+  },
+  temperatureCelsius: 48,
+  memory: {
+    totalBytes: 4_294_967_296,
+    usedBytes: 1_073_741_824,
+  },
   uptimeSeconds: 3 * 86_400 + 4 * 3_600 + 15 * 60,
-  tailscaleConnected: true,
-  throttlingFlags: [],
+  tailscale: { connected: true },
   runtimeMode: "real" as const,
 };
 
@@ -63,7 +65,7 @@ describe("SystemVitalsStrip", () => {
   it("flags CPU temperature severity when it crosses warn/crit thresholds", () => {
     renderStrip({
       boothId: "booth-01",
-      snapshot: { ...baseSnapshot, cpuTemperatureCelsius: 78 },
+      snapshot: { ...baseSnapshot, temperatureCelsius: 78 },
       receivedAt: "2026-05-27T00:00:05.000Z",
     });
     const tile = screen.getByText("78.0°C").parentElement;
@@ -73,20 +75,49 @@ describe("SystemVitalsStrip", () => {
   it("surfaces Tailscale outages with a critical tile", () => {
     renderStrip({
       boothId: "booth-01",
-      snapshot: { ...baseSnapshot, tailscaleConnected: false },
+      snapshot: { ...baseSnapshot, tailscale: { connected: false } },
       receivedAt: "2026-05-27T00:00:05.000Z",
     });
     const tile = screen.getByText("down").parentElement;
     expect(tile?.className).toContain("system-vitals-strip__tile--crit");
   });
 
-  it("shows throttling flags only when present", () => {
+  it("shows throttling flags only when one is asserted", () => {
     renderStrip({
       boothId: "booth-01",
-      snapshot: { ...baseSnapshot, throttlingFlags: ["under-voltage"] },
+      snapshot: {
+        ...baseSnapshot,
+        throttling: {
+          undervoltage: true,
+          armFreqCapped: false,
+          throttled: false,
+          softTempLimit: false,
+          undervoltageOccurred: false,
+          throttledOccurred: false,
+        },
+      },
       receivedAt: "2026-05-27T00:00:05.000Z",
     });
     expect(screen.getByText("Throttling")).toBeDefined();
+  });
+
+  it("hides the throttling tile when every flag is false", () => {
+    renderStrip({
+      boothId: "booth-01",
+      snapshot: {
+        ...baseSnapshot,
+        throttling: {
+          undervoltage: false,
+          armFreqCapped: false,
+          throttled: false,
+          softTempLimit: false,
+          undervoltageOccurred: false,
+          throttledOccurred: false,
+        },
+      },
+      receivedAt: "2026-05-27T00:00:05.000Z",
+    });
+    expect(screen.queryByText("Throttling")).toBeNull();
   });
 
   it("links to the dedicated live-system page so the strip stays clickable", () => {

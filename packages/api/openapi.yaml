@@ -1040,25 +1040,108 @@ components:
     BoothSystemSnapshot:
       type: object
       description: |
-        Forward-compatible snapshot of host vitals. All non-required fields
-        are nullable; unknown extra fields are allowed.
+        Forward-compatible snapshot of host vitals. Mirrors the Rust
+        `booth-hal::SystemSnapshot` struct as emitted on the wire (camelCase).
+        Every sub-object and field is optional; unknown extra keys are
+        preserved end-to-end so new metrics roll out without breaking older
+        operator builds.
       additionalProperties: true
-      required: [boothId, capturedAt]
       properties:
-        boothId: { type: string }
-        capturedAt: { type: string, format: date-time }
-        uptimeSeconds: { type: [number, "null"] }
-        cpuTemperatureCelsius: { type: [number, "null"] }
-        cpuUsageRatio: { type: [number, "null"] }
-        loadAverage1m: { type: [number, "null"] }
-        loadAverage5m: { type: [number, "null"] }
-        loadAverage15m: { type: [number, "null"] }
-        memoryUsedBytes: { type: [number, "null"] }
-        memoryTotalBytes: { type: [number, "null"] }
-        tailscaleConnected: { type: [boolean, "null"] }
-        throttlingFlags:
+        temperatureCelsius: { type: [number, "null"] }
+        uptimeSeconds: { type: [number, "null"], minimum: 0 }
+        runtimeMode:
+          anyOf:
+            - { type: string, enum: [real, mock, simulator] }
+            - type: "null"
+        cpu:
+          anyOf: [{ $ref: "#/components/schemas/BoothCpuStats" }, { type: "null" }]
+        memory:
+          anyOf: [{ $ref: "#/components/schemas/BoothMemoryStats" }, { type: "null" }]
+        disks:
           type: [array, "null"]
-          items: { type: string }
+          items: { $ref: "#/components/schemas/BoothDiskStats" }
+        networks:
+          type: [array, "null"]
+          items: { $ref: "#/components/schemas/BoothNetworkStats" }
+        process:
+          anyOf: [{ $ref: "#/components/schemas/BoothProcessStats" }, { type: "null" }]
+        audio:
+          anyOf: [{ $ref: "#/components/schemas/BoothAudioStats" }, { type: "null" }]
+        tailscale:
+          anyOf: [{ $ref: "#/components/schemas/BoothTailscaleStats" }, { type: "null" }]
+        throttling:
+          anyOf: [{ $ref: "#/components/schemas/BoothThrottlingFlags" }, { type: "null" }]
+    BoothCpuStats:
+      type: object
+      additionalProperties: true
+      properties:
+        usageRatio: { type: [number, "null"], minimum: 0, maximum: 1 }
+        perCoreUsageRatio:
+          type: [array, "null"]
+          items: { type: number, minimum: 0, maximum: 1 }
+        physicalCores: { type: [integer, "null"], minimum: 0 }
+        loadAvg1m: { type: [number, "null"] }
+        loadAvg5m: { type: [number, "null"] }
+        loadAvg15m: { type: [number, "null"] }
+    BoothMemoryStats:
+      type: object
+      additionalProperties: true
+      properties:
+        totalBytes: { type: [number, "null"], minimum: 0 }
+        usedBytes: { type: [number, "null"], minimum: 0 }
+        swapTotalBytes: { type: [number, "null"], minimum: 0 }
+        swapUsedBytes: { type: [number, "null"], minimum: 0 }
+    BoothDiskStats:
+      type: object
+      additionalProperties: true
+      required: [mountPoint, totalBytes, availableBytes]
+      properties:
+        mountPoint: { type: string }
+        filesystem: { type: [string, "null"] }
+        totalBytes: { type: number, minimum: 0 }
+        availableBytes: { type: number, minimum: 0 }
+    BoothNetworkStats:
+      type: object
+      additionalProperties: true
+      required: [interface, receiveBytesTotal, transmitBytesTotal]
+      properties:
+        interface: { type: string }
+        receiveBytesTotal: { type: number, minimum: 0 }
+        transmitBytesTotal: { type: number, minimum: 0 }
+    BoothProcessStats:
+      type: object
+      additionalProperties: true
+      properties:
+        residentBytes: { type: [number, "null"], minimum: 0 }
+        virtualBytes: { type: [number, "null"], minimum: 0 }
+        openFds: { type: [number, "null"], minimum: 0 }
+        threads: { type: [number, "null"], minimum: 0 }
+        uptimeSeconds: { type: [number, "null"], minimum: 0 }
+    BoothAudioStats:
+      type: object
+      additionalProperties: true
+      properties:
+        inputDevice: { type: [string, "null"] }
+        outputDevice: { type: [string, "null"] }
+        sampleRateHz: { type: [integer, "null"], minimum: 0 }
+    BoothTailscaleStats:
+      type: object
+      additionalProperties: true
+      properties:
+        connected: { type: [boolean, "null"] }
+        peerCount: { type: [integer, "null"], minimum: 0 }
+        hostname: { type: [string, "null"] }
+        exitNode: { type: [string, "null"] }
+    BoothThrottlingFlags:
+      type: object
+      additionalProperties: true
+      properties:
+        undervoltage: { type: [boolean, "null"] }
+        armFreqCapped: { type: [boolean, "null"] }
+        throttled: { type: [boolean, "null"] }
+        softTempLimit: { type: [boolean, "null"] }
+        undervoltageOccurred: { type: [boolean, "null"] }
+        throttledOccurred: { type: [boolean, "null"] }
     TranscriptionStatus:
       type: string
       enum: [pending, succeeded, failed]
