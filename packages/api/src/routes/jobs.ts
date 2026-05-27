@@ -146,11 +146,6 @@ const parseJobId = (jobId: string): { kind: JobKind; rowId: string } | null => {
 
 const jobIdFor = (kind: JobKind, rowId: string): string => `${kind}-${rowId}`;
 
-type LeasedJob =
-  | { kind: "transcription"; rowId: string; row: Awaited<ReturnType<typeof db.transcription.findUnique>> }
-  | { kind: "translation"; rowId: string; row: Awaited<ReturnType<typeof db.transcription.findUnique>> }
-  | { kind: "moderation"; rowId: string; row: Awaited<ReturnType<typeof db.moderation.findUnique>> };
-
 const claimTranscription = async (
   leaseToken: string,
   leaseSeconds: number,
@@ -415,7 +410,7 @@ jobsRouter.post(
 jobsRouter.post("/:id/succeed", zValidator("param", idParamSchema), async (c) => {
   const parsed = parseJobId(c.req.valid("param").id);
   if (!parsed) return c.json({ error: "not_found" }, 404);
-  const rawBody = await c.req.json().catch(() => null);
+  const rawBody: unknown = await c.req.json().catch(() => null);
   if (!rawBody || typeof rawBody !== "object") {
     return c.json({ error: "invalid_body" }, 400);
   }
