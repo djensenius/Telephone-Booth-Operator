@@ -19,6 +19,7 @@ import { MessagesScreen } from "../features/messages/MessagesScreen.js";
 import { QuestionsScreen } from "../features/questions/QuestionsScreen.js";
 import { SessionDetailScreen, SessionsScreen } from "../features/sessions/SessionsScreen.js";
 import { SettingsScreen } from "../features/settings/SettingsScreen.js";
+import { StatsScreen } from "../features/stats/StatsScreen.js";
 import { StatusScreen } from "../features/status/StatusScreen.js";
 import { LiveSystemPanel } from "../features/system/LiveSystemPanel.js";
 import { SystemVitalsStrip } from "../features/system/SystemVitalsStrip.js";
@@ -87,6 +88,9 @@ function AppLayout(): JSX.Element {
             <nav className="operator-sidebar__nav" aria-label="Observability routes">
               <h2>Observability</h2>
               <ul>
+                <li>
+                  <a href="/stats">Stats</a>
+                </li>
                 <li>
                   <a href="/system">Live system</a>
                 </li>
@@ -193,6 +197,12 @@ const sessionsRoute = createRoute({
   component: () => protectedScreen(<SessionsScreen />),
 });
 
+const statsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/stats",
+  component: () => protectedScreen(<StatsScreen />),
+});
+
 const sessionDetailRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/sessions/$id",
@@ -228,6 +238,7 @@ const routeTree = rootRoute.addChildren([
   systemRoute,
   eventsRoute,
   sessionsRoute,
+  statsRoute,
   sessionDetailRoute,
   loginRoute,
   aboutRoute,

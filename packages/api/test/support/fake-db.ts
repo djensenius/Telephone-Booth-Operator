@@ -381,25 +381,24 @@ export const fakeDb = {
       store.questions.set(question.id, question);
       return include?.audio ? attachAudio(question) : question;
     },
-    findMany: async ({
-      cursor,
-      skip = 0,
-      take,
-      include,
-    }: {
+    findMany: async (params: {
       cursor?: { id: string };
+      where?: Record<string, unknown>;
       skip?: number;
-      take: number;
+      take?: number;
       include?: { audio?: boolean };
-    }) => {
+    } = {}) => {
+      const { cursor, where = {}, skip = 0, take, include } = params;
+      const includeRetired = "retiredAt" in where;
       let questions = [...store.questions.values()]
-        .filter((question) => question.retiredAt === null)
+        .filter((question) => includeRetired || question.retiredAt === null)
+        .filter((question) => matchesWhere(question, where))
         .sort(byCreatedDesc);
       if (cursor) {
         const index = questions.findIndex((question) => question.id === cursor.id);
         questions = index >= 0 ? questions.slice(index + skip) : questions;
       }
-      const selected = questions.slice(0, take);
+      const selected = typeof take === "number" ? questions.slice(0, take) : questions;
       return include?.audio ? selected.map(attachAudio) : selected;
     },
     count: async () =>
@@ -721,7 +720,9 @@ export const fakeDb = {
       return snapshot;
     },
     findFirst: async () =>
-      [...store.statuses].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0] ?? null,
+      [...store.statuses].sort(
+        (a, b) => b.updatedAt.getTime() - a.updatedAt.getTime() || b.id - a.id,
+      )[0] ?? null,
     findMany: async ({
       where = {},
       take,
@@ -841,6 +842,19 @@ export const fakeDb = {
       if (typeof take === "number") events = events.slice(0, take);
       return events;
     },
+    findFirst: async ({
+      where = {},
+      orderBy,
+    }: {
+      where?: Record<string, unknown>;
+      orderBy?: unknown;
+    } = {}) => {
+      const events = sortBoothEvents(
+        store.boothEvents.filter((event) => matchesWhere(event, where)),
+        orderBy,
+      );
+      return events[0] ?? null;
+    },
   },
   callSession: {
     findUnique: async ({ where }: { where: { id: string } }) =>
@@ -902,6 +916,13 @@ const matchesWhere = (record: Record<string, unknown>, where: Record<string, unk
       const filter = raw as Record<string, unknown>;
       if ("in" in filter) {
         if (!Array.isArray(filter.in) || !(filter.in as unknown[]).includes(value)) return false;
+      }
+      if ("not" in filter) {
+        if (filter.not === null) {
+          if (value === null || value === undefined) return false;
+        } else if (value === filter.not) {
+          return false;
+        }
       }
       if ("gte" in filter && value !== undefined && value !== null) {
         if (compareValues(value, filter.gte) < 0) return false;

@@ -16,6 +16,7 @@ import {
   OperatorMeSchema,
   QuestionCreateSchema,
   QuestionSchema,
+  StatsOverviewSchema,
   TranscriptionListSchema,
   TranscriptionSchema,
   UploadSasRequestSchema,
@@ -38,6 +39,8 @@ import type {
   OperatorMe,
   Question,
   QuestionCreate,
+  StatsOverview,
+  StatsWindow,
   Transcription,
   TranscriptionList,
   UploadSasRequest,
@@ -320,6 +323,13 @@ export const system = {
     }),
 };
 
+export const stats = {
+  overview: (window: StatsWindow) =>
+    apiFetch<StatsOverview>(`/v1/stats/overview${query({ window })}`, {
+      schema: StatsOverviewSchema,
+    }),
+};
+
 export const apiQueryKeys = {
   me: ["auth", "me"] as const,
   status: ["status", "current"] as const,
@@ -334,6 +344,7 @@ export const apiQueryKeys = {
   sessions: (boothId?: string) => ["sessions", "list", boothId ?? null] as const,
   session: (id: string) => ["sessions", id] as const,
   system: (boothId: string) => ["system", boothId] as const,
+  statsOverview: (window: StatsWindow) => ["stats", "overview", window] as const,
 };
 
 export function useEventsList(params: EventsListParams = {}) {
@@ -366,6 +377,14 @@ export function useSystemCurrent(boothId: string | undefined) {
     queryFn: () => system.current(boothId ?? ""),
     enabled: typeof boothId === "string" && boothId.length > 0,
     refetchInterval: 5_000,
+  });
+}
+
+export function useStatsOverview(window: StatsWindow) {
+  return useQuery({
+    queryKey: apiQueryKeys.statsOverview(window),
+    queryFn: () => stats.overview(window),
+    refetchInterval: 30_000,
   });
 }
 
