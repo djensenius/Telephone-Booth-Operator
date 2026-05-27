@@ -70,6 +70,7 @@ export type FakeBoothEvent = {
   sessionId: string | null;
   recordingId: string | null;
   payload: unknown;
+  version: string | null;
 };
 
 export type FakeCallSession = {
@@ -82,6 +83,7 @@ export type FakeCallSession = {
   outcome: string | null;
   recordingId: string | null;
   durationMs: number | null;
+  version: string | null;
 };
 
 export type FakeTranscription = {
@@ -358,6 +360,7 @@ export const seedCallSession = (overrides: Partial<FakeCallSession> = {}): FakeC
     outcome: overrides.outcome ?? null,
     recordingId: overrides.recordingId ?? null,
     durationMs: overrides.durationMs ?? null,
+    version: overrides.version ?? null,
   };
   store.callSessions.set(session.id, session);
   return session;

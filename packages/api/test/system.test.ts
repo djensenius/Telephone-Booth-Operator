@@ -104,4 +104,27 @@ describe("system routes", () => {
       snapshot: { runtimeMode: "simulator" },
     });
   });
+
+  it("echoes the booth client version through cache + GET", async () => {
+    const app = createApp();
+    const put = await app.request("/v1/system", {
+      method: "PUT",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({
+        boothId: "booth-01",
+        snapshot: sampleSnapshot,
+        version: "0.3.2",
+      }),
+    });
+    expect(put.status).toBe(204);
+
+    const cookie = operatorCookie();
+    const got = await app.request("/v1/system/current?boothId=booth-01", { headers: { cookie } });
+    expect(got.status).toBe(200);
+    await expect(got.json()).resolves.toMatchObject({
+      boothId: "booth-01",
+      snapshot: sampleSnapshot,
+      version: "0.3.2",
+    });
+  });
 });

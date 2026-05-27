@@ -62,6 +62,29 @@ const baseSnapshot = {
 };
 
 describe("LiveSystemPanel", () => {
+  it("renders the booth client version when provided in the envelope", () => {
+    renderPanel({
+      boothId: "booth-01",
+      snapshot: baseSnapshot,
+      receivedAt: "2026-05-27T00:00:05.000Z",
+      version: "0.3.2",
+    });
+    // The "Phone client version" row is the first row in the grid.
+    expect(screen.getByText("Phone client version")).toBeDefined();
+    expect(screen.getByText("0.3.2")).toBeDefined();
+  });
+
+  it("falls back to em-dash when the envelope omits the version", () => {
+    renderPanel({
+      boothId: "booth-01",
+      snapshot: baseSnapshot,
+      receivedAt: "2026-05-27T00:00:05.000Z",
+    });
+    const versionRow = screen.getByText("Phone client version").closest("div");
+    expect(versionRow).toBeDefined();
+    expect(within(versionRow!).getByText("—")).toBeDefined();
+  });
+
   it("renders the loading state when the cache has no snapshot yet", () => {
     renderPanel();
     expect(screen.getByText("Live system")).toBeDefined();

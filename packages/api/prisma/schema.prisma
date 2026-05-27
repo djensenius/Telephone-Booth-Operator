@@ -122,6 +122,9 @@ model BoothEvent {
   sessionId   String?
   recordingId String?
   payload     Json
+  // Running version of the `telephone-booth` Rust client that produced the
+  // event (e.g. `0.3.2`). Nullable for backfill / older booths.
+  version     String?
   session     CallSession? @relation(fields: [sessionId], references: [id])
 
   @@unique([boothId, eventId])
@@ -145,6 +148,8 @@ model CallSession {
   outcome      String?
   recordingId  String?
   durationMs   Int?
+  // Booth client version captured from the `call_started` event.
+  version      String?
   events       BoothEvent[]
 
   @@index([boothId, startedAt])
