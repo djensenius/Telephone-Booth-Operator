@@ -52,6 +52,14 @@ export const serializeTranscription = (row: PrismaTranscription): TranscriptionP
   requestedById: row.requestedById,
   createdAt: iso(row.createdAt),
   completedAt: row.completedAt ? iso(row.completedAt) : null,
+  translationStatus: row.translationStatus,
+  translatedText: row.translatedText,
+  translatedLanguage: row.translatedLanguage,
+  translationProvider: row.translationProvider ? (row.translationProvider as AiProvider) : null,
+  translationModel: row.translationModel,
+  translationError: row.translationError,
+  translationLatencyMs: row.translationLatencyMs,
+  translationCompletedAt: row.translationCompletedAt ? iso(row.translationCompletedAt) : null,
 });
 
 const isCategoriesMap = (raw: unknown): raw is Record<string, number> => {

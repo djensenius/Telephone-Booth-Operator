@@ -11,9 +11,17 @@ import { generateSasUrl } from "../azure-blob.js";
 import { wsBroadcaster } from "../broadcaster.js";
 import { db } from "../db.js";
 import { serializeMessage } from "../serializers.js";
-import { resolveAiConfig, type AiConfig } from "./config.js";
-import { buildModerationProvider, buildTranscriptionProvider } from "./factory.js";
-import type { ModerationProvider, TranscriptionProvider } from "./types.js";
+import { isEnglishLanguage, resolveAiConfig, type AiConfig } from "./config.js";
+import {
+  buildModerationProvider,
+  buildTranscriptionProvider,
+  buildTranslationProvider,
+} from "./factory.js";
+import type {
+  ModerationProvider,
+  TranscriptionProvider,
+  TranslationProvider,
+} from "./types.js";
 import { ProviderError } from "./types.js";
 
 // Build a sanitized error string safe for persistence and logging.
@@ -45,6 +53,7 @@ const log = (
 export interface PipelineDeps {
   readonly config: AiConfig;
   readonly transcriptionProvider: TranscriptionProvider | null;
+  readonly translationProvider: TranslationProvider | null;
   readonly moderationProvider: ModerationProvider | null;
 }
 
@@ -53,6 +62,7 @@ export const buildDefaultPipelineDeps = (): PipelineDeps => {
   return {
     config,
     transcriptionProvider: buildTranscriptionProvider(config),
+    translationProvider: buildTranslationProvider(config),
     moderationProvider: buildModerationProvider(config),
   };
 };
@@ -77,7 +87,7 @@ const broadcastMessage = async (messageId: string): Promise<void> => {
   wsBroadcaster.broadcast({ kind: "message", message: serialized });
 };
 
-const applyAutoDecision = async (
+export const applyAutoDecision = async (
   messageId: string,
   deps: PipelineDeps,
   moderationOutcome: {
@@ -263,11 +273,10 @@ export const runTranscription = async (
     await broadcastMessage(message.id);
     if (!opts.skipDownstream) {
       if (result.text.trim().length > 0) {
-        await runModeration({
+        await runTranslationThenModeration({
           messageId: message.id,
           transcriptionId: pending.id,
           deps,
-          requestedByUserId: null,
         });
       } else {
         // Silent recording: there is nothing to moderate, but we still want
@@ -295,6 +304,141 @@ export const runTranscription = async (
     });
     await broadcastMessage(message.id);
     return { outcome: "created", transcriptionId: pending.id };
+  }
+};
+
+export interface RunTranslationOptions {
+  readonly messageId: string;
+  readonly transcriptionId: string;
+  readonly deps?: PipelineDeps;
+}
+
+export type TranslationOutcome =
+  | { outcome: "skipped"; reason: "english" | "empty_text" | "not_found" }
+  | { outcome: "succeeded" }
+  | { outcome: "failed"; reason: string }
+  | { outcome: "deferred"; reason: "pending_pull" };
+
+// Runs a translation against the given transcription's text. Returns
+// "deferred" when no in-process translation provider is configured but the
+// transcription is non-English — in that case the row is marked
+// `translationStatus = pending` so the pull worker can lease it. Returns
+// "skipped" when translation is not needed (English) or impossible (no text).
+export const runTranslation = async (
+  opts: RunTranslationOptions,
+): Promise<TranslationOutcome> => {
+  const deps = opts.deps ?? buildDefaultPipelineDeps();
+  const transcription = await db.transcription.findUnique({
+    where: { id: opts.transcriptionId },
+  });
+  if (!transcription) return { outcome: "skipped", reason: "not_found" };
+  const text = transcription.text?.trim() ?? "";
+  if (text.length === 0) return { outcome: "skipped", reason: "empty_text" };
+  if (isEnglishLanguage(transcription.language)) {
+    return { outcome: "skipped", reason: "english" };
+  }
+
+  const provider = deps.translationProvider;
+  if (!provider) {
+    // No in-process provider — defer to the pull worker. Mark the row so the
+    // jobs API can lease it; the worker will post a result back via
+    // `/v1/jobs/:id/succeed`.
+    if (transcription.translationStatus !== "pending") {
+      await db.transcription.update({
+        where: { id: transcription.id },
+        data: {
+          translationStatus: "pending",
+          translationProvider: deps.config.translationProvider,
+        },
+      });
+      await broadcastMessage(opts.messageId);
+    }
+    return { outcome: "deferred", reason: "pending_pull" };
+  }
+
+  // Mark pending before we call out, then update with the result.
+  await db.transcription.update({
+    where: { id: transcription.id },
+    data: {
+      translationStatus: "pending",
+      translationProvider: provider.name,
+      translationModel: provider.model,
+    },
+  });
+  await broadcastMessage(opts.messageId);
+
+  const startedAt = Date.now();
+  try {
+    const result = await provider.translate({
+      text,
+      sourceLanguage: transcription.language,
+    });
+    await db.transcription.update({
+      where: { id: transcription.id },
+      data: {
+        translationStatus: "succeeded",
+        translatedText: result.text,
+        translatedLanguage: result.language,
+        translationLatencyMs: Date.now() - startedAt,
+        translationCompletedAt: new Date(),
+        translationError: null,
+      },
+    });
+    log("info", "ai.translation.completed", {
+      messageId: opts.messageId,
+      provider: provider.name,
+      model: provider.model,
+      latencyMs: Date.now() - startedAt,
+    });
+    await broadcastMessage(opts.messageId);
+    return { outcome: "succeeded" };
+  } catch (error) {
+    const reason = sanitizeError(error);
+    await db.transcription.update({
+      where: { id: transcription.id },
+      data: {
+        translationStatus: "failed",
+        translationError: reason,
+        translationLatencyMs: Date.now() - startedAt,
+        translationCompletedAt: new Date(),
+      },
+    });
+    log("error", "ai.translation.failed", {
+      messageId: opts.messageId,
+      provider: provider.name,
+      reason,
+    });
+    await broadcastMessage(opts.messageId);
+    return { outcome: "failed", reason };
+  }
+};
+
+// Helper: run translation (if applicable) then moderation. Used by the
+// in-process pipeline after a successful transcription. Moderation runs
+// against the translated text if available, otherwise the original transcript.
+const runTranslationThenModeration = async (opts: {
+  messageId: string;
+  transcriptionId: string;
+  deps: PipelineDeps;
+}): Promise<void> => {
+  const outcome = await runTranslation({
+    messageId: opts.messageId,
+    transcriptionId: opts.transcriptionId,
+    deps: opts.deps,
+  });
+  // If translation is deferred (no in-process provider) we still kick off
+  // moderation against the original text so the existing push-mode pipeline
+  // is not stalled waiting on a pull worker that may never run. The pull
+  // worker can still translate later; it does not affect the moderation
+  // verdict already produced.
+  if (outcome.outcome === "deferred" || outcome.outcome === "succeeded" ||
+      outcome.outcome === "skipped" || outcome.outcome === "failed") {
+    await runModeration({
+      messageId: opts.messageId,
+      transcriptionId: opts.transcriptionId,
+      deps: opts.deps,
+      requestedByUserId: null,
+    });
   }
 };
 
@@ -368,8 +512,16 @@ export const runModeration = async (opts: RunModerationOptions): Promise<string 
   await broadcastMessage(opts.messageId);
 
   const startedAt = Date.now();
+  // Prefer translated text when present so moderation works on English even
+  // for non-English audio inputs. Falls back to the raw transcript otherwise.
+  const moderationText =
+    transcription.translationStatus === "succeeded" &&
+    typeof transcription.translatedText === "string" &&
+    transcription.translatedText.trim().length > 0
+      ? transcription.translatedText
+      : transcription.text;
   try {
-    const result = await provider.moderate({ text: transcription.text });
+    const result = await provider.moderate({ text: moderationText });
     await db.moderation.update({
       where: { id: pending.id },
       data: {

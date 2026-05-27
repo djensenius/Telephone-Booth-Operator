@@ -62,6 +62,14 @@ export const TranscriptionSchema = z.object({
   requestedById: z.string().nullable(),
   createdAt: z.string().datetime(),
   completedAt: z.string().datetime().nullable(),
+  translationStatus: TranscriptionStatusSchema.nullable(),
+  translatedText: z.string().nullable(),
+  translatedLanguage: z.string().nullable(),
+  translationProvider: AiProviderSchema.nullable(),
+  translationModel: z.string().nullable(),
+  translationError: z.string().nullable(),
+  translationLatencyMs: z.number().int().nonnegative().nullable(),
+  translationCompletedAt: z.string().datetime().nullable(),
 });
 export type Transcription = z.infer<typeof TranscriptionSchema>;
 

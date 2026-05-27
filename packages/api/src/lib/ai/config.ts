@@ -5,10 +5,12 @@
 import { z } from "zod";
 
 export type TranscriptionProviderName = "openai" | "mac_app" | "disabled";
+export type TranslationProviderName = "openai" | "mac_app" | "disabled";
 export type ModerationProviderName = "openai" | "mac_app" | "disabled";
 export type AutoDecisionMode = "always_pending" | "auto_reject" | "auto_both";
 
 const TranscriptionProviderEnum = z.enum(["openai", "mac_app", "disabled"]);
+const TranslationProviderEnum = z.enum(["openai", "mac_app", "disabled"]);
 const ModerationProviderEnum = z.enum(["openai", "mac_app", "disabled"]);
 const AutoDecisionModeEnum = z.enum(["always_pending", "auto_reject", "auto_both"]);
 
@@ -29,11 +31,35 @@ const parseInteger = (raw: string | undefined, fallback: number, min = 1): numbe
 // 25 MiB — matches OpenAI Whisper's upload limit.
 export const DEFAULT_MAX_AUDIO_BYTES = 26_214_400;
 
+// English language tags that mean "no translation needed". Anything not in
+// this set is treated as non-English and routed to the translation step.
+export const ENGLISH_LANGUAGE_TAGS = new Set<string>([
+  "en",
+  "en-us",
+  "en-gb",
+  "en-au",
+  "en-ca",
+  "en-ie",
+  "en-in",
+  "en-nz",
+  "en-za",
+  "english",
+]);
+
+export const isEnglishLanguage = (language: string | null | undefined): boolean => {
+  if (!language) return true;
+  return ENGLISH_LANGUAGE_TAGS.has(language.trim().toLowerCase());
+};
+
 export interface AiConfig {
   readonly transcriptionProvider: TranscriptionProviderName;
   readonly transcriptionOpenAiModel: string;
   readonly transcriptionMacAppUrl: string | null;
   readonly transcriptionMacAppToken: string | null;
+  readonly translationProvider: TranslationProviderName;
+  readonly translationOpenAiModel: string;
+  readonly translationMacAppUrl: string | null;
+  readonly translationMacAppToken: string | null;
   readonly moderationProvider: ModerationProviderName;
   readonly moderationOpenAiModel: string;
   readonly moderationMacAppUrl: string | null;
@@ -62,6 +88,12 @@ export const resolveAiConfig = (): AiConfig => {
     transcriptionOpenAiModel: trimmedOrNull(env.TRANSCRIPTION_OPENAI_MODEL) ?? "whisper-1",
     transcriptionMacAppUrl: trimmedOrNull(env.TRANSCRIPTION_MAC_APP_URL),
     transcriptionMacAppToken: trimmedOrNull(env.TRANSCRIPTION_MAC_APP_TOKEN),
+    translationProvider: TranslationProviderEnum.catch("disabled" as const).parse(
+      env.TRANSLATION_PROVIDER ?? "disabled",
+    ),
+    translationOpenAiModel: trimmedOrNull(env.TRANSLATION_OPENAI_MODEL) ?? "gpt-4o-mini",
+    translationMacAppUrl: trimmedOrNull(env.TRANSLATION_MAC_APP_URL),
+    translationMacAppToken: trimmedOrNull(env.TRANSLATION_MAC_APP_TOKEN),
     moderationProvider: ModerationProviderEnum.catch("disabled" as const).parse(
       env.MODERATION_PROVIDER ?? "disabled",
     ),

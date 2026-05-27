@@ -83,3 +83,22 @@ See `packages/api/prisma/schema.prisma` for the canonical schema.
   shown to the operator once on creation.
 - `BoothStatusSnapshot` — append-only log of status updates from the phone
   client, used to power the live status panel and historical charts.
+
+## AI pipeline: transcription, translation, moderation
+
+A recording goes through three steps after upload, all driven by the API
+process:
+
+1. **Transcription** — audio → text + detected language.
+2. **Translation** — if the detected language isn't English, text →
+   English. Stored on the same transcription row
+   (`translatedText`, `translatedLanguage`, …). Skipped for English.
+3. **Moderation** — runs against the translated text when present,
+   otherwise the original transcript. Drives the message's auto-decision
+   (`approve` / `review` / `reject`).
+
+Each step has its own provider abstraction (`packages/api/src/lib/ai/`).
+Built-in providers: OpenAI (cloud), `mac_app` (push to a reachable Mac),
+and `disabled`. The Mac app can additionally be wired as a **pull** worker
+that leases jobs from `/v1/jobs/*` — see [`operator-pull.md`](./operator-pull.md).
+Both modes can coexist; the lease semantics make races safe.

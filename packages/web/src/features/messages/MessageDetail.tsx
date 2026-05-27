@@ -89,6 +89,26 @@ function TranscriptCard({
       ) : (
         <>
           <p className="feature-transcript-body">{transcription.text ?? ""}</p>
+          {transcription.translationStatus === "succeeded" &&
+          typeof transcription.translatedText === "string" &&
+          transcription.translatedText.trim().length > 0 ? (
+            <p className="feature-transcript-body feature-transcript-body--translated">
+              <span className="feature-transcript-label">
+                Translated from {transcription.language ?? "unknown"}
+                {transcription.translatedLanguage
+                  ? ` to ${transcription.translatedLanguage}`
+                  : ""}
+              </span>
+              {transcription.translatedText}
+            </p>
+          ) : transcription.translationStatus === "pending" ? (
+            <p className="feature-empty">Translation in progress…</p>
+          ) : transcription.translationStatus === "failed" ? (
+            <p className="feature-error">
+              Translation failed
+              {transcription.translationError ? `: ${transcription.translationError}` : ""}.
+            </p>
+          ) : null}
           <dl className="debug-kv-grid debug-kv-grid--compact">
             <div>
               <dt>Provider</dt>

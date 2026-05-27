@@ -98,6 +98,24 @@ export type FakeTranscription = {
   requestedById: string | null;
   createdAt: Date;
   completedAt: Date | null;
+  // Pull-worker lease columns (transcription job).
+  leasedAt: Date | null;
+  leaseToken: string | null;
+  leaseExpiresAt: Date | null;
+  attemptCount: number;
+  // Translation step columns (lives on the transcription row).
+  translationStatus: "pending" | "succeeded" | "failed" | null;
+  translatedText: string | null;
+  translatedLanguage: string | null;
+  translationProvider: string | null;
+  translationModel: string | null;
+  translationError: string | null;
+  translationLatencyMs: number | null;
+  translationCompletedAt: Date | null;
+  translationLeasedAt: Date | null;
+  translationLeaseToken: string | null;
+  translationLeaseExpiresAt: Date | null;
+  translationAttemptCount: number;
 };
 
 export type FakeModeration = {
@@ -117,6 +135,11 @@ export type FakeModeration = {
   requestedById: string | null;
   createdAt: Date;
   completedAt: Date | null;
+  // Pull-worker lease columns (moderation job).
+  leasedAt: Date | null;
+  leaseToken: string | null;
+  leaseExpiresAt: Date | null;
+  attemptCount: number;
 };
 
 export const store = {
@@ -136,6 +159,103 @@ const cloneDate = (date: Date): Date => new Date(date.getTime());
 
 const byCreatedDesc = <T extends { createdAt: Date; id: string }>(a: T, b: T): number =>
   b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id);
+
+// Minimal Prisma-style predicate evaluator used by jobs.ts queries. Supports
+// equality, `not`, `lt`, `OR`, and the `is` relation filter we use for the
+// "moderation can only be claimed when translation isn't pending" guard.
+// Kept intentionally tiny — extend as new query shapes appear in tests.
+type Predicate = Record<string, unknown> | undefined;
+
+const matchScalar = (value: unknown, expected: unknown): boolean => {
+  if (expected === null || expected === undefined) return value === expected;
+  if (typeof expected === "object" && !(expected instanceof Date)) {
+    const expObj = expected as Record<string, unknown>;
+    if ("not" in expObj) {
+      return value !== expObj.not;
+    }
+    if ("lt" in expObj) {
+      if (value === null || value === undefined) return false;
+      if (value instanceof Date && expObj.lt instanceof Date) {
+        return value.getTime() < expObj.lt.getTime();
+      }
+      return (value as number) < (expObj.lt as number);
+    }
+    if ("increment" in expObj) {
+      // Should not appear in WHERE; ignore.
+      return true;
+    }
+  }
+  if (value instanceof Date && expected instanceof Date) {
+    return value.getTime() === expected.getTime();
+  }
+  return value === expected;
+};
+
+const matchPredicate = <T extends Record<string, unknown>>(
+  row: T,
+  where: Predicate,
+  relations: Record<string, (key: string) => unknown> = {},
+): boolean => {
+  if (!where) return true;
+  for (const [key, expected] of Object.entries(where)) {
+    if (key === "OR" && Array.isArray(expected)) {
+      const anyMatch = (expected as Predicate[]).some((p) => matchPredicate(row, p, relations));
+      if (!anyMatch) return false;
+      continue;
+    }
+    if (key === "AND" && Array.isArray(expected)) {
+      const allMatch = (expected as Predicate[]).every((p) => matchPredicate(row, p, relations));
+      if (!allMatch) return false;
+      continue;
+    }
+    // Relation filter: { relationName: { is: { ... } } }
+    if (
+      typeof expected === "object" &&
+      expected !== null &&
+      "is" in (expected as Record<string, unknown>) &&
+      relations[key]
+    ) {
+      const related = relations[key](key);
+      if (related === null || related === undefined) {
+        // `is: { ... }` only matches when the related row exists.
+        return false;
+      }
+      if (
+        !matchPredicate(
+          related as Record<string, unknown>,
+          (expected as { is: Predicate }).is,
+        )
+      ) {
+        return false;
+      }
+      continue;
+    }
+    if (!matchScalar((row as Record<string, unknown>)[key], expected)) return false;
+  }
+  return true;
+};
+
+const applyUpdate = <T extends Record<string, unknown>>(
+  row: T,
+  data: Record<string, unknown>,
+): T => {
+  const out: Record<string, unknown> = { ...row };
+  for (const [key, value] of Object.entries(data)) {
+    if (
+      value !== null &&
+      typeof value === "object" &&
+      !(value instanceof Date) &&
+      "increment" in (value as Record<string, unknown>)
+    ) {
+      const inc = (value as { increment: number }).increment;
+      const current = typeof out[key] === "number" ? (out[key] as number) : 0;
+      out[key] = current + inc;
+      continue;
+    }
+    out[key] = value;
+  }
+  return out as T;
+};
 
 const attachAudio = <T extends { audioId: string }>(record: T): T & { audio: FakeFile } => {
   const audio = store.files.get(record.audioId);
@@ -575,6 +695,22 @@ export const fakeDb = {
         requestedById: data.requestedById ?? null,
         createdAt: data.createdAt ?? new Date(),
         completedAt: data.completedAt ?? null,
+        leasedAt: data.leasedAt ?? null,
+        leaseToken: data.leaseToken ?? null,
+        leaseExpiresAt: data.leaseExpiresAt ?? null,
+        attemptCount: data.attemptCount ?? 0,
+        translationStatus: data.translationStatus ?? null,
+        translatedText: data.translatedText ?? null,
+        translatedLanguage: data.translatedLanguage ?? null,
+        translationProvider: data.translationProvider ?? null,
+        translationModel: data.translationModel ?? null,
+        translationError: data.translationError ?? null,
+        translationLatencyMs: data.translationLatencyMs ?? null,
+        translationCompletedAt: data.translationCompletedAt ?? null,
+        translationLeasedAt: data.translationLeasedAt ?? null,
+        translationLeaseToken: data.translationLeaseToken ?? null,
+        translationLeaseExpiresAt: data.translationLeaseExpiresAt ?? null,
+        translationAttemptCount: data.translationAttemptCount ?? 0,
       };
       store.transcriptions.set(row.id, row);
       return row;
@@ -584,34 +720,66 @@ export const fakeDb = {
       data,
     }: {
       where: { id: string };
-      data: Partial<FakeTranscription>;
+      data: Partial<FakeTranscription> & Record<string, unknown>;
     }) => {
       const existing = store.transcriptions.get(where.id);
       if (!existing) throw new Error("transcription not found");
-      const updated = { ...existing, ...data };
+      const updated = applyUpdate(existing, data);
       store.transcriptions.set(where.id, updated);
       return updated;
     },
-    findUnique: async ({ where }: { where: { id: string } }) =>
-      store.transcriptions.get(where.id) ?? null,
+    updateMany: async ({
+      where,
+      data,
+    }: {
+      where: Predicate;
+      data: Record<string, unknown>;
+    }) => {
+      let count = 0;
+      for (const row of store.transcriptions.values()) {
+        if (matchPredicate(row as unknown as Record<string, unknown>, where)) {
+          store.transcriptions.set(row.id, applyUpdate(row, data));
+          count += 1;
+        }
+      }
+      return { count };
+    },
+    findUnique: async ({
+      where,
+      include,
+    }: {
+      where: { id: string };
+      include?: { message?: unknown };
+    }) => {
+      const row = store.transcriptions.get(where.id) ?? null;
+      if (!row || !include?.message) return row;
+      const message = store.messages.get(row.messageId) ?? null;
+      const audio = message ? store.files.get(message.audioId) ?? null : null;
+      return { ...row, message: message ? { ...message, audio } : null } as never;
+    },
     findFirst: async ({
       where,
       orderBy,
+      include,
     }: {
-      where: { messageId: string; status?: string };
+      where?: Predicate;
       orderBy?: { createdAt?: "asc" | "desc" };
+      include?: { message?: unknown };
     }) => {
       const order = orderBy?.createdAt ?? "desc";
-      const rows = [...store.transcriptions.values()].filter(
-        (row) =>
-          row.messageId === where.messageId && (where.status ? row.status === where.status : true),
+      const rows = [...store.transcriptions.values()].filter((row) =>
+        matchPredicate(row as unknown as Record<string, unknown>, where),
       );
       rows.sort((a, b) =>
         order === "asc"
           ? a.createdAt.getTime() - b.createdAt.getTime()
           : b.createdAt.getTime() - a.createdAt.getTime(),
       );
-      return rows[0] ?? null;
+      const row = rows[0] ?? null;
+      if (!row || !include?.message) return row;
+      const message = store.messages.get(row.messageId) ?? null;
+      const audio = message ? store.files.get(message.audioId) ?? null : null;
+      return { ...row, message: message ? { ...message, audio } : null } as never;
     },
     findMany: async ({
       where,
@@ -658,36 +826,94 @@ export const fakeDb = {
         requestedById: data.requestedById ?? null,
         createdAt: new Date(),
         completedAt: data.completedAt ?? null,
+        leasedAt: data.leasedAt ?? null,
+        leaseToken: data.leaseToken ?? null,
+        leaseExpiresAt: data.leaseExpiresAt ?? null,
+        attemptCount: data.attemptCount ?? 0,
       };
       store.moderations.set(row.id, row);
       return row;
     },
-    update: async ({ where, data }: { where: { id: string }; data: Partial<FakeModeration> }) => {
+    update: async ({
+      where,
+      data,
+    }: {
+      where: { id: string };
+      data: Partial<FakeModeration> & Record<string, unknown>;
+    }) => {
       const existing = store.moderations.get(where.id);
       if (!existing) throw new Error("moderation not found");
-      const updated = { ...existing, ...data };
+      const updated = applyUpdate(existing, data);
       store.moderations.set(where.id, updated);
       return updated;
     },
-    findUnique: async ({ where }: { where: { id: string } }) =>
-      store.moderations.get(where.id) ?? null,
+    updateMany: async ({
+      where,
+      data,
+    }: {
+      where: Predicate;
+      data: Record<string, unknown>;
+    }) => {
+      const relations = {
+        transcription: (_key: string) =>
+          // unused for moderation.updateMany today; placeholder.
+          null,
+      };
+      let count = 0;
+      for (const row of store.moderations.values()) {
+        if (matchPredicate(row as unknown as Record<string, unknown>, where, relations)) {
+          store.moderations.set(row.id, applyUpdate(row, data));
+          count += 1;
+        }
+      }
+      return { count };
+    },
+    findUnique: async ({
+      where,
+      include,
+    }: {
+      where: { id: string };
+      include?: { transcription?: boolean };
+    }) => {
+      const row = store.moderations.get(where.id) ?? null;
+      if (!row || !include?.transcription) return row;
+      const transcription = row.transcriptionId
+        ? store.transcriptions.get(row.transcriptionId) ?? null
+        : null;
+      return { ...row, transcription } as never;
+    },
     findFirst: async ({
       where,
       orderBy,
+      include,
     }: {
-      where: { messageId: string };
+      where?: Predicate;
       orderBy?: { createdAt?: "asc" | "desc" };
+      include?: { transcription?: boolean };
     }) => {
       const order = orderBy?.createdAt ?? "desc";
-      const rows = [...store.moderations.values()].filter(
-        (row) => row.messageId === where.messageId,
-      );
+      const relations = {
+        transcription: (_key: string) => null as unknown,
+      };
+      const rows = [...store.moderations.values()].filter((row) => {
+        const rel = {
+          transcription: (_key: string) =>
+            row.transcriptionId ? store.transcriptions.get(row.transcriptionId) ?? null : null,
+        };
+        return matchPredicate(row as unknown as Record<string, unknown>, where, rel);
+      });
       rows.sort((a, b) =>
         order === "asc"
           ? a.createdAt.getTime() - b.createdAt.getTime()
           : b.createdAt.getTime() - a.createdAt.getTime(),
       );
-      return rows[0] ?? null;
+      void relations; // kept above for clarity / docs
+      const row = rows[0] ?? null;
+      if (!row || !include?.transcription) return row;
+      const transcription = row.transcriptionId
+        ? store.transcriptions.get(row.transcriptionId) ?? null
+        : null;
+      return { ...row, transcription } as never;
     },
     findMany: async ({
       where,
