@@ -3,7 +3,10 @@
 // No Postgres persistence in v1 — VictoriaMetrics owns historical metrics.
 
 import { zValidator } from "@hono/zod-validator";
-import { BoothSystemSnapshotSchema } from "@telephone-booth-operator/shared";
+import {
+  BoothSystemSnapshotSchema,
+  BOOTH_CLIENT_VERSION_MAX,
+} from "@telephone-booth-operator/shared";
 import { Hono } from "hono";
 import { z } from "zod";
 import { wsBroadcaster } from "../lib/broadcaster.js";
@@ -14,15 +17,24 @@ import { requireOperator, type AuthVariables } from "../lib/session.js";
 const putBodySchema = z.object({
   boothId: z.string().min(1).max(64),
   snapshot: BoothSystemSnapshotSchema,
+  // Optional booth-client version (e.g. `0.3.2`). Echoed back on the WS
+  // envelope and surfaced in the operator UI's "Live system" panel.
+  version: z.string().min(1).max(BOOTH_CLIENT_VERSION_MAX).nullable().optional(),
 });
 
 const systemRouter = new Hono<{ Variables: AuthVariables & ApiTokenVariables }>();
 
 systemRouter.put("/", requireApiToken(), zValidator("json", putBodySchema), (c) => {
-  const { boothId, snapshot } = c.req.valid("json");
+  const { boothId, snapshot, version } = c.req.valid("json");
   const receivedAt = new Date().toISOString();
-  setSystemSnapshot({ boothId, snapshot, receivedAt });
-  wsBroadcaster.broadcast({ kind: "system", boothId, snapshot, receivedAt });
+  setSystemSnapshot({ boothId, snapshot, receivedAt, version: version ?? null });
+  wsBroadcaster.broadcast({
+    kind: "system",
+    boothId,
+    snapshot,
+    receivedAt,
+    version: version ?? null,
+  });
   return c.body(null, 204);
 });
 

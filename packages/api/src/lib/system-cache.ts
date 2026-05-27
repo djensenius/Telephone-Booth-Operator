@@ -11,6 +11,9 @@ export type CachedSnapshot = {
   boothId: string;
   snapshot: BoothSystemSnapshot;
   receivedAt: string;
+  // Booth client (`telephone-booth`) version that produced this snapshot.
+  // Nullable because older booths don't report a version yet.
+  version: string | null;
 };
 
 const snapshots = new Map<string, CachedSnapshot>();

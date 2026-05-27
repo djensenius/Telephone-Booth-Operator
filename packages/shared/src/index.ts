@@ -272,6 +272,11 @@ export const CallOutcomeSchema = z.enum([
 ]);
 export type CallOutcome = z.infer<typeof CallOutcomeSchema>;
 
+// Maximum length for the running booth client (`telephone-booth`) version
+// string. Matches the SemVer + pre-release/build-metadata grammar limit we
+// expect in practice; mirrored on the API DB column.
+export const BOOTH_CLIENT_VERSION_MAX = 64;
+
 export const BoothEventSchema = z.object({
   eventId: z.string().min(1).max(128),
   boothId: z.string().min(1).max(64),
@@ -281,6 +286,10 @@ export const BoothEventSchema = z.object({
   sessionId: z.string().uuid().nullable().optional(),
   recordingId: z.string().min(1).max(128).nullable().optional(),
   payload: z.unknown().optional(),
+  // Running version of the `telephone-booth` Rust client that produced the
+  // event (e.g. `0.3.2`). Optional + nullable so older booths that don't
+  // emit it still ingest cleanly.
+  version: z.string().min(1).max(BOOTH_CLIENT_VERSION_MAX).nullable().optional(),
 });
 export type BoothEvent = z.infer<typeof BoothEventSchema>;
 
@@ -325,6 +334,10 @@ export const CallSessionSchema = z.object({
   outcome: CallOutcomeSchema.nullable(),
   recordingId: z.string().nullable(),
   durationMs: z.number().int().nonnegative().nullable(),
+  // Snapshot of the booth client version captured from the `call_started`
+  // event (when present). Helps operators correlate calls with deployed
+  // booth builds without scanning every event.
+  version: z.string().min(1).max(BOOTH_CLIENT_VERSION_MAX).nullable(),
 });
 export type CallSession = z.infer<typeof CallSessionSchema>;
 
@@ -462,6 +475,9 @@ export const BoothSystemSnapshotEnvelopeSchema = z.object({
   boothId: z.string(),
   snapshot: BoothSystemSnapshotSchema,
   receivedAt: z.string().datetime(),
+  // Running version of the `telephone-booth` Rust client that produced the
+  // snapshot. Optional + nullable so older booths still upload.
+  version: z.string().min(1).max(BOOTH_CLIENT_VERSION_MAX).nullable().optional(),
 });
 export type BoothSystemSnapshotEnvelope = z.infer<typeof BoothSystemSnapshotEnvelopeSchema>;
 
@@ -478,6 +494,7 @@ export const WsEnvelopeSchema = z.discriminatedUnion("kind", [
     boothId: z.string(),
     snapshot: BoothSystemSnapshotSchema,
     receivedAt: z.string().datetime(),
+    version: z.string().min(1).max(BOOTH_CLIENT_VERSION_MAX).nullable().optional(),
   }),
   z.object({
     kind: z.literal("message"),

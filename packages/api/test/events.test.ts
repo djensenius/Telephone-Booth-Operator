@@ -101,6 +101,7 @@ describe("POST /v1/events", () => {
             type: "call_started",
             occurredAt: startedAt,
             payload: {},
+            version: "0.3.2",
           }),
           sampleEvent({
             eventId: "evt-end",
@@ -109,6 +110,7 @@ describe("POST /v1/events", () => {
             type: "call_ended",
             occurredAt: endedAt,
             payload: { outcome: "recording_completed", duration_ms: 4500, digits_dialed: "1" },
+            version: "0.3.2",
           }),
         ],
       }),
@@ -121,6 +123,10 @@ describe("POST /v1/events", () => {
     expect(session?.outcome).toBe("recording_completed");
     expect(session?.durationMs).toBe(4500);
     expect(session?.digitsDialed).toBe("1");
+    expect(session?.version).toBe("0.3.2");
+    // The event row must also carry the booth client version verbatim.
+    const startEvent = store.boothEvents.find((event) => event.eventId === "evt-start");
+    expect(startEvent?.version).toBe("0.3.2");
   });
 });
 

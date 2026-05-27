@@ -1,8 +1,5 @@
 import { useMemo } from "react";
-import type {
-  BoothSystemSnapshot,
-  BoothThrottlingFlags,
-} from "@telephone-booth-operator/shared";
+import type { BoothSystemSnapshot, BoothThrottlingFlags } from "@telephone-booth-operator/shared";
 import { GlassPanel, RuntimeModeBadge } from "../../components/booth/index.js";
 import type { BoothRuntimeMode } from "../../components/booth/index.js";
 import { useSystemCurrent } from "../../lib/api-client.js";
@@ -34,6 +31,7 @@ export function LiveSystemPanel({ boothId = DEFAULT_BOOTH_ID }: LiveSystemPanelP
   const query = useSystemCurrent(boothId);
   const snapshot = query.data?.snapshot as BoothSystemSnapshot | undefined;
   const receivedAt = query.data?.receivedAt;
+  const clientVersion = query.data?.version ?? null;
 
   const rows = useMemo(() => {
     if (!snapshot) return [];
@@ -44,6 +42,10 @@ export function LiveSystemPanel({ boothId = DEFAULT_BOOTH_ID }: LiveSystemPanelP
     const memoryUsedBytes = memory?.usedBytes ?? null;
     const memoryTotalBytes = memory?.totalBytes ?? null;
     return [
+      {
+        label: "Phone client version",
+        value: clientVersion ?? "—",
+      },
       {
         label: "CPU temperature",
         value:
@@ -67,8 +69,7 @@ export function LiveSystemPanel({ boothId = DEFAULT_BOOTH_ID }: LiveSystemPanelP
       { label: "Audio output device", value: audio?.outputDevice ?? "—" },
       {
         label: "Audio sample rate",
-        value:
-          typeof audio?.sampleRateHz === "number" ? `${audio.sampleRateHz} Hz` : "—",
+        value: typeof audio?.sampleRateHz === "number" ? `${audio.sampleRateHz} Hz` : "—",
       },
       {
         label: "Tailscale",
@@ -84,7 +85,7 @@ export function LiveSystemPanel({ boothId = DEFAULT_BOOTH_ID }: LiveSystemPanelP
         value: summarizeThrottling(snapshot.throttling),
       },
     ];
-  }, [snapshot]);
+  }, [snapshot, clientVersion]);
 
   return (
     <GlassPanel title="Live system" className="feature-screen live-system-panel">

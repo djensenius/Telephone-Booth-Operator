@@ -99,8 +99,10 @@ describe("CallSessionSchema", () => {
       outcome: "recording_completed",
       recordingId: "recording-1",
       durationMs: 60000,
+      version: "0.3.2",
     });
     expect(parsed.outcome).toBe("recording_completed");
+    expect(parsed.version).toBe("0.3.2");
   });
 
   it("accepts a live (un-ended) session", () => {
@@ -114,8 +116,10 @@ describe("CallSessionSchema", () => {
       outcome: null,
       recordingId: null,
       durationMs: null,
+      version: null,
     });
     expect(parsed.endedAt).toBeNull();
+    expect(parsed.version).toBeNull();
   });
 });
 
@@ -189,9 +193,7 @@ describe("BoothSystemSnapshotSchema", () => {
   });
 
   it("rejects throttling supplied as a string array (old wire format)", () => {
-    expect(() =>
-      BoothSystemSnapshotSchema.parse({ throttling: ["under-voltage"] }),
-    ).toThrow();
+    expect(() => BoothSystemSnapshotSchema.parse({ throttling: ["under-voltage"] })).toThrow();
   });
 });
 

@@ -147,6 +147,7 @@ type StoredCallSession = {
   outcome: string | null;
   recordingId: string | null;
   durationMs: number | null;
+  version: string | null;
 };
 
 // Helpers for session derivation. Both sides treat absent fields as no-op
@@ -158,6 +159,7 @@ function callStartedData(event: BoothEvent): Partial<StoredCallSession> | null {
     boothId: event.boothId,
     bootId: event.bootId,
     startedAt: new Date(event.occurredAt),
+    version: event.version ?? null,
   };
 }
 
@@ -182,6 +184,7 @@ function callEndedData(event: BoothEvent): Partial<StoredCallSession> | null {
     durationMs,
     digitsDialed,
     recordingId,
+    version: event.version ?? null,
   };
 }
 
@@ -210,6 +213,7 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
     sessionId: event.sessionId ?? null,
     recordingId: event.recordingId ?? null,
     payload: event.payload ?? {},
+    version: event.version ?? null,
   }));
 
   // 2. Atomically upsert sessions and insert events in a single transaction.
@@ -231,6 +235,7 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
           outcome: init.outcome ?? null,
           recordingId: init.recordingId ?? null,
           durationMs: init.durationMs ?? null,
+          version: init.version ?? null,
         },
         update: {
           // Never overwrite startedAt; never null-out fields that the event
@@ -244,6 +249,7 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
           ...(init.durationMs !== undefined && init.durationMs !== null
             ? { durationMs: init.durationMs }
             : {}),
+          ...(init.version ? { version: init.version } : {}),
         },
       });
     }

@@ -517,8 +517,7 @@ paths:
               required: [leaseToken]
               properties:
                 leaseToken: { type: string }
-                leaseSeconds:
-                  { type: integer, minimum: 10, maximum: 3600, default: 60 }
+                leaseSeconds: { type: integer, minimum: 10, maximum: 3600, default: 60 }
       responses:
         "200":
           description: Lease extended.
@@ -530,8 +529,7 @@ paths:
                   ok: { type: boolean }
                   leaseExpiresAt: { type: string, format: date-time }
         "409":
-          description:
-            Lease lost — another worker re-leased the job or the row is no
+          description: Lease lost — another worker re-leased the job or the row is no
             longer pending. Stop work and discard the result.
 
   /v1/jobs/{id}/succeed:
@@ -788,6 +786,9 @@ paths:
               properties:
                 boothId: { type: string }
                 snapshot: { $ref: "#/components/schemas/BoothSystemSnapshot" }
+                version:
+                  description: Running `telephone-booth` Rust client version.
+                  anyOf: [{ type: string, minLength: 1, maxLength: 64 }, { type: "null" }]
       responses:
         "204": { description: snapshot accepted }
         "401": { description: missing or invalid API token }
@@ -1195,6 +1196,9 @@ components:
         sessionId: { anyOf: [{ type: string, format: uuid }, { type: "null" }] }
         recordingId: { anyOf: [{ type: string }, { type: "null" }] }
         payload: {}
+        version:
+          description: Running `telephone-booth` Rust client version (e.g. `0.3.2`).
+          anyOf: [{ type: string, minLength: 1, maxLength: 64 }, { type: "null" }]
     BoothEventRecord:
       allOf:
         - $ref: "#/components/schemas/BoothEvent"
@@ -1206,7 +1210,18 @@ components:
     CallSession:
       type: object
       required:
-        [id, boothId, bootId, startedAt, endedAt, digitsDialed, outcome, recordingId, durationMs]
+        [
+          id,
+          boothId,
+          bootId,
+          startedAt,
+          endedAt,
+          digitsDialed,
+          outcome,
+          recordingId,
+          durationMs,
+          version,
+        ]
       properties:
         id: { type: string, format: uuid }
         boothId: { type: string }
@@ -1220,6 +1235,9 @@ components:
             - { type: "null" }
         recordingId: { anyOf: [{ type: string }, { type: "null" }] }
         durationMs: { anyOf: [{ type: integer, minimum: 0 }, { type: "null" }] }
+        version:
+          description: Booth client version snapshot captured from the `call_started` event.
+          anyOf: [{ type: string, minLength: 1, maxLength: 64 }, { type: "null" }]
     CallSessionDetail:
       allOf:
         - $ref: "#/components/schemas/CallSession"

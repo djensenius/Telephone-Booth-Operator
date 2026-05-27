@@ -143,6 +143,7 @@ export const serializeBoothEvent = (event: PrismaBoothEvent): BoothEventRecord =
   sessionId: event.sessionId,
   recordingId: event.recordingId,
   payload: event.payload,
+  version: event.version,
 });
 
 export const serializeCallSession = (session: PrismaCallSession): CallSessionPayload => ({
@@ -155,4 +156,5 @@ export const serializeCallSession = (session: PrismaCallSession): CallSessionPay
   outcome: session.outcome as CallOutcome | null,
   recordingId: session.recordingId,
   durationMs: session.durationMs,
+  version: session.version,
 });

@@ -24,7 +24,13 @@ export type BoothStatusEvent = {
 // `WsEnvelopeSchema`. The status WS broadcasts all three kinds.
 export type WsEnvelope =
   | { kind: "status"; status: BoothStatusEvent }
-  | { kind: "system"; boothId: string; snapshot: BoothSystemSnapshot; receivedAt: string }
+  | {
+      kind: "system";
+      boothId: string;
+      snapshot: BoothSystemSnapshot;
+      receivedAt: string;
+      version: string | null;
+    }
   | { kind: "message"; message: Message };
 
 type Subscriber<T> = (event: T) => void;
