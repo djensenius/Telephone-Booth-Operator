@@ -910,55 +910,52 @@ components:
           description: "`{kind}-{rowId}` opaque to the worker."
         kind: { type: string, enum: [transcription, translation, moderation] }
         leaseToken: { type: string }
-        leaseExpiresAt: { type: string, format: date-time, nullable: true }
+        leaseExpiresAt: { type: [string, "null"], format: date-time }
         attempt: { type: integer, minimum: 1 }
         transcription:
-          type: object
-          nullable: true
+          type: [object, "null"]
           properties:
             messageId: { type: string, format: uuid }
             audioUrl: { type: string, format: uri }
             sha256: { type: string }
-            durationMs: { type: integer, nullable: true }
-            contentType: { type: string, nullable: true }
-            filename: { type: string, nullable: true }
-            model: { type: string, nullable: true }
-            language: { type: string, nullable: true }
+            durationMs: { type: [integer, "null"] }
+            contentType: { type: [string, "null"] }
+            filename: { type: [string, "null"] }
+            model: { type: [string, "null"] }
+            language: { type: [string, "null"] }
         translation:
-          type: object
-          nullable: true
+          type: [object, "null"]
           properties:
             messageId: { type: string, format: uuid }
             transcriptionId: { type: string, format: uuid }
             text: { type: string }
-            sourceLanguage: { type: string, nullable: true }
+            sourceLanguage: { type: [string, "null"] }
             targetLanguage: { type: string, default: "en" }
-            model: { type: string, nullable: true }
+            model: { type: [string, "null"] }
         moderation:
-          type: object
-          nullable: true
+          type: [object, "null"]
           properties:
             messageId: { type: string, format: uuid }
-            transcriptionId: { type: string, format: uuid, nullable: true }
+            transcriptionId: { type: [string, "null"], format: uuid }
             text: { type: string }
-            model: { type: string, nullable: true }
+            model: { type: [string, "null"] }
     SucceedTranscriptionBody:
       type: object
       required: [leaseToken, text]
       properties:
         leaseToken: { type: string }
         text: { type: string }
-        language: { type: string, nullable: true }
-        model: { type: string, nullable: true }
+        language: { type: [string, "null"] }
+        model: { type: [string, "null"] }
     SucceedTranslationBody:
       type: object
       required: [leaseToken, translatedText]
       properties:
         leaseToken: { type: string }
         translatedText: { type: string }
-        sourceLanguage: { type: string, nullable: true }
-        targetLanguage: { type: string, nullable: true }
-        model: { type: string, nullable: true }
+        sourceLanguage: { type: [string, "null"] }
+        targetLanguage: { type: [string, "null"] }
+        model: { type: [string, "null"] }
     SucceedModerationBody:
       type: object
       required: [leaseToken, flagged, recommendation, maxScore]
@@ -971,7 +968,7 @@ components:
           type: object
           additionalProperties: { type: number }
         reasonSummary: { type: string }
-        model: { type: string, nullable: true }
+        model: { type: [string, "null"] }
     BoothState:
       type: string
       enum:
