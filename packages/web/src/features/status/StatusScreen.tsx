@@ -85,10 +85,12 @@ export function StatusScreen(): JSX.Element {
             boothId: string;
             snapshot: BoothSystemSnapshot;
             receivedAt: string;
+            version: string | null;
           }>(["system", envelope.data.boothId], {
             boothId: envelope.data.boothId,
             snapshot: envelope.data.snapshot,
             receivedAt: envelope.data.receivedAt,
+            version: envelope.data.version ?? null,
           });
         } else if (envelope.data.kind === "message") {
           const message = envelope.data.message;
