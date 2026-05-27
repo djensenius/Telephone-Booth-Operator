@@ -541,15 +541,19 @@ export const StatsOverviewSchema = z.object({
     inProgress: z.number().int().nonnegative(),
     averageDurationMs: z.number().nonnegative().nullable(),
     longestDurationMs: z.number().nonnegative().nullable(),
-    // Keyed by CallOutcome string. Unknown server values are surfaced under
-    // the literal "unknown" key so older clients tolerate new enum members
-    // without crashing.
+    // Keyed by CallOutcome string. The producer emits the raw outcome value
+    // verbatim — new server-side enum members appear as their own keys
+    // rather than being normalised, so clients should render unrecognised
+    // keys directly. The literal "unknown" key is only emitted when the DB
+    // value was null.
     outcomes: z.record(z.number().int().nonnegative()),
     perDay: z.array(StatsCallsPerDaySchema),
   }),
   messages: z.object({
     total: z.number().int().nonnegative(),
-    // Keyed by MessageStatus string. Same forward-compat rules as outcomes.
+    // Keyed by MessageStatus string. As with `outcomes`, unrecognised
+    // server-side values appear under their raw key — clients should
+    // render whatever key arrives rather than special-casing "unknown".
     byStatus: z.record(z.number().int().nonnegative()),
     averageDurationMs: z.number().nonnegative().nullable(),
   }),

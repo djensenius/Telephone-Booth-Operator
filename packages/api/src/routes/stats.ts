@@ -245,6 +245,7 @@ const computeStatsOverview = async (window: StatsWindow): Promise<StatsOverview>
   const [
     sessionsByStart,
     sessionsByEnd,
+    sessionsEndedInWindow,
     inProgressCount,
     messages,
     stateTransitionEvents,
@@ -258,6 +259,13 @@ const computeStatsOverview = async (window: StatsWindow): Promise<StatsOverview>
     db.callSession.findMany({
       where: endedFilter ? { endedAt: endedFilter, outcome: { not: null } } : { outcome: { not: null } },
     }) as unknown as Promise<CallSessionRow[]>,
+    // Used for the pickup/hangup panel — counts sessions whose endedAt fell
+    // inside the window regardless of outcome, so the panel reconciles with
+    // calls.* at window boundaries (a call that started before the window
+    // but hung up inside it still counts as one hangup here).
+    db.callSession.count({
+      where: endedFilter ? { endedAt: endedFilter } : { endedAt: { not: null } },
+    }),
     db.callSession.count({ where: { endedAt: null } }),
     db.message.findMany({
       where: startedFilter ? { createdAt: startedFilter } : {},
@@ -312,8 +320,10 @@ const computeStatsOverview = async (window: StatsWindow): Promise<StatsOverview>
   // playback
   const totalPlaybacks = playbackCount(stateTransitionEvents);
 
-  // pickups/hangups
-  const hangups = sessionsByStart.filter((s) => s.endedAt !== null).length;
+  // pickups (started in window) and hangups (ended in window). Derived from
+  // CallSession so the count always reconciles with calls.* on either side
+  // of the window boundary.
+  const hangups = sessionsEndedInWindow;
   const digitsDialed = tallyDigits(sessionsByStart);
 
   // uploads

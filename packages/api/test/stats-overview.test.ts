@@ -283,6 +283,32 @@ describe("GET /v1/stats/overview", () => {
     expect(body.boothBreakdown).toEqual([]);
   });
 
+  it("counts hangups by endedAt so boundary-spanning calls reconcile", async () => {
+    // Started 2h before the 24h window, ended inside the window — should
+    // count as one hangup (and not as a pickup).
+    seedCallSession({
+      startedAt: new Date(Date.now() - 26 * 60 * 60 * 1000),
+      endedAt: minutesAgo(30),
+      outcome: "recording_completed",
+      durationMs: 1000,
+      boothId: "booth-1",
+    });
+    // Started inside the window but still in progress — pickup, no hangup.
+    seedCallSession({
+      startedAt: minutesAgo(10),
+      endedAt: null,
+      boothId: "booth-1",
+    });
+
+    const app = createApp();
+    const cookie = operatorCookie();
+    const res = await app.request("/v1/stats/overview?window=24h", { headers: { cookie } });
+    const body = await res.json();
+    expect(body.pickupsHangups.pickups).toBe(1);
+    expect(body.pickupsHangups.hangups).toBe(1);
+    expect(body.calls.completed).toBe(1);
+  });
+
   it("respects the 24h window — calls older than 24h are excluded", async () => {
     seedCallSession({ startedAt: minutesAgo(30), endedAt: minutesAgo(28), boothId: "booth-1" });
     seedCallSession({ startedAt: daysAgo(2), endedAt: daysAgo(2), boothId: "booth-1" });

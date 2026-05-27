@@ -924,16 +924,20 @@ const matchesWhere = (record: Record<string, unknown>, where: Record<string, unk
           return false;
         }
       }
-      if ("gte" in filter && value !== undefined && value !== null) {
+      if ("gte" in filter) {
+        if (value === undefined || value === null) return false;
         if (compareValues(value, filter.gte) < 0) return false;
       }
-      if ("lte" in filter && value !== undefined && value !== null) {
+      if ("lte" in filter) {
+        if (value === undefined || value === null) return false;
         if (compareValues(value, filter.lte) > 0) return false;
       }
-      if ("lt" in filter && value !== undefined && value !== null) {
+      if ("lt" in filter) {
+        if (value === undefined || value === null) return false;
         if (compareValues(value, filter.lt) >= 0) return false;
       }
-      if ("gt" in filter && value !== undefined && value !== null) {
+      if ("gt" in filter) {
+        if (value === undefined || value === null) return false;
         if (compareValues(value, filter.gt) <= 0) return false;
       }
     } else {
