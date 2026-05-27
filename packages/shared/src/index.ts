@@ -333,10 +333,14 @@ export type CallSessionDetail = z.infer<typeof CallSessionDetailSchema>;
 
 // Live system snapshot pushed by the booth via `PUT /v1/system`. Mirrors the
 // Rust `booth-hal::SystemSnapshot` struct as it appears on the wire (camelCase
-// via `#[serde(rename_all = "camelCase")]`). Every sub-object and field is
-// optional so the schema is forward-compatible with new metrics and tolerates
-// host adapters that can only fill in a subset of the fields. The whole
-// object is `.passthrough()` so unknown future keys are preserved end-to-end.
+// via `#[serde(rename_all = "camelCase")]`). Every top-level snapshot field
+// is optional so the schema is forward-compatible with new metrics and
+// tolerates host adapters that can only fill in a subset of the fields.
+// Disk and network *entries* still require their identifying field
+// (`mountPoint` / `interface`) plus core counters, because an entry without
+// those would have no meaning — adapters that can't supply them should omit
+// the entry rather than emit a partial one. Every object is `.passthrough()`
+// so unknown future keys are preserved end-to-end.
 //
 // The envelope-level `boothId` lives on `BoothSystemSnapshotEnvelopeSchema`
 // below — it is NOT a snapshot field. Likewise the server stamps `receivedAt`

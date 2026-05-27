@@ -1042,9 +1042,13 @@ components:
       description: |
         Forward-compatible snapshot of host vitals. Mirrors the Rust
         `booth-hal::SystemSnapshot` struct as emitted on the wire (camelCase).
-        Every sub-object and field is optional; unknown extra keys are
+        Every top-level snapshot field is optional, and unknown extra keys are
         preserved end-to-end so new metrics roll out without breaking older
-        operator builds.
+        operator builds. Note that disk and network *entries* still require
+        their identifying field (`mountPoint` / `interface`) and core counters
+        — see `BoothDiskStats` / `BoothNetworkStats` below — because an entry
+        without those would carry no signal. Adapters that can't supply them
+        should omit the entry rather than emit a partial one.
       additionalProperties: true
       properties:
         temperatureCelsius: { type: [number, "null"] }
