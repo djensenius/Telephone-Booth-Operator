@@ -15,6 +15,7 @@ export type FakeFile = {
 export type FakeQuestion = {
   id: string;
   prompt: string;
+  status: string;
   audioId: string;
   createdAt: Date;
   retiredAt: Date | null;
@@ -311,6 +312,7 @@ export const seedQuestion = (overrides: Partial<FakeQuestion> = {}): FakeQuestio
   const question: FakeQuestion = {
     id: overrides.id ?? randomUUID(),
     prompt: overrides.prompt ?? `prompt-${randomUUID().slice(0, 6)}`,
+    status: overrides.status ?? "active",
     audioId: overrides.audioId ?? seedFile().id,
     createdAt: overrides.createdAt ?? new Date(),
     retiredAt: overrides.retiredAt ?? null,
@@ -491,12 +493,13 @@ export const fakeDb = {
       data,
       include,
     }: {
-      data: { prompt: string; audioId: string };
+      data: { prompt: string; audioId: string; status?: string };
       include?: { audio?: boolean };
     }) => {
       const question: FakeQuestion = {
         id: randomUUID(),
         prompt: data.prompt,
+        status: data.status ?? "draft",
         audioId: data.audioId,
         createdAt: new Date(),
         retiredAt: null,
@@ -512,9 +515,7 @@ export const fakeDb = {
       include?: { audio?: boolean };
     } = {}) => {
       const { cursor, where = {}, skip = 0, take, include } = params;
-      const includeRetired = "retiredAt" in where;
       let questions = [...store.questions.values()]
-        .filter((question) => includeRetired || question.retiredAt === null)
         .filter((question) => matchesWhere(question, where))
         .sort(byCreatedDesc);
       if (cursor) {
@@ -524,21 +525,37 @@ export const fakeDb = {
       const selected = typeof take === "number" ? questions.slice(0, take) : questions;
       return include?.audio ? selected.map(attachAudio) : selected;
     },
-    count: async () =>
-      [...store.questions.values()].filter((question) => question.retiredAt === null).length,
-    findFirst: async ({ skip = 0, include }: { skip?: number; include?: { audio?: boolean } }) => {
+    count: async ({ where = {} }: { where?: Record<string, unknown> } = {}) =>
+      [...store.questions.values()].filter((question) => matchesWhere(question, where)).length,
+    findFirst: async ({
+      where = {},
+      skip = 0,
+      include,
+    }: {
+      where?: Record<string, unknown>;
+      skip?: number;
+      include?: { audio?: boolean };
+    }) => {
       const question = [...store.questions.values()]
-        .filter((item) => item.retiredAt === null)
+        .filter((item) => matchesWhere(item, where))
         .sort((a, b) => a.id.localeCompare(b.id))[skip];
       if (!question) return null;
       return include?.audio ? attachAudio(question) : question;
     },
-    update: async ({ where, data }: { where: { id: string }; data: Partial<FakeQuestion> }) => {
+    update: async ({
+      where,
+      data,
+      include,
+    }: {
+      where: { id: string };
+      data: Partial<FakeQuestion>;
+      include?: { audio?: boolean };
+    }) => {
       const existing = store.questions.get(where.id);
       if (!existing) throw new Error("question not found");
       const updated = { ...existing, ...data };
       store.questions.set(where.id, updated);
-      return updated;
+      return include?.audio ? attachAudio(updated) : updated;
     },
   },
   message: {

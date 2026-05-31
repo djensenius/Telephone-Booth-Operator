@@ -69,11 +69,13 @@ async function main(): Promise<void> {
       where: { prompt },
       update: {
         audioId: audio.id,
+        status: "active",
         retiredAt: null,
       },
       create: {
         prompt,
         audioId: audio.id,
+        status: "active",
       },
     });
   }

@@ -34,6 +34,7 @@ export const audioRef = (file: File) => ({
 export const serializeQuestion = (question: WithAudio<Question>): QuestionPayload => ({
   id: question.id,
   prompt: question.prompt,
+  status: question.status,
   createdAt: iso(question.createdAt),
   audio: audioRef(question.audio),
 });

@@ -34,6 +34,7 @@ const sha = "a".repeat(64);
 const question = {
   id: questionId,
   prompt: "What did the city sound like today?",
+  status: "active",
   createdAt: "2026-01-01T00:00:00.000Z",
   audio: { url: "https://media.example/question.flac", sha256: sha, durationMs: 12000 },
 };
@@ -58,6 +59,9 @@ const token = {
 };
 
 let createdQuestion = false;
+let lastQuestionsUrl = "";
+let activatedQuestionId = "";
+let deactivatedQuestionId = "";
 let deletedMessages: string[] = [];
 let revokedToken = false;
 let lastMessageUrl = "";
@@ -95,12 +99,13 @@ const server = setupServer(
   http.get("http://localhost/v1/system/current", () =>
     HttpResponse.json({ error: "no snapshot" }, { status: 404 }),
   ),
-  http.get("http://localhost/v1/questions", () =>
-    HttpResponse.json({
+  http.get("http://localhost/v1/questions", ({ request }) => {
+    lastQuestionsUrl = request.url;
+    return HttpResponse.json({
       items: createdQuestion ? [questionTwo, question] : [question],
       nextCursor: null,
-    }),
-  ),
+    });
+  }),
   http.post("http://localhost/v1/uploads/sas", () =>
     HttpResponse.json(
       {
@@ -118,6 +123,14 @@ const server = setupServer(
     return HttpResponse.json(questionTwo, { status: 201 });
   }),
   http.delete("http://localhost/v1/questions/:id", () => new HttpResponse(null, { status: 204 })),
+  http.post("http://localhost/v1/questions/:id/activate", ({ params }) => {
+    activatedQuestionId = String(params.id);
+    return HttpResponse.json({ ...question, id: String(params.id), status: "active" });
+  }),
+  http.post("http://localhost/v1/questions/:id/deactivate", ({ params }) => {
+    deactivatedQuestionId = String(params.id);
+    return HttpResponse.json({ ...question, id: String(params.id), status: "draft" });
+  }),
   http.get("http://localhost/v1/messages", ({ request }) => {
     lastMessageUrl = request.url;
     return HttpResponse.json({ items: [message] });
@@ -219,6 +232,9 @@ beforeAll(() => server.listen({ onUnhandledRequest: "bypass" }));
 afterAll(() => server.close());
 beforeEach(() => {
   createdQuestion = false;
+  lastQuestionsUrl = "";
+  activatedQuestionId = "";
+  deactivatedQuestionId = "";
   deletedMessages = [];
   revokedToken = false;
   lastMessageUrl = "";
@@ -342,6 +358,30 @@ describe("Questions feature", () => {
     renderPath("/questions");
     fireEvent.click((await screen.findAllByText("Delete"))[0]!);
     expect(screen.getByText("Retire this question?")).toBeTruthy();
+  });
+
+  it("deactivates an active question", async () => {
+    renderPath("/questions");
+    fireEvent.click(await screen.findByText("Deactivate"));
+    await waitFor(() => expect(deactivatedQuestionId).toBe(questionId), { timeout: 3_000 });
+  });
+
+  it("activates a draft question", async () => {
+    server.use(
+      http.get("http://localhost/v1/questions", () =>
+        HttpResponse.json({ items: [{ ...question, status: "draft" }], nextCursor: null }),
+      ),
+    );
+    renderPath("/questions");
+    fireEvent.click(await screen.findByText("Activate"));
+    await waitFor(() => expect(activatedQuestionId).toBe(questionId), { timeout: 3_000 });
+  });
+
+  it("filters the library by lifecycle status", async () => {
+    renderPath("/questions");
+    await screen.findByText("What did the city sound like today?");
+    fireEvent.click(screen.getByRole("button", { name: "active", pressed: false }));
+    await waitFor(() => expect(lastQuestionsUrl).toContain("status=active"), { timeout: 3_000 });
   });
 
   it("shows the empty library copy", async () => {

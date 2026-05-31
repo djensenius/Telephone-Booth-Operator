@@ -88,7 +88,7 @@ paths:
 
   /v1/questions:
     get:
-      summary: List active questions.
+      summary: List questions for management (drafts + active by default).
       tags: [questions]
       security:
         - operatorSession: []
@@ -100,6 +100,10 @@ paths:
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: status
+          in: query
+          description: Filter to a single lifecycle state. Omit to list every non-archived question.
+          schema: { $ref: "#/components/schemas/QuestionStatus" }
       responses:
         "200":
           description: ok
@@ -144,13 +148,47 @@ paths:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     delete:
-      summary: Soft-delete a question.
+      summary: Archive a question (soft-delete; stops the booth offering it).
       tags: [questions]
       security:
         - operatorSession: []
         - operatorBearer: []
       responses:
         "204": { description: removed }
+        "404": { description: not found }
+
+  /v1/questions/{id}/activate:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Activate a question so the booth offers it to callers.
+      tags: [questions]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Question" }
+        "404": { description: not found }
+
+  /v1/questions/{id}/deactivate:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Move a question back to draft so the booth stops offering it.
+      tags: [questions]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Question" }
         "404": { description: not found }
 
   /v1/messages:
@@ -1022,18 +1060,26 @@ components:
         durationMs: { anyOf: [{ type: integer, minimum: 1 }, { type: "null" }] }
     Question:
       type: object
-      required: [id, prompt, createdAt, audio]
+      required: [id, prompt, status, createdAt, audio]
       properties:
         id: { type: string, format: uuid }
         prompt: { type: string, minLength: 1, maxLength: 280 }
+        status: { $ref: "#/components/schemas/QuestionStatus" }
         createdAt: { type: string, format: date-time }
         audio: { $ref: "#/components/schemas/AudioRef" }
+    QuestionStatus:
+      type: string
+      enum: [draft, active, archived]
     QuestionCreate:
       type: object
       required: [prompt, audioFileId]
       properties:
         prompt: { type: string, minLength: 1, maxLength: 280 }
         audioFileId: { type: string, format: uuid }
+        status:
+          allOf:
+            - $ref: "#/components/schemas/QuestionStatus"
+          description: Defaults to draft when omitted.
     QuestionList:
       type: object
       required: [items, nextCursor]

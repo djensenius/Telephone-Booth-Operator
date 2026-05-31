@@ -120,9 +120,13 @@ export const StatusUpdateSchema = BoothStatusSchema.omit({ updatedAt: true }).ex
 });
 export type StatusUpdate = z.infer<typeof StatusUpdateSchema>;
 
+export const QuestionStatusSchema = z.enum(["draft", "active", "archived"]);
+export type QuestionStatus = z.infer<typeof QuestionStatusSchema>;
+
 export const QuestionSchema = z.object({
   id: z.string().uuid(),
   prompt: z.string().min(1).max(280),
+  status: QuestionStatusSchema,
   createdAt: z.string().datetime(),
   audio: AudioRefSchema,
 });
@@ -131,6 +135,7 @@ export type Question = z.infer<typeof QuestionSchema>;
 export const QuestionCreateSchema = z.object({
   prompt: z.string().min(1).max(280),
   audioFileId: z.string().uuid(),
+  status: QuestionStatusSchema.optional(),
 });
 export type QuestionCreate = z.infer<typeof QuestionCreateSchema>;
 

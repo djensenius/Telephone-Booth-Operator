@@ -2,6 +2,8 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   BoothNetworkStatsSchema,
   BoothStatusSchema,
+  QuestionSchema,
+  QuestionStatusSchema,
 } from "../src/index.js";
 
 describe("BoothStatusSchema", () => {
@@ -52,5 +54,34 @@ describe("BoothNetworkStatsSchema", () => {
         addresses: ["192.168.1.42", 1234],
       }),
     ).toThrow();
+  });
+});
+
+describe("QuestionStatusSchema", () => {
+  it("accepts the draft/active/archived lifecycle states", () => {
+    expect(QuestionStatusSchema.parse("draft")).toBe("draft");
+    expect(QuestionStatusSchema.parse("active")).toBe("active");
+    expect(QuestionStatusSchema.parse("archived")).toBe("archived");
+  });
+
+  it("rejects unknown states", () => {
+    expect(() => QuestionStatusSchema.parse("retired")).toThrow();
+  });
+
+  it("requires status on a Question payload", () => {
+    const question = {
+      id: "11111111-1111-1111-1111-111111111111",
+      prompt: "What did the booth ask?",
+      status: "active",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      audio: {
+        url: "https://example.com/a.flac",
+        sha256: "a".repeat(64),
+        durationMs: 1234,
+      },
+    };
+    expect(QuestionSchema.parse(question).status).toBe("active");
+    const { status: _status, ...withoutStatus } = question;
+    expect(() => QuestionSchema.parse(withoutStatus)).toThrow();
   });
 });
