@@ -24,15 +24,17 @@ vi.mock("../src/lib/require-api-token.js", () => ({
 }));
 
 import { createApp } from "../src/index.js";
+import { resetApnsSenderForTests, setApnsSenderForTests } from "../src/lib/apns.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { fakeBlobs, resetFakeAzure } from "./support/fake-azure.js";
-import { resetFakeDb, seedFile, seedMessage, seedQuestion } from "./support/fake-db.js";
+import { resetFakeDb, seedFile, seedMessage, seedMobileDevice, seedQuestion } from "./support/fake-db.js";
 import { operatorCookie, phoneHeaders } from "./support/http.js";
 
 const setup = () => {
   process.env.NODE_ENV = "test";
   process.env.SESSION_SECRET = "test-session-secret";
   resetSessionCryptoForTests();
+  resetApnsSenderForTests();
   resetFakeDb();
   resetFakeAzure();
   return createApp();
@@ -228,6 +230,56 @@ describe("messages routes", () => {
     expect(body.id).toBe(slot.id);
     // Status should still be "received" (not rolled back to "uploading")
     expect(body.status).toBe("received");
+  });
+
+  it("fans out a messageReceived push with an awaiting-moderation badge on /complete", async () => {
+    const app = createApp();
+    // One message already awaiting moderation (pending) plus the new one that
+    // /complete promotes to "received" → badge should be 2.
+    seedMessage({ audioId: seedFile({ sha256: "f".repeat(64) }).id, status: "pending" });
+    seedMobileDevice({ userId: "operator-1", platform: "ios" });
+
+    const sent: Array<{ userId: string; badge?: number; preferenceKey: string }> = [];
+    setApnsSenderForTests({
+      send: async (userId, notification) => {
+        sent.push({
+          userId,
+          badge: notification.badge,
+          preferenceKey: notification.preferenceKey,
+        });
+      },
+    });
+
+    const sha256 = "e".repeat(64);
+    const initiated = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({ durationMs: 2000, sha256 }),
+    });
+    expect(initiated.status).toBe(201);
+    const slot = await initiated.json();
+    fakeBlobs.set(slot.blobName, {
+      exists: true,
+      sizeBytes: 1234,
+      contentType: "audio/flac",
+      sha256,
+    });
+
+    const completed = await app.request(`/v1/messages/${slot.id}/complete`, {
+      method: "POST",
+      headers: phoneHeaders,
+    });
+    expect(completed.status, await completed.clone().text()).toBe(200);
+
+    // The push is fire-and-forget; let the microtask queue drain.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({
+      userId: "operator-1",
+      preferenceKey: "messageReceived",
+      badge: 2,
+    });
   });
 
   it("returns a random approved message with audio sha for the phone client", async () => {

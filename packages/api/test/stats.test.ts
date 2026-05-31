@@ -85,15 +85,18 @@ describe("/v1/stats/summary", () => {
     const app = createApp();
     installValidBearer();
 
-    // Seed: 2 pending messages, 1 received today, 1 call today, 1 in-progress call
+    // Seed: 2 pending + 1 received (awaiting moderation) + 1 approved message,
+    // all created today, plus 1 call today and 1 in-progress call.
     const audioA = seedFile({ sha256: "a".repeat(64), blobKey: "messages/aa/messageA.flac" });
     const audioB = seedFile({ sha256: "b".repeat(64), blobKey: "messages/bb/messageB.flac" });
     const audioC = seedFile({ sha256: "c".repeat(64), blobKey: "messages/cc/messageC.flac" });
+    const audioD = seedFile({ sha256: "e".repeat(64), blobKey: "messages/ee/messageD.flac" });
     const audioQ = seedFile({ sha256: "d".repeat(64), blobKey: "questions/dd/q.flac" });
     const question = seedQuestion({ audioId: audioQ.id });
     seedMessage({ audioId: audioA.id, status: "pending", questionId: question.id });
     seedMessage({ audioId: audioB.id, status: "pending", questionId: question.id });
     seedMessage({ audioId: audioC.id, status: "approved", questionId: question.id });
+    seedMessage({ audioId: audioD.id, status: "received", questionId: question.id });
     seedStatus({ state: "idle" });
     seedCallSession({ endedAt: new Date() });
     seedCallSession({ endedAt: null });
@@ -104,14 +107,20 @@ describe("/v1/stats/summary", () => {
     expect(res.status, await res.clone().text()).toBe(200);
     const body = (await res.json()) as {
       booth: { state: string };
-      messages: { pending: number; receivedToday: number; latestId: string | null };
+      messages: {
+        pending: number;
+        awaitingModeration: number;
+        receivedToday: number;
+        latestId: string | null;
+      };
       calls: { today: number; inProgress: number };
       realtime: { wsClients: number };
       generatedAt: string;
     };
     expect(body.booth.state).toBe("idle");
     expect(body.messages.pending).toBe(2);
-    expect(body.messages.receivedToday).toBe(3);
+    expect(body.messages.awaitingModeration).toBe(3);
+    expect(body.messages.receivedToday).toBe(4);
     expect(body.messages.latestId).not.toBeNull();
     expect(body.calls.today).toBe(2);
     expect(body.calls.inProgress).toBe(1);

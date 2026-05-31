@@ -145,6 +145,18 @@ export type FakeModeration = {
   attemptCount: number;
 };
 
+export type FakeMobileDevice = {
+  id: string;
+  userId: string;
+  apnsToken: string;
+  platform: string;
+  deviceName: string | null;
+  preferences: Record<string, unknown>;
+  registeredAt: Date;
+  lastSeenAt: Date;
+  revokedAt: Date | null;
+};
+
 export const store = {
   files: new Map<string, FakeFile>(),
   questions: new Map<string, FakeQuestion>(),
@@ -156,6 +168,7 @@ export const store = {
   callSessions: new Map<string, FakeCallSession>(),
   transcriptions: new Map<string, FakeTranscription>(),
   moderations: new Map<string, FakeModeration>(),
+  mobileDevices: new Map<string, FakeMobileDevice>(),
 };
 
 const cloneDate = (date: Date): Date => new Date(date.getTime());
@@ -337,6 +350,22 @@ export const seedMessage = (overrides: Partial<FakeMessage> = {}): FakeMessage =
   return message;
 };
 
+export const seedMobileDevice = (overrides: Partial<FakeMobileDevice> = {}): FakeMobileDevice => {
+  const device: FakeMobileDevice = {
+    id: overrides.id ?? randomUUID(),
+    userId: overrides.userId ?? randomUUID(),
+    apnsToken: overrides.apnsToken ?? randomUUID().replace(/-/g, ""),
+    platform: overrides.platform ?? "ios",
+    deviceName: overrides.deviceName ?? null,
+    preferences: overrides.preferences ?? {},
+    registeredAt: overrides.registeredAt ?? new Date(),
+    lastSeenAt: overrides.lastSeenAt ?? new Date(),
+    revokedAt: overrides.revokedAt ?? null,
+  };
+  store.mobileDevices.set(device.id, device);
+  return device;
+};
+
 export const seedStatus = (overrides: Partial<FakeStatus> = {}): FakeStatus => {
   const status: FakeStatus = {
     id: store.statuses.length + 1,
@@ -379,6 +408,7 @@ export const resetFakeDb = (): void => {
   store.callSessions.clear();
   store.transcriptions.clear();
   store.moderations.clear();
+  store.mobileDevices.clear();
 };
 
 const attachAi = (
@@ -687,12 +717,64 @@ export const fakeDb = {
     },
     count: async ({
       where = {},
-    }: { where?: { status?: string; createdAt?: { gte: Date } } } = {}) => {
+    }: {
+      where?: { status?: string | { in: string[] }; createdAt?: { gte: Date } };
+    } = {}) => {
       let messages = [...store.messages.values()];
-      if (where.status) messages = messages.filter((message) => message.status === where.status);
+      if (where.status) {
+        const status = where.status;
+        if (typeof status === "object" && Array.isArray(status.in)) {
+          const allowed = new Set(status.in);
+          messages = messages.filter((message) => allowed.has(message.status));
+        } else {
+          messages = messages.filter((message) => message.status === status);
+        }
+      }
       if (where.createdAt?.gte)
         messages = messages.filter((message) => message.createdAt >= where.createdAt.gte);
       return messages.length;
+    },
+  },
+  mobileDevice: {
+    findMany: async ({
+      where = {},
+      select,
+      distinct,
+    }: {
+      where?: { userId?: string; revokedAt?: Date | null };
+      select?: Record<string, boolean>;
+      distinct?: string[];
+    } = {}) => {
+      let devices = [...store.mobileDevices.values()].filter((device) => {
+        if ("revokedAt" in where && device.revokedAt !== where.revokedAt) return false;
+        if (where.userId !== undefined && device.userId !== where.userId) return false;
+        return true;
+      });
+      if (distinct?.includes("userId")) {
+        const seen = new Set<string>();
+        devices = devices.filter((device) => {
+          if (seen.has(device.userId)) return false;
+          seen.add(device.userId);
+          return true;
+        });
+      }
+      if (select) {
+        return devices.map((device) => {
+          const projected: Record<string, unknown> = {};
+          for (const key of Object.keys(select)) {
+            projected[key] = (device as unknown as Record<string, unknown>)[key];
+          }
+          return projected;
+        });
+      }
+      return devices;
+    },
+    update: async ({ where, data }: { where: { id: string }; data: Partial<FakeMobileDevice> }) => {
+      const existing = store.mobileDevices.get(where.id);
+      if (!existing) throw new Error("mobile device not found");
+      const updated = { ...existing, ...data };
+      store.mobileDevices.set(where.id, updated);
+      return updated;
     },
   },
   transcription: {

@@ -8,6 +8,7 @@ import { kickPipelineForMessage, runModeration, runTranscription } from "../lib/
 import { fanOutNotification } from "../lib/apns.js";
 import { generateSasUrl, headBlob } from "../lib/azure-blob.js";
 import { db } from "../lib/db.js";
+import { countMessagesAwaitingModeration } from "../lib/moderation-badge.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 import {
   serializeMessage,
@@ -177,10 +178,14 @@ messagesRouter.post(
     // DB asynchronously; the booth's `/complete` call does not wait on AI.
     kickPipelineForMessage(id);
     // Push fan-out: notify mobile devices that a new message has landed.
+    // The badge reflects the number of messages awaiting moderation (this
+    // one is now "received", so it is already included in the count).
+    const badge = await countMessagesAwaitingModeration();
     void fanOutNotification({
       preferenceKey: "messageReceived",
       title: "New booth message",
       body: "A new recording is ready to moderate.",
+      badge,
       threadId: `message:${id}`,
       category: "BOOTH_MESSAGE",
       data: { messageId: id },
