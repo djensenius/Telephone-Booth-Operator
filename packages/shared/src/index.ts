@@ -403,6 +403,7 @@ export const BoothNetworkStatsSchema = z
     interface: z.string(),
     receiveBytesTotal: z.number().nonnegative(),
     transmitBytesTotal: z.number().nonnegative(),
+    addresses: z.array(z.string()).optional(),
   })
   .passthrough();
 export type BoothNetworkStats = z.infer<typeof BoothNetworkStatsSchema>;

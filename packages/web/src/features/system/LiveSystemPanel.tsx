@@ -148,6 +148,12 @@ export function LiveSystemPanel({ boothId = DEFAULT_BOOTH_ID }: LiveSystemPanelP
                     <li key={iface.interface}>
                       <code>{iface.interface}</code> — rx {fmtBytes(iface.receiveBytesTotal)} · tx{" "}
                       {fmtBytes(iface.transmitBytesTotal)}
+                      {iface.addresses?.length ? (
+                        <span className="live-system-panel__addresses">
+                          {" · "}
+                          {iface.addresses.join(", ")}
+                        </span>
+                      ) : null}
                     </li>
                   ))}
                 </ul>
