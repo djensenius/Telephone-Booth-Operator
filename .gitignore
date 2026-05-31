@@ -16,3 +16,6 @@ test-results/
 *.tsbuildinfo
 packages/web/src/api/schema.gen.ts
 packages/api/prisma/migrations/*.lock
+
+# Stray npm lockfiles (this repo uses pnpm)
+package-lock.json
