@@ -12,6 +12,7 @@ import {
 } from "@telephone-booth-operator/shared";
 import { wsBroadcaster } from "../lib/broadcaster.js";
 import { db } from "../lib/db.js";
+import { countMessagesAwaitingModeration } from "../lib/moderation-badge.js";
 import { defaultStatus, serializeStatus } from "../lib/serializers.js";
 import { requireOperator, type AuthVariables } from "../lib/session.js";
 
@@ -25,6 +26,7 @@ type StatsSummary = {
   booth: ReturnType<typeof serializeStatus>;
   messages: {
     pending: number;
+    awaitingModeration: number;
     receivedToday: number;
     latestId: string | null;
   };
@@ -44,20 +46,29 @@ const computeStatsSummary = async (): Promise<StatsSummary> => {
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
 
-  const [latestStatus, pendingCount, receivedToday, latestMessage, callsToday, callsInProgress] =
-    await Promise.all([
-      db.boothStatusSnapshot.findFirst({ orderBy: { updatedAt: "desc" } }),
-      db.message.count({ where: { status: "pending" } }),
-      db.message.count({ where: { createdAt: { gte: startOfDay } } }),
-      db.message.findFirst({ orderBy: { createdAt: "desc" }, select: { id: true } }),
-      db.callSession.count({ where: { startedAt: { gte: startOfDay } } }),
-      db.callSession.count({ where: { endedAt: null } }),
-    ]);
+  const [
+    latestStatus,
+    pendingCount,
+    awaitingModeration,
+    receivedToday,
+    latestMessage,
+    callsToday,
+    callsInProgress,
+  ] = await Promise.all([
+    db.boothStatusSnapshot.findFirst({ orderBy: { updatedAt: "desc" } }),
+    db.message.count({ where: { status: "pending" } }),
+    countMessagesAwaitingModeration(),
+    db.message.count({ where: { createdAt: { gte: startOfDay } } }),
+    db.message.findFirst({ orderBy: { createdAt: "desc" }, select: { id: true } }),
+    db.callSession.count({ where: { startedAt: { gte: startOfDay } } }),
+    db.callSession.count({ where: { endedAt: null } }),
+  ]);
 
   return {
     booth: latestStatus ? serializeStatus(latestStatus) : defaultStatus(),
     messages: {
       pending: pendingCount,
+      awaitingModeration,
       receivedToday,
       latestId: latestMessage?.id ?? null,
     },

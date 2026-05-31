@@ -1470,9 +1470,15 @@ components:
         booth: { $ref: "#/components/schemas/BoothStatus" }
         messages:
           type: object
-          required: [pending, receivedToday, latestId]
+          required: [pending, awaitingModeration, receivedToday, latestId]
           properties:
             pending: { type: integer, minimum: 0 }
+            awaitingModeration:
+              type: integer
+              minimum: 0
+              description: >
+                Messages awaiting operator moderation (status "received" or
+                "pending"). Drives the mobile app-icon / tab badge.
             receivedToday: { type: integer, minimum: 0 }
             latestId:
               anyOf:

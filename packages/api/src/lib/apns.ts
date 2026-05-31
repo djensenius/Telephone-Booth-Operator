@@ -11,6 +11,7 @@
 // for example) without disturbing the route handlers.
 
 import { db } from "./db.js";
+import { Http2ApnsSender, loadApnsConfigFromEnv } from "./apns-http2.js";
 import type { MobileDevicePreferences } from "@telephone-booth-operator/shared";
 
 export type ApnsNotification = {
@@ -21,6 +22,10 @@ export type ApnsNotification = {
   title: string;
   /// Alert body.
   body: string;
+  /// Optional app-icon badge count (`aps.badge`). Reflects the number of
+  /// messages awaiting moderation so the icon stays correct when the push
+  /// lands even if the app is backgrounded or closed.
+  badge?: number;
   /// Optional category for action-button rendering.
   category?: string;
   /// Optional thread identifier so iOS coalesces related alerts.
@@ -50,23 +55,32 @@ const apnsEnvConfigured = (): boolean =>
     process.env.APNS_BUNDLE_ID,
   );
 
-let activeSender: ApnsSender = new NoopApnsSender();
-let senderInjectedForTests = false;
+const noopSender = new NoopApnsSender();
+let testSender: ApnsSender | null = null;
+let productionSender: ApnsSender | null = null;
 
 export const setApnsSenderForTests = (sender: ApnsSender): void => {
-  activeSender = sender;
-  senderInjectedForTests = true;
+  testSender = sender;
 };
 
 export const resetApnsSenderForTests = (): void => {
-  activeSender = new NoopApnsSender();
-  senderInjectedForTests = false;
+  testSender = null;
 };
 
 /// Resolves the active sender. In production this returns the real
-/// HTTP/2-backed implementation; in tests / dev it returns the no-op
-/// stub or whatever was set via `setApnsSenderForTests`.
-export const apnsSender = (): ApnsSender => activeSender;
+/// HTTP/2-backed implementation (lazily constructed from the environment);
+/// in tests it returns whatever was set via `setApnsSenderForTests`, and in
+/// dev (no APNs env) it returns the no-op stub.
+export const apnsSender = (): ApnsSender => {
+  if (testSender) return testSender;
+  if (productionSender) return productionSender;
+  const config = loadApnsConfigFromEnv();
+  if (config) {
+    productionSender = new Http2ApnsSender(config);
+    return productionSender;
+  }
+  return noopSender;
+};
 
 /// Looks up active devices for `userId` whose preferences enable the
 /// given preference key, applies sensible defaults to the preference
@@ -106,7 +120,7 @@ const prefersNotification = (raw: unknown, key: keyof MobileDevicePreferences): 
 /// invoked from request handlers that must not fail if APNs (or the
 /// mobile_devices table) is unavailable.
 export const fanOutNotification = async (notification: ApnsNotification): Promise<void> => {
-  if (!apnsEnvConfigured() && !senderInjectedForTests) {
+  if (!apnsEnvConfigured() && !testSender) {
     return;
   }
   try {
