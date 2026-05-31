@@ -73,9 +73,10 @@ export const resetApnsSenderForTests = (): void => {
 /// dev (no APNs env) it returns the no-op stub.
 export const apnsSender = (): ApnsSender => {
   if (testSender) return testSender;
+  if (productionSender) return productionSender;
   const config = loadApnsConfigFromEnv();
   if (config) {
-    productionSender ??= new Http2ApnsSender(config);
+    productionSender = new Http2ApnsSender(config);
     return productionSender;
   }
   return noopSender;
