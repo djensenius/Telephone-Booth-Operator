@@ -5,7 +5,9 @@ import {
   sha256Hex,
   uploadBlobToSas,
   uploads,
+  useActivateQuestion,
   useCreateQuestion,
+  useDeactivateQuestion,
   useDeleteQuestion,
   useQuestionsList,
 } from "../../lib/api-client.js";
@@ -111,6 +113,8 @@ export function QuestionsScreen({
 }: { readonly startNew?: boolean } = {}): JSX.Element {
   const questions = useQuestionsList();
   const deleteQuestion = useDeleteQuestion();
+  const activateQuestion = useActivateQuestion();
+  const deactivateQuestion = useDeactivateQuestion();
   const [dialogOpen, setDialogOpen] = useState(startNew);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const rows = questions.data?.items ?? [];
@@ -143,16 +147,22 @@ export function QuestionsScreen({
             <thead>
               <tr>
                 <th>Prompt</th>
+                <th>Status</th>
                 <th>Audio duration</th>
                 <th>Created</th>
                 <th>Preview</th>
-                <th>Action</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((question) => (
                 <tr key={question.id}>
                   <td>{question.prompt}</td>
+                  <td>
+                    <span className={`question-status question-status-${question.status}`}>
+                      {question.status}
+                    </span>
+                  </td>
                   <td>{duration(question.audio.durationMs)}</td>
                   <td>{date(question.createdAt)}</td>
                   <td>
@@ -161,9 +171,28 @@ export function QuestionsScreen({
                     </audio>
                   </td>
                   <td>
-                    <button type="button" onClick={() => setDeleteId(question.id)}>
-                      Delete
-                    </button>
+                    <div className="debug-button-row">
+                      {question.status === "active" ? (
+                        <button
+                          type="button"
+                          disabled={deactivateQuestion.isPending}
+                          onClick={() => void deactivateQuestion.mutateAsync(question.id)}
+                        >
+                          Deactivate
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={activateQuestion.isPending}
+                          onClick={() => void activateQuestion.mutateAsync(question.id)}
+                        >
+                          Activate
+                        </button>
+                      )}
+                      <button type="button" onClick={() => setDeleteId(question.id)}>
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

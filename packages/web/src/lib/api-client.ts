@@ -39,6 +39,7 @@ import type {
   OperatorMe,
   Question,
   QuestionCreate,
+  QuestionStatus,
   StatsOverview,
   StatsWindow,
   Transcription,
@@ -202,9 +203,15 @@ export const uploads = {
 };
 
 export const questions = {
-  list: (params: { readonly cursor?: string; readonly limit?: number } = {}) =>
+  list: (
+    params: {
+      readonly cursor?: string;
+      readonly limit?: number;
+      readonly status?: QuestionStatus;
+    } = {},
+  ) =>
     apiFetch<QuestionList>(
-      `/v1/questions${query({ cursor: params.cursor, limit: params.limit ?? 50 })}`,
+      `/v1/questions${query({ cursor: params.cursor, limit: params.limit ?? 50, status: params.status })}`,
       { schema: QuestionListSchema },
     ),
   create: (input: QuestionCreate) =>
@@ -213,6 +220,10 @@ export const questions = {
       body: QuestionCreateSchema.parse(input),
       schema: QuestionSchema,
     }),
+  activate: (id: string) =>
+    apiFetch<Question>(`/v1/questions/${id}/activate`, { method: "POST", schema: QuestionSchema }),
+  deactivate: (id: string) =>
+    apiFetch<Question>(`/v1/questions/${id}/deactivate`, { method: "POST", schema: QuestionSchema }),
   delete: (id: string) => apiFetch<void>(`/v1/questions/${id}`, { method: "DELETE" }),
 };
 
@@ -423,6 +434,22 @@ export function useDeleteQuestion() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: questions.delete,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: apiQueryKeys.questions }),
+  });
+}
+
+export function useActivateQuestion() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: questions.activate,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: apiQueryKeys.questions }),
+  });
+}
+
+export function useDeactivateQuestion() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: questions.deactivate,
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: apiQueryKeys.questions }),
   });
 }

@@ -34,6 +34,7 @@ const sha = "a".repeat(64);
 const question = {
   id: questionId,
   prompt: "What did the city sound like today?",
+  status: "active",
   createdAt: "2026-01-01T00:00:00.000Z",
   audio: { url: "https://media.example/question.flac", sha256: sha, durationMs: 12000 },
 };
