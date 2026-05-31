@@ -6,11 +6,12 @@ same Authentik provider the browser operator console uses, so that the
 app (and any future native client) can call the same `/v1/*` operator API.
 
 The operator API validates an Authentik-issued **JWT access token** via the
-provider's JWKS, the issuer, the audience (operator web `client_id` plus any
-`OIDC_MOBILE_AUDIENCES` you configure), and the operator group / email
-allow-list (`OIDC_ALLOWED_GROUPS`, `OIDC_ALLOWED_EMAILS`). The middleware
-lives in `packages/api/src/lib/bearer-auth.ts` and is invoked from
-`requireOperator()` as a fallback when no cookie session is present.
+provider's JWKS, the issuer (operator web `OIDC_ISSUER` plus any
+`OIDC_MOBILE_ISSUERS` you configure), the audience (operator web `client_id`
+plus any `OIDC_MOBILE_AUDIENCES` you configure), and the operator group /
+email allow-list (`OIDC_ALLOWED_GROUPS`, `OIDC_ALLOWED_EMAILS`). The
+middleware lives in `packages/api/src/lib/bearer-auth.ts` and is invoked
+from `requireOperator()` as a fallback when no cookie session is present.
 
 ## 1. Create a native application + provider in Authentik
 
@@ -31,10 +32,17 @@ In Authentik admin → **Applications** → **Create**:
   - **Subject mode:** `Based on the User's hashed ID` (or any stable identifier
     — the operator stores it as `OperatorUser.oidcSub`).
   - **Signing Key:** Use the same RSA key the existing operator provider uses
-    so the JWKS endpoint validates both tokens; alternately, host a separate
-    JWKS endpoint and update `OIDC_ISSUER` accordingly (single-issuer is the
-    common setup).
-  - **Issuer mode:** Match the same `OIDC_ISSUER` the operator API expects.
+    so the JWKS published at `OIDC_ISSUER` can verify mobile tokens too.
+    Sharing the key is required because the operator API only fetches JWKS
+    from the primary `OIDC_ISSUER`; mobile tokens must therefore be signed
+    by a key already advertised there.
+  - **Issuer mode:** Authentik derives the `iss` claim from the application
+    slug, so a separate mobile application will issue tokens whose `iss`
+    differs from the web provider's. Add the mobile provider's full issuer
+    URL (e.g. `https://authentik.example/application/o/telephone-booth-operator-mobile/`)
+    to `OIDC_MOBILE_ISSUERS` on the operator. (If you're reusing the
+    primary web provider for the mobile client, leave
+    `OIDC_MOBILE_ISSUERS` unset.)
 - **Bindings / Groups:** restrict access to the same `telephone-booth-operators`
   group used by the web client (or whichever value you've set in
   `OIDC_ALLOWED_GROUPS`).
@@ -55,19 +63,25 @@ still only grants access when at least one returned group matches
 
 ## 2. Configure the operator API
 
-Add the new client_id to the bearer-audience allow-list:
+Add the new client_id to the bearer-audience allow-list, and (if the mobile
+provider is a separate application with its own slug) the mobile provider's
+issuer URL to the issuer allow-list:
 
 ```bash
 # packages/api/.env (or your deployment secret store)
 OIDC_MOBILE_AUDIENCES=telephone-booth-operator-mobile
+# Only required when the mobile/native app uses a *separate* Authentik
+# application (different slug → different /application/o/<slug>/ issuer URL):
+OIDC_MOBILE_ISSUERS=https://authentik.example/application/o/telephone-booth-operator-mobile/
 ```
 
 Restart the API. The operator now accepts:
 
 - Cookie sessions issued by the existing web flow.
-- `Authorization: Bearer <jwt>` headers carrying access tokens whose `aud`
-  is **either** `OIDC_CLIENT_ID` (web) **or** any entry in
-  `OIDC_MOBILE_AUDIENCES`.
+- `Authorization: Bearer <jwt>` headers carrying access tokens whose `iss`
+  is **either** `OIDC_ISSUER` (web) **or** any entry in `OIDC_MOBILE_ISSUERS`,
+  **and** whose `aud` is **either** `OIDC_CLIENT_ID` (web) **or** any entry
+  in `OIDC_MOBILE_AUDIENCES`.
 
 No additional CORS configuration is required — native HTTP clients do not
 send `Origin` headers and therefore bypass the browser CORS allow-list.
@@ -98,10 +112,11 @@ to drive the full OIDC PKCE Authorization-Code grant:
 
 | Symptom                          | Likely cause                                                         |
 | -------------------------------- | -------------------------------------------------------------------- |
-| `401 invalid_token` from `/v1/*` | Token expired, audience mismatch, or signed by an unknown JWKS key.  |
+| `401 invalid_token` from `/v1/*` | Token expired, audience/issuer mismatch, or signed by an unknown JWKS key. |
 | `403` from `/v1/*` after sign-in | Authenticated principal isn't in `OIDC_ALLOWED_GROUPS`.              |
 | Sign-in completes but app loops  | App's URL scheme not registered, or Authentik redirect URI mismatch. |
 | `aud` mismatch only in mobile    | `OIDC_MOBILE_AUDIENCES` not set / restart pending on the API.        |
+| `iss` mismatch only in mobile    | Mobile provider has its own slug → set `OIDC_MOBILE_ISSUERS` and restart the API. |
 
 To inspect a failing token locally, paste it into <https://jwt.io> or run
 `jose.decodeJwt(token)` in a Node REPL — the API only logs failure reasons

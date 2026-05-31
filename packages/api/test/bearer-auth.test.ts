@@ -60,6 +60,8 @@ const setupEnv = () => {
   process.env.OIDC_REDIRECT_URI = "http://localhost/v1/auth/callback";
   process.env.OIDC_ALLOWED_GROUPS = "operators";
   process.env.OIDC_MOBILE_AUDIENCES = "mobile-client";
+  delete process.env.OIDC_MOBILE_ISSUERS;
+  delete process.env.OIDC_MOBILE_ISSUER;
   delete process.env.OIDC_ALLOWED_EMAILS;
   delete process.env.AUTH_DISABLED;
   resetAuthConfigForTests();
@@ -70,7 +72,7 @@ const installVerifier = (
   jwtVerifyMock: (
     token: string,
     key: unknown,
-    options: { audience?: string[]; issuer?: string },
+    options: { audience?: string[]; issuer?: string | string[] },
   ) => Promise<{ payload: Record<string, unknown> }>,
 ) => {
   __setBearerVerifierForTests({
@@ -82,6 +84,7 @@ const installVerifier = (
 describe("verifyOperatorBearer", () => {
   beforeEach(() => {
     store.users.clear();
+    fakeDb.operatorUser.upsert.mockClear();
     setupEnv();
   });
 
@@ -118,7 +121,10 @@ describe("verifyOperatorBearer", () => {
 
   it("rejects when the issuer does not match", async () => {
     installVerifier(async (_token, _key, options) => {
-      if (options.issuer !== "https://attacker.example") {
+      const allowed = (
+        Array.isArray(options.issuer) ? options.issuer : [options.issuer]
+      ).filter((value): value is string => typeof value === "string");
+      if (!allowed.includes("https://attacker.example")) {
         throw new joseErrors.JWTClaimValidationFailed(
           "unexpected iss claim",
           "iss",
@@ -131,6 +137,55 @@ describe("verifyOperatorBearer", () => {
     const result = await verifyOperatorBearer("token");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.status).toBe(401);
+  });
+
+  it("accepts a token whose iss matches OIDC_MOBILE_ISSUERS", async () => {
+    process.env.OIDC_MOBILE_ISSUERS = "https://idp.example/application/o/mobile/";
+    resetAuthConfigForTests();
+    installVerifier(async (_token, _key, options) => {
+      const allowed = (
+        Array.isArray(options.issuer) ? options.issuer : [options.issuer]
+      ).filter((value): value is string => typeof value === "string");
+      if (!allowed.includes("https://idp.example/application/o/mobile/")) {
+        throw new joseErrors.JWTClaimValidationFailed(
+          "unexpected iss claim",
+          "iss",
+          "unexpected_iss",
+        );
+      }
+      return {
+        payload: { ...FRESH_CLAIMS, iss: "https://idp.example/application/o/mobile/" },
+      };
+    });
+
+    const result = await verifyOperatorBearer("mobile-token");
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects a mobile-style iss when OIDC_MOBILE_ISSUERS is unset", async () => {
+    // OIDC_MOBILE_ISSUERS is intentionally NOT set in setupEnv().
+    installVerifier(async (_token, _key, options) => {
+      const allowed = (
+        Array.isArray(options.issuer) ? options.issuer : [options.issuer]
+      ).filter((value): value is string => typeof value === "string");
+      if (!allowed.includes("https://idp.example/application/o/mobile/")) {
+        throw new joseErrors.JWTClaimValidationFailed(
+          "unexpected iss claim",
+          "iss",
+          "unexpected_iss",
+        );
+      }
+      return {
+        payload: { ...FRESH_CLAIMS, iss: "https://idp.example/application/o/mobile/" },
+      };
+    });
+
+    const result = await verifyOperatorBearer("mobile-token");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(401);
+      expect(result.reason).toBe("invalid_token");
+    }
   });
 
   it("returns 403 when the principal is not in an allowed group", async () => {

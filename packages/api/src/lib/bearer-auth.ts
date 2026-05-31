@@ -6,7 +6,10 @@
 //
 // Trust model: tokens MUST
 //   • be signed by a key advertised at the provider's `jwks_uri`,
-//   • carry `iss === config.issuer`,
+//   • carry `iss === config.issuer`, **or** any entry in
+//     `config.mobileIssuers` (lets a separately-registered native/mobile
+//     Authentik provider use its own issuer URL while sharing the primary
+//     provider's signing key),
 //   • carry an `aud` that matches `config.clientId` or any entry in
 //     `config.mobileAudiences`,
 //   • be unexpired (`exp` claim, with a small allowed clock skew),
@@ -62,7 +65,7 @@ export const verifyOperatorBearer = async (token: string): Promise<BearerVerifyR
   try {
     const jwks = await loadJwks(config.issuer);
     const verified = await jwtVerifyImpl(token, jwks, {
-      issuer: config.issuer,
+      issuer: [config.issuer, ...config.mobileIssuers],
       audience: [config.clientId, ...config.mobileAudiences],
       clockTolerance: CLOCK_TOLERANCE_SECONDS,
     });
