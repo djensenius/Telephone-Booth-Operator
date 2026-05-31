@@ -16,6 +16,7 @@ import {
   OperatorMeSchema,
   QuestionCreateSchema,
   QuestionSchema,
+  QuestionStatusSchema,
   StatsOverviewSchema,
   TranscriptionListSchema,
   TranscriptionSchema,
@@ -345,7 +346,7 @@ export const apiQueryKeys = {
   me: ["auth", "me"] as const,
   status: ["status", "current"] as const,
   statusHistory: ["status", "history"] as const,
-  questions: ["questions", "list"] as const,
+  questions: (filter?: QuestionStatus | "all") => ["questions", "list", filter ?? "all"] as const,
   messages: (filter?: MessageStatus | "all") => ["messages", "list", filter ?? "all"] as const,
   message: (id: string) => ["messages", id] as const,
   transcriptions: (id: string) => ["messages", id, "transcriptions"] as const,
@@ -415,10 +416,17 @@ export function useStatusHistory(options?: { paused?: boolean }) {
   });
 }
 
-export function useQuestionsList() {
+export function useQuestionsList(filter: QuestionStatus | "all" = "all") {
+  const statusFilter = QuestionStatusSchema.safeParse(filter).success
+    ? (filter as QuestionStatus)
+    : undefined;
   return useQuery({
-    queryKey: apiQueryKeys.questions,
-    queryFn: () => questions.list({ limit: 100 }),
+    queryKey: apiQueryKeys.questions(filter),
+    queryFn: () =>
+      questions.list({
+        ...(statusFilter === undefined ? {} : { status: statusFilter }),
+        limit: 100,
+      }),
   });
 }
 
@@ -426,7 +434,7 @@ export function useCreateQuestion() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: questions.create,
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: apiQueryKeys.questions }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["questions", "list"] }),
   });
 }
 
@@ -434,7 +442,7 @@ export function useDeleteQuestion() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: questions.delete,
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: apiQueryKeys.questions }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["questions", "list"] }),
   });
 }
 
@@ -442,7 +450,7 @@ export function useActivateQuestion() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: questions.activate,
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: apiQueryKeys.questions }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["questions", "list"] }),
   });
 }
 
@@ -450,7 +458,7 @@ export function useDeactivateQuestion() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: questions.deactivate,
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: apiQueryKeys.questions }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["questions", "list"] }),
   });
 }
 

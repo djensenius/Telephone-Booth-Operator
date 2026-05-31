@@ -26,7 +26,7 @@ vi.mock("../src/lib/require-api-token.js", () => ({
 import { createApp } from "../src/index.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { fakeBlobs, resetFakeAzure } from "./support/fake-azure.js";
-import { resetFakeDb, seedFile, seedMessage } from "./support/fake-db.js";
+import { resetFakeDb, seedFile, seedMessage, seedQuestion } from "./support/fake-db.js";
 import { operatorCookie, phoneHeaders } from "./support/http.js";
 
 const setup = () => {
@@ -137,6 +137,31 @@ describe("messages routes", () => {
       body: JSON.stringify({ durationMs: 999_999, sha256 }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it("rejects message creation for a question that is not active", async () => {
+    const app = createApp();
+    const draft = seedQuestion({ status: "draft" });
+
+    const res = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({ durationMs: 3000, sha256: "a".repeat(64), questionId: draft.id }),
+    });
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toMatchObject({ error: "question_not_found" });
+  });
+
+  it("accepts message creation for an active question", async () => {
+    const app = createApp();
+    const active = seedQuestion({ status: "active" });
+
+    const res = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({ durationMs: 3000, sha256: "b".repeat(64), questionId: active.id }),
+    });
+    expect(res.status).toBe(201);
   });
 
   it("rejects /complete when blob metadata is missing sha256", async () => {

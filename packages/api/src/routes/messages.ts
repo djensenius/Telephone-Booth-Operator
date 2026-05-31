@@ -88,7 +88,7 @@ messagesRouter.post("/", requireApiToken(), zValidator("json", MessageCreateSche
   const body = c.req.valid("json");
   if (body.questionId) {
     const question = await db.question.findUnique({ where: { id: body.questionId } });
-    if (!question || question.retiredAt) return c.json({ error: "question_not_found" }, 404);
+    if (!question || question.status !== "active") return c.json({ error: "question_not_found" }, 404);
   }
 
   const blobName = messageBlobName(body.sha256);

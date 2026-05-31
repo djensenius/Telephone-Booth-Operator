@@ -12,6 +12,9 @@ import {
   useQuestionsList,
 } from "../../lib/api-client.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
+import type { QuestionStatus } from "@telephone-booth-operator/shared";
+
+const QUESTION_FILTERS: readonly (QuestionStatus | "all")[] = ["all", "draft", "active", "archived"];
 
 function duration(ms: number | null): string {
   if (ms === null) return "Unknown";
@@ -111,7 +114,8 @@ export function NewQuestionDialog({
 export function QuestionsScreen({
   startNew = false,
 }: { readonly startNew?: boolean } = {}): JSX.Element {
-  const questions = useQuestionsList();
+  const [filter, setFilter] = useState<QuestionStatus | "all">("all");
+  const questions = useQuestionsList(filter);
   const deleteQuestion = useDeleteQuestion();
   const activateQuestion = useActivateQuestion();
   const deactivateQuestion = useDeactivateQuestion();
@@ -124,6 +128,18 @@ export function QuestionsScreen({
       <p className="screen-kicker">Digit 3</p>
       <h1>Questions</h1>
       <p>Keep the booth supplied with prompt cards and their matching audio.</p>
+      <div className="feature-toolbar" role="toolbar" aria-label="Question filters">
+        {QUESTION_FILTERS.map((option) => (
+          <button
+            key={option}
+            type="button"
+            aria-pressed={filter === option}
+            onClick={() => setFilter(option)}
+          >
+            {option}
+          </button>
+        ))}
+      </div>
       <div className="feature-actions">
         <button
           className="feature-primary-button"
