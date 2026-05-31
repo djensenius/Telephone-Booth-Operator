@@ -48,6 +48,7 @@ const baseSnapshot = {
       interface: "eth0",
       receiveBytesTotal: 7_205_631,
       transmitBytesTotal: 8_177_440,
+      addresses: ["192.168.1.42", "fe80::1"],
     },
   ],
   uptimeSeconds: 3 * 86_400 + 4 * 3_600 + 15 * 60,
@@ -142,6 +143,7 @@ describe("LiveSystemPanel", () => {
     const netRow = screen.getByText("Network").parentElement;
     expect(netRow).toBeDefined();
     expect(within(netRow!).getByText("eth0")).toBeDefined();
+    expect(within(netRow!).getByText(/192\.168\.1\.42/)).toBeDefined();
   });
 
   it("summarises throttling flags from the nested throttling object", () => {

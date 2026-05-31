@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
-import { BoothStatusSchema } from "../src/index.js";
+import {
+  BoothNetworkStatsSchema,
+  BoothStatusSchema,
+} from "../src/index.js";
 
 describe("BoothStatusSchema", () => {
   it("accepts a valid status", () => {
@@ -15,6 +18,38 @@ describe("BoothStatusSchema", () => {
       BoothStatusSchema.parse({
         state: "nope",
         updatedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    ).toThrow();
+  });
+});
+
+describe("BoothNetworkStatsSchema", () => {
+  it("parses and preserves IPv4/IPv6 addresses", () => {
+    const parsed = BoothNetworkStatsSchema.parse({
+      interface: "eth0",
+      receiveBytesTotal: 1024,
+      transmitBytesTotal: 2048,
+      addresses: ["192.168.1.42", "fe80::1"],
+    });
+    expect(parsed.addresses).toEqual(["192.168.1.42", "fe80::1"]);
+  });
+
+  it("treats addresses as optional", () => {
+    const parsed = BoothNetworkStatsSchema.parse({
+      interface: "eth0",
+      receiveBytesTotal: 0,
+      transmitBytesTotal: 0,
+    });
+    expect(parsed.addresses).toBeUndefined();
+  });
+
+  it("rejects non-string address entries", () => {
+    expect(() =>
+      BoothNetworkStatsSchema.parse({
+        interface: "eth0",
+        receiveBytesTotal: 0,
+        transmitBytesTotal: 0,
+        addresses: ["192.168.1.42", 1234],
       }),
     ).toThrow();
   });

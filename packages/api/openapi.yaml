@@ -1322,6 +1322,10 @@ components:
         interface: { type: string }
         receiveBytesTotal: { type: number, minimum: 0 }
         transmitBytesTotal: { type: number, minimum: 0 }
+        addresses:
+          type: array
+          items: { type: string }
+          description: IP addresses bound to this interface (IPv4 and IPv6).
     BoothProcessStats:
       type: object
       additionalProperties: true
