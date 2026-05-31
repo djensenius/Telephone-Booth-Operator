@@ -52,6 +52,14 @@ const ENV_KEYS = [
   "AUTHENTIK_REDIRECT_URI",
   "AUTHENTIK_POST_LOGOUT_REDIRECT_URI",
   "AUTHENTIK_ALLOWED_GROUPS",
+  "OIDC_MOBILE_AUDIENCES",
+  "OIDC_MOBILE_CLIENT_IDS",
+  "AUTHENTIK_MOBILE_AUDIENCES",
+  "AUTHENTIK_MOBILE_CLIENT_IDS",
+  "OIDC_MOBILE_ISSUERS",
+  "OIDC_MOBILE_ISSUER",
+  "AUTHENTIK_MOBILE_ISSUERS",
+  "AUTHENTIK_MOBILE_ISSUER",
 ] as const;
 
 describe("OIDC config", () => {
@@ -132,6 +140,30 @@ describe("OIDC config", () => {
     expect(() => assertOidcIssuerAllowed(config)).toThrow(AuthConfigurationError);
   });
 
+  it("rejects an HTTP mobile issuer in production without the escape hatch", () => {
+    process.env.NODE_ENV = "production";
+
+    const config = resolveAuthConfig({
+      ...baseEnv,
+      OIDC_MOBILE_ISSUERS: "http://authentik.example/application/o/mobile/",
+    });
+    expect(() => assertOidcIssuerAllowed(config, { NODE_ENV: "production" }))
+      .toThrow(AuthConfigurationError);
+  });
+
+  it("allows an HTTP mobile issuer in production with the escape hatch", () => {
+    const config = resolveAuthConfig({
+      ...baseEnv,
+      OIDC_MOBILE_ISSUERS: "http://authentik.example/application/o/mobile/",
+    });
+    expect(() =>
+      assertOidcIssuerAllowed(config, {
+        NODE_ENV: "production",
+        OIDC_ALLOW_HTTP_ISSUER: "true",
+      }),
+    ).not.toThrow();
+  });
+
   it("allows an HTTP issuer at startup in production with the escape hatch", () => {
     process.env.NODE_ENV = "production";
     process.env.OIDC_ALLOW_HTTP_ISSUER = "true";
@@ -199,5 +231,41 @@ describe("OIDC config", () => {
     expect(() =>
       assertAuthorizationConfigured(config, {}),
     ).not.toThrow();
+  });
+
+  it("parses OIDC_MOBILE_AUDIENCES and OIDC_MOBILE_ISSUERS as CSV", () => {
+    const config = resolveAuthConfig({
+      ...baseEnv,
+      OIDC_MOBILE_AUDIENCES: "mobile-client, watch-client , ",
+      OIDC_MOBILE_ISSUERS:
+        "https://authentik.example/application/o/mobile/, https://authentik.example/application/o/watch/",
+    });
+    expect(config.disabled).toBe(false);
+    if (config.disabled) throw new Error("unexpected");
+    expect(config.mobileAudiences).toEqual(["mobile-client", "watch-client"]);
+    expect(config.mobileIssuers).toEqual([
+      "https://authentik.example/application/o/mobile/",
+      "https://authentik.example/application/o/watch/",
+    ]);
+  });
+
+  it("accepts AUTHENTIK_MOBILE_ISSUER (singular) alias", () => {
+    const config = resolveAuthConfig({
+      ...baseEnv,
+      AUTHENTIK_MOBILE_ISSUER: "https://authentik.example/application/o/mobile/",
+    });
+    expect(config.disabled).toBe(false);
+    if (config.disabled) throw new Error("unexpected");
+    expect(config.mobileIssuers).toEqual([
+      "https://authentik.example/application/o/mobile/",
+    ]);
+  });
+
+  it("defaults mobile audiences and issuers to empty arrays", () => {
+    const config = resolveAuthConfig(baseEnv);
+    expect(config.disabled).toBe(false);
+    if (config.disabled) throw new Error("unexpected");
+    expect(config.mobileAudiences).toEqual([]);
+    expect(config.mobileIssuers).toEqual([]);
   });
 });

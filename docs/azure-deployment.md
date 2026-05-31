@@ -143,6 +143,7 @@ Collect Authentik values:
 | `AUTHENTIK_CLIENT_SECRET`  | Operator web provider client secret                                               |
 | `AUTHENTIK_ALLOWED_GROUPS` | Comma-separated group names allowed into the operator UI                          |
 | `OIDC_MOBILE_AUDIENCES`    | Mobile/native Authentik client IDs, for example `telephone-booth-operator-mobile` |
+| `OIDC_MOBILE_ISSUERS`      | Optional. Comma-separated `iss` URLs of separately-registered mobile Authentik providers (e.g. `https://authentik.example/application/o/telephone-booth-operator-mobile/`). Leave unset when the mobile app reuses the web provider. |
 
 For a single public hostname, use these URLs:
 
@@ -203,6 +204,7 @@ az containerapp create \
     AUTHENTIK_ALLOWED_GROUPS="$AUTHENTIK_ALLOWED_GROUPS" \
     OIDC_SCOPES="openid email profile offline_access" \
     OIDC_MOBILE_AUDIENCES="$OIDC_MOBILE_AUDIENCES" \
+    OIDC_MOBILE_ISSUERS="$OIDC_MOBILE_ISSUERS" \
     AUTH_DISABLED=false
 ```
 

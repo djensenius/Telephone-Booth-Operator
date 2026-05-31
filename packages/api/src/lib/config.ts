@@ -18,6 +18,14 @@ export type OidcRuntimeConfig = {
   // against the same provider. The primary `clientId` above is always
   // accepted in addition to this list.
   mobileAudiences: string[];
+  // Additional `iss` values accepted on bearer access tokens. Useful when
+  // native/mobile clients are registered as a *separate* Authentik provider
+  // (different application slug → different `/application/o/<slug>/`
+  // issuer URL) but share the same signing certificate as the primary
+  // provider, so the JWKS published at `OIDC_ISSUER` still verifies the
+  // signature. The primary `issuer` above is always accepted in addition
+  // to this list.
+  mobileIssuers: string[];
 };
 
 export type AuthDisabledConfig = {
@@ -107,6 +115,14 @@ export const resolveAuthConfig = (env: NodeJS.ProcessEnv = process.env): AuthCon
         env.AUTHENTIK_MOBILE_CLIENT_IDS,
       ),
     ),
+    mobileIssuers: csv(
+      first(
+        env.OIDC_MOBILE_ISSUERS,
+        env.OIDC_MOBILE_ISSUER,
+        env.AUTHENTIK_MOBILE_ISSUERS,
+        env.AUTHENTIK_MOBILE_ISSUER,
+      ),
+    ),
   };
 };
 
@@ -115,13 +131,24 @@ let cachedConfig: AuthConfig | null = null;
 export const isHttpOidcIssuer = (config: AuthConfig): config is OidcRuntimeConfig =>
   !config.disabled && new URL(config.issuer).protocol === "http:";
 
+const hasHttpMobileIssuer = (config: AuthConfig): boolean => {
+  if (config.disabled) return false;
+  return config.mobileIssuers.some((issuer) => new URL(issuer).protocol === "http:");
+};
+
 export const assertOidcIssuerAllowed = (
   config: AuthConfig,
   env: NodeJS.ProcessEnv = process.env,
 ): void => {
-  if (isHttpOidcIssuer(config) && env.NODE_ENV === "production" && env.OIDC_ALLOW_HTTP_ISSUER !== "true") {
+  if (env.NODE_ENV !== "production" || env.OIDC_ALLOW_HTTP_ISSUER === "true") return;
+  if (isHttpOidcIssuer(config)) {
     throw new AuthConfigurationError(
       "HTTP OIDC issuers are not allowed in production. Use an HTTPS issuer URL or set OIDC_ALLOW_HTTP_ISSUER=true (not recommended).",
+    );
+  }
+  if (hasHttpMobileIssuer(config)) {
+    throw new AuthConfigurationError(
+      "HTTP OIDC_MOBILE_ISSUERS entries are not allowed in production. Use HTTPS issuer URLs or set OIDC_ALLOW_HTTP_ISSUER=true (not recommended).",
     );
   }
 };
