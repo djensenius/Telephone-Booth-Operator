@@ -19,6 +19,7 @@ rebuilds it from the filesystem; CI fails if it drifts.
 - [Azure storage](azure-storage.md) — container layout, SAS scoping, Azurite for dev
 - [Theme](theme.md) — operator-console visual system, components, accessibility
 - [Transcription providers](transcription-providers.md) — AI transcription + moderation pipeline
+- [Push notifications](push-notifications.md) — APNs setup, badge pipeline, sandbox vs production
 - [UI routing](ui-routing.md) — digit shortcuts, keyboard nav, reduced motion
 
 ## Running it

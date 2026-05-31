@@ -183,6 +183,7 @@ az containerapp create \
     session-secret="$SESSION_SECRET" \
     session-encryption-key="$SESSION_ENCRYPTION_KEY" \
     authentik-client-secret="$AUTHENTIK_CLIENT_SECRET" \
+    apns-auth-key="$(cat /path/to/AuthKey_XXXXXXXXXX.p8)" \
   --env-vars \
     API_PORT=8787 \
     NODE_ENV=production \
@@ -205,8 +206,18 @@ az containerapp create \
     OIDC_SCOPES="openid email profile offline_access" \
     OIDC_MOBILE_AUDIENCES="$OIDC_MOBILE_AUDIENCES" \
     OIDC_MOBILE_ISSUERS="$OIDC_MOBILE_ISSUERS" \
+    APNS_TEAM_ID="$APNS_TEAM_ID" \
+    APNS_KEY_ID="$APNS_KEY_ID" \
+    APNS_BUNDLE_ID="$APNS_BUNDLE_ID" \
+    APNS_ENVIRONMENT="$APNS_ENVIRONMENT" \
+    APNS_AUTH_KEY=secretref:apns-auth-key \
     AUTH_DISABLED=false
 ```
+
+> APNs push is optional. Omit the `apns-auth-key` secret and the `APNS_*` env
+> vars to disable it (the API falls back to a no-op sender). See
+> [Push notifications](push-notifications.md) for key creation and the
+> sandbox-vs-production gotcha.
 
 Container Apps assigns a default hostname. Capture it if you are not using a
 custom domain yet:
