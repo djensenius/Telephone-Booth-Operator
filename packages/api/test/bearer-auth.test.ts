@@ -68,6 +68,18 @@ const setupEnv = () => {
   resetBearerAuthForTests();
 };
 
+// Returns the issuer option from `jwtVerify` as a plain string array.
+// Lets the verifier mocks below check membership with strict `===`
+// equality rather than `Array.prototype.includes`, which CodeQL flags
+// as an incomplete-URL-substring-sanitization pattern.
+const issuerList = (issuer: string | string[] | undefined): string[] => {
+  if (Array.isArray(issuer)) return issuer.filter((value): value is string => typeof value === "string");
+  return typeof issuer === "string" ? [issuer] : [];
+};
+
+const issuerMatches = (issuer: string | string[] | undefined, expected: string): boolean =>
+  issuerList(issuer).some((value) => value === expected);
+
 const installVerifier = (
   jwtVerifyMock: (
     token: string,
@@ -121,10 +133,7 @@ describe("verifyOperatorBearer", () => {
 
   it("rejects when the issuer does not match", async () => {
     installVerifier(async (_token, _key, options) => {
-      const allowed = (
-        Array.isArray(options.issuer) ? options.issuer : [options.issuer]
-      ).filter((value): value is string => typeof value === "string");
-      if (!allowed.includes("https://attacker.example")) {
+      if (!issuerMatches(options.issuer, "https://attacker.example")) {
         throw new joseErrors.JWTClaimValidationFailed(
           "unexpected iss claim",
           "iss",
@@ -143,10 +152,7 @@ describe("verifyOperatorBearer", () => {
     process.env.OIDC_MOBILE_ISSUERS = "https://idp.example/application/o/mobile/";
     resetAuthConfigForTests();
     installVerifier(async (_token, _key, options) => {
-      const allowed = (
-        Array.isArray(options.issuer) ? options.issuer : [options.issuer]
-      ).filter((value): value is string => typeof value === "string");
-      if (!allowed.includes("https://idp.example/application/o/mobile/")) {
+      if (!issuerMatches(options.issuer, "https://idp.example/application/o/mobile/")) {
         throw new joseErrors.JWTClaimValidationFailed(
           "unexpected iss claim",
           "iss",
@@ -165,10 +171,7 @@ describe("verifyOperatorBearer", () => {
   it("rejects a mobile-style iss when OIDC_MOBILE_ISSUERS is unset", async () => {
     // OIDC_MOBILE_ISSUERS is intentionally NOT set in setupEnv().
     installVerifier(async (_token, _key, options) => {
-      const allowed = (
-        Array.isArray(options.issuer) ? options.issuer : [options.issuer]
-      ).filter((value): value is string => typeof value === "string");
-      if (!allowed.includes("https://idp.example/application/o/mobile/")) {
+      if (!issuerMatches(options.issuer, "https://idp.example/application/o/mobile/")) {
         throw new joseErrors.JWTClaimValidationFailed(
           "unexpected iss claim",
           "iss",
