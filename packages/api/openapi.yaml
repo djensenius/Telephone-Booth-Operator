@@ -359,6 +359,75 @@ paths:
         "404": { description: message not found }
         "409": { description: no succeeded transcription available to moderate }
 
+  /v1/messages/{id}/decision:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Record a human moderation decision (approve or reject).
+      description: |
+        Lets a logged-in operator override (or stand in for) the AI
+        pipeline by approving or rejecting a message. Sets the message
+        `status`, `decidedAt`, and `decidedById`, and optionally replaces
+        `notes`. Only valid once the recording has landed — a message that
+        is still `uploading` returns `409`.
+      tags: [messages]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approve, reject] }
+                notes: { type: string, maxLength: 2000 }
+      responses:
+        "200":
+          description: decision recorded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Message" }
+        "404": { description: message not found }
+        "409": { description: message is still uploading and cannot be decided }
+
+  /v1/messages/{id}/translation:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Attach a human translation to the latest succeeded transcription.
+      description: |
+        Lets a logged-in operator supply an English translation for a
+        transcription the translation worker could not produce. Updates the
+        message's latest succeeded transcription, marking `translationStatus`
+        as `succeeded` with a null `translationProvider` (consumers infer a
+        manual translation from a succeeded translation with no provider).
+        Returns `409` when the message has no succeeded transcription yet.
+      tags: [messages]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [translatedText]
+              properties:
+                translatedText: { type: string, minLength: 1, maxLength: 20000 }
+                translatedLanguage: { type: string, minLength: 1, maxLength: 64 }
+      responses:
+        "200":
+          description: translation recorded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Transcription" }
+        "404": { description: message not found }
+        "409": { description: no succeeded transcription to translate }
+
   /v1/uploads/sas:
     post:
       summary: Request a presigned Azure Blob upload URL.
@@ -1101,6 +1170,8 @@ components:
         notes: { anyOf: [{ type: string }, { type: "null" }] }
         createdAt: { type: string, format: date-time }
         receivedAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+        decidedAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+        decidedById: { anyOf: [{ type: string }, { type: "null" }] }
         audio: { $ref: "#/components/schemas/AudioRef" }
         latestTranscription:
           anyOf:
