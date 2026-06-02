@@ -24,6 +24,7 @@ vi.mock("../src/lib/require-api-token.js", () => ({
 }));
 
 import { createApp } from "../src/index.js";
+import { wsBroadcaster } from "../src/lib/broadcaster.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { fakeBlobs, resetFakeAzure } from "./support/fake-azure.js";
 import { fakeDb, resetFakeDb } from "./support/fake-db.js";
@@ -76,15 +77,21 @@ describe("message review actions", () => {
       const app = createApp();
       const id = await seedReceivedMessage(app);
       const cookie = operatorCookie();
+      const broadcasts: Array<{ kind: string }> = [];
+      wsBroadcaster.subscribe("test-decision", (e) => broadcasts.push(e));
       const res = await app.request(`/v1/messages/${id}/decision`, {
         method: "POST",
         headers: { cookie, "content-type": "application/json" },
         body: JSON.stringify({ decision: "approve" }),
       });
+      wsBroadcaster.unsubscribe("test-decision");
       expect(res.status, await res.clone().text()).toBe(200);
       const body = await res.json();
       expect(body).toMatchObject({ id, status: "approved", decidedById: "operator-1" });
       expect(typeof body.decidedAt).toBe("string");
+      expect(broadcasts).toContainEqual(
+        expect.objectContaining({ kind: "message", message: expect.objectContaining({ id, status: "approved" }) }),
+      );
     });
 
     it("rejects a message and stores the supplied notes", async () => {
@@ -175,11 +182,14 @@ describe("message review actions", () => {
         },
       });
       const cookie = operatorCookie();
+      const broadcasts: Array<{ kind: string }> = [];
+      wsBroadcaster.subscribe("test-translation", (e) => broadcasts.push(e));
       const res = await app.request(`/v1/messages/${id}/translation`, {
         method: "POST",
         headers: { cookie, "content-type": "application/json" },
         body: JSON.stringify({ translatedText: "  hello world  ", translatedLanguage: "en" }),
       });
+      wsBroadcaster.unsubscribe("test-translation");
       expect(res.status, await res.clone().text()).toBe(200);
       const body = await res.json();
       expect(body).toMatchObject({
@@ -190,6 +200,7 @@ describe("message review actions", () => {
         translationProvider: null,
       });
       expect(typeof body.translationCompletedAt).toBe("string");
+      expect(broadcasts).toContainEqual(expect.objectContaining({ kind: "message" }));
     });
 
     it("returns 409 when there is no succeeded transcription", async () => {

@@ -12,6 +12,7 @@ import { resolveAiConfig } from "../lib/ai/config.js";
 import { kickPipelineForMessage, runModeration, runTranscription } from "../lib/ai/pipeline.js";
 import { fanOutNotification } from "../lib/apns.js";
 import { generateSasUrl, headBlob } from "../lib/azure-blob.js";
+import { wsBroadcaster } from "../lib/broadcaster.js";
 import { db } from "../lib/db.js";
 import { countMessagesAwaitingModeration } from "../lib/moderation-badge.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
@@ -256,6 +257,15 @@ const messageWithAi = {
   moderations: { orderBy: { createdAt: "desc" }, take: 1 },
 } as const;
 
+// Push the latest serialized message over the WebSocket so connected operators
+// see status/transcription changes immediately. Mirrors the helpers in
+// pipeline.ts and jobs.ts (their broadcasters are not exported for reuse).
+const broadcastMessageById = async (messageId: string): Promise<void> => {
+  const full = await db.message.findUnique({ where: { id: messageId }, include: messageWithAi });
+  if (!full) return;
+  wsBroadcaster.broadcast({ kind: "message", message: serializeMessage(full as never) });
+};
+
 // Human moderation decision: a logged-in operator approves or rejects a
 // message, overriding (or standing in for) the AI pipeline. Only valid once
 // the recording has landed — "uploading" messages have no content to judge.
@@ -286,6 +296,7 @@ messagesRouter.post(
     });
     const message = await db.message.findUnique({ where: { id }, include: messageWithAi });
     if (!message) return c.json({ error: "not_found" }, 404);
+    wsBroadcaster.broadcast({ kind: "message", message: serializeMessage(message as never) });
     return c.json(serializeMessage(message as never));
   },
 );
@@ -326,6 +337,7 @@ messagesRouter.post(
         translationLeasedAt: null,
       },
     });
+    await broadcastMessageById(id);
     return c.json(serializeTranscription(updated));
   },
 );
