@@ -1,6 +1,11 @@
 import { zValidator } from "@hono/zod-validator";
 import { Prisma } from "@prisma/client";
-import { MessageCreateSchema, MessageStatusSchema } from "@telephone-booth-operator/shared";
+import {
+  MessageCreateSchema,
+  MessageDecisionSchema,
+  MessageStatusSchema,
+  TranslationSubmitSchema,
+} from "@telephone-booth-operator/shared";
 import { Hono } from "hono";
 import { z } from "zod";
 import { resolveAiConfig } from "../lib/ai/config.js";
@@ -244,3 +249,83 @@ messagesRouter.post("/:id/moderate", zValidator("param", idParamSchema), async (
   if (!row) return c.json({ error: "not_found" }, 404);
   return c.json(serializeModeration(row), 202);
 });
+
+const messageWithAi = {
+  audio: true,
+  transcriptions: { orderBy: { createdAt: "desc" }, take: 1 },
+  moderations: { orderBy: { createdAt: "desc" }, take: 1 },
+} as const;
+
+// Human moderation decision: a logged-in operator approves or rejects a
+// message, overriding (or standing in for) the AI pipeline. Only valid once
+// the recording has landed — "uploading" messages have no content to judge.
+messagesRouter.post(
+  "/:id/decision",
+  zValidator("param", idParamSchema),
+  zValidator("json", MessageDecisionSchema),
+  async (c) => {
+    const { id } = c.req.valid("param");
+    const { decision, notes } = c.req.valid("json");
+    const existing = await db.message.findUnique({
+      where: { id },
+      select: { id: true, status: true },
+    });
+    if (!existing) return c.json({ error: "not_found" }, 404);
+    if (existing.status === "uploading") {
+      return c.json({ error: "message_not_decidable" }, 409);
+    }
+    const user = c.get("user") as { id: string } | undefined;
+    await db.message.update({
+      where: { id },
+      data: {
+        status: decision === "approve" ? "approved" : "rejected",
+        decidedAt: new Date(),
+        decidedById: user?.id ?? null,
+        ...(notes !== undefined ? { notes } : {}),
+      },
+    });
+    const message = await db.message.findUnique({ where: { id }, include: messageWithAi });
+    if (!message) return c.json({ error: "not_found" }, 404);
+    return c.json(serializeMessage(message as never));
+  },
+);
+
+// Human translation: attach an operator-supplied English translation to the
+// message's latest succeeded transcription. Used when the translation worker
+// could not produce one (unsupported language, failure, or no provider).
+messagesRouter.post(
+  "/:id/translation",
+  zValidator("param", idParamSchema),
+  zValidator("json", TranslationSubmitSchema),
+  async (c) => {
+    const { id } = c.req.valid("param");
+    const { translatedText, translatedLanguage } = c.req.valid("json");
+    const message = await db.message.findUnique({ where: { id }, select: { id: true } });
+    if (!message) return c.json({ error: "not_found" }, 404);
+    const latest = await db.transcription.findFirst({
+      where: { messageId: id, status: "succeeded" },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!latest) return c.json({ error: "no_succeeded_transcription" }, 409);
+    const updated = await db.transcription.update({
+      where: { id: latest.id },
+      data: {
+        translationStatus: "succeeded",
+        translatedText,
+        translatedLanguage: translatedLanguage ?? null,
+        // Human-supplied translation: no AI provider/model. Consumers infer a
+        // manual translation from a succeeded translation with a null provider.
+        translationProvider: null,
+        translationModel: null,
+        translationError: null,
+        translationCompletedAt: new Date(),
+        // Release any held translation-worker lease so a racing job can't
+        // overwrite the operator's translation.
+        translationLeaseToken: null,
+        translationLeaseExpiresAt: null,
+        translationLeasedAt: null,
+      },
+    });
+    return c.json(serializeTranscription(updated));
+  },
+);

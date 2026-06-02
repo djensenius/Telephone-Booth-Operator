@@ -82,4 +82,16 @@ curl -X POST "$PUBLIC_API_URL/v1/messages/<id>/complete" \
 # Operator: list recent messages using the browser session cookie
 curl "$PUBLIC_API_URL/v1/messages?status=received&limit=25" \
   -H 'Cookie: __Host-booth_session=<signed-session>'
+
+# Operator: approve or reject a message (human moderation decision)
+curl -X POST "$PUBLIC_API_URL/v1/messages/<id>/decision" \
+  -H 'Cookie: __Host-booth_session=<signed-session>' \
+  -H 'Content-Type: application/json' \
+  -d '{"decision":"approve"}'
+
+# Operator: attach a human translation to the latest succeeded transcription
+curl -X POST "$PUBLIC_API_URL/v1/messages/<id>/translation" \
+  -H 'Cookie: __Host-booth_session=<signed-session>' \
+  -H 'Content-Type: application/json' \
+  -d '{"translatedText":"hello world","translatedLanguage":"en"}'
 ```

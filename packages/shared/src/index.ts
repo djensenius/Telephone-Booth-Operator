@@ -146,11 +146,28 @@ export const MessageSchema = z.object({
   notes: z.string().nullable().optional(),
   createdAt: z.string().datetime(),
   receivedAt: z.string().datetime().nullable().optional(),
+  decidedAt: z.string().datetime().nullable().optional(),
+  decidedById: z.string().nullable().optional(),
   audio: AudioRefSchema,
   latestTranscription: TranscriptionSchema.nullable().optional(),
   latestModeration: ModerationSchema.nullable().optional(),
 });
 export type Message = z.infer<typeof MessageSchema>;
+
+// Human review actions. A logged-in operator can override the AI pipeline by
+// approving or rejecting a message, and can supply a translation for a
+// transcription the translation worker could not produce.
+export const MessageDecisionSchema = z.object({
+  decision: z.enum(["approve", "reject"]),
+  notes: z.string().max(2000).optional(),
+});
+export type MessageDecision = z.infer<typeof MessageDecisionSchema>;
+
+export const TranslationSubmitSchema = z.object({
+  translatedText: z.string().trim().min(1).max(20_000),
+  translatedLanguage: z.string().trim().min(1).max(64).optional(),
+});
+export type TranslationSubmit = z.infer<typeof TranslationSubmitSchema>;
 
 // 5 minutes — generous upper bound for booth recordings.
 export const MAX_AUDIO_DURATION_MS = 300_000;

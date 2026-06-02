@@ -109,6 +109,8 @@ export const serializeMessage = (message: WithAudio<WithAi<Message>>): MessagePa
     notes: message.notes,
     createdAt: iso(message.createdAt),
     receivedAt: message.receivedAt ? iso(message.receivedAt) : null,
+    decidedAt: message.decidedAt ? iso(message.decidedAt) : null,
+    decidedById: message.decidedById,
     audio: audioRef(message.audio),
     latestTranscription: latestTranscription ? serializeTranscription(latestTranscription) : null,
     latestModeration: latestModeration ? serializeModeration(latestModeration) : null,
