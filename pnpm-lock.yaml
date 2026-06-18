@@ -25,10 +25,10 @@ importers:
         version: 12.31.0
       '@hono/node-server':
         specifier: ^1.13.7
-        version: 1.19.14(hono@4.12.22)
+        version: 1.19.14(hono@4.12.25)
       '@hono/zod-validator':
         specifier: ^0.4.1
-        version: 0.4.3(hono@4.12.22)(zod@3.25.76)
+        version: 0.4.3(hono@4.12.25)(zod@3.25.76)
       '@prisma/client':
         specifier: ^5.22.0
         version: 5.22.0(prisma@5.22.0)
@@ -39,8 +39,8 @@ importers:
         specifier: ^0.41.1
         version: 0.41.1
       hono:
-        specifier: ^4.6.12
-        version: 4.12.22
+        specifier: ^4.12.25
+        version: 4.12.25
       jose:
         specifier: ^6.2.3
         version: 6.2.3
@@ -1450,8 +1450,8 @@ packages:
   help-me@5.0.0:
     resolution: {integrity: sha512-7xgomUX6ADmcYzFik0HzAxh/73YlKR9bmFzf51CZwR+b6YtzU2m0u49hQCqV6SvlqIqsaxovfwdvbnsw3b/zpg==}
 
-  hono@4.12.22:
-    resolution: {integrity: sha512-7fvVPbB92zNRsQke+uiRGwtTuef0tB2Dg4hWxYfFNvkQhIltWoyi0ONReM5LWA+jJWS3nfT5lTq+qbsIpX0IQw==}
+  hono@4.12.25:
+    resolution: {integrity: sha512-2NFaIyNVgJmBs/ecmtGzlmluTFs5cHEWGTdu0t1HBwYzoGXOL5nUQBRMXsXWla5i4KkG//QMzVP88m1+I3fdAQ==}
     engines: {node: '>=16.9.0'}
 
   html-encoding-sniffer@4.0.0:
@@ -2366,13 +2366,13 @@ snapshots:
 
   '@fontsource/inter@5.2.8': {}
 
-  '@hono/node-server@1.19.14(hono@4.12.22)':
+  '@hono/node-server@1.19.14(hono@4.12.25)':
     dependencies:
-      hono: 4.12.22
+      hono: 4.12.25
 
-  '@hono/zod-validator@0.4.3(hono@4.12.22)(zod@3.25.76)':
+  '@hono/zod-validator@0.4.3(hono@4.12.25)(zod@3.25.76)':
     dependencies:
-      hono: 4.12.22
+      hono: 4.12.25
       zod: 3.25.76
 
   '@inquirer/ansi@2.0.5': {}
@@ -3126,7 +3126,7 @@ snapshots:
 
   help-me@5.0.0: {}
 
-  hono@4.12.22: {}
+  hono@4.12.25: {}
 
   html-encoding-sniffer@4.0.0:
     dependencies:
