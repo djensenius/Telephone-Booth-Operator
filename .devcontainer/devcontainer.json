@@ -1,6 +1,6 @@
 {
   "name": "Telephone-Booth-Operator",
-  "image": "mcr.microsoft.com/vscode/devcontainers/base:ubuntu26.04",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu26.04",
   "features": {
     "ghcr.io/djensenius/dfj-container/dfj-container:latest": {},
     "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
