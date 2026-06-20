@@ -1,0 +1,43 @@
+{
+  "name": "Telephone-Booth-Operator",
+  "image": "mcr.microsoft.com/vscode/devcontainers/base:ubuntu26.04",
+  "features": {
+    "ghcr.io/djensenius/dfj-container/dfj-container:latest": {},
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "24.16.0",
+      "pnpmVersion": "9.15.0"
+    }
+  },
+  "postCreateCommand": "mise install && just setup",
+  "forwardPorts": [
+    5173,
+    8787,
+    5432,
+    10000
+  ],
+  "portsAttributes": {
+    "5173": {
+      "label": "Operator web"
+    },
+    "8787": {
+      "label": "Operator API"
+    },
+    "5432": {
+      "label": "Postgres"
+    },
+    "10000": {
+      "label": "Azurite blob storage"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "DavidAnson.vscode-markdownlint",
+        "Prisma.prisma",
+        "dbaeumer.vscode-eslint",
+        "vitest.explorer"
+      ]
+    }
+  }
+}
