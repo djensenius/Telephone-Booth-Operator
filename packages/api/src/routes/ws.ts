@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer } from "ws";
 import { wsBroadcaster } from "../lib/broadcaster.js";
+import { verifyOperatorBearer } from "../lib/bearer-auth.js";
 import {
   readSessionFromCookieHeader,
   sessionIsExpired,
@@ -30,6 +31,32 @@ const isStatusWsPath = (request: IncomingMessage): boolean => {
 
 const closePolicyViolation = (ws: WebSocket): void => {
   ws.close(1008, "operator session required");
+};
+
+const bearerTokenFromHeader = (header: string | undefined): string | null => {
+  if (!header) return null;
+  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+  return match && match[1] ? match[1].trim() : null;
+};
+
+// Authorize a status-socket upgrade. Browser clients present the operator
+// session cookie; native clients (iOS/watchOS/tvOS, the Rust CLI) that have
+// no cookie jar present an `Authorization: Bearer` Authentik access token,
+// verified the same way as the REST/SSE bearer flow.
+const authorizeStatusUpgrade = async (request: IncomingMessage): Promise<boolean> => {
+  const session = await readSessionFromCookieHeader(request.headers.cookie);
+  if (session && !sessionIsExpired(session)) return true;
+
+  const token = bearerTokenFromHeader(request.headers.authorization);
+  if (!token) return false;
+  try {
+    const result = await verifyOperatorBearer(token);
+    return result.ok;
+  } catch {
+    // A transient JWKS/network failure must not crash the upgrade handler;
+    // treat it as an auth failure and let the client retry.
+    return false;
+  }
 };
 
 export const attachStatusWebSocket = (server: ServerType): void => {
@@ -70,8 +97,7 @@ export const attachStatusWebSocket = (server: ServerType): void => {
 
     wss.handleUpgrade(request, socket, head, (ws) => {
       void (async () => {
-        const session = await readSessionFromCookieHeader(request.headers.cookie);
-        if (!session || sessionIsExpired(session)) {
+        if (!(await authorizeStatusUpgrade(request))) {
           closePolicyViolation(ws);
           return;
         }

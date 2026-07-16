@@ -704,9 +704,12 @@ paths:
       summary: WebSocket — operator UI subscribes to live status push.
       description: |
         Operator UIs subscribe over WebSocket; the server fans out a
-        discriminated `{kind:"status"|"system"|"message", ...}` envelope. The
-        connection is dropped with code 1009 if outbound buffering exceeds
-        ~1 MiB (slow consumer guard).
+        discriminated `{kind:"status"|"system"|"message", ...}` envelope.
+        Browser clients authenticate with the operator session cookie;
+        native clients (mobile apps, the Rust CLI) present an
+        `Authorization: Bearer` Authentik access token. The connection is
+        dropped with code 1009 if outbound buffering exceeds ~1 MiB (slow
+        consumer guard).
       tags: [status]
       security:
         - operatorSession: []
