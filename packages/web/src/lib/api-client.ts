@@ -462,10 +462,15 @@ export function useSystemCurrent(boothId: string | undefined) {
 }
 
 export function useStatsOverview(selection: StatsRangeSelection) {
+  // A custom range with a fixed end never changes, so polling it just reruns
+  // the (deliberately un-cached) server aggregation. Only keep refetching while
+  // the selection is "live": a preset window, or a custom range ending at "now"
+  // (end === null).
+  const isLive = selection.kind !== "custom" || selection.end === null;
   return useQuery({
     queryKey: apiQueryKeys.statsOverview(selection),
     queryFn: () => stats.overview(selection),
-    refetchInterval: 30_000,
+    refetchInterval: isLive ? 30_000 : false,
   });
 }
 

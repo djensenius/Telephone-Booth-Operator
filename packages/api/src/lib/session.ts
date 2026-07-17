@@ -467,10 +467,20 @@ const revalidateSessionAgainstIdp = async (
       await destroySession(c);
       return null;
     }
-    // Transient failure (network / IdP outage): keep the session and leave
-    // lastValidatedAt untouched so the next request retries.
+    // Transient failure (network / IdP outage): keep the session, but still
+    // advance lastValidatedAt so we retry on the normal cadence instead of
+    // re-hitting the IdP on every subsequent request for the duration of the
+    // outage (the web client fires many concurrent queries).
     logRevalidationOutcome("auth_revalidation_transient", session, error);
-    return session;
+    try {
+      return await db.operatorSession.update({
+        where: { id: session.id },
+        data: { lastValidatedAt: new Date() },
+        include: { user: true },
+      });
+    } catch {
+      return session;
+    }
   }
 };
 

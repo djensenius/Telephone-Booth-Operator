@@ -11,6 +11,7 @@
 //     blobKey/sha256 are stored, so scope/lifetime rules are untouched.
 
 import { createHash } from "node:crypto";
+import { Prisma } from "@prisma/client";
 import { downloadBlob, headBlob, uploadBlob } from "./azure-blob.js";
 import { createTar, readTar } from "./archive.js";
 import { db } from "./db.js";
@@ -57,29 +58,28 @@ export type ImportSummary = {
   blobsSkipped: number;
 };
 
-const modelClient = (
-  name: ModelName,
-): {
+type ModelDelegate = {
   findMany: (args?: unknown) => Promise<Row[]>;
   upsert: (args: unknown) => Promise<unknown>;
-} =>
-  (
-    db as unknown as Record<
-      ModelName,
-      {
-        findMany: (args?: unknown) => Promise<Row[]>;
-        upsert: (args: unknown) => Promise<unknown>;
-      }
-    >
-  )[name];
-
-const collectDump = async (): Promise<DataDump> => {
-  const dump = {} as DataDump;
-  for (const name of IMPORT_ORDER) {
-    dump[name] = await modelClient(name).findMany({});
-  }
-  return dump;
 };
+
+const modelClientOf = (client: unknown, name: ModelName): ModelDelegate =>
+  (client as Record<ModelName, ModelDelegate>)[name];
+
+const collectDump = async (): Promise<DataDump> =>
+  // Read every table inside a single RepeatableRead transaction so the dump is
+  // a consistent snapshot; concurrent writes can't produce child rows that
+  // reference parents missing from the backup.
+  db.$transaction(
+    async (tx) => {
+      const dump = {} as DataDump;
+      for (const name of IMPORT_ORDER) {
+        dump[name] = await modelClientOf(tx, name).findMany({});
+      }
+      return dump;
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+  );
 
 // Build a full export archive: `manifest.json`, `data.json`, and one
 // `blobs/<sha256>` entry per unique audio file that still exists in storage.
@@ -131,6 +131,16 @@ export const buildExportArchive = async (): Promise<{
 
 export class ImportFormatError extends Error {}
 
+const parseJson = (raw: Buffer, what: string): unknown => {
+  try {
+    return JSON.parse(raw.toString("utf8"));
+  } catch (error) {
+    throw new ImportFormatError(
+      `${what} is not valid JSON: ${error instanceof Error ? error.message : "parse error"}`,
+    );
+  }
+};
+
 const parseArchive = (
   archive: Buffer,
 ): { manifest: ExportManifest; dump: DataDump; blobs: Map<string, Buffer> } => {
@@ -142,14 +152,25 @@ const parseArchive = (
   if (!manifestRaw || !dataRaw) {
     throw new ImportFormatError("archive missing manifest.json or data.json");
   }
-  const manifest = JSON.parse(manifestRaw.toString("utf8")) as ExportManifest;
+  const manifestValue = parseJson(manifestRaw, "manifest.json");
+  if (typeof manifestValue !== "object" || manifestValue === null) {
+    throw new ImportFormatError("manifest.json is not an object");
+  }
+  const manifest = manifestValue as ExportManifest;
   if (manifest.format !== EXPORT_FORMAT) {
-    throw new ImportFormatError(`unexpected archive format: ${manifest.format}`);
+    throw new ImportFormatError(`unexpected archive format: ${String(manifest.format)}`);
+  }
+  if (typeof manifest.version !== "number") {
+    throw new ImportFormatError("manifest.json is missing a numeric version");
   }
   if (manifest.version > EXPORT_VERSION) {
     throw new ImportFormatError(`archive version ${manifest.version} is newer than supported`);
   }
-  const dump = JSON.parse(dataRaw.toString("utf8")) as Partial<DataDump>;
+  const dumpValue = parseJson(dataRaw, "data.json");
+  if (typeof dumpValue !== "object" || dumpValue === null) {
+    throw new ImportFormatError("data.json is not an object");
+  }
+  const dump = dumpValue as Partial<DataDump>;
 
   const blobs = new Map<string, Buffer>();
   for (const [name, data] of byName) {
@@ -157,26 +178,34 @@ const parseArchive = (
   }
 
   const normalized = {} as DataDump;
-  for (const name of IMPORT_ORDER) normalized[name] = dump[name] ?? [];
+  for (const name of IMPORT_ORDER) {
+    const rows = dump[name] ?? [];
+    if (!Array.isArray(rows)) {
+      throw new ImportFormatError(`data.json entry "${name}" must be an array`);
+    }
+    normalized[name] = rows;
+  }
 
   return { manifest, dump: normalized, blobs };
 };
 
 // Restore an export archive into the current instance. Rows are upserted by id
-// (idempotent), and each referenced audio blob is uploaded only when the
-// target storage does not already hold it (dedupe by blobKey). SHA-256 is
-// verified against the archived bytes before upload.
+// (idempotent) inside a single transaction, so a mid-restore failure never
+// leaves a partially populated database. Each referenced audio blob is uploaded
+// when the target storage does not already hold a byte-identical copy (verified
+// by SHA-256), so truncated or corrupted target blobs are repaired rather than
+// silently trusted.
 export const restoreImportArchive = async (archive: Buffer): Promise<ImportSummary> => {
   const { dump, blobs } = parseArchive(archive);
 
   let blobsUploaded = 0;
   let blobsSkipped = 0;
-  const uploadedKeys = new Set<string>();
+  const handledKeys = new Set<string>();
 
   for (const raw of dump.file) {
     const file = raw as FileRow;
-    if (uploadedKeys.has(file.blobKey)) continue;
-    uploadedKeys.add(file.blobKey);
+    if (handledKeys.has(file.blobKey)) continue;
+    handledKeys.add(file.blobKey);
     const data = blobs.get(file.sha256);
     if (!data) {
       blobsSkipped += 1;
@@ -187,7 +216,10 @@ export const restoreImportArchive = async (archive: Buffer): Promise<ImportSumma
       throw new ImportFormatError(`blob sha256 mismatch for ${file.sha256}`);
     }
     const head = await headBlob(file.blobKey);
-    if (head.exists) {
+    if (head.exists && head.sha256 === file.sha256) {
+      // Target already holds a blob whose recorded integrity hash matches — safe
+      // to skip. A missing or mismatched hash means we cannot trust the existing
+      // bytes, so we re-upload the archive's verified copy below.
       blobsSkipped += 1;
       continue;
     }
@@ -196,15 +228,22 @@ export const restoreImportArchive = async (archive: Buffer): Promise<ImportSumma
   }
 
   const rows: Record<string, number> = {};
-  for (const name of IMPORT_ORDER) {
-    const client = modelClient(name);
-    let count = 0;
-    for (const row of dump[name]) {
-      await client.upsert({ where: { id: row.id }, create: row, update: row });
-      count += 1;
-    }
-    rows[name] = count;
-  }
+  await db.$transaction(
+    async (tx) => {
+      for (const name of IMPORT_ORDER) {
+        const client = modelClientOf(tx, name);
+        let count = 0;
+        for (const row of dump[name]) {
+          await client.upsert({ where: { id: row.id }, create: row, update: row });
+          count += 1;
+        }
+        rows[name] = count;
+      }
+    },
+    // A full restore can touch many rows; allow well beyond the 5s default so
+    // the whole database is applied atomically.
+    { timeout: 120_000, maxWait: 10_000 },
+  );
 
   return { rows, blobsUploaded, blobsSkipped };
 };

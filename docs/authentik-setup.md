@@ -20,6 +20,24 @@ have a docker-compose quickstart.
 The operator UI authorizes by group membership, so adding more humans
 later is a no-code change.
 
+### (Optional) Admin group
+
+Operators in a dedicated **admin** group get the elevated tier: they can
+create/edit/delete/manage questions and run the full data export/import.
+Create a second group for them:
+
+> _Authentik admin UI → Directory → Groups → Create_
+
+| Field   | Value                       |
+| ------- | --------------------------- |
+| Name    | `telephone-booth-admins`    |
+| Members | Add your admin user(s)      |
+
+Admins must **also** be in `telephone-booth-operators` — admin is additive
+on top of operator access. Wire the group name into `AUTHENTIK_ADMIN_GROUPS`
+(see step 4). Leave it unset to run with no admins, in which case question
+management and export/import are unavailable to everyone.
+
 ## 2. Create the OAuth2 / OpenID provider
 
 > _Applications → Providers → Create → OAuth2/OpenID Provider_
@@ -94,6 +112,7 @@ AUTHENTIK_CLIENT_SECRET=<from step 2>
 AUTHENTIK_REDIRECT_URI=http://localhost:8787/v1/auth/callback
 AUTHENTIK_POST_LOGOUT_REDIRECT_URI=http://localhost:5173
 AUTHENTIK_ALLOWED_GROUPS=telephone-booth-operators
+AUTHENTIK_ADMIN_GROUPS=telephone-booth-admins
 OIDC_SCOPES="openid email profile offline_access"
 SESSION_SECRET=<openssl rand -hex 32>
 SESSION_ENCRYPTION_KEY=<openssl rand -base64 32>

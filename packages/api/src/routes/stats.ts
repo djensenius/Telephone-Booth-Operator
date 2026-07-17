@@ -575,6 +575,21 @@ statsRouter.post(
   },
 );
 
+statsRouter.get(
+  "/filters/:id",
+  requireOperator(),
+  zValidator("param", idParamSchema),
+  async (c) => {
+    const user = c.get("user");
+    const { id } = c.req.valid("param");
+    const existing = (await db.metricFilter.findUnique({
+      where: { id },
+    })) as unknown as (MetricFilterRow & { userId: string }) | null;
+    if (!existing || existing.userId !== user.id) return c.json({ error: "not_found" }, 404);
+    return c.json(serializeMetricFilter(existing));
+  },
+);
+
 statsRouter.put(
   "/filters/:id",
   requireOperator(),

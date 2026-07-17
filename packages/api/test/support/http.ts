@@ -4,8 +4,8 @@ import { seedSession } from "./fake-db.js";
 
 export const phoneHeaders = { authorization: "Bearer test-token" };
 
-export const operatorCookie = (): string => {
-  const session = seedSession();
+export const operatorCookie = (overrides?: { isAdmin?: boolean }): string => {
+  const session = seedSession(overrides);
   const headers = new Headers();
   const context = {
     req: {

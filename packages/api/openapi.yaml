@@ -498,6 +498,9 @@ paths:
       responses:
         "200":
           description: aggregated usage statistics
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StatsOverview" }
         "400": { description: invalid window or range }
         "401": { description: missing or invalid credentials }
 
@@ -542,6 +545,22 @@ paths:
         "401": { description: missing or invalid credentials }
 
   /v1/stats/filters/{id}:
+    get:
+      summary: Fetch one of the current operator's saved filters.
+      tags: [stats]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: the saved filter
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MetricFilter" }
+        "401": { description: missing or invalid credentials }
+        "404": { description: not found or not owned by the caller }
     put:
       summary: Replace one of the current operator's saved filters.
       tags: [stats]
@@ -1756,10 +1775,12 @@ components:
       enum: [24h, 7d, 30d, all]
     MetricFilterInput:
       type: object
-      required: [name]
+      required: [name, window]
       description: >
-        Create/update payload for a saved filter. Must resolve to a usable
-        selection: either a `window`, or a custom range (any of start/end).
+        Create/update payload for a saved filter. `window` is required: a preset
+        value selects that window (and forbids start/end), while `null` means a
+        custom range qualified by the optional start/end bounds (null =
+        open-ended). A preset window and a range are mutually exclusive.
       properties:
         name: { type: string, minLength: 1, maxLength: 80 }
         window:
@@ -1768,6 +1789,125 @@ components:
             - { type: "null" }
         start: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
         end: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+    StatsOverview:
+      type: object
+      description: Historical usage aggregation for a preset window or custom range.
+      required:
+        [
+          window,
+          rangeStart,
+          rangeEnd,
+          generatedAt,
+          timezone,
+          calls,
+          messages,
+          playback,
+          pickupsHangups,
+          uploads,
+          topQuestions,
+          hourly,
+          busiest,
+          lastActivityAt,
+          boothBreakdown,
+        ]
+      properties:
+        window:
+          anyOf:
+            - { $ref: "#/components/schemas/StatsWindow" }
+            - { type: string, enum: [custom] }
+        rangeStart: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+        rangeEnd: { type: string, format: date-time }
+        generatedAt: { type: string, format: date-time }
+        timezone: { type: string, enum: [UTC] }
+        calls:
+          type: object
+          required:
+            [total, completed, inProgress, averageDurationMs, longestDurationMs, outcomes, perDay]
+          properties:
+            total: { type: integer, minimum: 0 }
+            completed: { type: integer, minimum: 0 }
+            inProgress: { type: integer, minimum: 0 }
+            averageDurationMs: { anyOf: [{ type: number, minimum: 0 }, { type: "null" }] }
+            longestDurationMs: { anyOf: [{ type: number, minimum: 0 }, { type: "null" }] }
+            outcomes:
+              type: object
+              additionalProperties: { type: integer, minimum: 0 }
+            perDay:
+              type: array
+              items:
+                type: object
+                required: [date, total, completed]
+                properties:
+                  date: { type: string }
+                  total: { type: integer, minimum: 0 }
+                  completed: { type: integer, minimum: 0 }
+        messages:
+          type: object
+          required: [total, byStatus, averageDurationMs]
+          properties:
+            total: { type: integer, minimum: 0 }
+            byStatus:
+              type: object
+              additionalProperties: { type: integer, minimum: 0 }
+            averageDurationMs: { anyOf: [{ type: number, minimum: 0 }, { type: "null" }] }
+        playback:
+          type: object
+          required: [totalPlaybacks]
+          properties:
+            totalPlaybacks: { type: integer, minimum: 0 }
+        pickupsHangups:
+          type: object
+          required: [pickups, hangups, digitsDialed]
+          properties:
+            pickups: { type: integer, minimum: 0 }
+            hangups: { type: integer, minimum: 0 }
+            digitsDialed:
+              type: object
+              additionalProperties: { type: integer, minimum: 0 }
+        uploads:
+          type: object
+          required: [succeeded, failed, failureRate]
+          properties:
+            succeeded: { type: integer, minimum: 0 }
+            failed: { type: integer, minimum: 0 }
+            failureRate: { anyOf: [{ type: number, minimum: 0, maximum: 1 }, { type: "null" }] }
+        topQuestions:
+          type: array
+          items:
+            type: object
+            required: [questionId, prompt, messageCount, lastUsedAt, retiredAt]
+            properties:
+              questionId: { type: string, format: uuid }
+              prompt: { type: string }
+              messageCount: { type: integer, minimum: 0 }
+              lastUsedAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+              retiredAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+        hourly:
+          type: array
+          items:
+            type: object
+            required: [hour, calls, messages]
+            properties:
+              hour: { type: integer, minimum: 0, maximum: 23 }
+              calls: { type: integer, minimum: 0 }
+              messages: { type: integer, minimum: 0 }
+        busiest:
+          type: object
+          required: [hour, dayOfWeek]
+          properties:
+            hour: { anyOf: [{ type: integer, minimum: 0, maximum: 23 }, { type: "null" }] }
+            dayOfWeek: { anyOf: [{ type: integer, minimum: 0, maximum: 6 }, { type: "null" }] }
+        lastActivityAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+        boothBreakdown:
+          type: array
+          items:
+            type: object
+            required: [boothId, calls, messages, lastSeenAt]
+            properties:
+              boothId: { type: string }
+              calls: { type: integer, minimum: 0 }
+              messages: { anyOf: [{ type: integer, minimum: 0 }, { type: "null" }] }
+              lastSeenAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
     MobileDevicePlatform:
       type: string
       enum: [ios, ipados, macos, watchos, visionos, tvos]

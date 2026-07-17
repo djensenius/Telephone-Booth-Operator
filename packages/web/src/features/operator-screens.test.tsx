@@ -395,6 +395,19 @@ describe("Questions feature", () => {
     expect(await screen.findByText("No questions on the line")).toBeTruthy();
   });
 
+  it("hides admin question controls for non-admin operators", async () => {
+    server.use(
+      http.get("http://localhost/v1/auth/me", () =>
+        HttpResponse.json({ ...operator, isAdmin: false }),
+      ),
+    );
+    renderPath("/questions");
+    expect(await screen.findByText("What did the city sound like today?")).toBeTruthy();
+    expect(screen.queryByText("New question")).toBeNull();
+    expect(screen.queryByText("Deactivate")).toBeNull();
+    expect(screen.queryByText("Delete")).toBeNull();
+  });
+
   it("has no critical axe violations", async () => {
     const { container } = renderPath("/questions");
     await screen.findByText("Question library");

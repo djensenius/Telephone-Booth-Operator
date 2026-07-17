@@ -112,6 +112,24 @@ describe("admin data export/import", () => {
     expect(fakeBlobData.get(messageFile.blobKey)?.toString("utf8")).toBe("message-audio-bytes");
   });
 
+  it("rejects an authenticated non-admin export with 403", async () => {
+    const app = createApp();
+    const cookie = operatorCookie({ isAdmin: false });
+    const res = await app.request("/v1/admin/data/export", { headers: { cookie } });
+    expect(res.status).toBe(403);
+  });
+
+  it("rejects an authenticated non-admin import with 403", async () => {
+    const app = createApp();
+    const cookie = operatorCookie({ isAdmin: false });
+    const res = await app.request("/v1/admin/data/import", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/x-tar" },
+      body: Buffer.from("padding padding padding padding padding padding padding padding pad"),
+    });
+    expect(res.status).toBe(403);
+  });
+
   it("rejects an empty import body", async () => {
     const app = createApp();
     const cookie = operatorCookie();

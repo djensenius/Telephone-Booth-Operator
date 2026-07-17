@@ -112,6 +112,12 @@ describe("Saved metric filters CRUD", () => {
     expect(listed.items).toHaveLength(1);
     expect(listed.items[0]?.id).toBe(filter.id);
 
+    const fetched = await app.request(`/v1/stats/filters/${filter.id}`, { headers: { cookie } });
+    expect(fetched.status).toBe(200);
+    const fetchedBody = (await fetched.json()) as { id: string; name: string };
+    expect(fetchedBody.id).toBe(filter.id);
+    expect(fetchedBody.name).toBe("Last week");
+
     const start = daysAgo(10).toISOString();
     const updated = await app.request(`/v1/stats/filters/${filter.id}`, {
       method: "PUT",
@@ -150,6 +156,38 @@ describe("Saved metric filters CRUD", () => {
     expect(res.status).toBe(400);
   });
 
+  it("saves a custom range that spans the whole history through now", async () => {
+    const app = createApp();
+    const cookie = operatorCookie();
+    // The UI represents "from the beginning through now" as window null with
+    // both bounds null; this explicit custom selection must be accepted.
+    const res = await app.request("/v1/stats/filters", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ name: "All time", window: null, start: null, end: null }),
+    });
+    expect(res.status).toBe(201);
+    const filter = (await res.json()) as {
+      window: string | null;
+      start: string | null;
+      end: string | null;
+    };
+    expect(filter.window).toBeNull();
+    expect(filter.start).toBeNull();
+    expect(filter.end).toBeNull();
+  });
+
+  it("rejects a preset window combined with a custom range", async () => {
+    const app = createApp();
+    const cookie = operatorCookie();
+    const res = await app.request("/v1/stats/filters", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Contradiction", window: "7d", start: daysAgo(3).toISOString() }),
+    });
+    expect(res.status).toBe(400);
+  });
+
   it("does not expose another operator's filters", async () => {
     const app = createApp();
     const cookie = operatorCookie();
@@ -169,6 +207,9 @@ describe("Saved metric filters CRUD", () => {
     const list = await app.request("/v1/stats/filters", { headers: { cookie } });
     const body = (await list.json()) as { items: unknown[] };
     expect(body.items).toHaveLength(0);
+
+    const fetch = await app.request(`/v1/stats/filters/${otherId}`, { headers: { cookie } });
+    expect(fetch.status).toBe(404);
 
     const update = await app.request(`/v1/stats/filters/${otherId}`, {
       method: "PUT",

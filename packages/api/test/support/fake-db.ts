@@ -308,7 +308,7 @@ export const seedFile = (overrides: Partial<FakeFile> = {}): FakeFile => {
   return file;
 };
 
-export const seedSession = (): FakeSession => {
+export const seedSession = (overrides?: { isAdmin?: boolean }): FakeSession => {
   const session: FakeSession = {
     id: randomUUID(),
     userId: "operator-1",
@@ -318,7 +318,7 @@ export const seedSession = (): FakeSession => {
       email: "operator@example.com",
       name: "Operator",
       groups: ["operators"],
-      isAdmin: true,
+      isAdmin: overrides?.isAdmin ?? true,
       picture: null,
     },
     accessTokenExpiresAt: new Date(Date.now() + 5 * 60 * 1000),

@@ -698,9 +698,10 @@ export type StatsOverview = z.infer<typeof StatsOverviewSchema>;
 
 // -----------------------------------------------------------------------------
 // Saved metric filters. A filter captures a named time selection an operator
-// can re-apply later. It is either a preset `window`, or an explicit custom
-// range. For custom ranges, `start === null` means "from the beginning" and
-// `end === null` means "now" (always current).
+// can re-apply later. It is either a preset `window`, or a custom range
+// (`window: null`). For custom ranges, `start === null` means "from the
+// beginning" and `end === null` means "now" (always current). A preset window
+// and a start/end range are mutually exclusive.
 // -----------------------------------------------------------------------------
 
 export const MetricFilterSchema = z.object({
@@ -716,23 +717,30 @@ export type MetricFilter = z.infer<typeof MetricFilterSchema>;
 
 const metricFilterFields = {
   name: z.string().trim().min(1).max(80),
-  window: StatsWindowSchema.nullable().optional(),
+  // `window` is a required key so an explicit custom range (`window: null`) is
+  // distinguishable from an accidentally empty payload (key omitted, which is
+  // rejected). A preset value selects that window; `null` means "custom range"
+  // and is qualified by the optional start/end bounds below.
+  window: StatsWindowSchema.nullable(),
   start: z.string().datetime().nullable().optional(),
   end: z.string().datetime().nullable().optional(),
 };
 
 type MetricFilterInput = {
   name: string;
-  window?: StatsWindow | null | undefined;
+  window: StatsWindow | null;
   start?: string | null | undefined;
   end?: string | null | undefined;
 };
 
-// A create/update payload must resolve to a usable selection: either a preset
-// window, or a custom range (any of start/end). A completely empty selection is
-// rejected so a saved filter always means something.
-const hasSelection = (value: MetricFilterInput): boolean =>
-  (value.window ?? null) !== null || (value.start ?? null) !== null || (value.end ?? null) !== null;
+// A preset window is a complete selection on its own; a custom range
+// (`window: null`) may carry start/end bounds, where `null` means open-ended
+// ("from the beginning" / "through now"). A preset window and an explicit
+// range are mutually exclusive.
+const presetExcludesRange = (value: MetricFilterInput): boolean => {
+  if (value.window === null) return true;
+  return (value.start ?? null) === null && (value.end ?? null) === null;
+};
 
 const rangeOrdered = (value: MetricFilterInput): boolean => {
   if (!value.start || !value.end) return true;
@@ -741,8 +749,9 @@ const rangeOrdered = (value: MetricFilterInput): boolean => {
 
 export const MetricFilterCreateSchema = z
   .object(metricFilterFields)
-  .refine((value): boolean => hasSelection(value), {
-    message: "A filter needs a window or a start/end range.",
+  .refine((value): boolean => presetExcludesRange(value), {
+    message: "A preset window cannot be combined with a custom start/end range.",
+    path: ["window"],
   })
   .refine((value): boolean => rangeOrdered(value), {
     message: "start must be on or before end.",

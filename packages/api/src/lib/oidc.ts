@@ -149,9 +149,16 @@ export const fetchOperatorUserInfo = async (
     const info = await oidc.fetchUserInfo(await getOidcClient(), accessToken, expectedSubject);
     return info as unknown as IDTokenClaims;
   } catch (error) {
+    // Only an *authorization* failure means the account was deleted or the
+    // token revoked: a WWW-Authenticate challenge (401) or a userinfo error
+    // response with a 401/403 status. Any other error — including provider
+    // 5xx responses (also surfaced as `ResponseBodyError`) and network faults
+    // — is transient, so callers should fail open and retry rather than
+    // signing valid operators out during an IdP outage.
     const rejected =
       error instanceof oidc.WWWAuthenticateChallengeError ||
-      error instanceof oidc.ResponseBodyError;
+      (error instanceof oidc.ResponseBodyError &&
+        (error.status === 401 || error.status === 403));
     throw new UserRevalidationError(
       error instanceof Error ? error.message : "userinfo request failed",
       rejected,
