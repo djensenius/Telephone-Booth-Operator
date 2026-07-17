@@ -5,6 +5,53 @@ import { GlassPanel } from "../../components/booth/index.js";
 import { useEventsList } from "../../lib/api-client.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
 
+// Pull a short, human-readable summary out of an arbitrary event payload so
+// `error`/`log` events are diagnosable from the table instead of showing an
+// empty cell. When the payload is a structured object we expose it as an
+// expandable detail (`hasPayload`) whose full JSON is serialized lazily on
+// expansion — event payloads are unbounded (`BoothEventSchema.payload` is
+// `z.unknown()`) and this screen renders up to 100 rows, so serializing every
+// payload up front would be wasteful. The generic fallback label is
+// "View payload" when there is no obvious message field.
+function eventDetail(payload: unknown): { summary: string; hasPayload: boolean } {
+  if (payload === null || payload === undefined) return { summary: "—", hasPayload: false };
+  if (typeof payload === "string") return { summary: payload, hasPayload: false };
+  if (typeof payload === "number" || typeof payload === "boolean") {
+    return { summary: String(payload), hasPayload: false };
+  }
+  if (typeof payload !== "object") return { summary: "View payload", hasPayload: false };
+  const record = payload as Record<string, unknown>;
+  const candidate = record.message ?? record.error ?? record.reason ?? record.detail;
+  const summary = typeof candidate === "string" && candidate.length > 0 ? candidate : "View payload";
+  return { summary, hasPayload: true };
+}
+
+// Expandable payload cell. The full JSON is only serialized the first time the
+// operator opens the disclosure, keeping large payloads off the render path
+// while every row is collapsed.
+function EventPayloadCell({
+  summary,
+  payload,
+}: {
+  readonly summary: string;
+  readonly payload: unknown;
+}): JSX.Element {
+  const [serialized, setSerialized] = useState<string | null>(null);
+  return (
+    <details
+      className="events-screen__detail"
+      onToggle={(event) => {
+        if (event.currentTarget.open && serialized === null) {
+          setSerialized(JSON.stringify(payload, null, 2));
+        }
+      }}
+    >
+      <summary>{summary}</summary>
+      <pre>{serialized ?? "Expand to load payload…"}</pre>
+    </details>
+  );
+}
+
 const EVENT_TYPES: readonly BoothEventType[] = [
   "call_started",
   "call_ended",
@@ -80,6 +127,7 @@ export function EventsScreen(): JSX.Element {
                 <th scope="col">Session</th>
                 <th scope="col">Recording</th>
                 <th scope="col">Booth</th>
+                <th scope="col">Detail</th>
               </tr>
             </thead>
             <tbody>
@@ -104,6 +152,15 @@ export function EventsScreen(): JSX.Element {
                   </td>
                   <td>{event.recordingId ?? "—"}</td>
                   <td>{event.boothId}</td>
+                  <td>
+                    {(() => {
+                      const detail = eventDetail(event.payload);
+                      if (!detail.hasPayload) {
+                        return <span className="events-screen__detail">{detail.summary}</span>;
+                      }
+                      return <EventPayloadCell summary={detail.summary} payload={event.payload} />;
+                    })()}
+                  </td>
                 </tr>
               ))}
             </tbody>

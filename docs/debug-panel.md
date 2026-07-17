@@ -1,9 +1,9 @@
 # Debug panel
 
-The operator Debug panel is digit shortcut **9** (`/debug`). It connects to
-the phone client's `booth-debug` HTTP and WebSocket surface and displays
-live state, GPIO, audio meters, logs, redacted config, and optional
-simulation controls.
+The operator Debug panel is digit shortcut **9** (`/debug`), available to
+**admin operators only**. It connects to the phone client's `booth-debug`
+HTTP and WebSocket surface and displays live state, GPIO, audio meters,
+logs, redacted config, and optional simulation controls.
 
 ## Screenshot placeholders
 

@@ -8,18 +8,19 @@ export interface DigitRoute {
   readonly label: string;
   readonly href: string;
   readonly reserved?: boolean;
+  readonly adminOnly?: boolean;
 }
 
 export const DIGIT_ROUTES: readonly DigitRoute[] = [
   { digit: "1", label: "Status", href: "/status" },
   { digit: "2", label: "Messages", href: "/messages" },
   { digit: "3", label: "Questions", href: "/questions" },
-  { digit: "4", label: "Tokens", href: "/tokens" },
+  { digit: "4", label: "Tokens", href: "/tokens", adminOnly: true },
   { digit: "5", label: "Settings", href: "/settings" },
   { digit: "6", label: "About", href: "/about" },
   { digit: "7", label: "Logout", href: "/logout" },
   { digit: "8", label: "Reserved", href: "#reserved-8", reserved: true },
-  { digit: "9", label: "Debug", href: "/debug" },
+  { digit: "9", label: "Debug", href: "/debug", adminOnly: true },
   { digit: "0", label: "Home", href: "/" },
 ];
 
