@@ -46,9 +46,11 @@ spec change.
    blob, checks the content-addressed SHA-256, marks the message
    `received`, and returns `{id, status, receivedAt}`.
 5. Phone status updates sent to `PUT /v1/status` are appended to
-   `BoothStatusSnapshot` and broadcast over the cookie-authenticated
-   `/v1/ws/status` WebSocket; missing-cookie clients are closed with
-   policy violation `1008`.
+   `BoothStatusSnapshot` and broadcast over the
+   `/v1/ws/status` WebSocket. Browser operators authenticate with the
+   session cookie; native clients (iOS/watchOS/tvOS, the Rust CLI) present
+   an `Authorization: Bearer` token. Clients that present neither a valid
+   cookie nor a valid bearer are closed with policy violation `1008`.
 
 ## Request flow: operator login
 

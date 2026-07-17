@@ -29,7 +29,7 @@ external VictoriaMetrics instance; Grafana dashboards live under
 | `GET /v1/sessions/:id`   | Operator cookie | Session + ordered events.                |
 | `PUT /v1/system`         | API token       | Update in-memory cache + WS broadcast.   |
 | `GET /v1/system/current` | Operator cookie | Latest cached snapshot.                  |
-| `GET /v1/ws/status`      | Operator cookie | Discriminated `{kind,…}` envelope.       |
+| `GET /v1/ws/status`      | Cookie or bearer | Discriminated `{kind,…}` envelope.       |
 
 Cursors are base64url-encoded `(receivedAt, id)` tuples and pair with the
 composite `@@index([boothId, receivedAt, id])` for stable pagination.
