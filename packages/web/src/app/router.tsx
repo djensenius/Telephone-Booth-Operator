@@ -56,7 +56,7 @@ function BuildFooter(): JSX.Element {
 
 function AppLayout(): JSX.Element {
   const { isAuthenticated, isAdmin } = useCurrentUser();
-  useNumericNavigation(isAuthenticated);
+  useNumericNavigation(isAuthenticated, isAdmin);
   return (
     <BoothFrame>
       <a className="skip-link" href="#main-content">

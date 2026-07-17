@@ -17,7 +17,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
   );
 }
 
-export function useNumericNavigation(enabled = true): void {
+export function useNumericNavigation(enabled = true, isAdmin = false): void {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const chordPrefix = useRef(false);
@@ -44,7 +44,11 @@ export function useNumericNavigation(enabled = true): void {
           void navigate({ to: "/questions" });
           break;
         case "4":
-          void navigate({ to: "/tokens" });
+          // Tokens is admin-only; ignore the shortcut for non-admins so the
+          // disabled sidebar entry cannot be reached from the keyboard.
+          if (isAdmin) {
+            void navigate({ to: "/tokens" });
+          }
           break;
         case "5":
           void navigate({ to: "/settings" });
@@ -63,7 +67,10 @@ export function useNumericNavigation(enabled = true): void {
           }
           break;
         case "9":
-          void navigate({ to: "/debug" });
+          // Debug is admin-only; ignore for non-admins.
+          if (isAdmin) {
+            void navigate({ to: "/debug" });
+          }
           break;
         case "0":
           void navigate({ to: "/" });
@@ -101,7 +108,10 @@ export function useNumericNavigation(enabled = true): void {
         if (key === "d") {
           event.preventDefault();
           clearChord();
-          void navigate({ to: "/debug" });
+          // Debug is admin-only; swallow the chord for non-admins.
+          if (isAdmin) {
+            void navigate({ to: "/debug" });
+          }
           return;
         }
         clearChord();
@@ -129,5 +139,5 @@ export function useNumericNavigation(enabled = true): void {
       document.removeEventListener("keydown", handleKeyDown);
       clearChord();
     };
-  }, [enabled, navigate, queryClient]);
+  }, [enabled, isAdmin, navigate, queryClient]);
 }

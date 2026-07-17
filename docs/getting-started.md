@@ -62,13 +62,15 @@ public for visitors who only need lore and credits.
   playback, downloads, detail view, local listened marks, and bulk delete.
 - Rotary digit **3** → **Questions** uploads FLAC prompt audio, files prompt
   cards, previews audio, and retires prompts.
-- Rotary digit **4** → **Tokens** issues API tokens. Copy the plaintext token
-  immediately; it is shown once. See [`api-tokens.md`](api-tokens.md).
-- Rotary digit **5** → **Settings** shows account details, logout, theme
-  preferences, and the phone-client connection panel.
+- Rotary digit **4** → **Tokens** issues API tokens (**admin-only**). Copy the
+  plaintext token immediately; it is shown once. See
+  [`api-tokens.md`](api-tokens.md).
+- Rotary digit **5** → **Settings** shows account details, logout, and theme
+  preferences. The phone-client connection panel is admin-only.
 - Rotary digit **6** → **About** explains the booth design and project stack.
 - Rotary digit **7** clears the operator session and returns to login.
-- Rotary digit **9** → **Debug** opens the phone-client diagnostics panel.
+- Rotary digit **9** → **Debug** opens the phone-client diagnostics panel
+  (**admin-only**).
 
 Paste issued phone-client tokens into the Rust client's
 `/etc/phone-booth/config.toml`.

@@ -65,7 +65,7 @@ export function SettingsScreen(): JSX.Element {
     <GlassPanel title="Operator settings" className="feature-screen settings-screen">
       <p className="screen-kicker">Digit 5</p>
       <h1>Settings</h1>
-      <p>Set operator preferences and keep the phone-client connection card close at hand.</p>
+      <p>Set operator preferences from one place.{user?.isAdmin ? " Admins also manage the phone-client connection here." : ""}</p>
       <section className="feature-card">
         <div className="settings-account-heading">
           <h2>Account</h2>

@@ -520,6 +520,30 @@ describe("Tokens feature", () => {
     expect(screen.getByText("9 · Debug · Admin")).toBeTruthy();
     expect(screen.queryByRole("link", { name: "4 · Tokens" })).toBeNull();
   });
+
+  it("ignores admin-only digit and chord shortcuts for non-admin operators", async () => {
+    server.use(
+      http.get("http://localhost/v1/auth/me", () =>
+        HttpResponse.json({ ...operator, isAdmin: false }),
+      ),
+    );
+    renderPath("/status");
+    await screen.findByText("4 · Tokens · Admin");
+    fireEvent.keyDown(document, { key: "4" });
+    fireEvent.keyDown(document, { key: "9" });
+    fireEvent.keyDown(document, { key: "g" });
+    fireEvent.keyDown(document, { key: "d" });
+    // Admin-only destinations must stay unreachable from the keyboard.
+    await waitFor(() => expect(screen.queryByText("Admin access required")).toBeNull());
+    expect(screen.queryByText("API tokens")).toBeNull();
+  });
+
+  it("allows admin-only digit shortcuts for admin operators", async () => {
+    renderPath("/status");
+    await screen.findByRole("link", { name: "4 · Tokens" });
+    fireEvent.keyDown(document, { key: "4" });
+    expect(await screen.findByText("API tokens")).toBeTruthy();
+  });
 });
 
 describe("Events feature", () => {
@@ -548,7 +572,16 @@ describe("Events feature", () => {
     );
     renderPath("/events");
     expect(await screen.findByText("booth-01")).toBeTruthy();
-    expect(screen.getByText("gpio read timed out")).toBeTruthy();
+    const summary = screen.getByText("gpio read timed out");
+    const details = summary.closest("details");
+    expect(details).not.toBeNull();
+    // Payload JSON is serialized lazily; it must not be present while collapsed.
+    expect(details?.querySelector("pre")?.textContent).not.toContain("gpio read timed out");
+    (details as HTMLDetailsElement).open = true;
+    fireEvent(details as HTMLDetailsElement, new Event("toggle"));
+    await waitFor(() =>
+      expect(details?.querySelector("pre")?.textContent).toContain("gpio read timed out"),
+    );
   });
 });
 
