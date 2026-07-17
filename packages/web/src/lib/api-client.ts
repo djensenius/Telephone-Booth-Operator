@@ -12,6 +12,8 @@ import {
   CreateApiTokenRequestSchema,
   MessageSchema,
   MessageStatusSchema,
+  MetricFilterCreateSchema,
+  MetricFilterSchema,
   ModerationSchema,
   OperatorMeSchema,
   QuestionCreateSchema,
@@ -36,6 +38,8 @@ import type {
   CreateApiTokenRequest,
   Message,
   MessageStatus,
+  MetricFilter,
+  MetricFilterCreate,
   Moderation,
   OperatorMe,
   Question,
@@ -224,7 +228,10 @@ export const questions = {
   activate: (id: string) =>
     apiFetch<Question>(`/v1/questions/${id}/activate`, { method: "POST", schema: QuestionSchema }),
   deactivate: (id: string) =>
-    apiFetch<Question>(`/v1/questions/${id}/deactivate`, { method: "POST", schema: QuestionSchema }),
+    apiFetch<Question>(`/v1/questions/${id}/deactivate`, {
+      method: "POST",
+      schema: QuestionSchema,
+    }),
   delete: (id: string) => apiFetch<void>(`/v1/questions/${id}`, { method: "DELETE" }),
 };
 
@@ -335,10 +342,71 @@ export const system = {
     }),
 };
 
+// A metrics time selection: either a preset window, or an explicit custom
+// range. For custom, `start === null` means "from the beginning" and
+// `end === null` means "now" (kept live so a saved filter stays current).
+export type StatsRangeSelection =
+  | { readonly kind: "preset"; readonly window: StatsWindow }
+  | { readonly kind: "custom"; readonly start: string | null; readonly end: string | null };
+
+const statsOverviewQuery = (selection: StatsRangeSelection): string => {
+  if (selection.kind === "preset") return query({ window: selection.window });
+  return query({
+    start: selection.start ?? undefined,
+    end: selection.end ?? "now",
+  });
+};
+
+const MetricFilterListSchema = z.object({ items: z.array(MetricFilterSchema) });
+
 export const stats = {
-  overview: (window: StatsWindow) =>
-    apiFetch<StatsOverview>(`/v1/stats/overview${query({ window })}`, {
+  overview: (selection: StatsRangeSelection) =>
+    apiFetch<StatsOverview>(`/v1/stats/overview${statsOverviewQuery(selection)}`, {
       schema: StatsOverviewSchema,
+    }),
+};
+
+export const metricFilters = {
+  list: () =>
+    apiFetch<{ items: MetricFilter[] }>("/v1/stats/filters", { schema: MetricFilterListSchema }),
+  create: (input: MetricFilterCreate) =>
+    apiFetch<MetricFilter>("/v1/stats/filters", {
+      method: "POST",
+      body: MetricFilterCreateSchema.parse(input),
+      schema: MetricFilterSchema,
+    }),
+  update: (id: string, input: MetricFilterCreate) =>
+    apiFetch<MetricFilter>(`/v1/stats/filters/${id}`, {
+      method: "PUT",
+      body: MetricFilterCreateSchema.parse(input),
+      schema: MetricFilterSchema,
+    }),
+  remove: (id: string) => apiFetch<void>(`/v1/stats/filters/${id}`, { method: "DELETE" }),
+};
+
+export type AdminImportSummary = {
+  rows: Record<string, number>;
+  blobsUploaded: number;
+  blobsSkipped: number;
+};
+
+export const adminData = {
+  // Full backup download. Uses a raw fetch (not apiFetch) so we can stream the
+  // tar archive as a Blob and trigger a browser download.
+  export: async (): Promise<{ blob: Blob; filename: string }> => {
+    const response = await fetch(apiUrlFor("/v1/admin/data/export"), { credentials: "include" });
+    if (!response.ok) {
+      throw new ApiError(response.status, `export failed (HTTP ${response.status})`);
+    }
+    const disposition = response.headers.get("content-disposition") ?? "";
+    const match = /filename="([^"]+)"/.exec(disposition);
+    return { blob: await response.blob(), filename: match?.[1] ?? "telephone-booth-export.tar" };
+  },
+  import: (archive: Blob) =>
+    apiFetch<AdminImportSummary>("/v1/admin/data/import", {
+      method: "POST",
+      body: archive,
+      headers: { "Content-Type": "application/x-tar" },
     }),
 };
 
@@ -356,7 +424,8 @@ export const apiQueryKeys = {
   sessions: (boothId?: string) => ["sessions", "list", boothId ?? null] as const,
   session: (id: string) => ["sessions", id] as const,
   system: (boothId: string) => ["system", boothId] as const,
-  statsOverview: (window: StatsWindow) => ["stats", "overview", window] as const,
+  statsOverview: (selection: StatsRangeSelection) => ["stats", "overview", selection] as const,
+  metricFilters: ["stats", "filters"] as const,
 };
 
 export function useEventsList(params: EventsListParams = {}) {
@@ -392,11 +461,48 @@ export function useSystemCurrent(boothId: string | undefined) {
   });
 }
 
-export function useStatsOverview(window: StatsWindow) {
+export function useStatsOverview(selection: StatsRangeSelection) {
+  // A custom range with a fixed end never changes, so polling it just reruns
+  // the (deliberately un-cached) server aggregation. Only keep refetching while
+  // the selection is "live": a preset window, or a custom range ending at "now"
+  // (end === null).
+  const isLive = selection.kind !== "custom" || selection.end === null;
   return useQuery({
-    queryKey: apiQueryKeys.statsOverview(window),
-    queryFn: () => stats.overview(window),
-    refetchInterval: 30_000,
+    queryKey: apiQueryKeys.statsOverview(selection),
+    queryFn: () => stats.overview(selection),
+    refetchInterval: isLive ? 30_000 : false,
+  });
+}
+
+export function useMetricFilters() {
+  return useQuery({
+    queryKey: apiQueryKeys.metricFilters,
+    queryFn: () => metricFilters.list(),
+  });
+}
+
+export function useCreateMetricFilter() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: MetricFilterCreate) => metricFilters.create(input),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: apiQueryKeys.metricFilters }),
+  });
+}
+
+export function useUpdateMetricFilter() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: MetricFilterCreate }) =>
+      metricFilters.update(id, input),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: apiQueryKeys.metricFilters }),
+  });
+}
+
+export function useDeleteMetricFilter() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => metricFilters.remove(id),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: apiQueryKeys.metricFilters }),
   });
 }
 

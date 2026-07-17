@@ -124,6 +124,48 @@ export const exchangeCode = async (
 export const refreshTokens = async (refreshToken: string): Promise<TokenSet> =>
   oidc.refreshTokenGrant(await getOidcClient(), refreshToken);
 
+// Thrown by `fetchOperatorUserInfo`. `rejected` distinguishes an active
+// rejection by the IdP (the userinfo endpoint returned 401/403 — i.e. the
+// account was deleted or the token revoked) from a transient failure
+// (network error, IdP outage) where callers should fail open and retry.
+export class UserRevalidationError extends Error {
+  override name = "UserRevalidationError";
+  readonly rejected: boolean;
+  constructor(message: string, rejected: boolean) {
+    super(message);
+    this.rejected = rejected;
+  }
+}
+
+// Call the provider's userinfo endpoint with a live access token to confirm the
+// account still exists and to pick up its current claims (groups, email). This
+// hits the IdP directly, so a deleted user is detected even while their
+// self-contained access token is still cryptographically unexpired.
+export const fetchOperatorUserInfo = async (
+  accessToken: string,
+  expectedSubject: string,
+): Promise<IDTokenClaims> => {
+  try {
+    const info = await oidc.fetchUserInfo(await getOidcClient(), accessToken, expectedSubject);
+    return info as unknown as IDTokenClaims;
+  } catch (error) {
+    // Only an *authorization* failure means the account was deleted or the
+    // token revoked: a WWW-Authenticate challenge (401) or a userinfo error
+    // response with a 401/403 status. Any other error — including provider
+    // 5xx responses (also surfaced as `ResponseBodyError`) and network faults
+    // — is transient, so callers should fail open and retry rather than
+    // signing valid operators out during an IdP outage.
+    const rejected =
+      error instanceof oidc.WWWAuthenticateChallengeError ||
+      (error instanceof oidc.ResponseBodyError &&
+        (error.status === 401 || error.status === 403));
+    throw new UserRevalidationError(
+      error instanceof Error ? error.message : "userinfo request failed",
+      rejected,
+    );
+  }
+};
+
 export const endSessionUrl = (idTokenHint: string | null | undefined): URL | null => {
   const config = getRequiredOidcConfig();
   const client = currentClient();

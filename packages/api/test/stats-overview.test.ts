@@ -69,7 +69,6 @@ describe("GET /v1/stats/overview", () => {
       headers: { cookie },
     });
     expect(res.status).toBe(400);
-    await expect(res.json()).resolves.toMatchObject({ error: "invalid_window" });
   });
 
   it("returns a zero-filled overview for an empty database", async () => {

@@ -94,11 +94,17 @@ const isLocalFromUrl = (url: string): boolean => {
   }
 };
 
-const appendCookieHeader = (c: { header: (name: string, value: string, options?: { append: boolean }) => void }, parts: string[]): void => {
+const appendCookieHeader = (
+  c: { header: (name: string, value: string, options?: { append: boolean }) => void },
+  parts: string[],
+): void => {
   c.header("Set-Cookie", parts.join("; "), { append: true });
 };
 
-const setLoginTxCookie = (c: Parameters<typeof appendCookieHeader>[0] & { req: { url: string } }, state: string): void => {
+const setLoginTxCookie = (
+  c: Parameters<typeof appendCookieHeader>[0] & { req: { url: string } },
+  state: string,
+): void => {
   const signed = encodeURIComponent(signedCookieValue(state));
   const maxAge = String(Math.floor(pendingLoginTtlMs / 1000));
   appendCookieHeader(c, [
@@ -120,7 +126,9 @@ const setLoginTxCookie = (c: Parameters<typeof appendCookieHeader>[0] & { req: {
   ]);
 };
 
-const clearLoginTxCookie = (c: Parameters<typeof appendCookieHeader>[0] & { req: { url: string } }): void => {
+const clearLoginTxCookie = (
+  c: Parameters<typeof appendCookieHeader>[0] & { req: { url: string } },
+): void => {
   appendCookieHeader(c, [
     `${LOGIN_TX_COOKIE_NAME}=`,
     "Path=/",
@@ -167,7 +175,18 @@ const htmlBody = (title: string, detail: string): string => {
 </html>`;
 };
 
-const htmlResponse = (c: { html: (body: string, status?: ContentfulStatusCode, headers?: Record<string, string>) => Response | Promise<Response> }, title: string, detail: string, status: ContentfulStatusCode): Response | Promise<Response> =>
+const htmlResponse = (
+  c: {
+    html: (
+      body: string,
+      status?: ContentfulStatusCode,
+      headers?: Record<string, string>,
+    ) => Response | Promise<Response>;
+  },
+  title: string,
+  detail: string,
+  status: ContentfulStatusCode,
+): Response | Promise<Response> =>
   c.html(htmlBody(title, detail), status, {
     "Content-Security-Policy": "default-src 'none'",
   });
@@ -194,6 +213,7 @@ const operatorMeFromUser = (user: {
   email: string;
   name: string;
   groups: unknown;
+  isAdmin: boolean;
   picture: string | null;
 }) => {
   const groups = Array.isArray(user.groups)
@@ -204,6 +224,7 @@ const operatorMeFromUser = (user: {
     email: user.email,
     name: user.name,
     groups,
+    isAdmin: user.isAdmin,
     providerName: getAuthConfig().providerName,
     ...(user.picture ? { picture: user.picture } : {}),
   };
@@ -219,7 +240,12 @@ export const authRoutes = new Hono<{ Variables: AuthVariables }>();
 
 authRoutes.get("/login", zValidator("query", loginQuerySchema), async (c) => {
   if (getAuthConfig().disabled) {
-    return htmlResponse(c, "Authentication disabled", "AUTH_DISABLED=true is enabled for local development.", 503);
+    return htmlResponse(
+      c,
+      "Authentication disabled",
+      "AUTH_DISABLED=true is enabled for local development.",
+      503,
+    );
   }
 
   prunePendingLogins();
@@ -254,7 +280,12 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
   const txState = readLoginTxCookie(c.req.header("cookie"));
   clearLoginTxCookie(c);
   if (!txState || txState !== query.state) {
-    return htmlResponse(c, "OIDC login failed", "Login transaction cookie missing or mismatched.", 400);
+    return htmlResponse(
+      c,
+      "OIDC login failed",
+      "Login transaction cookie missing or mismatched.",
+      400,
+    );
   }
 
   prunePendingLogins();

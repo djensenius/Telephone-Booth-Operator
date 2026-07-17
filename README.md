@@ -84,6 +84,7 @@ and shown only once on creation.
 | [`docs/azure-storage.md`](docs/azure-storage.md)     | Azure Blob layout, SAS scoping, Azurite for dev    |
 | [`docs/deployment.md`](docs/deployment.md)           | Production deploy via container images             |
 | [`docs/runbook.md`](docs/runbook.md)                 | Day-2: rotate secrets, restore from backup         |
+| [`docs/backup-restore.md`](docs/backup-restore.md)   | Full data + audio export/import (admin-only)       |
 | [`docs/troubleshooting.md`](docs/troubleshooting.md) | When the receiver buzzes                           |
 
 Full index: [`docs/README.md`](docs/README.md).

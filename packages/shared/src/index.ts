@@ -214,6 +214,7 @@ export const OperatorMeSchema = z.object({
   email: z.string().email(),
   name: z.string(),
   groups: z.array(z.string()),
+  isAdmin: z.boolean(),
   picture: z.string().url().optional(),
   providerName: z.string(),
 });
@@ -642,7 +643,7 @@ export const StatsBusiestSchema = z.object({
 export type StatsBusiest = z.infer<typeof StatsBusiestSchema>;
 
 export const StatsOverviewSchema = z.object({
-  window: StatsWindowSchema,
+  window: z.union([StatsWindowSchema, z.literal("custom")]),
   rangeStart: z.string().datetime().nullable(),
   rangeEnd: z.string().datetime(),
   generatedAt: z.string().datetime(),
@@ -694,3 +695,69 @@ export const StatsOverviewSchema = z.object({
   boothBreakdown: z.array(StatsBoothBreakdownSchema),
 });
 export type StatsOverview = z.infer<typeof StatsOverviewSchema>;
+
+// -----------------------------------------------------------------------------
+// Saved metric filters. A filter captures a named time selection an operator
+// can re-apply later. It is either a preset `window`, or a custom range
+// (`window: null`). For custom ranges, `start === null` means "from the
+// beginning" and `end === null` means "now" (always current). A preset window
+// and a start/end range are mutually exclusive.
+// -----------------------------------------------------------------------------
+
+export const MetricFilterSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  window: StatsWindowSchema.nullable(),
+  start: z.string().datetime().nullable(),
+  end: z.string().datetime().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type MetricFilter = z.infer<typeof MetricFilterSchema>;
+
+const metricFilterFields = {
+  name: z.string().trim().min(1).max(80),
+  // `window` is a required key so an explicit custom range (`window: null`) is
+  // distinguishable from an accidentally empty payload (key omitted, which is
+  // rejected). A preset value selects that window; `null` means "custom range"
+  // and is qualified by the optional start/end bounds below.
+  window: StatsWindowSchema.nullable(),
+  start: z.string().datetime().nullable().optional(),
+  end: z.string().datetime().nullable().optional(),
+};
+
+type MetricFilterInput = {
+  name: string;
+  window: StatsWindow | null;
+  start?: string | null | undefined;
+  end?: string | null | undefined;
+};
+
+// A preset window is a complete selection on its own; a custom range
+// (`window: null`) may carry start/end bounds, where `null` means open-ended
+// ("from the beginning" / "through now"). A preset window and an explicit
+// range are mutually exclusive.
+const presetExcludesRange = (value: MetricFilterInput): boolean => {
+  if (value.window === null) return true;
+  return (value.start ?? null) === null && (value.end ?? null) === null;
+};
+
+const rangeOrdered = (value: MetricFilterInput): boolean => {
+  if (!value.start || !value.end) return true;
+  return new Date(value.start).getTime() <= new Date(value.end).getTime();
+};
+
+export const MetricFilterCreateSchema = z
+  .object(metricFilterFields)
+  .refine((value): boolean => presetExcludesRange(value), {
+    message: "A preset window cannot be combined with a custom start/end range.",
+    path: ["window"],
+  })
+  .refine((value): boolean => rangeOrdered(value), {
+    message: "start must be on or before end.",
+    path: ["start"],
+  });
+export type MetricFilterCreate = z.infer<typeof MetricFilterCreateSchema>;
+
+export const MetricFilterUpdateSchema = MetricFilterCreateSchema;
+export type MetricFilterUpdate = z.infer<typeof MetricFilterUpdateSchema>;

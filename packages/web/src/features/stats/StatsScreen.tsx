@@ -4,9 +4,15 @@
 
 import { useMemo, useState } from "react";
 import { STATS_WINDOW_VALUES } from "@telephone-booth-operator/shared";
-import type { StatsOverview, StatsWindow } from "@telephone-booth-operator/shared";
+import type { MetricFilter, StatsOverview, StatsWindow } from "@telephone-booth-operator/shared";
 import { GlassPanel } from "../../components/booth/index.js";
-import { useStatsOverview } from "../../lib/api-client.js";
+import {
+  useCreateMetricFilter,
+  useDeleteMetricFilter,
+  useMetricFilters,
+  useStatsOverview,
+  type StatsRangeSelection,
+} from "../../lib/api-client.js";
 import { FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
 
 const WINDOW_LABEL: Record<StatsWindow, string> = {
@@ -48,7 +54,13 @@ const STATUS_LABEL: Record<string, string> = {
   rejected: "Rejected",
 };
 
-const STATUS_ORDER: readonly string[] = ["uploading", "received", "pending", "approved", "rejected"];
+const STATUS_ORDER: readonly string[] = [
+  "uploading",
+  "received",
+  "pending",
+  "approved",
+  "rejected",
+];
 
 const DAY_OF_WEEK_LABEL = [
   "Sunday",
@@ -410,9 +422,193 @@ function BoothBreakdownSection({ overview }: OverviewProps): JSX.Element | null 
   );
 }
 
+// datetime-local input <-> ISO helpers. The input yields a local
+// "YYYY-MM-DDTHH:mm" string; we round-trip through Date for the API's ISO.
+function isoToLocalInput(iso: string | null): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
+    date.getHours(),
+  )}:${pad(date.getMinutes())}`;
+}
+
+function localInputToIso(value: string): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
+
+function selectionLabel(selection: StatsRangeSelection): string {
+  if (selection.kind === "preset") return WINDOW_LABEL[selection.window];
+  const start = selection.start ? new Date(selection.start).toLocaleString() : "the beginning";
+  const end = selection.end ? new Date(selection.end).toLocaleString() : "now";
+  return `${start} → ${end}`;
+}
+
+function filterToSelection(filter: MetricFilter): StatsRangeSelection {
+  if (filter.window) return { kind: "preset", window: filter.window };
+  return { kind: "custom", start: filter.start, end: filter.end };
+}
+
+function selectionToCreate(name: string, selection: StatsRangeSelection) {
+  if (selection.kind === "preset") {
+    return { name, window: selection.window, start: null, end: null };
+  }
+  return { name, window: null, start: selection.start, end: selection.end };
+}
+
+function StatsControls({
+  selection,
+  onChange,
+}: {
+  selection: StatsRangeSelection;
+  onChange: (next: StatsRangeSelection) => void;
+}): JSX.Element {
+  const filtersQuery = useMetricFilters();
+  const createFilter = useCreateMetricFilter();
+  const deleteFilter = useDeleteMetricFilter();
+  const [filterName, setFilterName] = useState("");
+  const savedFilters = filtersQuery.data?.items ?? [];
+
+  const custom = selection.kind === "custom" ? selection : null;
+  const endIsNow = custom !== null && custom.end === null;
+
+  const handleSave = (): void => {
+    const name = filterName.trim();
+    if (name.length === 0 || createFilter.isPending) return;
+    createFilter.mutate(selectionToCreate(name, selection), {
+      onSuccess: () => setFilterName(""),
+    });
+  };
+
+  return (
+    <div className="stats-controls">
+      <fieldset className="stats-window-picker" aria-label="Time range">
+        <legend className="visually-hidden">Time range</legend>
+        {STATS_WINDOW_VALUES.map((option) => (
+          <label key={option}>
+            <input
+              type="radio"
+              name="stats-window"
+              value={option}
+              checked={selection.kind === "preset" && selection.window === option}
+              onChange={() => onChange({ kind: "preset", window: option })}
+            />
+            <span>{WINDOW_LABEL[option]}</span>
+          </label>
+        ))}
+        <label>
+          <input
+            type="radio"
+            name="stats-window"
+            value="custom"
+            checked={selection.kind === "custom"}
+            onChange={() => onChange({ kind: "custom", start: null, end: null })}
+          />
+          <span>Custom range</span>
+        </label>
+      </fieldset>
+
+      {custom === null ? null : (
+        <fieldset className="stats-custom-range" aria-label="Custom range">
+          <legend className="visually-hidden">Custom range bounds</legend>
+          <label>
+            <span>Start</span>
+            <input
+              type="datetime-local"
+              value={isoToLocalInput(custom.start)}
+              onChange={(event) =>
+                onChange({ ...custom, start: localInputToIso(event.target.value) })
+              }
+            />
+          </label>
+          <label>
+            <span>End</span>
+            <input
+              type="datetime-local"
+              value={isoToLocalInput(custom.end)}
+              disabled={endIsNow}
+              onChange={(event) =>
+                onChange({ ...custom, end: localInputToIso(event.target.value) })
+              }
+            />
+          </label>
+          <label className="stats-now-toggle">
+            <input
+              type="checkbox"
+              checked={endIsNow}
+              onChange={(event) =>
+                onChange({ ...custom, end: event.target.checked ? null : new Date().toISOString() })
+              }
+            />
+            <span>End = now (live)</span>
+          </label>
+        </fieldset>
+      )}
+
+      <div className="stats-saved-filters">
+        <label>
+          <span>Saved filters</span>
+          <select
+            value=""
+            onChange={(event) => {
+              const found = savedFilters.find((f) => f.id === event.target.value);
+              if (found) onChange(filterToSelection(found));
+            }}
+          >
+            <option value="">Load a saved filter…</option>
+            {savedFilters.map((filter) => (
+              <option key={filter.id} value={filter.id}>
+                {filter.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="stats-save-filter">
+          <input
+            type="text"
+            placeholder="Name this filter"
+            value={filterName}
+            maxLength={80}
+            onChange={(event) => setFilterName(event.target.value)}
+          />
+          <button type="button" onClick={handleSave} disabled={filterName.trim().length === 0}>
+            Save current
+          </button>
+        </div>
+        {savedFilters.length > 0 ? (
+          <ul className="stats-saved-filter-list">
+            {savedFilters.map((filter) => (
+              <li key={filter.id}>
+                <button type="button" onClick={() => onChange(filterToSelection(filter))}>
+                  {filter.name}
+                </button>
+                <button
+                  type="button"
+                  className="stats-filter-delete"
+                  aria-label={`Delete ${filter.name}`}
+                  onClick={() => deleteFilter.mutate(filter.id)}
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export function StatsScreen(): JSX.Element {
-  const [windowChoice, setWindowChoice] = useState<StatsWindow>("7d");
-  const query = useStatsOverview(windowChoice);
+  const [selection, setSelection] = useState<StatsRangeSelection>({
+    kind: "preset",
+    window: "7d",
+  });
+  const query = useStatsOverview(selection);
   const overview = query.data ?? null;
 
   const generatedAt = useMemo(
@@ -427,25 +623,11 @@ export function StatsScreen(): JSX.Element {
           <span className="screen-kicker">Operator console</span>
           <h1 id="stats-title">Usage statistics</h1>
           <p className="stats-screen__subtitle">
-            {WINDOW_LABEL[windowChoice]}
+            {selectionLabel(selection)}
             {generatedAt === null ? null : ` · refreshed ${generatedAt}`}
           </p>
         </div>
-        <fieldset className="stats-window-picker" aria-label="Window">
-          <legend className="visually-hidden">Time window</legend>
-          {STATS_WINDOW_VALUES.map((option) => (
-            <label key={option}>
-              <input
-                type="radio"
-                name="stats-window"
-                value={option}
-                checked={windowChoice === option}
-                onChange={() => setWindowChoice(option)}
-              />
-              <span>{WINDOW_LABEL[option]}</span>
-            </label>
-          ))}
-        </fieldset>
+        <StatsControls selection={selection} onChange={setSelection} />
       </header>
       {query.isError ? (
         <FeatureError

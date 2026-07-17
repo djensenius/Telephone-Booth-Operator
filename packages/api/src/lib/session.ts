@@ -8,8 +8,15 @@ import {
 import type { OperatorSession, OperatorUser } from "@prisma/client";
 import type { Context, MiddlewareHandler } from "hono";
 import { verifyOperatorBearer } from "./bearer-auth.js";
+import { getAuthConfig } from "./config.js";
 import { db } from "./db.js";
-import { refreshTokens, type TokenSet } from "./oidc.js";
+import {
+  fetchOperatorUserInfo,
+  refreshTokens,
+  UserRevalidationError,
+  type TokenSet,
+} from "./oidc.js";
+import { revalidateOperatorFromClaims } from "./operator-user.js";
 
 export const SESSION_COOKIE_NAME = "__Host-booth_session";
 const DEV_SESSION_COOKIE_NAME = "booth_session";
@@ -253,6 +260,7 @@ export const createSession = async (
       refreshToken: encryptSessionSecret(tokens.refresh_token),
       accessTokenExpiresAt: accessTokenExpiresAt(tokens),
       expiresAt: sessionExpiresAt(),
+      lastValidatedAt: new Date(),
       ip: requestIp(request),
       userAgent: request.headers.get("user-agent"),
     },
@@ -383,6 +391,99 @@ const refreshIfAccessTokenExpired = async (
   return null;
 };
 
+const logRevalidationOutcome = (
+  event: "auth_revalidation_rejected" | "auth_revalidation_transient" | "auth_revalidation_revoked",
+  session: SessionUser,
+  error?: unknown,
+): void => {
+  const base = {
+    level: event === "auth_revalidation_transient" ? "warn" : "info",
+    event,
+    sub: session.user.oidcSub,
+  };
+  const payload =
+    error instanceof Error ? { ...base, error: error.name, message: error.message } : base;
+  console.error(JSON.stringify(payload));
+};
+
+const revalidateIntervalMs = (): number =>
+  Math.max(ttlSecondsFromEnv("SESSION_REVALIDATE_SECONDS", 300), 60) * 1000;
+
+// True only when OIDC is configured and enabled. Reading the config throws when
+// OIDC is unconfigured (e.g. AUTH_DISABLED local dev, or unit tests that mock
+// sessions directly); in those cases we cannot — and should not — revalidate.
+const oidcRevalidationEnabled = (): boolean => {
+  try {
+    return !getAuthConfig().disabled;
+  } catch {
+    return false;
+  }
+};
+
+const sessionNeedsRevalidation = (session: SessionUser): boolean => {
+  const last = session.lastValidatedAt?.getTime();
+  if (last === undefined || last === null) return true;
+  return Date.now() - last >= revalidateIntervalMs();
+};
+
+// Periodically confirm the session's account still exists and is still
+// authorized at the IdP. This catches accounts deleted in Authentik (or
+// removed from the operator group) that would otherwise remain usable until
+// their access token happened to expire — even across the full session TTL.
+const revalidateSessionAgainstIdp = async (
+  c: Context,
+  session: SessionUser,
+): Promise<SessionUser | null> => {
+  if (!oidcRevalidationEnabled()) return session;
+  if (!sessionNeedsRevalidation(session)) return session;
+
+  const accessToken = decryptSessionSecret(session.accessToken);
+  if (!accessToken) {
+    // No access token to check liveness with (e.g. legacy session). The
+    // session TTL and refresh-token checks still bound its lifetime; skip
+    // rather than forcing an aggressive logout.
+    return session;
+  }
+
+  try {
+    const claims = await fetchOperatorUserInfo(accessToken, session.user.oidcSub);
+    const outcome = await revalidateOperatorFromClaims(claims);
+    if (!outcome.ok) {
+      logRevalidationOutcome("auth_revalidation_revoked", session);
+      await destroySession(c);
+      return null;
+    }
+    const updated = await db.operatorSession.update({
+      where: { id: session.id },
+      data: { lastValidatedAt: new Date() },
+      include: { user: true },
+    });
+    return updated;
+  } catch (error) {
+    if (error instanceof UserRevalidationError && error.rejected) {
+      // The IdP actively rejected the token: the account was deleted or the
+      // token revoked. End the session immediately.
+      logRevalidationOutcome("auth_revalidation_rejected", session, error);
+      await destroySession(c);
+      return null;
+    }
+    // Transient failure (network / IdP outage): keep the session, but still
+    // advance lastValidatedAt so we retry on the normal cadence instead of
+    // re-hitting the IdP on every subsequent request for the duration of the
+    // outage (the web client fires many concurrent queries).
+    logRevalidationOutcome("auth_revalidation_transient", session, error);
+    try {
+      return await db.operatorSession.update({
+        where: { id: session.id },
+        data: { lastValidatedAt: new Date() },
+        include: { user: true },
+      });
+    } catch {
+      return session;
+    }
+  }
+};
+
 export const readValidSession = async (c: Context): Promise<SessionUser | null> => {
   const session = await readSession(c);
   if (!session) return null;
@@ -390,7 +491,9 @@ export const readValidSession = async (c: Context): Promise<SessionUser | null> 
     await destroySession(c);
     return null;
   }
-  return refreshIfAccessTokenExpired(c, session);
+  const refreshed = await refreshIfAccessTokenExpired(c, session);
+  if (!refreshed) return null;
+  return revalidateSessionAgainstIdp(c, refreshed);
 };
 
 const publicV1Route = (path: string, method: string): boolean => {
@@ -447,6 +550,18 @@ export const requireOperator =
   };
 
 export const requireSession = requireOperator;
+
+// Operator **admin** guard. Mount AFTER `requireOperator()` so `c.get("user")`
+// is populated. Returns 403 for authenticated operators who are not admins.
+export const requireAdmin =
+  (): MiddlewareHandler<{ Variables: AuthVariables }> => async (c, next) => {
+    const user = c.get("user");
+    if (!user) return unauthorized(c);
+    if (!user.isAdmin) {
+      return c.json({ error: "forbidden", detail: "Operator admin privileges required." }, 403);
+    }
+    await next();
+  };
 
 export const resetSessionCryptoForTests = (): void => {
   generatedCookieSecret = null;

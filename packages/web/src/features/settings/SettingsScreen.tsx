@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { GlassPanel, useBoothStatus } from "../../components/booth/index.js";
 import { LogoutButton } from "../auth/LogoutButton.js";
 import { useCurrentUser } from "../auth/useCurrentUser.js";
+import { AdminBackupPanel } from "./AdminBackupPanel.js";
 import { PhoneClientConnection } from "./PhoneClientConnection.js";
 
 const fontSizeKey = "booth.theme.fontSize";
@@ -138,6 +139,7 @@ export function SettingsScreen(): JSX.Element {
           </label>
         </div>
       </section>
+      {user?.isAdmin ? <AdminBackupPanel /> : null}
       <PhoneClientConnection userSub={user?.id ?? "anonymous"} />
     </GlassPanel>
   );

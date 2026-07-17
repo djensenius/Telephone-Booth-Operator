@@ -2,11 +2,15 @@
 // Results are memoized for STATS_CACHE_TTL_MS so that high-frequency widget
 // timelines don't fan out into N Postgres queries per refresh.
 
+import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
+import { z } from "zod";
 import {
-  STATS_WINDOW_VALUES,
+  MetricFilterCreateSchema,
+  MetricFilterUpdateSchema,
   StatsWindowSchema,
   statsWindowDurationMs,
+  type MetricFilter,
   type StatsOverview,
   type StatsWindow,
 } from "@telephone-booth-operator/shared";
@@ -103,7 +107,17 @@ export const resetStatsCacheForTests = (): void => {
 // row counts on a real installation are small enough that this is fine.
 // -----------------------------------------------------------------------------
 
-const overviewCache = new Map<StatsWindow, { value: StatsOverview; expiresAt: number }>();
+const overviewCache = new Map<string, { value: StatsOverview; expiresAt: number }>();
+
+// A resolved time selection for the overview aggregation. `window` is the
+// label echoed back to the client ("custom" for explicit ranges). `rangeStart`
+// is the inclusive lower bound (null = from the beginning) and `rangeEnd` is
+// the inclusive upper bound (defaults to "now" for presets).
+type ResolvedRange = {
+  window: StatsWindow | "custom";
+  rangeStart: Date | null;
+  rangeEnd: Date;
+};
 
 type CallSessionRow = {
   id: string;
@@ -134,10 +148,7 @@ const incRecord = (record: Record<string, number>, key: string): void => {
   record[key] = (record[key] ?? 0) + 1;
 };
 
-const buildHourly = (
-  callTimes: Date[],
-  messageTimes: Date[],
-): StatsOverview["hourly"] => {
+const buildHourly = (callTimes: Date[], messageTimes: Date[]): StatsOverview["hourly"] => {
   const buckets = Array.from({ length: 24 }, (_, hour) => ({
     hour,
     calls: 0,
@@ -245,13 +256,13 @@ const findBusiest = (
   return { hour, dayOfWeek };
 };
 
-const computeStatsOverview = async (window: StatsWindow): Promise<StatsOverview> => {
+const computeStatsOverview = async (range: ResolvedRange): Promise<StatsOverview> => {
   const generatedAt = new Date();
-  const windowMs = statsWindowDurationMs(window);
-  const rangeEnd = generatedAt;
-  const rangeStart = windowMs === null ? null : new Date(rangeEnd.getTime() - windowMs);
-  const startedFilter = rangeStart ? { gte: rangeStart } : undefined;
-  const endedFilter = rangeStart ? { gte: rangeStart } : undefined;
+  const { window, rangeStart, rangeEnd } = range;
+  // Inclusive bounds. Presets have rangeEnd == now, so the upper bound is a
+  // no-op there; custom ranges may end in the past, hence the explicit `lte`.
+  const bounds: { gte?: Date; lte: Date } = { lte: rangeEnd };
+  if (rangeStart) bounds.gte = rangeStart;
 
   const [
     sessionsByStart,
@@ -265,33 +276,29 @@ const computeStatsOverview = async (window: StatsWindow): Promise<StatsOverview>
     questions,
   ] = await Promise.all([
     db.callSession.findMany({
-      where: startedFilter ? { startedAt: startedFilter } : {},
+      where: { startedAt: bounds },
     }) as unknown as Promise<CallSessionRow[]>,
     db.callSession.findMany({
-      where: endedFilter ? { endedAt: endedFilter, outcome: { not: null } } : { outcome: { not: null } },
+      where: { endedAt: bounds, outcome: { not: null } },
     }) as unknown as Promise<CallSessionRow[]>,
     // Used for the pickup/hangup panel — counts sessions whose endedAt fell
     // inside the window regardless of outcome, so the panel reconciles with
     // calls.* at window boundaries (a call that started before the window
     // but hung up inside it still counts as one hangup here).
     db.callSession.count({
-      where: endedFilter ? { endedAt: endedFilter } : { endedAt: { not: null } },
+      where: { endedAt: bounds },
     }),
     db.callSession.count({ where: { endedAt: null } }),
     db.message.findMany({
-      where: startedFilter ? { createdAt: startedFilter } : {},
+      where: { createdAt: bounds },
       include: { audio: true },
       take: MAX_MESSAGES_PER_OVERVIEW,
     }) as unknown as Promise<MessageRow[]>,
     db.boothEvent.findMany({
-      where: startedFilter
-        ? { type: "state_transition", occurredAt: startedFilter }
-        : { type: "state_transition" },
+      where: { type: "state_transition", occurredAt: bounds },
     }) as unknown as Promise<BoothEventRow[]>,
     db.boothEvent.findMany({
-      where: startedFilter
-        ? { type: { in: ["upload_completed", "upload_failed"] }, occurredAt: startedFilter }
-        : { type: { in: ["upload_completed", "upload_failed"] } },
+      where: { type: { in: ["upload_completed", "upload_failed"] }, occurredAt: bounds },
     }) as unknown as Promise<BoothEventRow[]>,
     db.boothEvent.findFirst({
       orderBy: [{ receivedAt: "desc" }],
@@ -446,14 +453,74 @@ const computeStatsOverview = async (window: StatsWindow): Promise<StatsOverview>
   };
 };
 
+// Resolve a preset window into a concrete range ending "now".
+const presetRange = (window: StatsWindow): ResolvedRange => {
+  const rangeEnd = new Date();
+  const windowMs = statsWindowDurationMs(window);
+  const rangeStart = windowMs === null ? null : new Date(rangeEnd.getTime() - windowMs);
+  return { window, rangeStart, rangeEnd };
+};
+
 const getCachedOverview = async (window: StatsWindow): Promise<StatsOverview> => {
   const now = Date.now();
   const cachedEntry = overviewCache.get(window);
   if (cachedEntry && cachedEntry.expiresAt > now) return cachedEntry.value;
-  const value = await computeStatsOverview(window);
+  const value = await computeStatsOverview(presetRange(window));
   overviewCache.set(window, { value, expiresAt: now + OVERVIEW_CACHE_TTL_MS });
   return value;
 };
+
+// Query schema for /overview. Either a preset `window`, or a custom range via
+// `start`/`end`. `end` accepts the literal "now" (or is omitted) to mean the
+// current instant, so a saved custom filter stays live.
+const overviewQuerySchema = z
+  .object({
+    window: StatsWindowSchema.optional(),
+    start: z.string().datetime().optional(),
+    end: z.union([z.literal("now"), z.string().datetime()]).optional(),
+  })
+  .refine(
+    (v) => (v.start && v.end && v.end !== "now" ? new Date(v.start) <= new Date(v.end) : true),
+    {
+      message: "start must be on or before end",
+      path: ["start"],
+    },
+  );
+
+const resolveOverviewRange = (query: z.infer<typeof overviewQuerySchema>): ResolvedRange => {
+  const hasCustom = query.start !== undefined || query.end !== undefined;
+  if (!hasCustom) return presetRange(query.window ?? "7d");
+  const rangeEnd = !query.end || query.end === "now" ? new Date() : new Date(query.end);
+  const rangeStart = query.start ? new Date(query.start) : null;
+  return { window: "custom", rangeStart, rangeEnd };
+};
+
+// -----------------------------------------------------------------------------
+// Saved metric filters — per-operator named time selections. Owner-scoped: an
+// operator only ever sees and mutates their own filters.
+// -----------------------------------------------------------------------------
+
+type MetricFilterRow = {
+  id: string;
+  name: string;
+  window: string | null;
+  rangeStart: Date | null;
+  rangeEnd: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+const serializeMetricFilter = (row: MetricFilterRow): MetricFilter => ({
+  id: row.id,
+  name: row.name,
+  window: (row.window as StatsWindow | null) ?? null,
+  start: row.rangeStart ? row.rangeStart.toISOString() : null,
+  end: row.rangeEnd ? row.rangeEnd.toISOString() : null,
+  createdAt: row.createdAt.toISOString(),
+  updatedAt: row.updatedAt.toISOString(),
+});
+
+const idParamSchema = z.object({ id: z.string().uuid() });
 
 export const statsRouter = new Hono<{ Variables: AuthVariables }>();
 
@@ -462,18 +529,105 @@ statsRouter.get("/summary", requireOperator(), async (c) => {
   return c.json(summary);
 });
 
-statsRouter.get("/overview", requireOperator(), async (c) => {
-  const raw = c.req.query("window") ?? "7d";
-  const parsed = StatsWindowSchema.safeParse(raw);
-  if (!parsed.success) {
-    return c.json(
-      {
-        error: "invalid_window",
-        allowed: STATS_WINDOW_VALUES,
-      },
-      400,
-    );
-  }
-  const overview = await getCachedOverview(parsed.data);
-  return c.json(overview);
+statsRouter.get(
+  "/overview",
+  requireOperator(),
+  zValidator("query", overviewQuerySchema),
+  async (c) => {
+    const query = c.req.valid("query");
+    const range = resolveOverviewRange(query);
+    // Preset windows are cached; custom ranges (which may end at a live "now")
+    // are computed fresh so the numbers are always current.
+    const overview =
+      range.window === "custom"
+        ? await computeStatsOverview(range)
+        : await getCachedOverview(range.window);
+    return c.json(overview);
+  },
+);
+
+statsRouter.get("/filters", requireOperator(), async (c) => {
+  const user = c.get("user");
+  const rows = (await db.metricFilter.findMany({
+    where: { userId: user.id },
+    orderBy: [{ createdAt: "asc" }],
+  })) as unknown as MetricFilterRow[];
+  return c.json({ items: rows.map(serializeMetricFilter) });
 });
+
+statsRouter.post(
+  "/filters",
+  requireOperator(),
+  zValidator("json", MetricFilterCreateSchema),
+  async (c) => {
+    const user = c.get("user");
+    const body = c.req.valid("json");
+    const row = (await db.metricFilter.create({
+      data: {
+        userId: user.id,
+        name: body.name,
+        window: body.window ?? null,
+        rangeStart: body.start ? new Date(body.start) : null,
+        rangeEnd: body.end ? new Date(body.end) : null,
+      },
+    })) as unknown as MetricFilterRow;
+    return c.json(serializeMetricFilter(row), 201);
+  },
+);
+
+statsRouter.get(
+  "/filters/:id",
+  requireOperator(),
+  zValidator("param", idParamSchema),
+  async (c) => {
+    const user = c.get("user");
+    const { id } = c.req.valid("param");
+    const existing = (await db.metricFilter.findUnique({
+      where: { id },
+    })) as unknown as (MetricFilterRow & { userId: string }) | null;
+    if (!existing || existing.userId !== user.id) return c.json({ error: "not_found" }, 404);
+    return c.json(serializeMetricFilter(existing));
+  },
+);
+
+statsRouter.put(
+  "/filters/:id",
+  requireOperator(),
+  zValidator("param", idParamSchema),
+  zValidator("json", MetricFilterUpdateSchema),
+  async (c) => {
+    const user = c.get("user");
+    const { id } = c.req.valid("param");
+    const body = c.req.valid("json");
+    const existing = (await db.metricFilter.findUnique({
+      where: { id },
+    })) as unknown as MetricFilterRow & { userId: string };
+    if (!existing || existing.userId !== user.id) return c.json({ error: "not_found" }, 404);
+    const row = (await db.metricFilter.update({
+      where: { id },
+      data: {
+        name: body.name,
+        window: body.window ?? null,
+        rangeStart: body.start ? new Date(body.start) : null,
+        rangeEnd: body.end ? new Date(body.end) : null,
+      },
+    })) as unknown as MetricFilterRow;
+    return c.json(serializeMetricFilter(row));
+  },
+);
+
+statsRouter.delete(
+  "/filters/:id",
+  requireOperator(),
+  zValidator("param", idParamSchema),
+  async (c) => {
+    const user = c.get("user");
+    const { id } = c.req.valid("param");
+    const existing = (await db.metricFilter.findUnique({
+      where: { id },
+    })) as unknown as { userId: string } | null;
+    if (!existing || existing.userId !== user.id) return c.json({ error: "not_found" }, 404);
+    await db.metricFilter.delete({ where: { id } });
+    return c.body(null, 204);
+  },
+);

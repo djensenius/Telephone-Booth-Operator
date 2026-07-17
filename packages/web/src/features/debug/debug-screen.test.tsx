@@ -101,6 +101,7 @@ describe("DebugScreen", () => {
               email: "operator@example.com",
               name: "Jane Operator",
               groups: [],
+              isAdmin: true,
               providerName: "Authentik",
             }),
           );

@@ -13,6 +13,11 @@ export type OidcRuntimeConfig = {
   scopes: string;
   allowedGroups: string[];
   allowedEmails: string[];
+  // Groups whose members are granted the operator **admin** tier (e.g.
+  // managing the question catalogue, full data export/import). Admin is
+  // additive on top of the operator allow-list above: an admin group member
+  // must still satisfy `allowedGroups`/`allowedEmails` to be an operator.
+  adminGroups: string[];
   // Additional `aud` values accepted on bearer access tokens — typically the
   // Authentik client_id(s) of native/mobile applications that PKCE-auth
   // against the same provider. The primary `clientId` above is always
@@ -93,6 +98,15 @@ export const resolveAuthConfig = (env: NodeJS.ProcessEnv = process.env): AuthCon
     ),
   );
 
+  const adminGroups = csv(
+    first(
+      env.OIDC_ADMIN_GROUPS,
+      env.AUTHENTIK_ADMIN_GROUPS,
+      env.OIDC_ADMIN_GROUP,
+      env.AUTHENTIK_ADMIN_GROUP,
+    ),
+  );
+
   return {
     disabled: false,
     providerName,
@@ -107,6 +121,7 @@ export const resolveAuthConfig = (env: NodeJS.ProcessEnv = process.env): AuthCon
     allowedEmails: csv(first(env.OIDC_ALLOWED_EMAILS, env.AUTHENTIK_ALLOWED_EMAILS)).map((email) =>
       email.toLowerCase(),
     ),
+    adminGroups,
     mobileAudiences: csv(
       first(
         env.OIDC_MOBILE_AUDIENCES,
