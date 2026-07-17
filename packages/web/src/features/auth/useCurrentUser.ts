@@ -5,6 +5,7 @@ export interface CurrentUserState {
   readonly user: OperatorMe | null;
   readonly isLoading: boolean;
   readonly isAuthenticated: boolean;
+  readonly isAdmin: boolean;
 }
 
 export function useCurrentUser(): CurrentUserState {
@@ -14,5 +15,6 @@ export function useCurrentUser(): CurrentUserState {
     user: query.data ?? null,
     isLoading: query.isLoading,
     isAuthenticated: query.data !== undefined && !unauthenticated,
+    isAdmin: query.data?.isAdmin ?? false,
   };
 }

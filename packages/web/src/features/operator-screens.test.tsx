@@ -496,12 +496,85 @@ describe("Tokens feature", () => {
     await screen.findByText("API tokens");
     await expectNoCriticalAxe(container);
   });
+
+  it("blocks the tokens screen for non-admin operators", async () => {
+    server.use(
+      http.get("http://localhost/v1/auth/me", () =>
+        HttpResponse.json({ ...operator, isAdmin: false }),
+      ),
+    );
+    renderPath("/tokens");
+    expect(await screen.findByText("Admin access required")).toBeTruthy();
+    expect(screen.queryByText("API tokens")).toBeNull();
+  });
+
+  it("greys out admin-only shortcuts for non-admin operators", async () => {
+    server.use(
+      http.get("http://localhost/v1/auth/me", () =>
+        HttpResponse.json({ ...operator, isAdmin: false }),
+      ),
+    );
+    renderPath("/status");
+    const locked = await screen.findByText("4 · Tokens · Admin");
+    expect(locked.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByText("9 · Debug · Admin")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "4 · Tokens" })).toBeNull();
+  });
+});
+
+describe("Events feature", () => {
+  it("surfaces the payload detail for error events", async () => {
+    server.use(
+      http.get("http://localhost/v1/events", () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: "99999999-9999-4999-8999-999999999999",
+              eventId: "evt-1",
+              boothId: "booth-01",
+              bootId: "88888888-8888-4888-8888-888888888888",
+              type: "error",
+              occurredAt: "2026-07-17T21:43:20.000Z",
+              receivedAt: "2026-07-17T21:43:20.000Z",
+              sessionId: null,
+              recordingId: null,
+              payload: { message: "gpio read timed out" },
+              version: "0.3.2",
+            },
+          ],
+          nextCursor: null,
+        }),
+      ),
+    );
+    renderPath("/events");
+    expect(await screen.findByText("booth-01")).toBeTruthy();
+    expect(screen.getByText("gpio read timed out")).toBeTruthy();
+  });
 });
 
 describe("Settings feature", () => {
   it("renders theme settings and phone-client connection", async () => {
     renderPath("/settings");
     expect(await screen.findByText("Phone Client Connection")).toBeTruthy();
+    expect(screen.getByText("Theme")).toBeTruthy();
+  });
+
+  it("shows the admin badge for admin operators", async () => {
+    renderPath("/settings");
+    await screen.findByText("Jane Operator");
+    expect(screen.getByText("Admin")).toBeTruthy();
+  });
+
+  it("hides the phone-client connection and admin badge for non-admins", async () => {
+    server.use(
+      http.get("http://localhost/v1/auth/me", () =>
+        HttpResponse.json({ ...operator, isAdmin: false }),
+      ),
+    );
+    renderPath("/settings");
+    await screen.findByText("Jane Operator");
+    expect(screen.queryByText("Phone Client Connection")).toBeNull();
+    expect(screen.queryByText("Admin")).toBeNull();
     expect(screen.getByText("Theme")).toBeTruthy();
   });
 

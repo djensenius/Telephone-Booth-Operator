@@ -5,6 +5,23 @@ import { GlassPanel } from "../../components/booth/index.js";
 import { useEventsList } from "../../lib/api-client.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
 
+// Pull a short, human-readable summary out of an arbitrary event payload so
+// `error`/`log` events are diagnosable from the table instead of showing an
+// empty cell. Falls back to compact JSON when there's no obvious message.
+function eventDetail(payload: unknown): { summary: string; full: string | null } {
+  if (payload === null || payload === undefined) return { summary: "—", full: null };
+  if (typeof payload === "string") return { summary: payload, full: null };
+  if (typeof payload === "number" || typeof payload === "boolean") {
+    return { summary: String(payload), full: null };
+  }
+  if (typeof payload !== "object") return { summary: "View payload", full: null };
+  const record = payload as Record<string, unknown>;
+  const candidate = record.message ?? record.error ?? record.reason ?? record.detail;
+  const full = JSON.stringify(payload, null, 2);
+  const summary = typeof candidate === "string" && candidate.length > 0 ? candidate : "View payload";
+  return { summary, full };
+}
+
 const EVENT_TYPES: readonly BoothEventType[] = [
   "call_started",
   "call_ended",
@@ -80,6 +97,7 @@ export function EventsScreen(): JSX.Element {
                 <th scope="col">Session</th>
                 <th scope="col">Recording</th>
                 <th scope="col">Booth</th>
+                <th scope="col">Detail</th>
               </tr>
             </thead>
             <tbody>
@@ -104,6 +122,20 @@ export function EventsScreen(): JSX.Element {
                   </td>
                   <td>{event.recordingId ?? "—"}</td>
                   <td>{event.boothId}</td>
+                  <td>
+                    {(() => {
+                      const detail = eventDetail(event.payload);
+                      if (detail.full === null) {
+                        return <span className="events-screen__detail">{detail.summary}</span>;
+                      }
+                      return (
+                        <details className="events-screen__detail">
+                          <summary>{detail.summary}</summary>
+                          <pre>{detail.full}</pre>
+                        </details>
+                      );
+                    })()}
+                  </td>
                 </tr>
               ))}
             </tbody>

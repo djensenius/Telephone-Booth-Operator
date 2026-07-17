@@ -11,6 +11,7 @@ import { AboutScreen } from "../features/about/AboutScreen.js";
 import { LoginScreen } from "../features/auth/LoginScreen.js";
 import { LogoutButton } from "../features/auth/LogoutButton.js";
 import { RequireAuth } from "../features/auth/RequireAuth.js";
+import { RequireAdmin } from "../features/auth/RequireAdmin.js";
 import { useCurrentUser } from "../features/auth/useCurrentUser.js";
 import { DebugScreen } from "../features/debug/DebugScreen.js";
 import { EventsScreen } from "../features/events/EventsScreen.js";
@@ -54,7 +55,7 @@ function BuildFooter(): JSX.Element {
 }
 
 function AppLayout(): JSX.Element {
-  const { isAuthenticated } = useCurrentUser();
+  const { isAuthenticated, isAdmin } = useCurrentUser();
   useNumericNavigation(isAuthenticated);
   return (
     <BoothFrame>
@@ -74,6 +75,14 @@ function AppLayout(): JSX.Element {
                   <li key={route.digit}>
                     {route.reserved === true ? (
                       <span className="operator-sidebar__reserved">{route.digit} · Reserved</span>
+                    ) : route.adminOnly === true && !isAdmin ? (
+                      <span
+                        className="operator-sidebar__reserved operator-sidebar__admin-locked"
+                        aria-disabled="true"
+                        title="Admin only"
+                      >
+                        {`${route.digit} · ${route.label} · Admin`}
+                      </span>
                     ) : route.digit === "7" ? (
                       <LogoutButton className="operator-sidebar__logout">
                         {`${route.digit} · ${route.label}`}
@@ -120,6 +129,14 @@ function protectedScreen(screen: JSX.Element): JSX.Element {
   return <RequireAuth>{screen}</RequireAuth>;
 }
 
+function adminScreen(screen: JSX.Element): JSX.Element {
+  return (
+    <RequireAuth>
+      <RequireAdmin>{screen}</RequireAdmin>
+    </RequireAuth>
+  );
+}
+
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
@@ -164,7 +181,7 @@ const newQuestionRoute = createRoute({
 const tokensRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/tokens",
-  component: () => protectedScreen(<TokensScreen />),
+  component: () => adminScreen(<TokensScreen />),
 });
 
 const settingsRoute = createRoute({
@@ -176,7 +193,7 @@ const settingsRoute = createRoute({
 const debugRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/debug",
-  component: () => protectedScreen(<DebugScreen />),
+  component: () => adminScreen(<DebugScreen />),
 });
 
 const systemRoute = createRoute({
