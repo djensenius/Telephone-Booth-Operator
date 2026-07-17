@@ -5,7 +5,7 @@ import { z } from "zod";
 import { db } from "../lib/db.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 import { serializeQuestion } from "../lib/serializers.js";
-import type { AuthVariables } from "../lib/session.js";
+import { requireAdmin, type AuthVariables } from "../lib/session.js";
 
 const listQuerySchema = z.object({
   cursor: z.string().uuid().optional(),
@@ -34,7 +34,7 @@ questionsRouter.get("/", zValidator("query", listQuerySchema), async (c) => {
   return c.json({ items, nextCursor: next ?? null });
 });
 
-questionsRouter.post("/", zValidator("json", QuestionCreateSchema), async (c) => {
+questionsRouter.post("/", requireAdmin(), zValidator("json", QuestionCreateSchema), async (c) => {
   const body = c.req.valid("json");
   const audio = await db.file.findUnique({ where: { id: body.audioFileId } });
   if (!audio) return c.json({ error: "audio_file_not_found" }, 404);
@@ -54,33 +54,43 @@ questionsRouter.post("/", zValidator("json", QuestionCreateSchema), async (c) =>
   }
 });
 
-questionsRouter.post("/:id/activate", zValidator("param", idParamSchema), async (c) => {
-  const { id } = c.req.valid("param");
-  const question = await db.question.findUnique({ where: { id } });
-  if (!question) return c.json({ error: "not_found" }, 404);
+questionsRouter.post(
+  "/:id/activate",
+  requireAdmin(),
+  zValidator("param", idParamSchema),
+  async (c) => {
+    const { id } = c.req.valid("param");
+    const question = await db.question.findUnique({ where: { id } });
+    if (!question) return c.json({ error: "not_found" }, 404);
 
-  const updated = await db.question.update({
-    where: { id },
-    data: { status: "active", retiredAt: null },
-    include: { audio: true },
-  });
-  return c.json(serializeQuestion(updated));
-});
+    const updated = await db.question.update({
+      where: { id },
+      data: { status: "active", retiredAt: null },
+      include: { audio: true },
+    });
+    return c.json(serializeQuestion(updated));
+  },
+);
 
-questionsRouter.post("/:id/deactivate", zValidator("param", idParamSchema), async (c) => {
-  const { id } = c.req.valid("param");
-  const question = await db.question.findUnique({ where: { id } });
-  if (!question) return c.json({ error: "not_found" }, 404);
+questionsRouter.post(
+  "/:id/deactivate",
+  requireAdmin(),
+  zValidator("param", idParamSchema),
+  async (c) => {
+    const { id } = c.req.valid("param");
+    const question = await db.question.findUnique({ where: { id } });
+    if (!question) return c.json({ error: "not_found" }, 404);
 
-  const updated = await db.question.update({
-    where: { id },
-    data: { status: "draft", retiredAt: null },
-    include: { audio: true },
-  });
-  return c.json(serializeQuestion(updated));
-});
+    const updated = await db.question.update({
+      where: { id },
+      data: { status: "draft", retiredAt: null },
+      include: { audio: true },
+    });
+    return c.json(serializeQuestion(updated));
+  },
+);
 
-questionsRouter.delete("/:id", zValidator("param", idParamSchema), async (c) => {
+questionsRouter.delete("/:id", requireAdmin(), zValidator("param", idParamSchema), async (c) => {
   const { id } = c.req.valid("param");
   const question = await db.question.findUnique({ where: { id } });
   if (!question || question.status === "archived") return c.json({ error: "not_found" }, 404);

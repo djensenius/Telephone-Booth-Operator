@@ -20,6 +20,16 @@ export const groupsFromClaims = (claims: IDTokenClaims): string[] => {
   return groups.filter((group): group is string => typeof group === "string");
 };
 
+// Whether the given groups grant the operator **admin** tier. Derived from the
+// live group claim on every login (cookie flow) and every bearer request
+// (mobile flow), so removing a user from the admin group takes effect without
+// waiting for a stored flag to be recomputed.
+export const isAdminFromGroups = (groups: string[]): boolean => {
+  const { adminGroups } = getRequiredOidcConfig();
+  if (adminGroups.length === 0) return false;
+  return groups.some((group) => adminGroups.includes(group));
+};
+
 export const pictureFromClaims = (claims: IDTokenClaims): string | null => {
   const picture = claimString(claims, "picture");
   if (!picture) return null;
@@ -97,11 +107,13 @@ export const authorizeAndUpsertOperator = async (
 
   const name = claimString(claims, "name") ?? claimString(claims, "preferred_username") ?? email;
   const picture = pictureFromClaims(claims);
+  const isAdmin = isAdminFromGroups(groups);
   const updateData: {
     email: string;
     name: string;
     groups: string[];
     picture: string | null;
+    isAdmin: boolean;
     lastSeenAt: Date;
     lastLoginAt?: Date;
   } = {
@@ -109,6 +121,7 @@ export const authorizeAndUpsertOperator = async (
     name,
     groups,
     picture,
+    isAdmin,
     lastSeenAt: now,
   };
   if (options.markLogin) updateData.lastLoginAt = now;
@@ -122,6 +135,7 @@ export const authorizeAndUpsertOperator = async (
       name,
       groups,
       picture,
+      isAdmin,
       lastLoginAt: now,
       lastSeenAt: now,
     },
@@ -129,4 +143,30 @@ export const authorizeAndUpsertOperator = async (
   });
 
   return { ok: true, user, groups };
+};
+
+export type RevalidationOutcome = { ok: true; user?: OperatorUser } | { ok: false; reason: string };
+
+// Re-evaluate an existing operator's authorization from a fresh set of claims
+// (typically a userinfo response) during periodic session revalidation.
+//
+// Only the 403 "no longer in an operator group / email" case revokes access.
+// A userinfo response may legitimately omit the `groups` claim (depending on
+// the provider's scope mapping) or other fields; in that case we cannot
+// re-evaluate group authorization, so we treat the successful response as a
+// liveness confirmation and leave the stored authorization untouched rather
+// than logging out a still-valid operator.
+export const revalidateOperatorFromClaims = async (
+  claims: IDTokenClaims,
+): Promise<RevalidationOutcome> => {
+  if (!Array.isArray(claims.groups)) {
+    return { ok: true };
+  }
+  const result = await authorizeAndUpsertOperator(claims);
+  if (result.ok) return { ok: true, user: result.user };
+  // Only an authorization failure (403) should end the session. A 400 means
+  // the userinfo response lacked the claim shape we need to re-authorize, so
+  // keep the session (liveness was already confirmed by a successful call).
+  if (result.status === 403) return { ok: false, reason: result.reason };
+  return { ok: true };
 };

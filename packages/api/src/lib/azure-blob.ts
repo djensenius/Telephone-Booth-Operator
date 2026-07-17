@@ -137,6 +137,28 @@ export const headBlob = async (blobName: string): Promise<BlobHead> => {
   }
 };
 
+// Download a blob's full contents into a Buffer. Used by the admin data
+// export to bundle audio alongside the database dump.
+export const downloadBlob = async (blobName: string): Promise<Buffer> => {
+  const blob = containerClient().getBlockBlobClient(blobName);
+  return blob.downloadToBuffer();
+};
+
+// Upload a blob (used by admin data import). `sha256` is stored as blob
+// metadata to mirror the phone-side upload path so integrity checks keep
+// working after a restore.
+export const uploadBlob = async (
+  blobName: string,
+  data: Buffer,
+  options: { contentType: string; sha256?: string },
+): Promise<void> => {
+  const blob = containerClient().getBlockBlobClient(blobName);
+  await blob.uploadData(data, {
+    blobHTTPHeaders: { blobContentType: options.contentType },
+    ...(options.sha256 ? { metadata: { sha256: options.sha256 } } : {}),
+  });
+};
+
 export const resetAzureBlobForTests = (): void => {
   state = null;
 };

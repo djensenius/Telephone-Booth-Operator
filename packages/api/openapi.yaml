@@ -468,6 +468,167 @@ paths:
               schema: { $ref: "#/components/schemas/StatsSummary" }
         "401": { description: missing or invalid credentials }
 
+  /v1/stats/overview:
+    get:
+      summary: Historical usage aggregation over a time window or custom range.
+      description: |
+        Thorough aggregates across calls, messages, booth events and uploads.
+        Select either a preset `window`, or a custom range via `start`/`end`.
+        `end` accepts the literal `now` (or omit it) to mean the current
+        instant, so a saved custom filter stays live. Preset windows are
+        cached; custom ranges are computed fresh.
+      tags: [stats]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      parameters:
+        - name: window
+          in: query
+          schema: { $ref: "#/components/schemas/StatsWindow" }
+        - name: start
+          in: query
+          schema: { type: string, format: date-time }
+        - name: end
+          in: query
+          description: An ISO timestamp, or the literal "now".
+          schema:
+            anyOf:
+              - { type: string, format: date-time }
+              - { type: string, enum: [now] }
+      responses:
+        "200":
+          description: aggregated usage statistics
+        "400": { description: invalid window or range }
+        "401": { description: missing or invalid credentials }
+
+  /v1/stats/filters:
+    get:
+      summary: List the current operator's saved metric filters.
+      tags: [stats]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      responses:
+        "200":
+          description: saved filters
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/MetricFilter" }
+        "401": { description: missing or invalid credentials }
+    post:
+      summary: Save a new metric filter for the current operator.
+      tags: [stats]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MetricFilterInput" }
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MetricFilter" }
+        "400": { description: invalid selection }
+        "401": { description: missing or invalid credentials }
+
+  /v1/stats/filters/{id}:
+    put:
+      summary: Replace one of the current operator's saved filters.
+      tags: [stats]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MetricFilterInput" }
+      responses:
+        "200":
+          description: updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MetricFilter" }
+        "400": { description: invalid selection }
+        "401": { description: missing or invalid credentials }
+        "404": { description: not found or not owned by the caller }
+    delete:
+      summary: Delete one of the current operator's saved filters.
+      tags: [stats]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: deleted }
+        "401": { description: missing or invalid credentials }
+        "404": { description: not found or not owned by the caller }
+
+  /v1/admin/data/export:
+    get:
+      summary: Admin-only full data + audio export (tar archive download).
+      description: |
+        Streams a complete backup: the Postgres data set (minus ephemeral
+        OIDC sessions) plus every audio blob, bundled as a tar archive.
+        See docs/backup-restore.md for the archive layout.
+      tags: [admin]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      responses:
+        "200":
+          description: tar archive
+          content:
+            application/x-tar:
+              schema: { type: string, format: binary }
+        "401": { description: missing or invalid credentials }
+        "403": { description: operator is not an admin }
+
+  /v1/admin/data/import:
+    post:
+      summary: Admin-only restore of a previously exported archive.
+      description: |
+        Accepts a tar archive produced by the export endpoint and upserts its
+        rows, uploading any audio blobs the target storage does not already
+        hold. Idempotent; blob integrity is verified against SHA-256.
+      tags: [admin]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/x-tar:
+            schema: { type: string, format: binary }
+      responses:
+        "200":
+          description: import summary
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rows, blobsUploaded, blobsSkipped]
+                properties:
+                  rows: { type: object, additionalProperties: { type: integer } }
+                  blobsUploaded: { type: integer }
+                  blobsSkipped: { type: integer }
+        "400": { description: empty or invalid archive }
+        "401": { description: missing or invalid credentials }
+        "403": { description: operator is not an admin }
+
   /v1/auth/login:
     get:
       summary: Begin Authentik OIDC login (Auth-Code + PKCE).
@@ -1231,7 +1392,7 @@ components:
           { type: string, format: uuid, description: "Present for question-audio uploads." }
     OperatorMe:
       type: object
-      required: [id, name, email, groups, providerName]
+      required: [id, name, email, groups, isAdmin, providerName]
       properties:
         id: { type: string, description: "Stable Authentik sub" }
         name: { type: string }
@@ -1239,6 +1400,9 @@ components:
         groups:
           type: array
           items: { type: string }
+        isAdmin:
+          type: boolean
+          description: "True when the operator is in an admin group (OIDC_ADMIN_GROUPS). Admins may manage questions and run data export/import."
         picture: { type: string, format: uri }
         providerName: { type: string, description: "OIDC_PROVIDER_NAME — drives UI copy." }
     CreateApiTokenRequest:
@@ -1570,6 +1734,40 @@ components:
           properties:
             wsClients: { type: integer, minimum: 0 }
         generatedAt: { type: string, format: date-time }
+    MetricFilter:
+      type: object
+      required: [id, name, window, start, end, createdAt, updatedAt]
+      description: >
+        A per-operator saved metrics time selection. Either `window` (a preset)
+        is set, or a custom range via `start`/`end`. A null `end` means "now".
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 80 }
+        window:
+          anyOf:
+            - { $ref: "#/components/schemas/StatsWindow" }
+            - { type: "null" }
+        start: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+        end: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    StatsWindow:
+      type: string
+      enum: [24h, 7d, 30d, all]
+    MetricFilterInput:
+      type: object
+      required: [name]
+      description: >
+        Create/update payload for a saved filter. Must resolve to a usable
+        selection: either a `window`, or a custom range (any of start/end).
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        window:
+          anyOf:
+            - { $ref: "#/components/schemas/StatsWindow" }
+            - { type: "null" }
+        start: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+        end: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
     MobileDevicePlatform:
       type: string
       enum: [ios, ipados, macos, watchos, visionos, tvos]

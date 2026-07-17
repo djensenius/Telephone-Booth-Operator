@@ -52,6 +52,7 @@ type FakeSession = {
     email: string;
     name: string;
     groups: string[];
+    isAdmin: boolean;
     picture: string | null;
   };
   accessTokenExpiresAt: Date | null;
@@ -157,6 +158,17 @@ export type FakeMobileDevice = {
   revokedAt: Date | null;
 };
 
+export type FakeMetricFilter = {
+  id: string;
+  userId: string;
+  name: string;
+  window: string | null;
+  rangeStart: Date | null;
+  rangeEnd: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 export const store = {
   files: new Map<string, FakeFile>(),
   questions: new Map<string, FakeQuestion>(),
@@ -169,6 +181,7 @@ export const store = {
   transcriptions: new Map<string, FakeTranscription>(),
   moderations: new Map<string, FakeModeration>(),
   mobileDevices: new Map<string, FakeMobileDevice>(),
+  metricFilters: new Map<string, FakeMetricFilter>(),
 };
 
 const cloneDate = (date: Date): Date => new Date(date.getTime());
@@ -236,12 +249,7 @@ const matchPredicate = <T extends Record<string, unknown>>(
         // `is: { ... }` only matches when the related row exists.
         return false;
       }
-      if (
-        !matchPredicate(
-          related as Record<string, unknown>,
-          (expected as { is: Predicate }).is,
-        )
-      ) {
+      if (!matchPredicate(related as Record<string, unknown>, (expected as { is: Predicate }).is)) {
         return false;
       }
       continue;
@@ -310,6 +318,7 @@ export const seedSession = (): FakeSession => {
       email: "operator@example.com",
       name: "Operator",
       groups: ["operators"],
+      isAdmin: true,
       picture: null,
     },
     accessTokenExpiresAt: new Date(Date.now() + 5 * 60 * 1000),
@@ -409,6 +418,7 @@ export const resetFakeDb = (): void => {
   store.transcriptions.clear();
   store.moderations.clear();
   store.mobileDevices.clear();
+  store.metricFilters.clear();
 };
 
 const attachAi = (
@@ -456,27 +466,36 @@ const attachAi = (
 
 export const fakeDb = {
   operatorUser: {
+    findMany: async () => [...store.users.values()],
     upsert: async ({
       where,
       create,
       update,
     }: {
-      where: { oidcSub: string };
+      where: { oidcSub?: string; id?: string };
       create: Record<string, unknown>;
       update: Record<string, unknown>;
     }) => {
-      const existing = store.users.get(where.oidcSub);
+      // Import upserts by id; login upserts by oidcSub.
+      if (where.id) {
+        const key = (create.oidcSub as string) ?? where.id;
+        const merged = { ...create };
+        store.users.set(key, merged);
+        return merged;
+      }
+      const existing = store.users.get(where.oidcSub as string);
       if (!existing) {
         const next = { ...create };
-        store.users.set(where.oidcSub, next);
+        store.users.set(where.oidcSub as string, next);
         return next;
       }
       const merged = { ...existing, ...update };
-      store.users.set(where.oidcSub, merged);
+      store.users.set(where.oidcSub as string, merged);
       return merged;
     },
   },
   file: {
+    findMany: async () => [...store.files.values()],
     findUnique: async ({
       where,
     }: {
@@ -498,10 +517,16 @@ export const fakeDb = {
       where,
       create: createData,
     }: {
-      where: { sha256: string };
+      where: { sha256?: string; id?: string };
       create: Partial<FakeFile> & Omit<FakeFile, "id" | "createdAt">;
       update: Partial<FakeFile>;
     }) => {
+      // Import uses an id-keyed upsert; the app's upload path uses sha256.
+      if (where.id) {
+        const file = fileFromData({ ...createData, id: where.id });
+        store.files.set(file.id, file);
+        return file;
+      }
       const existing = [...store.files.values()].find((f) => f.sha256 === where.sha256);
       if (existing) return existing;
       const file = fileFromData(createData);
@@ -537,13 +562,15 @@ export const fakeDb = {
       store.questions.set(question.id, question);
       return include?.audio ? attachAudio(question) : question;
     },
-    findMany: async (params: {
-      cursor?: { id: string };
-      where?: Record<string, unknown>;
-      skip?: number;
-      take?: number;
-      include?: { audio?: boolean };
-    } = {}) => {
+    findMany: async (
+      params: {
+        cursor?: { id: string };
+        where?: Record<string, unknown>;
+        skip?: number;
+        take?: number;
+        include?: { audio?: boolean };
+      } = {},
+    ) => {
       const { cursor, where = {}, skip = 0, take, include } = params;
       let questions = [...store.questions.values()]
         .filter((question) => matchesWhere(question, where))
@@ -586,6 +613,18 @@ export const fakeDb = {
       const updated = { ...existing, ...data };
       store.questions.set(where.id, updated);
       return include?.audio ? attachAudio(updated) : updated;
+    },
+    upsert: async ({
+      where,
+      create,
+    }: {
+      where: { id: string };
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => {
+      const question = { ...(create as unknown as FakeQuestion), id: where.id };
+      store.questions.set(where.id, question);
+      return question;
     },
   },
   message: {
@@ -638,11 +677,14 @@ export const fakeDb = {
     }) => {
       const duplicate = [...store.messages.values()].find((m) => m.audioId === data.audioId);
       if (duplicate) {
-        throw new Prisma.PrismaClientKnownRequestError("Unique constraint failed on the fields: (`audioId`)", {
-          code: "P2002",
-          clientVersion: "5.0.0",
-          meta: { target: ["audioId"] },
-        });
+        throw new Prisma.PrismaClientKnownRequestError(
+          "Unique constraint failed on the fields: (`audioId`)",
+          {
+            code: "P2002",
+            clientVersion: "5.0.0",
+            meta: { target: ["audioId"] },
+          },
+        );
       }
       const message: FakeMessage = {
         id: randomUUID(),
@@ -664,6 +706,18 @@ export const fakeDb = {
       const updated = { ...existing, ...data };
       store.messages.set(where.id, updated);
       return updated;
+    },
+    upsert: async ({
+      where,
+      create,
+    }: {
+      where: { id: string };
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => {
+      const message = { ...(create as unknown as FakeMessage), id: where.id };
+      store.messages.set(where.id, message);
+      return message;
     },
     updateMany: async ({
       where,
@@ -830,13 +884,7 @@ export const fakeDb = {
       store.transcriptions.set(where.id, updated);
       return updated;
     },
-    updateMany: async ({
-      where,
-      data,
-    }: {
-      where: Predicate;
-      data: Record<string, unknown>;
-    }) => {
+    updateMany: async ({ where, data }: { where: Predicate; data: Record<string, unknown> }) => {
       let count = 0;
       for (const row of store.transcriptions.values()) {
         if (matchPredicate(row as unknown as Record<string, unknown>, where)) {
@@ -856,7 +904,7 @@ export const fakeDb = {
       const row = store.transcriptions.get(where.id) ?? null;
       if (!row || !include?.message) return row;
       const message = store.messages.get(row.messageId) ?? null;
-      const audio = message ? store.files.get(message.audioId) ?? null : null;
+      const audio = message ? (store.files.get(message.audioId) ?? null) : null;
       return { ...row, message: message ? { ...message, audio } : null } as never;
     },
     findFirst: async ({
@@ -880,7 +928,7 @@ export const fakeDb = {
       const row = rows[0] ?? null;
       if (!row || !include?.message) return row;
       const message = store.messages.get(row.messageId) ?? null;
-      const audio = message ? store.files.get(message.audioId) ?? null : null;
+      const audio = message ? (store.files.get(message.audioId) ?? null) : null;
       return { ...row, message: message ? { ...message, audio } : null } as never;
     },
     findMany: async ({
@@ -949,20 +997,12 @@ export const fakeDb = {
       store.moderations.set(where.id, updated);
       return updated;
     },
-    updateMany: async ({
-      where,
-      data,
-    }: {
-      where: Predicate;
-      data: Record<string, unknown>;
-    }) => {
+    updateMany: async ({ where, data }: { where: Predicate; data: Record<string, unknown> }) => {
       let count = 0;
       for (const row of store.moderations.values()) {
         const relations = {
           transcription: (_key: string) =>
-            row.transcriptionId
-              ? store.transcriptions.get(row.transcriptionId) ?? null
-              : null,
+            row.transcriptionId ? (store.transcriptions.get(row.transcriptionId) ?? null) : null,
         };
         if (matchPredicate(row as unknown as Record<string, unknown>, where, relations)) {
           store.moderations.set(row.id, applyUpdate(row, data));
@@ -981,7 +1021,7 @@ export const fakeDb = {
       const row = store.moderations.get(where.id) ?? null;
       if (!row || !include?.transcription) return row;
       const transcription = row.transcriptionId
-        ? store.transcriptions.get(row.transcriptionId) ?? null
+        ? (store.transcriptions.get(row.transcriptionId) ?? null)
         : null;
       return { ...row, transcription } as never;
     },
@@ -1001,7 +1041,7 @@ export const fakeDb = {
       const rows = [...store.moderations.values()].filter((row) => {
         const rel = {
           transcription: (_key: string) =>
-            row.transcriptionId ? store.transcriptions.get(row.transcriptionId) ?? null : null,
+            row.transcriptionId ? (store.transcriptions.get(row.transcriptionId) ?? null) : null,
         };
         return matchPredicate(row as unknown as Record<string, unknown>, where, rel);
       });
@@ -1014,7 +1054,7 @@ export const fakeDb = {
       const row = rows[0] ?? null;
       if (!row || !include?.transcription) return row;
       const transcription = row.transcriptionId
-        ? store.transcriptions.get(row.transcriptionId) ?? null
+        ? (store.transcriptions.get(row.transcriptionId) ?? null)
         : null;
       return { ...row, transcription } as never;
     },
@@ -1225,6 +1265,63 @@ export const fakeDb = {
     },
     count: async ({ where = {} }: { where?: Record<string, unknown> } = {}) =>
       [...store.callSessions.values()].filter((session) => matchesWhere(session, where)).length,
+  },
+  metricFilter: {
+    findUnique: async ({ where }: { where: { id: string } }) =>
+      store.metricFilters.get(where.id) ?? null,
+    findMany: async ({ where = {} }: { where?: { userId?: string } } = {}) =>
+      [...store.metricFilters.values()]
+        .filter((filter) => (where.userId ? filter.userId === where.userId : true))
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()),
+    create: async ({
+      data,
+    }: {
+      data: Omit<FakeMetricFilter, "id" | "createdAt" | "updatedAt">;
+    }) => {
+      const now = new Date();
+      const filter: FakeMetricFilter = {
+        id: randomUUID(),
+        createdAt: now,
+        updatedAt: now,
+        ...data,
+      };
+      store.metricFilters.set(filter.id, filter);
+      return filter;
+    },
+    update: async ({ where, data }: { where: { id: string }; data: Partial<FakeMetricFilter> }) => {
+      const existing = store.metricFilters.get(where.id);
+      if (!existing) throw new Error("MetricFilter not found");
+      const merged: FakeMetricFilter = { ...existing, ...data, updatedAt: new Date() };
+      store.metricFilters.set(where.id, merged);
+      return merged;
+    },
+    delete: async ({ where }: { where: { id: string } }) => {
+      const existing = store.metricFilters.get(where.id);
+      store.metricFilters.delete(where.id);
+      return existing ?? null;
+    },
+    upsert: async ({
+      where,
+      create,
+    }: {
+      where: { id: string };
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => {
+      const filter = { ...(create as unknown as FakeMetricFilter), id: where.id };
+      store.metricFilters.set(where.id, filter);
+      return filter;
+    },
+  },
+  apiToken: {
+    findMany: async () => [] as Record<string, unknown>[],
+    upsert: async ({
+      create,
+    }: {
+      where: { id: string };
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => create,
   },
   $transaction: async <T>(fn: (tx: typeof fakeDb) => Promise<T>): Promise<T> => fn(fakeDb),
 };

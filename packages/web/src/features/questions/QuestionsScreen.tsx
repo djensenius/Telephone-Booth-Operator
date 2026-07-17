@@ -12,9 +12,15 @@ import {
   useQuestionsList,
 } from "../../lib/api-client.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
+import { useCurrentUser } from "../auth/useCurrentUser.js";
 import type { QuestionStatus } from "@telephone-booth-operator/shared";
 
-const QUESTION_FILTERS: readonly (QuestionStatus | "all")[] = ["all", "draft", "active", "archived"];
+const QUESTION_FILTERS: readonly (QuestionStatus | "all")[] = [
+  "all",
+  "draft",
+  "active",
+  "archived",
+];
 
 function duration(ms: number | null): string {
   if (ms === null) return "Unknown";
@@ -114,12 +120,14 @@ export function NewQuestionDialog({
 export function QuestionsScreen({
   startNew = false,
 }: { readonly startNew?: boolean } = {}): JSX.Element {
+  const { user } = useCurrentUser();
+  const isAdmin = user?.isAdmin ?? false;
   const [filter, setFilter] = useState<QuestionStatus | "all">("all");
   const questions = useQuestionsList(filter);
   const deleteQuestion = useDeleteQuestion();
   const activateQuestion = useActivateQuestion();
   const deactivateQuestion = useDeactivateQuestion();
-  const [dialogOpen, setDialogOpen] = useState(startNew);
+  const [dialogOpen, setDialogOpen] = useState(startNew && isAdmin);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const rows = questions.data?.items ?? [];
 
@@ -140,15 +148,22 @@ export function QuestionsScreen({
           </button>
         ))}
       </div>
-      <div className="feature-actions">
-        <button
-          className="feature-primary-button"
-          type="button"
-          onClick={() => setDialogOpen(true)}
-        >
-          New question
-        </button>
-      </div>
+      {isAdmin ? (
+        <div className="feature-actions">
+          <button
+            className="feature-primary-button"
+            type="button"
+            onClick={() => setDialogOpen(true)}
+          >
+            New question
+          </button>
+        </div>
+      ) : (
+        <p className="feature-note" role="note">
+          You have read-only access to the question library. Ask an operator admin to add, edit, or
+          retire questions.
+        </p>
+      )}
       {questions.isLoading ? <FeatureSkeleton /> : null}
       {questions.error ? <FeatureError message="Could not load the question library." /> : null}
       {!questions.isLoading && rows.length === 0 ? (
@@ -167,7 +182,7 @@ export function QuestionsScreen({
                 <th>Audio duration</th>
                 <th>Created</th>
                 <th>Preview</th>
-                <th>Actions</th>
+                {isAdmin ? <th>Actions</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -186,38 +201,42 @@ export function QuestionsScreen({
                       Question audio
                     </audio>
                   </td>
-                  <td>
-                    <div className="debug-button-row">
-                      {question.status === "active" ? (
-                        <button
-                          type="button"
-                          disabled={deactivateQuestion.isPending}
-                          onClick={() => void deactivateQuestion.mutateAsync(question.id)}
-                        >
-                          Deactivate
+                  {isAdmin ? (
+                    <td>
+                      <div className="debug-button-row">
+                        {question.status === "active" ? (
+                          <button
+                            type="button"
+                            disabled={deactivateQuestion.isPending}
+                            onClick={() => void deactivateQuestion.mutateAsync(question.id)}
+                          >
+                            Deactivate
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={activateQuestion.isPending}
+                            onClick={() => void activateQuestion.mutateAsync(question.id)}
+                          >
+                            Activate
+                          </button>
+                        )}
+                        <button type="button" onClick={() => setDeleteId(question.id)}>
+                          Delete
                         </button>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled={activateQuestion.isPending}
-                          onClick={() => void activateQuestion.mutateAsync(question.id)}
-                        >
-                          Activate
-                        </button>
-                      )}
-                      <button type="button" onClick={() => setDeleteId(question.id)}>
-                        Delete
-                      </button>
-                    </div>
-                  </td>
+                      </div>
+                    </td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
-      <NewQuestionDialog open={dialogOpen} onClose={() => setDialogOpen(false)} />
-      {deleteId === null ? null : (
+      {isAdmin ? (
+        <NewQuestionDialog open={dialogOpen} onClose={() => setDialogOpen(false)} />
+      ) : null}
+      {deleteId === null || !isAdmin ? null : (
         <section
           className="feature-dialog"
           role="dialog"

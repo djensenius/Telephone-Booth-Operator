@@ -715,6 +715,16 @@ textarea:focus-visible,
   border-radius: var(--radius-md);
 }
 
+.settings-status {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+  color: var(--text-secondary, var(--text-primary));
+}
+
+.settings-status--error {
+  color: var(--accent-red);
+}
+
 .status-grid dt,
 .debug-status-bar dt,
 .debug-kv-grid dt {
@@ -1461,6 +1471,97 @@ textarea:focus-visible,
 .stats-window-picker label:has(input:checked) {
   background: var(--accent-red);
   color: var(--surface-panel-raised);
+}
+
+.stats-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: flex-end;
+}
+
+.stats-custom-range {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+  border: 1px solid var(--accent-red);
+  border-radius: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  margin: 0;
+}
+
+.stats-custom-range label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary, var(--text-primary));
+}
+
+.stats-custom-range .stats-now-toggle {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.stats-saved-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: flex-end;
+  justify-content: flex-end;
+}
+
+.stats-saved-filters > label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary, var(--text-primary));
+}
+
+.stats-save-filter {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.stats-saved-filter-list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  justify-content: flex-end;
+}
+
+.stats-saved-filter-list li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 1px solid var(--accent-red);
+  border-radius: 999px;
+  padding: 0.1rem 0.25rem 0.1rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+.stats-saved-filter-list button {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+
+.stats-filter-delete {
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 0.35rem;
+  color: var(--accent-red);
 }
 
 .stats-grid {

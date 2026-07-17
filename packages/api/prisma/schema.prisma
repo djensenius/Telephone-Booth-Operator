@@ -174,6 +174,7 @@ model OperatorUser {
   name                    String
   groups                  Json? // raw groups claim at last login
   picture                 String?
+  isAdmin                 Boolean           @default(false) // derived from admin-group membership at last login/token check
   firstSeenAt             DateTime          @default(now())
   lastSeenAt              DateTime          @default(now())
   lastLoginAt             DateTime?
@@ -183,6 +184,24 @@ model OperatorUser {
   requestedTranscriptions Transcription[]   @relation("TranscriptionRequester")
   requestedModerations    Moderation[]      @relation("ModerationRequester")
   mobileDevices           MobileDevice[]
+  metricFilters           MetricFilter[]
+}
+
+// Per-operator saved metrics filter. Captures a named time selection that can
+// be re-applied on the stats screen. Either `window` (a preset) is set, or a
+// custom range via `rangeStart`/`rangeEnd`. A null `rangeEnd` means "now".
+model MetricFilter {
+  id         String       @id @default(uuid()) @db.Uuid
+  userId     String
+  user       OperatorUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String
+  window     String? // preset window enum value, or null for a custom range
+  rangeStart DateTime? // inclusive lower bound; null = from the beginning
+  rangeEnd   DateTime? // inclusive upper bound; null = now (live)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  @@index([userId])
 }
 
 model OperatorSession {
@@ -196,6 +215,7 @@ model OperatorSession {
   expiresAt            DateTime
   createdAt            DateTime     @default(now())
   lastSeenAt           DateTime     @default(now())
+  lastValidatedAt      DateTime? // last successful re-check of the account against the IdP (userinfo)
   ip                   String?
   userAgent            String?
 
@@ -266,14 +286,14 @@ model Transcription {
   // Lease columns for the pull-worker model. The transcription row itself
   // doubles as a "transcription job" when status = pending and the
   // translation row as a "translation job" when translationStatus = pending.
-  leaseToken               String?
-  leaseExpiresAt           DateTime?
-  leasedAt                 DateTime?
-  attemptCount             Int      @default(0)
-  translationLeaseToken    String?
+  leaseToken                String?
+  leaseExpiresAt            DateTime?
+  leasedAt                  DateTime?
+  attemptCount              Int       @default(0)
+  translationLeaseToken     String?
   translationLeaseExpiresAt DateTime?
-  translationLeasedAt      DateTime?
-  translationAttemptCount  Int      @default(0)
+  translationLeasedAt       DateTime?
+  translationAttemptCount   Int       @default(0)
 
   @@index([messageId, createdAt])
   @@index([status, createdAt])
@@ -311,7 +331,7 @@ model Moderation {
   leaseToken     String?
   leaseExpiresAt DateTime?
   leasedAt       DateTime?
-  attemptCount   Int      @default(0)
+  attemptCount   Int       @default(0)
 
   @@index([messageId, createdAt])
   @@index([recommendation, createdAt])
@@ -322,16 +342,16 @@ model Moderation {
 // physical device + platform; revoked rows stay in the table with a
 // non-null revokedAt so we can track tokens reused after re-install.
 model MobileDevice {
-  id                   String       @id @default(uuid()) @db.Uuid
-  userId               String
-  user                 OperatorUser @relation(fields: [userId], references: [id], onDelete: Cascade)
-  apnsToken            String
-  platform             String       // "ios" | "ipados" | "macos" | "watchos" | "tvos" | "visionos"
-  deviceName           String?
-  preferences          Json         @default("{}")
-  registeredAt         DateTime     @default(now())
-  lastSeenAt           DateTime     @default(now())
-  revokedAt            DateTime?
+  id           String       @id @default(uuid()) @db.Uuid
+  userId       String
+  user         OperatorUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  apnsToken    String
+  platform     String // "ios" | "ipados" | "macos" | "watchos" | "tvos" | "visionos"
+  deviceName   String?
+  preferences  Json         @default("{}")
+  registeredAt DateTime     @default(now())
+  lastSeenAt   DateTime     @default(now())
+  revokedAt    DateTime?
 
   @@unique([apnsToken, platform])
   @@index([userId, revokedAt])

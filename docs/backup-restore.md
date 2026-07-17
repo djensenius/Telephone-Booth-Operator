@@ -1,0 +1,68 @@
+# Backup & restore (full data export/import)
+
+The operator API can export a **complete** archive of an installation —
+the entire Postgres data set (minus ephemeral OIDC sessions) plus **all
+audio blobs** — and restore it into another instance. Both operations are
+**admin-only** (the caller must belong to the Authentik admin group; see
+[`authentik-setup.md`](authentik-setup.md)).
+
+## What's in the archive
+
+A single `.tar` file containing:
+
+| Entry | Contents |
+| --- | --- |
+| `manifest.json` | Format/version, generation time, row counts, blob count, and any `missingBlobs` (files whose audio was absent from storage at export time). |
+| `data.json` | Every exported table: questions, messages, files, booth events, call sessions, operator users, API tokens, transcriptions, moderations, metric filters, mobile devices, booth status snapshots. |
+| `blobs/<sha256>` | One entry per unique audio file, content-addressed by SHA-256. |
+
+Deliberately **excluded**:
+
+- **`OperatorSession`** rows — they hold live id/access/refresh tokens
+  (plaintext credentials). Sessions are ephemeral; operators simply log in
+  again after a restore.
+- **SAS URLs** — never materialised into the archive. Only the stable
+  `blobKey`/`sha256` travel, so SAS scope and lifetime rules are untouched.
+
+API-token rows are included so tokens keep working after a restore, but
+only their Argon2id **hash** is stored — never a plaintext token.
+
+## Endpoints
+
+```text
+GET  /v1/admin/data/export   → application/x-tar download
+POST /v1/admin/data/import   ← raw tar body (application/x-tar)
+```
+
+Import is **idempotent**: rows are upserted by id, and each audio blob is
+uploaded only when the target storage does not already hold it (dedupe by
+`blobKey`). Every blob's bytes are re-hashed and checked against the
+archived `sha256` before upload, so a corrupted archive is rejected.
+
+## CLI wrapper
+
+[`tools/data-backup.ts`](../tools/data-backup.ts) wraps both endpoints.
+Provide the API base URL and admin credentials via environment variables:
+
+```sh
+# Export
+OPERATOR_API_URL=https://operator.example \
+OPERATOR_TOKEN=<admin-operator-bearer-token> \
+  tsx tools/data-backup.ts export ./backup-$(date +%F).tar
+
+# Restore into a target instance
+OPERATOR_API_URL=https://operator.example \
+OPERATOR_TOKEN=<admin-operator-bearer-token> \
+  tsx tools/data-backup.ts import ./backup-2025-01-01.tar
+```
+
+`OPERATOR_COOKIE` (a raw session cookie header value) may be used instead
+of `OPERATOR_TOKEN`.
+
+## Restore checklist
+
+1. Point `OPERATOR_API_URL` at the **target** instance.
+2. Ensure the target's Azure Blob container exists and is writable.
+3. Run `import`. Review the returned summary (`rows`, `blobsUploaded`,
+   `blobsSkipped`).
+4. Operators log in again (sessions are not restored).

@@ -22,6 +22,7 @@ const operator = {
   email: "operator@example.com",
   name: "Jane Operator",
   groups: ["operators"],
+  isAdmin: true,
   providerName: "Authentik",
 };
 const questionId = "11111111-1111-4111-8111-111111111111";

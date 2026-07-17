@@ -14,9 +14,15 @@ import { logger } from "hono/logger";
 import { pathToFileURL } from "node:url";
 import { startAiSweeper } from "./lib/ai/sweeper.js";
 import { startSnapshotPruner } from "./lib/snapshot-pruner.js";
-import { AuthConfigurationError, assertAuthorizationConfigured, assertOidcIssuerAllowed, resolveAuthConfig } from "./lib/config.js";
+import {
+  AuthConfigurationError,
+  assertAuthorizationConfigured,
+  assertOidcIssuerAllowed,
+  resolveAuthConfig,
+} from "./lib/config.js";
 import { requireOperator, type AuthVariables } from "./lib/session.js";
 import apiTokensRouter from "./routes/api-tokens.js";
+import { adminDataRouter } from "./routes/admin-data.js";
 import { authRoutes } from "./routes/auth.js";
 import { devicesRouter } from "./routes/devices.js";
 import { eventsRouter } from "./routes/events.js";
@@ -76,6 +82,7 @@ export const createApp = (): Hono<{ Variables: AuthVariables }> => {
   app.route("/v1/system", systemRouter);
   app.route("/v1/uploads", uploadsRouter);
   app.route("/v1/devices", devicesRouter);
+  app.route("/v1/admin/data", adminDataRouter);
   app.route("/v1/ws", wsRouter);
 
   return app;

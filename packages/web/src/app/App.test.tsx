@@ -27,6 +27,7 @@ function installFetch(options: { readonly authenticated?: boolean } = {}): void 
                 email: "operator@example.com",
                 name: "Jane Operator",
                 groups: [],
+                isAdmin: true,
                 providerName: "Authentik",
               })
             : new Response(JSON.stringify({ error: "unauthenticated" }), {
@@ -160,12 +161,14 @@ describe("App shell", () => {
 
       if (timeEl) timeEl.textContent = originalText ?? "";
       for (const [dd, original] of restoreLineText) dd.textContent = original ?? "";
-      if (busyAside && busyOriginalClass !== null) busyAside.setAttribute("class", busyOriginalClass);
+      if (busyAside && busyOriginalClass !== null)
+        busyAside.setAttribute("class", busyOriginalClass);
       if (busyAside && busyOriginalAriaHidden !== null)
         busyAside.setAttribute("aria-hidden", busyOriginalAriaHidden);
       if (vitalsFooter && vitalsOriginalClass !== null)
         vitalsFooter.setAttribute("class", vitalsOriginalClass);
-      if (vitalsFooter && vitalsOriginalText !== null) vitalsFooter.textContent = vitalsOriginalText;
+      if (vitalsFooter && vitalsOriginalText !== null)
+        vitalsFooter.textContent = vitalsOriginalText;
     } finally {
       vi.useRealTimers();
     }
