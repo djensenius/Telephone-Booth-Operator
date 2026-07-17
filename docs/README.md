@@ -10,6 +10,7 @@ rebuilds it from the filesystem; CI fails if it drifts.
 ## Authentication
 
 - [Authentik setup](authentik-setup.md) — full Authentik walkthrough (default provider)
+- [Authentik onboarding](authentik-onboarding.md) — invite-only, passwordless (passkey) self-serve enrollment
 - [Other providers](other-providers/) — Keycloak / Auth0 / Google / Dex / generic OIDC
 
 ## Inside the box
