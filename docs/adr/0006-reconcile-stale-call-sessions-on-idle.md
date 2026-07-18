@@ -34,11 +34,15 @@ sessions
 
 - Find `callSession` rows with `endedAt: null` and `startedAt <= idleTime`,
   where `idleTime` is the snapshot's `updatedAt`.
-- Close each row with a per-row `updateMany` scoped to `endedAt: null`, setting
+- Close the whole stale backlog in one atomic `callSession.updateMany` scoped to
+  that same `{ endedAt: null, startedAt: { lte: idleTime } }` predicate, setting
   `endedAt = idleTime`, `outcome = "aborted"`, and `durationMs = null`.
 
-The write is conditional on `endedAt: null` so that if an authoritative
-`call_ended` is persisted by `POST /v1/events` between the read and the write,
+A single `updateMany` (rather than a read followed by per-row writes) keeps the
+operation atomic and bounded — the stale backlog after a long outage is
+unbounded, so one statement avoids a slow per-row round trip that could fail
+partway through. The `endedAt: null` predicate keeps the write conditional, so
+if an authoritative `call_ended` is persisted by `POST /v1/events` concurrently,
 the real event wins the race and is not overwritten by an `aborted`
 reconciliation.
 

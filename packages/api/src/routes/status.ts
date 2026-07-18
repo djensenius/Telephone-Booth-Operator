@@ -25,23 +25,21 @@ const historyQuerySchema = z.object({
 // `call_ended` was never delivered), so `idleTime - startedAt` would be fiction.
 // It would also overflow the `Int` column once a session has been open longer
 // than ~24.9 days — precisely the long-lived rows this reconciliation targets.
+//
+// A single `updateMany` closes the whole (unbounded) stale backlog in one atomic
+// statement. The `endedAt: null` predicate keeps the write conditional, so an
+// authoritative `call_ended` persisted concurrently wins the race and is not
+// overwritten by an `aborted` reconciliation. The `startedAt <= idleTime` guard
+// avoids closing a newer session started after a delayed idle report.
 async function reconcileStaleSessionsOnIdle(idleTime: Date): Promise<void> {
-  const stale = await db.callSession.findMany({
+  await db.callSession.updateMany({
     where: { endedAt: null, startedAt: { lte: idleTime } },
+    data: {
+      endedAt: idleTime,
+      outcome: "aborted",
+      durationMs: null,
+    },
   });
-  for (const session of stale) {
-    // Conditional on `endedAt: null` so an authoritative `call_ended` persisted
-    // between the read above and this write wins the race — the real event must
-    // not be overwritten by a reconciliation `aborted`.
-    await db.callSession.updateMany({
-      where: { id: session.id, endedAt: null },
-      data: {
-        endedAt: idleTime,
-        outcome: "aborted",
-        durationMs: null,
-      },
-    });
-  }
 }
 
 export const statusRouter = new Hono<{ Variables: AuthVariables & ApiTokenVariables }>();
