@@ -1263,6 +1263,34 @@ export const fakeDb = {
       store.callSessions.set(where.id, merged);
       return merged;
     },
+    update: async ({
+      where,
+      data,
+    }: {
+      where: { id: string };
+      data: Partial<FakeCallSession>;
+    }) => {
+      const existing = store.callSessions.get(where.id);
+      if (!existing) throw new Error(`callSession ${where.id} not found`);
+      const merged: FakeCallSession = { ...existing, ...data };
+      store.callSessions.set(where.id, merged);
+      return merged;
+    },
+    updateMany: async ({
+      where = {},
+      data,
+    }: {
+      where?: Record<string, unknown>;
+      data: Partial<FakeCallSession>;
+    }) => {
+      const matches = [...store.callSessions.values()].filter((session) =>
+        matchesWhere(session, where),
+      );
+      for (const session of matches) {
+        store.callSessions.set(session.id, { ...session, ...data });
+      }
+      return { count: matches.length };
+    },
     count: async ({ where = {} }: { where?: Record<string, unknown> } = {}) =>
       [...store.callSessions.values()].filter((session) => matchesWhere(session, where)).length,
   },

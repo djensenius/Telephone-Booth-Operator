@@ -163,6 +163,9 @@ model CallSession {
 
   @@index([boothId, startedAt])
   @@index([outcome])
+  // Supports on-idle stale-session reconciliation, which filters open sessions
+  // by `endedAt IS NULL AND startedAt <= idleTime` on every idle status write.
+  @@index([endedAt, startedAt])
 }
 
 // Operator humans authenticated via OIDC (Authentik by default).

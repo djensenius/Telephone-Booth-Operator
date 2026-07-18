@@ -13,6 +13,35 @@ const historyQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(500).default(100),
 });
 
+// On-hook reconciliation. The booth is a single-line phone, so when it reports
+// `idle` nothing can be active — any still-open CallSession is provably stale
+// (its `call_ended` event was produced but never delivered/persisted). Close
+// those sessions so `inProgress` stats return to the true count. Marking the
+// outcome `aborted` (rather than `recording_completed`) keeps completion-rate
+// metrics honest. Scoped only by time for now because `BoothStatusSnapshot`
+// has no `boothId`; safe for the single-booth installation (see ADR 0006).
+//
+// `durationMs` is left null: the real call ended at an unknown earlier time (its
+// `call_ended` was never delivered), so `idleTime - startedAt` would be fiction.
+// It would also overflow the `Int` column once a session has been open longer
+// than ~24.9 days — precisely the long-lived rows this reconciliation targets.
+//
+// A single `updateMany` closes the whole (unbounded) stale backlog in one atomic
+// statement. The `endedAt: null` predicate keeps the write conditional, so an
+// authoritative `call_ended` persisted concurrently wins the race and is not
+// overwritten by an `aborted` reconciliation. The `startedAt <= idleTime` guard
+// avoids closing a newer session started after a delayed idle report.
+async function reconcileStaleSessionsOnIdle(idleTime: Date): Promise<void> {
+  await db.callSession.updateMany({
+    where: { endedAt: null, startedAt: { lte: idleTime } },
+    data: {
+      endedAt: idleTime,
+      outcome: "aborted",
+      durationMs: null,
+    },
+  });
+}
+
 export const statusRouter = new Hono<{ Variables: AuthVariables & ApiTokenVariables }>();
 
 statusRouter.get("/", async (c) => {
@@ -35,6 +64,9 @@ statusRouter.put("/", requireApiToken(), zValidator("json", StatusUpdateSchema),
       updatedAt: update.updatedAt ? new Date(update.updatedAt) : new Date(),
     },
   });
+  if (update.state === "idle") {
+    await reconcileStaleSessionsOnIdle(snapshot.updatedAt);
+  }
   wsBroadcaster.broadcast({ kind: "status", status: serializeStatus(snapshot) });
   return c.body(null, 204);
 });

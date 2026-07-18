@@ -41,3 +41,4 @@ rebuilds it from the filesystem; CI fails if it drifts.
 - [0003 — Azure Blob with SAS uploads](adr/0003-azure-blob-with-sas-uploads.md)
 - [0004 — Postgres with Prisma](adr/0004-postgres-with-prisma.md)
 - [0005 — AI transcription and moderation](adr/0005-ai-transcription-and-moderation.md)
+- [0006 — Reconcile stale call sessions on booth idle](adr/0006-reconcile-stale-call-sessions-on-idle.md)
