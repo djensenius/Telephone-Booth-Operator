@@ -69,8 +69,10 @@ rate; they surface honestly under the `aborted` bucket.
 
 - `inProgress` returns to the true count (0/1) as soon as the booth reports
   on-hook.
-- No new infrastructure, background job, or schema change — the fix rides on
-  an existing authoritative signal.
+- No new infrastructure or background job — the fix rides on an existing
+  authoritative signal. The only schema change is a supporting index
+  (`CallSession(endedAt, startedAt)`) so the on-idle `updateMany` does not scan
+  the full session table.
 - Completion-rate stays honest because reconciled sessions are `aborted`, not
   `recording_completed`.
 
@@ -81,6 +83,23 @@ rate; they surface honestly under the `aborted` bucket.
   current single-booth installation. A multi-booth deployment must add the
   reporting booth id to the snapshot and scope reconciliation by it so one
   booth's idle report can never end another booth's live call.
+- **Idle event time is optional.** `updatedAt` is optional on
+  `StatusUpdateSchema`; when the booth omits it we fall back to the server
+  receipt time. The `startedAt <= idleTime` guard is therefore only as strong
+  as the supplied timestamp: a delayed or retried idle report that lands after
+  a genuinely new call started could abort that call. In practice the booth is
+  a single line reporting on-hook transitions, so an accurate idle means no
+  call is active; requiring an authoritative client idle timestamp (and
+  refusing reconciliation without one) is the robust fix and is deferred to the
+  wire-contract/client work.
+- **Race with a delayed `call_started`.** Reconciliation only closes sessions
+  that exist when it runs. A `call_started` event committed by `POST /v1/events`
+  immediately after the `updateMany` can insert a fresh `endedAt: null` row
+  whose `startedAt <= idleTime`, re-inflating the open count until the next idle
+  report (which, for transition-only reporting, may not arrive). Fully closing
+  this needs a persisted idle watermark enforced during session derivation, or
+  serialized start-vs-reconcile ingestion; both are larger changes tracked with
+  the durable-event-delivery work below.
 - **Coverage gaps.** Idle reconciliation does not cover a booth that crashes
   mid-call and never reports idle again. Complementary backstops (closing
   sessions from a prior `bootId` when a new boot id appears, and a time-based
