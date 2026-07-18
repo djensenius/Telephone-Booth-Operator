@@ -306,7 +306,7 @@ describe("messages routes", () => {
     expect(random.status).toBe(404);
   });
 
-  it("returns 409 when two concurrent requests create a message with the same sha256", async () => {
+  it("re-issues a slot (201) for concurrent creates with the same sha256", async () => {
     const app = createApp();
     const sha256 = "d".repeat(64);
 
@@ -323,7 +323,147 @@ describe("messages routes", () => {
       }),
     ]);
 
-    const statuses = [first.status, second.status].sort();
-    expect(statuses).toEqual([201, 409]);
+    // Idempotent re-initiation: while the message is still "uploading", both
+    // callers get a usable slot for the same message id rather than a 409.
+    expect([first.status, second.status]).toEqual([201, 201]);
+    const [a, b] = await Promise.all([first.json(), second.json()]);
+    expect(a.id).toBe(b.id);
+    expect(a.uploadUrl).toContain("sp=cw");
+    expect(b.uploadUrl).toContain("sp=cw");
+  });
+
+  it("re-issues a fresh slot when re-creating an uploading message (reboot recovery)", async () => {
+    const app = createApp();
+    const sha256 = "e".repeat(64);
+
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+
+      const first = await app.request("/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ durationMs: 2000, sha256 }),
+      });
+      expect(first.status).toBe(201);
+      const firstSlot = await first.json();
+
+      vi.setSystemTime(new Date("2026-01-01T00:05:00.000Z"));
+
+      // Blob was never uploaded; the booth reboots and re-POSTs the same sha256.
+      const second = await app.request("/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ durationMs: 2000, sha256 }),
+      });
+      expect(second.status).toBe(201);
+      const secondSlot = await second.json();
+      expect(secondSlot.id).toBe(firstSlot.id);
+      expect(secondSlot.blobName).toBe(firstSlot.blobName);
+      expect(secondSlot.uploadUrl).toContain("sp=cw");
+      expect(Date.parse(new URL(secondSlot.uploadUrl).searchParams.get("se") ?? "")).toBeGreaterThan(
+        Date.parse(new URL(firstSlot.uploadUrl).searchParams.get("se") ?? ""),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("re-issues a slot for an uploading message after its question leaves active", async () => {
+    const app = createApp();
+    const question = seedQuestion();
+    const sha256 = "1".repeat(64);
+
+    const first = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({ durationMs: 2000, questionId: question.id, sha256 }),
+    });
+    expect(first.status).toBe(201);
+    const firstSlot = await first.json();
+
+    question.status = "draft";
+
+    const second = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({ durationMs: 2000, questionId: question.id, sha256 }),
+    });
+    expect(second.status).toBe(201);
+    const secondSlot = await second.json();
+    expect(secondSlot.id).toBe(firstSlot.id);
+    expect(secondSlot.blobName).toBe(firstSlot.blobName);
+  });
+
+  it("returns 409 when the same upload is retried for a different question", async () => {
+    const app = createApp();
+    const firstQuestion = seedQuestion();
+    const secondQuestion = seedQuestion();
+    const sha256 = "2".repeat(64);
+
+    const first = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({ durationMs: 2000, questionId: firstQuestion.id, sha256 }),
+    });
+    expect(first.status).toBe(201);
+
+    const second = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({ durationMs: 2000, questionId: secondQuestion.id, sha256 }),
+    });
+    expect(second.status).toBe(409);
+    await expect(second.json()).resolves.toMatchObject({ error: "message_already_exists" });
+  });
+
+  it("does not issue message upload SAS URLs for question audio files", async () => {
+    const app = createApp();
+    const sha256 = "3".repeat(64);
+    const audio = seedFile({ sha256 });
+    seedQuestion({ audioId: audio.id });
+
+    const created = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({ durationMs: 2000, sha256 }),
+    });
+    expect(created.status).toBe(409);
+    await expect(created.json()).resolves.toMatchObject({ error: "message_already_exists" });
+  });
+
+  it("returns 409 when re-creating a message that already left uploading", async () => {
+    const app = createApp();
+    const sha256 = "f".repeat(64);
+
+    const first = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({ durationMs: 2000, sha256 }),
+    });
+    expect(first.status).toBe(201);
+    const slot = await first.json();
+
+    // Complete the upload so the message advances past "uploading".
+    fakeBlobs.set(slot.blobName, {
+      exists: true,
+      sizeBytes: 1234,
+      contentType: "audio/flac",
+      sha256,
+    });
+    const complete = await app.request(`/v1/messages/${slot.id}/complete`, {
+      method: "POST",
+      headers: phoneHeaders,
+    });
+    expect(complete.status).toBe(200);
+
+    // A genuine duplicate: the recording already landed.
+    const second = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({ durationMs: 2000, sha256 }),
+    });
+    expect(second.status).toBe(409);
+    await expect(second.json()).resolves.toMatchObject({ error: "message_already_exists" });
   });
 });

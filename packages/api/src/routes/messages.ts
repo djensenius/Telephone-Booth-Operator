@@ -93,12 +93,39 @@ messagesRouter.delete("/:id", zValidator("param", idParamSchema), async (c) => {
 
 messagesRouter.post("/", requireApiToken(), zValidator("json", MessageCreateSchema), async (c) => {
   const body = c.req.valid("json");
+  const blobName = messageBlobName(body.sha256);
+  const requestedQuestionId = body.questionId ?? null;
+  const uploadSlot = (id: string) => {
+    const sas = generateSasUrl(blobName, { permissions: "cw", contentType: "audio/flac" });
+    return c.json({ id, uploadUrl: sas.url, blobName }, 201);
+  };
+  const matchesReplayRequest = (message: { questionId: string | null; status: string }) =>
+    message.status === "uploading" && message.questionId === requestedQuestionId;
+
+  const existingFile = await db.file.findUnique({ where: { sha256: body.sha256 } });
+  if (existingFile) {
+    const existingMessage = await db.message.findUnique({ where: { audioId: existingFile.id } });
+    if (existingMessage) {
+      // Idempotent re-initiation: a message still in "uploading" never had its
+      // blob land (e.g. the booth crashed or rebooted between create and the
+      // Azure PUT). Hand back a fresh SAS + the existing id so the booth can
+      // resume the upload instead of stranding the recording. Only a message
+      // that has advanced past "uploading" is a genuine duplicate.
+      if (matchesReplayRequest(existingMessage)) {
+        return uploadSlot(existingMessage.id);
+      }
+      return c.json({ error: "message_already_exists" }, 409);
+    }
+  }
+
   if (body.questionId) {
     const question = await db.question.findUnique({ where: { id: body.questionId } });
     if (!question || question.status !== "active") return c.json({ error: "question_not_found" }, 404);
   }
+  if (existingFile && existingFile.blobKey !== blobName) {
+    return c.json({ error: "message_already_exists" }, 409);
+  }
 
-  const blobName = messageBlobName(body.sha256);
   const file = await db.file.upsert({
     where: { sha256: body.sha256 },
     create: {
@@ -113,7 +140,12 @@ messagesRouter.post("/", requireApiToken(), zValidator("json", MessageCreateSche
   });
 
   const existingMessage = await db.message.findUnique({ where: { audioId: file.id } });
-  if (existingMessage) return c.json({ error: "message_already_exists" }, 409);
+  if (existingMessage) {
+    if (matchesReplayRequest(existingMessage)) {
+      return uploadSlot(existingMessage.id);
+    }
+    return c.json({ error: "message_already_exists" }, 409);
+  }
 
   let message;
   try {
@@ -126,12 +158,18 @@ messagesRouter.post("/", requireApiToken(), zValidator("json", MessageCreateSche
     });
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      // Lost a create race. The winner's row exists; if it is still
+      // "uploading", re-issue a slot so this caller can proceed rather than
+      // bouncing off a 409.
+      const raced = await db.message.findUnique({ where: { audioId: file.id } });
+      if (raced && matchesReplayRequest(raced)) {
+        return uploadSlot(raced.id);
+      }
       return c.json({ error: "message_already_exists" }, 409);
     }
     throw err;
   }
-  const sas = generateSasUrl(blobName, { permissions: "cw", contentType: "audio/flac" });
-  return c.json({ id: message.id, uploadUrl: sas.url, blobName }, 201);
+  return uploadSlot(message.id);
 });
 
 messagesRouter.post(
