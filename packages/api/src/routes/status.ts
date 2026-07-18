@@ -13,6 +13,29 @@ const historyQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(500).default(100),
 });
 
+// On-hook reconciliation. The booth is a single-line phone, so when it reports
+// `idle` nothing can be active — any still-open CallSession is provably stale
+// (its `call_ended` event was produced but never delivered/persisted). Close
+// those sessions so `inProgress` stats return to the true count. Marking the
+// outcome `aborted` (rather than `recording_completed`) keeps completion-rate
+// metrics honest. Scoped only by time for now because `BoothStatusSnapshot`
+// has no `boothId`; safe for the single-booth installation (see ADR 0006).
+async function reconcileStaleSessionsOnIdle(idleTime: Date): Promise<void> {
+  const stale = await db.callSession.findMany({
+    where: { endedAt: null, startedAt: { lte: idleTime } },
+  });
+  for (const session of stale) {
+    await db.callSession.update({
+      where: { id: session.id },
+      data: {
+        endedAt: idleTime,
+        outcome: "aborted",
+        durationMs: idleTime.getTime() - session.startedAt.getTime(),
+      },
+    });
+  }
+}
+
 export const statusRouter = new Hono<{ Variables: AuthVariables & ApiTokenVariables }>();
 
 statusRouter.get("/", async (c) => {
@@ -35,6 +58,9 @@ statusRouter.put("/", requireApiToken(), zValidator("json", StatusUpdateSchema),
       updatedAt: update.updatedAt ? new Date(update.updatedAt) : new Date(),
     },
   });
+  if (update.state === "idle") {
+    await reconcileStaleSessionsOnIdle(snapshot.updatedAt);
+  }
   wsBroadcaster.broadcast({ kind: "status", status: serializeStatus(snapshot) });
   return c.body(null, 204);
 });
