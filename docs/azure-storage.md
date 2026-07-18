@@ -73,6 +73,63 @@ one-line change in `.env`.
 Store the connection string in your platform's secret manager, not in source
 control. Rotate the storage account key when staff access changes.
 
+## CORS (required for browser uploads)
+
+The API never proxies file bytes — the browser `PUT`s recordings **directly**
+to the SAS URL, sending `x-ms-blob-type` and `Content-Type` headers. Those
+custom headers make it a cross-origin request, so the browser first fires a
+preflight `OPTIONS`. If the storage account has **no matching CORS rule**,
+Azure rejects the preflight with **HTTP 403** and the upload fails before any
+bytes are sent:
+
+```text
+Preflight response is not successful. Status code: 403
+Fetch API cannot load https://<account>.blob.core.windows.net/booth-recordings/...flac
+```
+
+Azurite allows all origins by default, so this only bites against a real
+account.
+
+> **CORS is not an authorization control.** It is a browser-enforced policy
+> about which *web origins* may make cross-origin requests; non-browser
+> clients (e.g. the Rust phone client, `curl`) ignore it entirely. Adding a
+> CORS rule does **not** widen who can upload — that gate is the SAS itself:
+> callers must authenticate to obtain one (`POST /v1/messages` /
+> `POST /v1/uploads/sas`), and each SAS is `cw`-only, pinned to a single
+> content-addressed blob key and `audio/flac`, with a short TTL. This is why
+> we keep direct-to-blob uploads (see
+> [ADR 0003](./adr/0003-azure-blob-with-sas-uploads.md)) rather than proxying
+> bytes through the API.
+
+Configure Blob-service CORS once, scoped to the operator web origin(s) — the
+same value(s) as `WEB_ORIGIN`. **Do not use `*`;** list exact origins:
+
+```sh
+az storage cors add \
+  --services b \
+  --account-name <account> \
+  --account-key "<key>" \
+  --origins "https://operator.example.com" "https://web.example.com" \
+  --methods GET HEAD PUT OPTIONS \
+  --allowed-headers "*" \
+  --exposed-headers "*" \
+  --max-age 3600
+```
+
+The rule takes effect within a minute and needs no redeploy. Verify with a
+preflight (CORS is evaluated before auth, so no valid SAS is required):
+
+```sh
+az storage cors list --services b --account-name <account> --account-key "<key>"
+
+curl -s -o /dev/null -w "%{http_code}\n" -X OPTIONS \
+  "https://<account>.blob.core.windows.net/booth-recordings/probe.flac" \
+  -H "Origin: https://operator.example.com" \
+  -H "Access-Control-Request-Method: PUT" \
+  -H "Access-Control-Request-Headers: x-ms-blob-type,content-type"
+# expect: 200
+```
+
 ## Lifecycle / retention
 
 Recordings stay around indefinitely by default. To prune, add a
