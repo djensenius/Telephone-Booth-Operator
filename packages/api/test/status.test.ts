@@ -139,11 +139,12 @@ describe("status routes", () => {
     });
     expect(put.status).toBe(204);
 
-    // The stale session is closed as aborted with a computed duration.
+    // The stale session is closed as aborted; duration is null because the real
+    // end time is unknown (its call_ended was never delivered).
     const reconciled = await fakeDb.callSession.findUnique({ where: { id: stale.id } });
     expect(reconciled?.endedAt?.toISOString()).toBe(idleTime.toISOString());
     expect(reconciled?.outcome).toBe("aborted");
-    expect(reconciled?.durationMs).toBe(idleTime.getTime() - startedAt.getTime());
+    expect(reconciled?.durationMs).toBeNull();
 
     // inProgress is back to the true count.
     expect(await fakeDb.callSession.count({ where: { endedAt: null } })).toBe(0);
@@ -176,6 +177,27 @@ describe("status routes", () => {
     expect(put.status).toBe(204);
 
     // A live call must not be closed while the booth is mid-call.
+    expect(await fakeDb.callSession.count({ where: { endedAt: null } })).toBe(1);
+  });
+
+  it("leaves a session that started after the idle timestamp open", async () => {
+    const app = createApp();
+
+    const idleTime = new Date(Date.now() - 60_000);
+    // A newer live call started after a delayed idle report was generated. The
+    // `startedAt <= idleTime` guard must protect it from being closed.
+    const fresh = seedCallSession({ startedAt: new Date(), endedAt: null });
+
+    const put = await app.request("/v1/status", {
+      method: "PUT",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({ state: "idle", updatedAt: idleTime.toISOString() }),
+    });
+    expect(put.status).toBe(204);
+
+    const untouched = await fakeDb.callSession.findUnique({ where: { id: fresh.id } });
+    expect(untouched?.endedAt).toBeNull();
+    expect(untouched?.outcome).toBeNull();
     expect(await fakeDb.callSession.count({ where: { endedAt: null } })).toBe(1);
   });
 });

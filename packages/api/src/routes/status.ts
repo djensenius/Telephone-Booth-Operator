@@ -20,17 +20,25 @@ const historyQuerySchema = z.object({
 // outcome `aborted` (rather than `recording_completed`) keeps completion-rate
 // metrics honest. Scoped only by time for now because `BoothStatusSnapshot`
 // has no `boothId`; safe for the single-booth installation (see ADR 0006).
+//
+// `durationMs` is left null: the real call ended at an unknown earlier time (its
+// `call_ended` was never delivered), so `idleTime - startedAt` would be fiction.
+// It would also overflow the `Int` column once a session has been open longer
+// than ~24.9 days — precisely the long-lived rows this reconciliation targets.
 async function reconcileStaleSessionsOnIdle(idleTime: Date): Promise<void> {
   const stale = await db.callSession.findMany({
     where: { endedAt: null, startedAt: { lte: idleTime } },
   });
   for (const session of stale) {
-    await db.callSession.update({
-      where: { id: session.id },
+    // Conditional on `endedAt: null` so an authoritative `call_ended` persisted
+    // between the read above and this write wins the race — the real event must
+    // not be overwritten by a reconciliation `aborted`.
+    await db.callSession.updateMany({
+      where: { id: session.id, endedAt: null },
       data: {
         endedAt: idleTime,
         outcome: "aborted",
-        durationMs: idleTime.getTime() - session.startedAt.getTime(),
+        durationMs: null,
       },
     });
   }

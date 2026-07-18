@@ -34,8 +34,20 @@ sessions
 
 - Find `callSession` rows with `endedAt: null` and `startedAt <= idleTime`,
   where `idleTime` is the snapshot's `updatedAt`.
-- Set `endedAt = idleTime`, `outcome = "aborted"`, and
-  `durationMs = endedAt - startedAt`.
+- Close each row with a per-row `updateMany` scoped to `endedAt: null`, setting
+  `endedAt = idleTime`, `outcome = "aborted"`, and `durationMs = null`.
+
+The write is conditional on `endedAt: null` so that if an authoritative
+`call_ended` is persisted by `POST /v1/events` between the read and the write,
+the real event wins the race and is not overwritten by an `aborted`
+reconciliation.
+
+`durationMs` is left `null` rather than `idleTime - startedAt`: the call
+actually ended at an unknown earlier time (its `call_ended` was never
+delivered), so a computed duration would be fiction. It would also overflow the
+`Int` column once a session has been open longer than ~24.9 days — exactly the
+long-lived rows this reconciliation targets — causing Postgres to reject the
+update and leave the session open.
 
 The `startedAt <= idleTime` guard avoids closing a session whose
 `call_started` arrives with a timestamp slightly after the idle snapshot
