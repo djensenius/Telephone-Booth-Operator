@@ -4,6 +4,7 @@ import type { IncomingMessage } from "node:http";
 import { randomUUID } from "node:crypto";
 import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer } from "ws";
+import { verifyToken } from "../lib/api-tokens.js";
 import { wsBroadcaster } from "../lib/broadcaster.js";
 import { verifyOperatorBearer } from "../lib/bearer-auth.js";
 import {
@@ -40,9 +41,13 @@ const bearerTokenFromHeader = (header: string | undefined): string | null => {
 };
 
 // Authorize a status-socket upgrade. Browser clients present the operator
-// session cookie; native clients (iOS/watchOS/tvOS, the Rust CLI) that have
-// no cookie jar present an `Authorization: Bearer` Authentik access token,
-// verified the same way as the REST/SSE bearer flow.
+// session cookie; native operator clients (iOS/watchOS/tvOS, the Rust CLI)
+// present an `Authorization: Bearer` Authentik access token; the push-mode
+// Transcription worker (macOS + iOS) presents its static Argon2id API token,
+// verified the same way as the `/v1/worker` REST callbacks. Any one of these
+// grants the read-only status/work stream.
+// TODO(security): Static API tokens are currently unscoped. Add worker/operator
+// token scopes so phone-client tokens cannot subscribe to worker work events.
 const authorizeStatusUpgrade = async (request: IncomingMessage): Promise<boolean> => {
   const session = await readSessionFromCookieHeader(request.headers.cookie);
   if (session && !sessionIsExpired(session)) return true;
@@ -51,10 +56,15 @@ const authorizeStatusUpgrade = async (request: IncomingMessage): Promise<boolean
   if (!token) return false;
   try {
     const result = await verifyOperatorBearer(token);
-    return result.ok;
+    if (result.ok) return true;
   } catch {
     // A transient JWKS/network failure must not crash the upgrade handler;
-    // treat it as an auth failure and let the client retry.
+    // fall through to the static API-token check and, failing that, deny.
+  }
+  try {
+    const apiToken = await verifyToken(token);
+    return apiToken !== null;
+  } catch {
     return false;
   }
 };

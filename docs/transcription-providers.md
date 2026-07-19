@@ -20,24 +20,34 @@ authoritative list.
 
 | Variable                      | Default                  | Description                                               |
 | ----------------------------- | ------------------------ | --------------------------------------------------------- |
-| `TRANSCRIPTION_PROVIDER`      | `disabled`               | `openai`, `mac_app`, or `disabled`.                       |
+| `TRANSCRIPTION_PROVIDER`      | `disabled`               | `openai`, `mac_app`, `push`, or `disabled`.               |
 | `TRANSCRIPTION_OPENAI_MODEL`  | `whisper-1`              | Model passed to `/v1/audio/transcriptions`.               |
 | `TRANSCRIPTION_MAC_APP_URL`   | _empty_                  | Base or full URL for OpenAI-compatible Mac transcription. |
 | `TRANSCRIPTION_MAC_APP_TOKEN` | _empty_                  | Optional bearer token for the Mac app.                    |
-| `MODERATION_PROVIDER`         | `disabled`               | `openai`, `mac_app`, or `disabled`.                       |
+| `MODERATION_PROVIDER`         | `disabled`               | `openai`, `mac_app`, `push`, or `disabled`.               |
 | `MODERATION_OPENAI_MODEL`     | `omni-moderation-latest` | Model passed to `/v1/moderations`.                        |
 | `MODERATION_MAC_APP_URL`      | _empty_                  | Base or full URL for OpenAI-compatible Mac moderation.    |
 | `MODERATION_MAC_APP_TOKEN`    | _empty_                  | Optional bearer token for the Mac app.                    |
 | `OPENAI_API_KEY`              | _empty_                  | Shared key for both OpenAI endpoints.                     |
 | `OPENAI_BASE_URL`             | `https://api.openai.com` | Override for self-hosted OpenAI-compatible APIs.          |
-| `AUTO_DECISION_MODE`          | `always_pending`         | `always_pending`, `auto_reject`, or `auto_both`.          |
-| `AUTO_REJECT_THRESHOLD`       | `0.85`                   | Moderation score at which `auto_reject` triggers.         |
-| `AUTO_APPROVE_THRESHOLD`      | `0.15`                   | Max score below which `auto_both` will auto-approve.      |
+| `MODERATION_REJECT_THRESHOLD` | `0.85`                   | Score at/above which the AI _suggests_ `reject`.          |
+| `MODERATION_APPROVE_THRESHOLD`| `0.15`                   | Score at/below which the AI _suggests_ `approve`.         |
 | `AI_SWEEPER_INTERVAL_SECONDS` | `60`                     | How often the recovery sweeper retries stuck messages.    |
 
 A provider with `disabled` selected, or with credentials missing, is a
 no-op — the pipeline writes a `failed` row with `error = "disabled"` and
 continues. This is the safe default for local development.
+
+## Push mode (`push`)
+
+Setting a provider to `push` inverts the flow: no in-process provider runs.
+Instead the Transcription app (macOS + iOS) subscribes to `/v1/ws/status`,
+reacts to `{kind:"work", needs}` envelopes, runs the step locally, and POSTs
+the result back to `/v1/worker/*`. Transcription steps land as a `pending` row
+plus a broadcast `work` event rather than a `failed` row. See
+[`operator-push.md`](./operator-push.md) for the full contract. Unlike
+`mac_app` (Operator → app push-in), `push` needs no inbound reachability to
+the app.
 
 ## OpenAI
 
@@ -57,9 +67,12 @@ OPENAI_API_KEY=sk-...
   `${OPENAI_BASE_URL}/v1/moderations`.
 
 A `recommendation` is derived from the response: `flagged === true` or
-`maxScore >= AUTO_REJECT_THRESHOLD` maps to `reject`,
-`maxScore <= AUTO_APPROVE_THRESHOLD` maps to `approve`, otherwise
-`review`.
+`maxScore >= MODERATION_REJECT_THRESHOLD` maps to `reject`,
+`maxScore <= MODERATION_APPROVE_THRESHOLD` maps to `approve`, otherwise
+`review`. This recommendation is **only an advisory suggestion** shown to the
+operator — the Operator never auto-approves or auto-rejects a message. Every
+message waits in the queue until a human decides via
+`POST /v1/messages/:id/decision`.
 
 ## Mac app
 
@@ -134,24 +147,18 @@ Expected response:
 The operator derives `recommendation`, `maxScore`, and stored category scores
 using the same threshold logic as the OpenAI moderation provider.
 
-## Auto-decision modes
+## Moderation is advisory — humans always decide
 
-The pipeline runs after both steps succeed. The mode controls what
-happens to `Message.status`:
+The pipeline runs after both steps succeed. Once moderation finishes, the
+pipeline advances the message from `received` to `pending` so it shows up in the
+operator review queue. It **never** auto-approves or auto-rejects: the AI
+moderation result (`flagged`, `recommendation`, `maxScore`, category scores) is
+stored purely as an advisory suggestion.
 
-- `always_pending` (default) — the pipeline advances the message from
-  `received` to `pending` so it shows up in the operator review queue,
-  but never auto-approves or auto-rejects.
-- `auto_reject` — if the moderation recommendation is `reject` (or
-  `maxScore` is above `AUTO_REJECT_THRESHOLD`), the message is
-  auto-rejected. `decidedById` is left `null` and `notes` records why.
-  Otherwise the message lands in `pending` for an operator.
-- `auto_both` — also auto-approves messages with `flagged === false`
-  and `maxScore <= AUTO_APPROVE_THRESHOLD`. Borderline scores still go
-  to `pending`.
-
-Auto-decisions are reversible — operators can flip the status from the
-detail screen.
+Every message is decided by a human operator via
+`POST /v1/messages/:id/decision` from any operator app (web, mobile, or the CLI
+TUI). The decision stamps `decidedById` (the acting operator) and `decidedAt`;
+an AI suggestion never sets those fields.
 
 ## Operator UI
 
@@ -174,9 +181,11 @@ POST /v1/messages/{id}/moderate
 GET  /v1/messages/{id}/transcriptions
 ```
 
-`transcribe` re-runs the full pipeline (transcription + moderation +
-auto-decision). `moderate` only re-runs the moderation step against the
-latest succeeded transcription. `transcriptions` returns the full
+`transcribe` re-runs the full pipeline (transcription + translation +
+moderation). `moderate` only re-runs the moderation step against the
+latest succeeded transcription. Moderation is advisory only — neither
+endpoint decides the message; a human approves/rejects via
+`POST /v1/messages/:id/decision`. `transcriptions` returns the full
 history of attempts.
 
 ## Cost and privacy

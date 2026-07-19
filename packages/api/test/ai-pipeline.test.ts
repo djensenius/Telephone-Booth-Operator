@@ -6,9 +6,18 @@ vi.mock(
   async () => (await import("./support/fake-azure.js")).fakeAzureModule,
 );
 
-import { runModeration, runTranscription, type PipelineDeps } from "../src/lib/ai/pipeline.js";
-import type { ModerationProvider, TranscriptionProvider } from "../src/lib/ai/types.js";
-import { fakeDb } from "./support/fake-db.js";
+import {
+  runModeration,
+  runTranslationThenModeration,
+  runTranscription,
+  type PipelineDeps,
+} from "../src/lib/ai/pipeline.js";
+import { wsBroadcaster, type WsEnvelope } from "../src/lib/broadcaster.js";
+import type {
+  ModerationProvider,
+  TranscriptionProvider,
+} from "../src/lib/ai/types.js";
+import { fakeDb, store } from "./support/fake-db.js";
 import { resetFakeAzure } from "./support/fake-azure.js";
 import { resetFakeDb } from "./support/fake-db.js";
 
@@ -58,15 +67,18 @@ const baseDeps = (overrides: Partial<PipelineDeps> = {}): PipelineDeps => ({
     transcriptionOpenAiModel: "whisper-1",
     transcriptionMacAppUrl: null,
     transcriptionMacAppToken: null,
+    translationProvider: "disabled",
+    translationOpenAiModel: "gpt-4o-mini",
+    translationMacAppUrl: null,
+    translationMacAppToken: null,
     moderationProvider: "openai",
     moderationOpenAiModel: "omni-moderation-latest",
     moderationMacAppUrl: null,
     moderationMacAppToken: null,
     openAiApiKey: "sk-test",
     openAiBaseUrl: "https://api.openai.com",
-    autoDecisionMode: "always_pending",
-    autoRejectThreshold: 0.85,
-    autoApproveThreshold: 0.15,
+    moderationRejectThreshold: 0.85,
+    moderationApproveThreshold: 0.15,
     sweeperIntervalSeconds: 60,
     maxAudioBytes: 26_214_400,
     sweeperStaleThresholdSeconds: 300,
@@ -80,6 +92,8 @@ const baseDeps = (overrides: Partial<PipelineDeps> = {}): PipelineDeps => ({
     "moderationProvider" in overrides
       ? (overrides.moderationProvider ?? null)
       : fakeModeration({ flagged: false, recommendation: "approve", maxScore: 0.05 }),
+  translationProvider:
+    "translationProvider" in overrides ? (overrides.translationProvider ?? null) : null,
 });
 
 describe("AI pipeline", () => {
@@ -88,7 +102,7 @@ describe("AI pipeline", () => {
     resetFakeAzure();
   });
 
-  it("runs transcription then moderation and leaves the message pending under always_pending", async () => {
+  it("runs transcription then moderation and always leaves the message pending for a human", async () => {
     const id = await seedReceivedMessage();
     await runTranscription({ messageId: id, deps: baseDeps() });
 
@@ -128,7 +142,7 @@ describe("AI pipeline", () => {
     expect(withRelations.transcriptions[0]?.error).toMatch(/disabled/);
   });
 
-  it("auto-rejects when moderation flags the transcript in auto_reject mode", async () => {
+  it("never auto-rejects even when moderation flags the transcript; a human still decides", async () => {
     const id = await seedReceivedMessage();
     await runTranscription({
       messageId: id,
@@ -139,23 +153,29 @@ describe("AI pipeline", () => {
           maxScore: 0.92,
           reasonSummary: "hate",
         }),
-        config: { autoDecisionMode: "auto_reject" } as never,
       }),
     });
-    const message = await fakeDb.message.findUnique({ where: { id }, include: { audio: true } });
+    const message = await fakeDb.message.findUnique({
+      where: { id },
+      include: { audio: true, moderations: true },
+    });
     const withRelations = message as unknown as {
       status: string;
       notes: string | null;
       decidedById: string | null;
       decidedAt: Date | null;
+      moderations: Array<{ recommendation: string | null; flagged: boolean | null }>;
     };
-    expect(withRelations.status).toBe("rejected");
+    // The AI suggestion is recorded, but the message stays in the queue for a
+    // human decision — no auto-reject, no decidedAt/decidedById stamp.
+    expect(withRelations.status).toBe("pending");
     expect(withRelations.decidedById).toBeNull();
-    expect(withRelations.decidedAt).not.toBeNull();
-    expect(withRelations.notes).toMatch(/auto-rejected/);
+    expect(withRelations.decidedAt).toBeNull();
+    expect(withRelations.moderations[0]?.recommendation).toBe("reject");
+    expect(withRelations.moderations[0]?.flagged).toBe(true);
   });
 
-  it("auto-approves clean content in auto_both mode", async () => {
+  it("never auto-approves clean content; the suggestion is advisory only", async () => {
     const id = await seedReceivedMessage();
     await runTranscription({
       messageId: id,
@@ -165,30 +185,20 @@ describe("AI pipeline", () => {
           recommendation: "approve",
           maxScore: 0.02,
         }),
-        config: { autoDecisionMode: "auto_both" } as never,
       }),
     });
-    const message = await fakeDb.message.findUnique({ where: { id }, include: { audio: true } });
-    const withRelations = message as unknown as { status: string; notes: string | null };
-    expect(withRelations.status).toBe("approved");
-    expect(withRelations.notes).toMatch(/auto-approved/);
-  });
-
-  it("leaves status pending in auto_both when moderation is borderline", async () => {
-    const id = await seedReceivedMessage();
-    await runTranscription({
-      messageId: id,
-      deps: baseDeps({
-        moderationProvider: fakeModeration({
-          flagged: false,
-          recommendation: "review",
-          maxScore: 0.4,
-        }),
-        config: { autoDecisionMode: "auto_both" } as never,
-      }),
+    const message = await fakeDb.message.findUnique({
+      where: { id },
+      include: { audio: true, moderations: true },
     });
-    const message = await fakeDb.message.findUnique({ where: { id }, include: { audio: true } });
-    expect((message as unknown as { status: string }).status).toBe("pending");
+    const withRelations = message as unknown as {
+      status: string;
+      decidedAt: Date | null;
+      moderations: Array<{ recommendation: string | null }>;
+    };
+    expect(withRelations.status).toBe("pending");
+    expect(withRelations.decidedAt).toBeNull();
+    expect(withRelations.moderations[0]?.recommendation).toBe("approve");
   });
 
   it("runModeration returns null when there is no succeeded transcription", async () => {
@@ -420,5 +430,121 @@ describe("AI pipeline", () => {
     expect(staleRow?.status).toBe("failed");
     const newRow = withRelations.transcriptions.find((t) => t.status === "succeeded");
     expect(newRow).toBeDefined();
+  });
+
+  it("in push mode, marks transcription pending and broadcasts transcription work", async () => {
+    const id = await seedReceivedMessage();
+    const events: WsEnvelope[] = [];
+    const clientId = `test-${Math.random()}`;
+    wsBroadcaster.subscribe(clientId, (e) => events.push(e));
+
+    const result = await runTranscription({
+      messageId: id,
+      deps: baseDeps({
+        transcriptionProvider: null,
+        config: {
+          ...baseDeps().config,
+          transcriptionProvider: "push",
+        },
+      }),
+    });
+    wsBroadcaster.unsubscribe(clientId);
+
+    expect(result).toEqual({ outcome: "created", transcriptionId: expect.any(String) });
+    const message = await fakeDb.message.findUnique({
+      where: { id },
+      include: { audio: true, transcriptions: true, moderations: true },
+    });
+    const withRelations = message as unknown as {
+      transcriptions: Array<{ status: string; provider: string }>;
+    };
+    // A pending row is created (not a failed one) so the worker can fill it in.
+    expect(withRelations.transcriptions).toHaveLength(1);
+    expect(withRelations.transcriptions[0]?.status).toBe("pending");
+    expect(withRelations.transcriptions[0]?.provider).toBe("push");
+    // The worker is told to transcribe via a `work` envelope.
+    const work = events.find((e) => e.kind === "work");
+    expect(work).toEqual({ kind: "work", messageId: id, needs: ["transcription"] });
+  });
+
+  it("defers moderation until the push translation callback completes", async () => {
+    const id = await seedReceivedMessage();
+    const transcription = await fakeDb.transcription.create({
+      data: {
+        messageId: id,
+        provider: "push",
+        model: null,
+        status: "succeeded",
+        text: "bonjour",
+        language: "fr",
+        requestedById: null,
+        completedAt: new Date(),
+      },
+    });
+    const events: WsEnvelope[] = [];
+    const clientId = `test-${Math.random()}`;
+    wsBroadcaster.subscribe(clientId, (e) => events.push(e));
+
+    await runTranslationThenModeration({
+      messageId: id,
+      transcriptionId: transcription.id,
+      deps: baseDeps({
+        translationProvider: null,
+        moderationProvider: fakeModeration({ flagged: false, recommendation: "approve", maxScore: 0.01 }),
+        config: { translationProvider: "push" } as never,
+      }),
+    });
+    wsBroadcaster.unsubscribe(clientId);
+
+    const updated = await fakeDb.transcription.findUnique({ where: { id: transcription.id } });
+    expect(updated?.translationStatus).toBe("pending");
+    expect([...store.moderations.values()]).toHaveLength(0);
+    expect(events.find((e) => e.kind === "work")).toEqual({
+      kind: "work",
+      messageId: id,
+      needs: ["translation"],
+    });
+  });
+
+  it("creates reusable pending moderation work in push mode", async () => {
+    const id = await seedReceivedMessage();
+    await fakeDb.transcription.create({
+      data: {
+        messageId: id,
+        provider: "push",
+        model: null,
+        status: "succeeded",
+        text: "hello",
+        language: "en",
+        requestedById: null,
+        completedAt: new Date(),
+      },
+    });
+    const events: WsEnvelope[] = [];
+    const clientId = `test-${Math.random()}`;
+    wsBroadcaster.subscribe(clientId, (e) => events.push(e));
+
+    await runModeration({
+      messageId: id,
+      deps: baseDeps({
+        moderationProvider: null,
+        config: { moderationProvider: "push" } as never,
+      }),
+      requestedByUserId: null,
+    });
+    await runModeration({
+      messageId: id,
+      deps: baseDeps({
+        moderationProvider: null,
+        config: { moderationProvider: "push" } as never,
+      }),
+      requestedByUserId: null,
+    });
+    wsBroadcaster.unsubscribe(clientId);
+
+    const moderations = [...store.moderations.values()].filter((m) => m.messageId === id);
+    expect(moderations).toHaveLength(1);
+    expect(moderations[0]).toMatchObject({ status: "pending", provider: "push" });
+    expect(events.filter((e) => e.kind === "work")).toHaveLength(2);
   });
 });

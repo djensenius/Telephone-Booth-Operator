@@ -66,6 +66,7 @@ let deactivatedQuestionId = "";
 let deletedMessages: string[] = [];
 let revokedToken = false;
 let lastMessageUrl = "";
+let lastDecision: { decision: string; notes?: string } | null = null;
 let writeTextMock: ReturnType<typeof vi.fn>;
 
 const server = setupServer(
@@ -137,6 +138,18 @@ const server = setupServer(
     return HttpResponse.json({ items: [message] });
   }),
   http.get("http://localhost/v1/messages/:id", () => HttpResponse.json(message)),
+  http.get("http://localhost/v1/messages/:id/transcriptions", () =>
+    HttpResponse.json({ items: [] }),
+  ),
+  http.post("http://localhost/v1/messages/:id/decision", async ({ request }) => {
+    lastDecision = (await request.json()) as { decision: string; notes?: string };
+    return HttpResponse.json({
+      ...message,
+      status: lastDecision.decision === "approve" ? "approved" : "rejected",
+      decidedAt: "2026-01-02T00:05:00.000Z",
+      ...(lastDecision.notes !== undefined ? { notes: lastDecision.notes } : {}),
+    });
+  }),
   http.delete("http://localhost/v1/messages/:id", ({ params }) => {
     deletedMessages.push(String(params.id));
     return new HttpResponse(null, { status: 204 });
@@ -239,6 +252,7 @@ beforeEach(() => {
   deletedMessages = [];
   revokedToken = false;
   lastMessageUrl = "";
+  lastDecision = null;
   installBrowserStubs();
   window.localStorage.clear();
   document.documentElement.className = "";
@@ -439,6 +453,18 @@ describe("Messages feature", () => {
     renderPath(`/messages/${messageId}`);
     expect(await screen.findByText("Message playback")).toBeTruthy();
     expect(await screen.findByText("front step")).toBeTruthy();
+  });
+
+  it("lets an operator approve a message (human decision)", async () => {
+    renderPath(`/messages/${messageId}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(lastDecision?.decision).toBe("approve"));
+  });
+
+  it("lets an operator reject a message (human decision)", async () => {
+    renderPath(`/messages/${messageId}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Reject" }));
+    await waitFor(() => expect(lastDecision?.decision).toBe("reject"));
   });
 
   it("persists the listened toggle", async () => {

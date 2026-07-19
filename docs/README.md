@@ -20,6 +20,7 @@ rebuilds it from the filesystem; CI fails if it drifts.
 - [Azure storage](azure-storage.md) — container layout, SAS scoping, Azurite for dev
 - [Theme](theme.md) — operator-console visual system, components, accessibility
 - [Transcription providers](transcription-providers.md) — AI transcription + moderation pipeline
+- [Push-mode worker](operator-push.md) — WebSocket/REST contract for app-run transcription, translation, and moderation
 - [Push notifications](push-notifications.md) — APNs setup, badge pipeline, sandbox vs production
 - [UI routing](ui-routing.md) — digit shortcuts, keyboard nav, reduced motion
 
@@ -42,3 +43,4 @@ rebuilds it from the filesystem; CI fails if it drifts.
 - [0004 — Postgres with Prisma](adr/0004-postgres-with-prisma.md)
 - [0005 — AI transcription and moderation](adr/0005-ai-transcription-and-moderation.md)
 - [0006 — Reconcile stale call sessions on booth idle](adr/0006-reconcile-stale-call-sessions-on-idle.md)
+- [0009 — Human-only moderation and push-based transcription worker](adr/0009-human-moderation-and-push-worker.md)

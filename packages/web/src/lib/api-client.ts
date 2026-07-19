@@ -11,6 +11,7 @@ import {
   CallSessionListSchema,
   CreateApiTokenRequestSchema,
   MessageSchema,
+  MessageDecisionSchema,
   MessageStatusSchema,
   MetricFilterCreateSchema,
   MetricFilterSchema,
@@ -37,6 +38,7 @@ import type {
   CallSessionList,
   CreateApiTokenRequest,
   Message,
+  MessageDecision,
   MessageStatus,
   MetricFilter,
   MetricFilterCreate,
@@ -262,6 +264,12 @@ export const messages = {
     apiFetch<Moderation>(`/v1/messages/${id}/moderate`, {
       method: "POST",
       schema: ModerationSchema,
+    }),
+  decide: (id: string, input: MessageDecision) =>
+    apiFetch<Message>(`/v1/messages/${id}/decision`, {
+      method: "POST",
+      body: MessageDecisionSchema.parse(input),
+      schema: MessageSchema,
     }),
 };
 
@@ -630,6 +638,21 @@ export function useRemoderateMessage() {
   return useMutation({
     mutationFn: (id: string) => messages.moderate(id),
     onSuccess: (_data, id) => {
+      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.message(id) });
+      void queryClient.invalidateQueries({ queryKey: ["messages", "list"] });
+    },
+  });
+}
+
+// Human moderation decision. The AI moderation result is only ever an advisory
+// suggestion — approving or rejecting a message is always an explicit operator
+// action, recorded against the acting operator on the server.
+export function useDecideMessage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { readonly id: string; readonly input: MessageDecision }) =>
+      messages.decide(id, input),
+    onSuccess: (_data, { id }) => {
       void queryClient.invalidateQueries({ queryKey: apiQueryKeys.message(id) });
       void queryClient.invalidateQueries({ queryKey: ["messages", "list"] });
     },

@@ -45,7 +45,7 @@ export type TranscriptionStatus = z.infer<typeof TranscriptionStatusSchema>;
 export const ModerationRecommendationSchema = z.enum(["approve", "review", "reject"]);
 export type ModerationRecommendation = z.infer<typeof ModerationRecommendationSchema>;
 
-export const AiProviderSchema = z.enum(["openai", "mac_app", "disabled"]);
+export const AiProviderSchema = z.enum(["openai", "mac_app", "push", "disabled"]);
 export type AiProvider = z.infer<typeof AiProviderSchema>;
 
 export const TranscriptionSchema = z.object({
@@ -523,6 +523,16 @@ export const WsEnvelopeSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("message"),
     message: MessageSchema,
+  }),
+  // Push-mode work notification. The Transcription app (macOS + iOS)
+  // subscribes to the status socket and reacts to these by running the named
+  // steps locally, then POSTing results back to the worker callback endpoints.
+  // Carries no secrets (no SAS URLs / transcript text) — the worker fetches
+  // what it needs over its authenticated REST calls.
+  z.object({
+    kind: z.literal("work"),
+    messageId: z.string(),
+    needs: z.array(z.enum(["transcription", "translation", "moderation"])).min(1),
   }),
 ]);
 export type WsEnvelope = z.infer<typeof WsEnvelopeSchema>;

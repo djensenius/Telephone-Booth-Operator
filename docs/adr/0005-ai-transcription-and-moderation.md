@@ -1,6 +1,8 @@
 # ADR 0005 — AI transcription and moderation pipeline
 
-**Status:** accepted.
+**Status:** accepted. The auto-decision policy below was **superseded by
+ADR 0009** — moderation is now advisory-only and every message requires a human
+decision (see the "Auto-decision policy" section for the current behaviour).
 
 ## Context
 
@@ -70,6 +72,16 @@ hour at most. Instead:
   the operator UI updates without polling.
 
 ### Auto-decision policy
+
+> **Superseded by ADR 0009.** The original design (below) allowed the pipeline
+> to auto-approve or auto-reject messages via `AUTO_DECISION_MODE`. That mode
+> has been **removed**: moderation is now advisory-only. After both steps
+> succeed the pipeline simply advances `received` messages to `pending`; a human
+> operator always makes the decision via `POST /v1/messages/:id/decision`. The
+> former `MODERATION_REJECT_THRESHOLD` / `MODERATION_APPROVE_THRESHOLD` env vars
+> now only map a score to the advisory `recommendation` label.
+
+_Original design (no longer in effect):_
 
 `AUTO_DECISION_MODE` (default `always_pending`) controls what the
 pipeline does with `Message.status` after both steps succeed:
