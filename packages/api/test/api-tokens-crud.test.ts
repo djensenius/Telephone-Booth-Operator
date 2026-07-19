@@ -213,5 +213,21 @@ describe("api token CRUD", () => {
     });
     expect(forbidden.status).toBe(403);
     await expect(forbidden.json()).resolves.toEqual({ error: "insufficient_scope" });
+
+    // Booth/phone routes default to the "operator" scope, so a worker token
+    // must be rejected there too (least-privilege boundary).
+    const phoneApp = new Hono<{ Variables: ApiTokenVariables }>();
+    phoneApp.get("/phone", requireApiToken(), (c) => c.json({ ok: true }));
+
+    const phoneWithWorker = await phoneApp.request("/phone", {
+      headers: { authorization: `Bearer ${workerToken}` },
+    });
+    expect(phoneWithWorker.status).toBe(403);
+    await expect(phoneWithWorker.json()).resolves.toEqual({ error: "insufficient_scope" });
+
+    const phoneWithOperator = await phoneApp.request("/phone", {
+      headers: { authorization: `Bearer ${operatorToken}` },
+    });
+    expect(phoneWithOperator.status, await phoneWithOperator.clone().text()).toBe(200);
   });
 });

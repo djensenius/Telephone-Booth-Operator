@@ -66,6 +66,7 @@ let activatedQuestionId = "";
 let deactivatedQuestionId = "";
 let deletedMessages: string[] = [];
 let revokedToken = false;
+let lastCreatedTokenScope: string | undefined;
 let lastMessageUrl = "";
 let lastDecision: { decision: string; notes?: string } | null = null;
 let writeTextMock: ReturnType<typeof vi.fn>;
@@ -158,12 +159,20 @@ const server = setupServer(
   http.get("http://localhost/v1/api-tokens", () =>
     HttpResponse.json([{ ...token, revokedAt: revokedToken ? "2026-01-05T00:00:00.000Z" : null }]),
   ),
-  http.post("http://localhost/v1/api-tokens", () =>
-    HttpResponse.json(
-      { ...token, plaintext: "booth-token-plaintext", lastUsedAt: undefined, revokedAt: undefined },
+  http.post("http://localhost/v1/api-tokens", async ({ request }) => {
+    const body = (await request.json()) as { scope?: string };
+    lastCreatedTokenScope = body.scope;
+    return HttpResponse.json(
+      {
+        ...token,
+        scope: body.scope ?? "operator",
+        plaintext: "booth-token-plaintext",
+        lastUsedAt: undefined,
+        revokedAt: undefined,
+      },
       { status: 201 },
-    ),
-  ),
+    );
+  }),
   http.delete("http://localhost/v1/api-tokens/:id", () => {
     revokedToken = true;
     return new HttpResponse(null, { status: 204 });
@@ -252,6 +261,7 @@ beforeEach(() => {
   deactivatedQuestionId = "";
   deletedMessages = [];
   revokedToken = false;
+  lastCreatedTokenScope = undefined;
   lastMessageUrl = "";
   lastDecision = null;
   installBrowserStubs();
@@ -486,6 +496,23 @@ describe("Tokens feature", () => {
     renderPath("/tokens");
     expect(await screen.findByText("booth client")).toBeTruthy();
     expect(await screen.findByLabelText("1 usage buckets")).toBeTruthy();
+  });
+
+  it("shows the token scope column", async () => {
+    renderPath("/tokens");
+    expect(await screen.findByText("booth client")).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Scope" })).toBeTruthy();
+    expect(screen.getByRole("cell", { name: "operator" })).toBeTruthy();
+  });
+
+  it("issues a worker-scoped token", async () => {
+    renderPath("/tokens");
+    fireEvent.click(await screen.findByText("New token"));
+    fireEvent.change(screen.getByLabelText("Token name"), { target: { value: "worker" } });
+    fireEvent.change(screen.getByLabelText("Scope"), { target: { value: "worker" } });
+    fireEvent.click(screen.getByText("Issue token"));
+    expect(await screen.findByText("booth-token-plaintext")).toBeTruthy();
+    expect(lastCreatedTokenScope).toBe("worker");
   });
 
   it("opens the new token dialog", async () => {

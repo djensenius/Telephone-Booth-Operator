@@ -31,9 +31,12 @@ narrowest scope for the credential's job:
   URLs and transcript/moderation content).
 - **`worker`** — a least-privilege credential for the push-mode Transcription
   worker. It may call only the `/v1/worker/*` result-callback routes and, on
-  `/v1/ws/status`, receives **only** `work` scheduling events. A worker-scoped
-  token can never read message content, and an operator-scoped token can never
-  read `work` events.
+  `/v1/ws/status`, receives **only** `work` scheduling events — never the
+  `message` envelopes that carry audio SAS URLs and transcript/moderation
+  content. (Content the worker must process is fetched deliberately from its
+  input route `GET /v1/worker/messages/:id/work`; it is the broadcast
+  WebSocket stream, not the worker input, that excludes content.) An
+  operator-scoped token can never read `work` events.
 
 Requests to `/v1/worker/*` with a non-`worker` token are rejected with
 `403 insufficient_scope`. Tokens created before scopes existed default to

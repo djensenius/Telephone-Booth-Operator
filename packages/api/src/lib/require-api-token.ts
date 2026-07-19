@@ -15,11 +15,11 @@ const bearerTokenFromHeader = (authorization: string | undefined): string | null
   return token;
 };
 
-// When `requiredScope` is provided the token must carry exactly that scope.
-// Omitting it accepts any active token (used by legacy booth/phone routes that
-// predate scoping and continue to run with the default "operator" scope).
+// The token must carry exactly `requiredScope`. Defaults to "operator" so the
+// booth/phone and native-operator routes reject worker-scoped tokens; the push
+// worker router opts in with `requireApiToken("worker")`.
 export const requireApiToken =
-  (requiredScope?: ApiTokenScope): MiddlewareHandler<{ Variables: ApiTokenVariables }> =>
+  (requiredScope: ApiTokenScope = "operator"): MiddlewareHandler<{ Variables: ApiTokenVariables }> =>
   async (c, next) => {
     const plaintext = bearerTokenFromHeader(c.req.header("authorization"));
     if (!plaintext) return c.json({ error: "invalid_token" }, 401);
@@ -27,7 +27,7 @@ export const requireApiToken =
     const token = await verifyToken(plaintext);
     if (!token) return c.json({ error: "invalid_token" }, 401);
 
-    if (requiredScope && token.scope !== requiredScope) {
+    if (token.scope !== requiredScope) {
       return c.json({ error: "insufficient_scope" }, 403);
     }
 

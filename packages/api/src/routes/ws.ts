@@ -77,7 +77,11 @@ const authorizeStatusUpgrade = async (
   try {
     const apiToken = await verifyToken(token);
     if (!apiToken) return null;
-    return apiToken.scope === "worker" ? "worker" : "operator";
+    // `scope` is stored as an unconstrained string; classify known values
+    // explicitly and fail closed on anything unexpected.
+    if (apiToken.scope === "worker") return "worker";
+    if (apiToken.scope === "operator") return "operator";
+    return null;
   } catch {
     return null;
   }
