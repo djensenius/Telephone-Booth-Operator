@@ -29,11 +29,16 @@ vi.mock("../src/lib/api-tokens.js", async (importActual) => {
   const actual = await importActual<typeof import("../src/lib/api-tokens.js")>();
   return {
     ...actual,
-    // The push-mode Transcription worker subscribes with a static API token.
-    // Accept a single well-known plaintext so the WS upgrade path can be tested
-    // without seeding a real Argon2id hash.
+    // The push-mode Transcription worker subscribes with a worker-scoped static
+    // API token; generic operator clients use an operator-scoped token. Accept
+    // two well-known plaintexts so the WS upgrade path can be tested without
+    // seeding real Argon2id hashes.
     verifyToken: async (plaintext: string) =>
-      plaintext === "worker-token" ? ({ id: "worker-token-1" } as never) : null,
+      plaintext === "worker-token"
+        ? ({ id: "worker-token-1", scope: "worker" } as never)
+        : plaintext === "operator-token"
+          ? ({ id: "operator-token-1", scope: "operator" } as never)
+          : null,
   };
 });
 
@@ -55,6 +60,7 @@ import {
 import { resetAuthConfigForTests } from "../src/lib/config.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { attachStatusWebSocket } from "../src/routes/ws.js";
+import { broadcastWork } from "../src/lib/broadcaster.js";
 import { resetFakeAzure } from "./support/fake-azure.js";
 import { resetFakeDb } from "./support/fake-db.js";
 import { operatorCookie, phoneHeaders } from "./support/http.js";
@@ -194,10 +200,11 @@ describe("status websocket", () => {
     await closeServer(server);
   });
 
-  it("subscribes push-mode workers using their static API token", async () => {
+  it("delivers work events (not status) to worker-scoped tokens", async () => {
     // The worker's API token is not a valid Authentik JWT, so the bearer
-    // verifier rejects it; the upgrade must then fall through to the static
-    // API-token check and still authorize the read-only status/work stream.
+    // verifier rejects it; the upgrade falls through to the static API-token
+    // check. A worker-scoped token authorizes ONLY the `work` stream and must
+    // never receive status/system/message envelopes (audio SAS + content).
     installBearerVerifier();
     const app = createApp();
     const server = serve({ fetch: app.fetch, port: 0 });
@@ -213,16 +220,56 @@ describe("status websocket", () => {
       ws.once("error", reject);
     });
 
-    const message = new Promise<Record<string, unknown>>((resolve) => {
+    const received = new Promise<Record<string, unknown>>((resolve) => {
       ws.once("message", (data) => resolve(JSON.parse(data.toString()) as Record<string, unknown>));
     });
+    // A status broadcast must be filtered out; only the following work event
+    // should reach the worker.
     const put = await app.request("/v1/status", {
       method: "PUT",
       headers: { "content-type": "application/json", ...phoneHeaders },
       body: JSON.stringify({ state: "recording" }),
     });
     expect(put.status).toBe(204);
-    await expect(message).resolves.toMatchObject({ kind: "status" });
+    broadcastWork("11111111-1111-1111-1111-111111111111", ["transcription"]);
+    await expect(received).resolves.toMatchObject({
+      kind: "work",
+      messageId: "11111111-1111-1111-1111-111111111111",
+    });
+    ws.close();
+    await closeServer(server);
+  });
+
+  it("delivers status (not work) to operator-scoped tokens", async () => {
+    // An operator-scoped static token authorizes the status stream but must
+    // never receive raw `work` scheduling events.
+    installBearerVerifier();
+    const app = createApp();
+    const server = serve({ fetch: app.fetch, port: 0 });
+    attachStatusWebSocket(server);
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("missing test server address");
+
+    const ws = new WebSocket(`ws://127.0.0.1:${address.port}/v1/ws/status`, {
+      headers: { authorization: "Bearer operator-token" },
+    });
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", () => resolve());
+      ws.once("error", reject);
+    });
+
+    const received = new Promise<Record<string, unknown>>((resolve) => {
+      ws.once("message", (data) => resolve(JSON.parse(data.toString()) as Record<string, unknown>));
+    });
+    // A work broadcast must be filtered out; only the status update should land.
+    broadcastWork("22222222-2222-2222-2222-222222222222", ["moderation"]);
+    const put = await app.request("/v1/status", {
+      method: "PUT",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({ state: "recording" }),
+    });
+    expect(put.status).toBe(204);
+    await expect(received).resolves.toMatchObject({ kind: "status" });
     ws.close();
     await closeServer(server);
   });

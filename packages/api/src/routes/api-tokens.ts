@@ -21,6 +21,7 @@ const toIso = (value: Date | null): string | null => value?.toISOString() ?? nul
 const toSummary = (token: {
   id: string;
   name: string;
+  scope: string;
   last4: string;
   createdAt: Date;
   expiresAt: Date | null;
@@ -30,6 +31,7 @@ const toSummary = (token: {
   ApiTokenSchema.parse({
     id: token.id,
     name: token.name,
+    scope: token.scope,
     last4: token.last4,
     createdAt: token.createdAt.toISOString(),
     expiresAt: toIso(token.expiresAt),
@@ -40,6 +42,7 @@ const toSummary = (token: {
 const selectedTokenFields = {
   id: true,
   name: true,
+  scope: true,
   last4: true,
   createdAt: true,
   expiresAt: true,
@@ -85,6 +88,7 @@ apiTokensRouter.post("/", zValidator("json", CreateApiTokenRequestSchema), async
   const token = await db.apiToken.create({
     data: {
       name: body.name,
+      scope: body.scope,
       lookupId: generated.lookupId,
       tokenHash: generated.hash,
       last4: generated.last4,

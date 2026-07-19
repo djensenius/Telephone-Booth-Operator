@@ -52,6 +52,7 @@ const message = {
 const token = {
   id: tokenId,
   name: "booth client",
+  scope: "operator",
   last4: "1234",
   createdAt: "2026-01-03T00:00:00.000Z",
   expiresAt: null,

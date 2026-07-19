@@ -220,8 +220,12 @@ export const OperatorMeSchema = z.object({
 });
 export type OperatorMe = z.infer<typeof OperatorMeSchema>;
 
+export const ApiTokenScopeSchema = z.enum(["operator", "worker"]);
+export type ApiTokenScope = z.infer<typeof ApiTokenScopeSchema>;
+
 export const CreateApiTokenRequestSchema = z.object({
   name: z.string().trim().min(1).max(64),
+  scope: ApiTokenScopeSchema.default("operator"),
   expiresInDays: z.number().int().positive().max(3650).optional(),
 });
 export type CreateApiTokenRequest = z.infer<typeof CreateApiTokenRequestSchema>;
@@ -229,6 +233,7 @@ export type CreateApiTokenRequest = z.infer<typeof CreateApiTokenRequestSchema>;
 export const ApiTokenSchema = z.object({
   id: z.string().uuid(),
   name: z.string(),
+  scope: ApiTokenScopeSchema,
   last4: z.string().length(4),
   createdAt: z.string().datetime(),
   expiresAt: z.string().datetime().nullable(),

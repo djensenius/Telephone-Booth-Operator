@@ -66,8 +66,9 @@ const broadcastMessageById = async (messageId: string): Promise<void> => {
   wsBroadcaster.broadcast({ kind: "message", message: serializeMessage(full as never) });
 };
 
-// TODO(security): Static API tokens are currently unscoped. Add a worker-only
-// token scope before exposing this surface beyond trusted installation clients.
+// This surface is gated by `requireApiToken("worker")` (see below): only a
+// worker-scoped token may reach it, and such tokens receive nothing but `work`
+// events on the status WebSocket.
 
 // Nudge a message from "received" into the operator queue without deciding it.
 const advanceReceivedMessage = async (messageId: string): Promise<void> => {
@@ -82,7 +83,7 @@ const advanceReceivedMessage = async (messageId: string): Promise<void> => {
 
 export const workerRouter = new Hono<{ Variables: ApiTokenVariables }>();
 
-workerRouter.use("*", requireApiToken());
+workerRouter.use("*", requireApiToken("worker"));
 
 // GET /v1/worker/messages/:id/work — fetch the inputs the worker needs to run
 // the next step for a message. The `work` WS envelope deliberately carries only

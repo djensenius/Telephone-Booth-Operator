@@ -177,4 +177,41 @@ describe("api token CRUD", () => {
     expect(rejected.status).toBe(401);
     await expect(rejected.json()).resolves.toEqual({ error: "invalid_token" });
   });
+
+  it("enforces token scope on scoped routes", async () => {
+    const cookie = seedSession();
+    const app = createApp();
+
+    const createScoped = async (name: string, scope: "operator" | "worker"): Promise<string> => {
+      const res = await app.request("/v1/api-tokens", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ name, scope }),
+      });
+      expect(res.status, await res.clone().text()).toBe(201);
+      const body = (await res.json()) as { plaintext: string; scope: string };
+      expect(body.scope).toBe(scope);
+      return body.plaintext;
+    };
+
+    const workerToken = await createScoped("Transcription worker", "worker");
+    const operatorToken = await createScoped("Booth Pi", "operator");
+
+    const workerApp = new Hono<{ Variables: ApiTokenVariables }>();
+    workerApp.get("/work", requireApiToken("worker"), (c) =>
+      c.json({ scope: c.get("apiToken").scope }),
+    );
+
+    const accepted = await workerApp.request("/work", {
+      headers: { authorization: `Bearer ${workerToken}` },
+    });
+    expect(accepted.status, await accepted.clone().text()).toBe(200);
+    await expect(accepted.json()).resolves.toEqual({ scope: "worker" });
+
+    const forbidden = await workerApp.request("/work", {
+      headers: { authorization: `Bearer ${operatorToken}` },
+    });
+    expect(forbidden.status).toBe(403);
+    await expect(forbidden.json()).resolves.toEqual({ error: "insufficient_scope" });
+  });
 });
