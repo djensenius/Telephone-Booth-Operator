@@ -33,15 +33,23 @@ operator (web / mobile / CLI) reviews and calls POST /v1/messages/:id/decision.
 
 ## Authentication
 
-Everything authenticates with the same static Argon2id API token the phone
-clients use (`requireApiToken`). Mint one via `POST /v1/api-tokens` and store
-it in the app's Keychain.
+The worker authenticates with a **worker-scoped** static Argon2id API token —
+not the generic operator/phone token. Mint one via `POST /v1/api-tokens` with
+`{"scope": "worker"}` (or pick **Worker** in the operator UI → Tokens), and
+store it in the app's Keychain.
+
+A worker-scoped token is least-privilege: it may call only the `/v1/worker/*`
+callbacks and, on the status WebSocket, receives **only** `work` events — never
+message content (audio SAS URLs, transcripts, moderation). It cannot access the
+booth/phone routes. Conversely, an operator-scoped token is rejected from
+`/v1/worker/*` with `403 insufficient_scope` and never sees `work` events.
 
 - **WebSocket:** connect to `/v1/ws/status` with an
   `Authorization: Bearer <token>` header. The upgrade authorizer accepts
-  a browser session cookie, an Authentik bearer, **or** a valid API token (this
-  worker uses the token).
-- **Callbacks:** the `/v1/worker/*` endpoints require the API token.
+  a browser session cookie, an Authentik bearer, **or** a valid API token; a
+  worker-scoped token is classified as a worker connection and filtered to
+  `work` events only.
+- **Callbacks:** the `/v1/worker/*` endpoints require a `worker`-scoped API token.
 
 ## The `work` envelope
 

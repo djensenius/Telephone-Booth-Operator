@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer } from "ws";
 import { verifyToken } from "../lib/api-tokens.js";
-import { wsBroadcaster } from "../lib/broadcaster.js";
+import { wsBroadcaster, type WsEnvelope } from "../lib/broadcaster.js";
 import { verifyOperatorBearer } from "../lib/bearer-auth.js";
 import {
   readSessionFromCookieHeader,
@@ -17,7 +17,13 @@ export const wsRouter = new Hono<{ Variables: AuthVariables }>();
 
 wsRouter.get("/status", (c) => c.json({ error: "upgrade_required" }, 426));
 
-type LiveSocket = WebSocket & { isAlive?: boolean; clientId?: string };
+type SubscriberKind = "operator" | "worker";
+
+type LiveSocket = WebSocket & {
+  isAlive?: boolean;
+  clientId?: string;
+  subscriberKind?: SubscriberKind;
+};
 
 // Per-client outbound backpressure cap. When the buffered amount exceeds
 // this, the slow consumer is dropped with code 1009 ("message too big") so
@@ -40,34 +46,52 @@ const bearerTokenFromHeader = (header: string | undefined): string | null => {
   return match && match[1] ? match[1].trim() : null;
 };
 
-// Authorize a status-socket upgrade. Browser clients present the operator
-// session cookie; native operator clients (iOS/watchOS/tvOS, the Rust CLI)
-// present an `Authorization: Bearer` Authentik access token; the push-mode
-// Transcription worker (macOS + iOS) presents its static Argon2id API token,
-// verified the same way as the `/v1/worker` REST callbacks. Any one of these
-// grants the read-only status/work stream.
-// TODO(security): Static API tokens are currently unscoped. Add worker/operator
-// token scopes so phone-client tokens cannot subscribe to worker work events.
-const authorizeStatusUpgrade = async (request: IncomingMessage): Promise<boolean> => {
+// Authorize a status-socket upgrade and classify the connection. Browser
+// clients present the operator session cookie; native operator clients
+// (iOS/watchOS/tvOS, the Rust CLI) present an `Authorization: Bearer` Authentik
+// access token; the push-mode Transcription worker (macOS + iOS) presents its
+// static Argon2id API token, verified the same way as the `/v1/worker` REST
+// callbacks.
+//
+// The returned kind scopes what the subscriber may receive: "operator"
+// connections get every non-`work` envelope (status/system/message, which carry
+// audio SAS URLs and transcript/moderation content); "worker" connections get
+// ONLY `work` envelopes. A generic (operator-scoped) API token therefore cannot
+// read work events, and a worker-scoped token cannot read message content.
+// Returns `null` when the upgrade is not authorized.
+const authorizeStatusUpgrade = async (
+  request: IncomingMessage,
+): Promise<SubscriberKind | null> => {
   const session = await readSessionFromCookieHeader(request.headers.cookie);
-  if (session && !sessionIsExpired(session)) return true;
+  if (session && !sessionIsExpired(session)) return "operator";
 
   const token = bearerTokenFromHeader(request.headers.authorization);
-  if (!token) return false;
+  if (!token) return null;
   try {
     const result = await verifyOperatorBearer(token);
-    if (result.ok) return true;
+    if (result.ok) return "operator";
   } catch {
     // A transient JWKS/network failure must not crash the upgrade handler;
     // fall through to the static API-token check and, failing that, deny.
   }
   try {
     const apiToken = await verifyToken(token);
-    return apiToken !== null;
+    if (!apiToken) return null;
+    // `scope` is stored as an unconstrained string; classify known values
+    // explicitly and fail closed on anything unexpected.
+    if (apiToken.scope === "worker") return "worker";
+    if (apiToken.scope === "operator") return "operator";
+    return null;
   } catch {
-    return false;
+    return null;
   }
 };
+
+// Whether a subscriber of the given kind should receive an envelope. Worker
+// connections are limited to `work` events; operator connections receive
+// everything else (never raw `work`, which is internal scheduling).
+const envelopeVisibleTo = (kind: SubscriberKind, envelope: WsEnvelope): boolean =>
+  kind === "worker" ? envelope.kind === "work" : envelope.kind !== "work";
 
 export const attachStatusWebSocket = (server: ServerType): void => {
   const wss = new WebSocketServer({ noServer: true });
@@ -94,6 +118,8 @@ export const attachStatusWebSocket = (server: ServerType): void => {
     });
     wsBroadcaster.subscribe(ws.clientId, (envelope) => {
       if (ws.readyState !== WebSocket.OPEN) return;
+      const kind = ws.subscriberKind ?? "operator";
+      if (!envelopeVisibleTo(kind, envelope)) return;
       if (ws.bufferedAmount > MAX_BUFFERED_BYTES) {
         ws.close(1009, "operator slow consumer");
         return;
@@ -107,10 +133,12 @@ export const attachStatusWebSocket = (server: ServerType): void => {
 
     wss.handleUpgrade(request, socket, head, (ws) => {
       void (async () => {
-        if (!(await authorizeStatusUpgrade(request))) {
+        const kind = await authorizeStatusUpgrade(request);
+        if (!kind) {
           closePolicyViolation(ws);
           return;
         }
+        (ws as LiveSocket).subscriberKind = kind;
         wss.emit("connection", ws, request);
       })();
     });

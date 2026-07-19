@@ -13,15 +13,39 @@ stores only:
 - `lookupId` — the first 8 characters, indexed for a fast database lookup.
 - `tokenHash` — an Argon2id hash of the full plaintext token.
 - `last4` — display hint for operators.
+- `scope` — capability scope, either `operator` (default) or `worker`.
 - lifecycle fields: `createdAt`, `expiresAt`, `lastUsedAt`, and `revokedAt`.
 
 The plaintext token is returned exactly once by `POST /v1/api-tokens` as
 `plaintext`; it is never stored and cannot be recovered later.
 
+## Scopes
+
+Every token carries a `scope` that bounds what it may access. Choose the
+narrowest scope for the credential's job:
+
+- **`operator`** (default) — the historical scope for booth/phone clients and
+  native operator clients (iOS/watchOS/tvOS, the Rust CLI). Grants the
+  booth/phone REST routes and the read-only operator status stream on
+  `/v1/ws/status` (status, system, and message envelopes — including audio SAS
+  URLs and transcript/moderation content).
+- **`worker`** — a least-privilege credential for the push-mode Transcription
+  worker. It may call only the `/v1/worker/*` result-callback routes and, on
+  `/v1/ws/status`, receives **only** `work` scheduling events — never the
+  `message` envelopes that carry audio SAS URLs and transcript/moderation
+  content. (Content the worker must process is fetched deliberately from its
+  input route `GET /v1/worker/messages/:id/work`; it is the broadcast
+  WebSocket stream, not the worker input, that excludes content.) An
+  operator-scoped token can never read `work` events.
+
+Requests to `/v1/worker/*` with a non-`worker` token are rejected with
+`403 insufficient_scope`. Tokens created before scopes existed default to
+`operator`, preserving their prior behavior.
+
 ## Lifecycle
 
-1. An authenticated operator creates a token with a name and optional
-   `expiresInDays` value.
+1. An authenticated operator creates a token with a name, a `scope`
+   (`operator` or `worker`), and an optional `expiresInDays` value.
 2. The API stores the Argon2id hash and returns the plaintext once.
 3. The phone client sends `Authorization: Bearer <token>` on protected phone
    routes.

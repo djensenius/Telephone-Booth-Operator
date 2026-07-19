@@ -177,4 +177,57 @@ describe("api token CRUD", () => {
     expect(rejected.status).toBe(401);
     await expect(rejected.json()).resolves.toEqual({ error: "invalid_token" });
   });
+
+  it("enforces token scope on scoped routes", async () => {
+    const cookie = seedSession();
+    const app = createApp();
+
+    const createScoped = async (name: string, scope: "operator" | "worker"): Promise<string> => {
+      const res = await app.request("/v1/api-tokens", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ name, scope }),
+      });
+      expect(res.status, await res.clone().text()).toBe(201);
+      const body = (await res.json()) as { plaintext: string; scope: string };
+      expect(body.scope).toBe(scope);
+      return body.plaintext;
+    };
+
+    const workerToken = await createScoped("Transcription worker", "worker");
+    const operatorToken = await createScoped("Booth Pi", "operator");
+
+    const workerApp = new Hono<{ Variables: ApiTokenVariables }>();
+    workerApp.get("/work", requireApiToken("worker"), (c) =>
+      c.json({ scope: c.get("apiToken").scope }),
+    );
+
+    const accepted = await workerApp.request("/work", {
+      headers: { authorization: `Bearer ${workerToken}` },
+    });
+    expect(accepted.status, await accepted.clone().text()).toBe(200);
+    await expect(accepted.json()).resolves.toEqual({ scope: "worker" });
+
+    const forbidden = await workerApp.request("/work", {
+      headers: { authorization: `Bearer ${operatorToken}` },
+    });
+    expect(forbidden.status).toBe(403);
+    await expect(forbidden.json()).resolves.toEqual({ error: "insufficient_scope" });
+
+    // Booth/phone routes default to the "operator" scope, so a worker token
+    // must be rejected there too (least-privilege boundary).
+    const phoneApp = new Hono<{ Variables: ApiTokenVariables }>();
+    phoneApp.get("/phone", requireApiToken(), (c) => c.json({ ok: true }));
+
+    const phoneWithWorker = await phoneApp.request("/phone", {
+      headers: { authorization: `Bearer ${workerToken}` },
+    });
+    expect(phoneWithWorker.status).toBe(403);
+    await expect(phoneWithWorker.json()).resolves.toEqual({ error: "insufficient_scope" });
+
+    const phoneWithOperator = await phoneApp.request("/phone", {
+      headers: { authorization: `Bearer ${operatorToken}` },
+    });
+    expect(phoneWithOperator.status, await phoneWithOperator.clone().text()).toBe(200);
+  });
 });

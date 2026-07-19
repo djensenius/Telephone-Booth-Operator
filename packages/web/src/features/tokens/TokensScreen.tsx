@@ -48,6 +48,7 @@ export function NewTokenDialog({
 }): JSX.Element | null {
   const createToken = useCreateApiToken();
   const [name, setName] = useState("");
+  const [scope, setScope] = useState<"operator" | "worker">("operator");
   const [expiresInDays, setExpiresInDays] = useState("");
   const [plaintext, setPlaintext] = useState<string | null>(null);
   if (!open) return null;
@@ -56,10 +57,12 @@ export function NewTokenDialog({
     event.preventDefault();
     const created = await createToken.mutateAsync({
       name,
+      scope,
       ...(expiresInDays.trim() ? { expiresInDays: Number(expiresInDays) } : {}),
     });
     setPlaintext(created.plaintext);
     setName("");
+    setScope("operator");
     setExpiresInDays("");
   }
 
@@ -85,6 +88,18 @@ export function NewTokenDialog({
               required
               maxLength={64}
             />
+          </label>
+          <label>
+            Scope
+            <select
+              value={scope}
+              onChange={(event) =>
+                setScope(event.currentTarget.value === "worker" ? "worker" : "operator")
+              }
+            >
+              <option value="operator">Operator (booth / phone / operator clients)</option>
+              <option value="worker">Worker (push-worker callbacks only)</option>
+            </select>
           </label>
           <label>
             Expires in days (optional)
@@ -134,6 +149,7 @@ function TokenRow({
   return (
     <tr>
       <td>{token.name}</td>
+      <td>{token.scope}</td>
       <td>•••• {token.last4}</td>
       <td>{date(token.lastUsedAt)}</td>
       <td>{date(token.expiresAt)}</td>
@@ -187,6 +203,7 @@ export function TokensScreen(): JSX.Element {
             <thead>
               <tr>
                 <th>Name</th>
+                <th>Scope</th>
                 <th>Last four</th>
                 <th>Last used</th>
                 <th>Expires</th>
