@@ -37,7 +37,6 @@ const setup = () => {
   // full code path (DB writes, serializers, WS broadcaster).
   process.env.TRANSCRIPTION_PROVIDER = "disabled";
   process.env.MODERATION_PROVIDER = "disabled";
-  process.env.AUTO_DECISION_MODE = "always_pending";
   resetSessionCryptoForTests();
   resetFakeDb();
   resetFakeAzure();

@@ -4,15 +4,13 @@
 
 import { z } from "zod";
 
-export type TranscriptionProviderName = "openai" | "mac_app" | "disabled";
-export type TranslationProviderName = "openai" | "mac_app" | "disabled";
-export type ModerationProviderName = "openai" | "mac_app" | "disabled";
-export type AutoDecisionMode = "always_pending" | "auto_reject" | "auto_both";
+export type TranscriptionProviderName = "openai" | "mac_app" | "push" | "disabled";
+export type TranslationProviderName = "openai" | "mac_app" | "push" | "disabled";
+export type ModerationProviderName = "openai" | "mac_app" | "push" | "disabled";
 
-const TranscriptionProviderEnum = z.enum(["openai", "mac_app", "disabled"]);
-const TranslationProviderEnum = z.enum(["openai", "mac_app", "disabled"]);
-const ModerationProviderEnum = z.enum(["openai", "mac_app", "disabled"]);
-const AutoDecisionModeEnum = z.enum(["always_pending", "auto_reject", "auto_both"]);
+const TranscriptionProviderEnum = z.enum(["openai", "mac_app", "push", "disabled"]);
+const TranslationProviderEnum = z.enum(["openai", "mac_app", "push", "disabled"]);
+const ModerationProviderEnum = z.enum(["openai", "mac_app", "push", "disabled"]);
 
 const parseFloat01 = (raw: string | undefined, fallback: number): number => {
   if (raw === undefined || raw.trim().length === 0) return fallback;
@@ -66,9 +64,11 @@ export interface AiConfig {
   readonly moderationMacAppToken: string | null;
   readonly openAiApiKey: string | null;
   readonly openAiBaseUrl: string;
-  readonly autoDecisionMode: AutoDecisionMode;
-  readonly autoRejectThreshold: number;
-  readonly autoApproveThreshold: number;
+  // Score thresholds that map a moderation `maxScore` to a human-facing
+  // recommendation (approve / review / reject). This is only an advisory
+  // suggestion — the Operator never auto-decides a message.
+  readonly moderationRejectThreshold: number;
+  readonly moderationApproveThreshold: number;
   readonly sweeperIntervalSeconds: number;
   readonly maxAudioBytes: number;
   readonly sweeperStaleThresholdSeconds: number;
@@ -102,11 +102,8 @@ export const resolveAiConfig = (): AiConfig => {
     moderationMacAppToken: trimmedOrNull(env.MODERATION_MAC_APP_TOKEN),
     openAiApiKey: trimmedOrNull(env.OPENAI_API_KEY),
     openAiBaseUrl: trimmedOrNull(env.OPENAI_BASE_URL) ?? "https://api.openai.com",
-    autoDecisionMode: AutoDecisionModeEnum.catch("always_pending" as const).parse(
-      env.AUTO_DECISION_MODE ?? "always_pending",
-    ),
-    autoRejectThreshold: parseFloat01(env.AUTO_REJECT_THRESHOLD, 0.85),
-    autoApproveThreshold: parseFloat01(env.AUTO_APPROVE_THRESHOLD, 0.15),
+    moderationRejectThreshold: parseFloat01(env.MODERATION_REJECT_THRESHOLD, 0.85),
+    moderationApproveThreshold: parseFloat01(env.MODERATION_APPROVE_THRESHOLD, 0.15),
     sweeperIntervalSeconds: parseInteger(env.AI_SWEEPER_INTERVAL_SECONDS, 60),
     maxAudioBytes: parseInteger(env.MAX_AUDIO_BYTES, DEFAULT_MAX_AUDIO_BYTES, 1),
     sweeperStaleThresholdSeconds: parseInteger(env.AI_SWEEPER_STALE_THRESHOLD_SECONDS, 300, 10),

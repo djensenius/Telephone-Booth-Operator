@@ -1019,6 +1019,35 @@ textarea:focus-visible,
   background: transparent;
 }
 
+.feature-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.6rem 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.feature-field textarea {
+  font: inherit;
+  color: var(--text-primary);
+  background: var(--surface-panel-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+  resize: vertical;
+}
+
+.feature-button--approve {
+  color: color-mix(in srgb, var(--accent-green) 72%, var(--text-primary));
+  border-color: color-mix(in srgb, var(--accent-green) 40%, var(--border-subtle));
+}
+
+.feature-button--reject {
+  color: color-mix(in srgb, var(--accent-red) 70%, var(--text-primary));
+  border-color: color-mix(in srgb, var(--accent-red) 40%, var(--border-subtle));
+}
+
 .debug-panel {
   min-width: 0;
 }

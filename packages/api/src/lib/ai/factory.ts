@@ -16,6 +16,10 @@ export const buildTranscriptionProvider = (
   switch (config.transcriptionProvider) {
     case "disabled":
       return null;
+    // Push mode: no in-process provider. The Transcription app subscribes to
+    // the status WebSocket and posts results back to /v1/worker/*.
+    case "push":
+      return null;
     case "openai":
       if (!config.openAiApiKey) return null;
       return new OpenAiTranscriptionProvider({
@@ -40,6 +44,8 @@ export const buildTranslationProvider = (
   switch (config.translationProvider) {
     case "disabled":
       return null;
+    case "push":
+      return null;
     case "openai":
       if (!config.openAiApiKey) return null;
       return new OpenAiTranslationProvider({
@@ -62,22 +68,24 @@ export const buildModerationProvider = (
   switch (config.moderationProvider) {
     case "disabled":
       return null;
+    case "push":
+      return null;
     case "openai":
       if (!config.openAiApiKey) return null;
       return new OpenAiModerationProvider({
         apiKey: config.openAiApiKey,
         baseUrl: config.openAiBaseUrl,
         model: config.moderationOpenAiModel,
-        rejectThreshold: config.autoRejectThreshold,
-        approveThreshold: config.autoApproveThreshold,
+        rejectThreshold: config.moderationRejectThreshold,
+        approveThreshold: config.moderationApproveThreshold,
       });
     case "mac_app":
       if (!config.moderationMacAppUrl) return null;
       return new MacAppModerationProvider({
         url: config.moderationMacAppUrl,
         token: config.moderationMacAppToken,
-        rejectThreshold: config.autoRejectThreshold,
-        approveThreshold: config.autoApproveThreshold,
+        rejectThreshold: config.moderationRejectThreshold,
+        approveThreshold: config.moderationApproveThreshold,
       });
   }
 };

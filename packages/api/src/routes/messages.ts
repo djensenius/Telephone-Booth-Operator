@@ -330,11 +330,6 @@ messagesRouter.post(
         translationModel: null,
         translationError: null,
         translationCompletedAt: new Date(),
-        // Release any held translation-worker lease so a racing job can't
-        // overwrite the operator's translation.
-        translationLeaseToken: null,
-        translationLeaseExpiresAt: null,
-        translationLeasedAt: null,
       },
     });
     await broadcastMessageById(id);

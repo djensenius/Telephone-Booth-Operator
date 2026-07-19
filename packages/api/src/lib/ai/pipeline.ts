@@ -8,7 +8,7 @@
 //     server restarts mid-flight.
 
 import { generateSasUrl } from "../azure-blob.js";
-import { wsBroadcaster } from "../broadcaster.js";
+import { broadcastWork, wsBroadcaster } from "../broadcaster.js";
 import { db } from "../db.js";
 import { serializeMessage } from "../serializers.js";
 import { isEnglishLanguage, resolveAiConfig, type AiConfig } from "./config.js";
@@ -87,56 +87,17 @@ const broadcastMessage = async (messageId: string): Promise<void> => {
   wsBroadcaster.broadcast({ kind: "message", message: serialized });
 };
 
-export const applyAutoDecision = async (
-  messageId: string,
-  deps: PipelineDeps,
-  moderationOutcome: {
-    recommendation: "approve" | "review" | "reject";
-    flagged: boolean;
-    maxScore: number;
-    reasonSummary?: string;
-  },
-): Promise<void> => {
-  const { autoDecisionMode, autoRejectThreshold, autoApproveThreshold } = deps.config;
-  if (autoDecisionMode === "always_pending") {
-    await db.message.update({ where: { id: messageId }, data: { status: "pending" } });
-    return;
-  }
-  const reasonNote =
-    moderationOutcome.reasonSummary ?? `score ${moderationOutcome.maxScore.toFixed(2)}`;
-  if (
-    moderationOutcome.recommendation === "reject" ||
-    moderationOutcome.flagged ||
-    moderationOutcome.maxScore >= autoRejectThreshold
-  ) {
-    await db.message.update({
-      where: { id: messageId },
-      data: {
-        status: "rejected",
-        decidedAt: new Date(),
-        decidedById: null,
-        notes: `auto-rejected by moderation: ${reasonNote}`,
-      },
-    });
-    return;
-  }
-  if (
-    autoDecisionMode === "auto_both" &&
-    !moderationOutcome.flagged &&
-    moderationOutcome.maxScore <= autoApproveThreshold
-  ) {
-    await db.message.update({
-      where: { id: messageId },
-      data: {
-        status: "approved",
-        decidedAt: new Date(),
-        decidedById: null,
-        notes: `auto-approved by moderation: ${reasonNote}`,
-      },
-    });
-    return;
-  }
-  await db.message.update({ where: { id: messageId }, data: { status: "pending" } });
+// Advance a freshly moderated message into the operator review queue. The AI
+// moderation result is only ever an advisory *suggestion*: the Operator never
+// auto-approves or auto-rejects. A human operator makes the decision via
+// `POST /v1/messages/:id/decision`. We only nudge `received` → `pending` so the
+// message surfaces in the queue; any already-decided message is left untouched
+// (e.g. re-moderation after a human decision must not reopen it).
+export const advanceMessageAfterModeration = async (messageId: string): Promise<void> => {
+  await db.message.updateMany({
+    where: { id: messageId, status: "received" },
+    data: { status: "pending" },
+  });
 };
 
 export interface RunTranscriptionOptions {
@@ -164,6 +125,32 @@ export const runTranscription = async (
   if (!message) return { outcome: "not_found" };
 
   if (!provider) {
+    // Push mode: no in-process transcription provider, but a subscribed
+    // Transcription app will do the work. Create the pending row and broadcast
+    // a `work` event so the app fetches the audio and posts the text back to
+    // /v1/worker/messages/:id/transcription. (In a truly disabled config we
+    // instead record a failed row below.)
+    if (deps.config.transcriptionProvider === "push") {
+      const existing = await db.transcription.findFirst({
+        where: { messageId: message.id, status: "pending" },
+        orderBy: { createdAt: "desc" },
+      });
+      const pending =
+        existing ??
+        (await db.transcription.create({
+          data: {
+            messageId: message.id,
+            provider: "push",
+            model: null,
+            status: "pending",
+            durationMs: message.audio.durationMs,
+            requestedById: opts.requestedByUserId ?? null,
+          },
+        }));
+      await broadcastMessage(message.id);
+      broadcastWork(message.id, ["transcription"]);
+      return { outcome: "created", transcriptionId: pending.id };
+    }
     const failed = await db.transcription.create({
       data: {
         messageId: message.id,
@@ -337,45 +324,41 @@ export const runTranslation = async (
   if (isEnglishLanguage(transcription.language)) {
     return { outcome: "skipped", reason: "english" };
   }
-  // Never overwrite an already-finalized translation. If a pull worker (or
+  // Never overwrite an already-finalized translation. If the push worker (or
   // an earlier in-process run) already wrote `succeeded`, return as-is so
   // a sweeper / retry / parallel run can't downgrade the row back to
   // `pending` and clobber the worker's translatedText / model fields.
   if (transcription.translationStatus === "succeeded") {
     return { outcome: "succeeded" };
   }
-  // Likewise, don't trample an in-flight pull-worker lease. The worker will
-  // either succeed (case above on the next run) or fail and reset the row.
-  if (
-    transcription.translationStatus === "pending" &&
-    transcription.translationLeaseExpiresAt &&
-    transcription.translationLeaseExpiresAt.getTime() > Date.now()
-  ) {
+  // Likewise, don't trample a translation the push worker is already handling
+  // (status = pending). The worker will POST the result back to
+  // `/v1/worker/messages/:id/translation`, which flips the row to `succeeded`.
+  if (transcription.translationStatus === "pending") {
     return { outcome: "deferred", reason: "pending_pull" };
   }
 
   const provider = deps.translationProvider;
   if (!provider) {
-    // No in-process provider — defer to the pull worker. Mark the row so the
-    // jobs API can lease it; the worker will post a result back via
-    // `/v1/jobs/:id/succeed`. Use updateMany so we never flip a row that
-    // a worker has just finalized in the moment between the read above and
-    // this write.
-    if (transcription.translationStatus !== "pending") {
-      await db.transcription.updateMany({
-        where: {
-          id: transcription.id,
-          OR: [
-            { translationStatus: null },
-            { translationStatus: "failed" },
-          ],
-        },
-        data: {
-          translationStatus: "pending",
-          translationProvider: deps.config.translationProvider,
-        },
-      });
-      await broadcastMessage(opts.messageId);
+    // No in-process provider — defer to the push worker. Mark the row
+    // `pending` and broadcast a `work` event so a subscribed Transcription
+    // app translates it and POSTs the result to
+    // `/v1/worker/messages/:id/translation`. Use updateMany so we never flip a
+    // row that a worker has just finalized between the read above and this
+    // write.
+    await db.transcription.updateMany({
+      where: {
+        id: transcription.id,
+        OR: [{ translationStatus: null }, { translationStatus: "failed" }],
+      },
+      data: {
+        translationStatus: "pending",
+        translationProvider: deps.config.translationProvider,
+      },
+    });
+    await broadcastMessage(opts.messageId);
+    if (deps.config.translationProvider === "push") {
+      broadcastWork(opts.messageId, ["translation"]);
     }
     return { outcome: "deferred", reason: "pending_pull" };
   }
@@ -590,7 +573,7 @@ export const runModeration = async (opts: RunModerationOptions): Promise<string 
       maxScore: result.maxScore,
       latencyMs: Date.now() - startedAt,
     });
-    await applyAutoDecision(opts.messageId, deps, result);
+    await advanceMessageAfterModeration(opts.messageId);
     await broadcastMessage(opts.messageId);
     return pending.id;
   } catch (error) {

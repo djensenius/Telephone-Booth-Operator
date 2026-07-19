@@ -37,7 +37,6 @@ const setup = () => {
   // without touching the network; review routes still exercise the full path.
   process.env.TRANSCRIPTION_PROVIDER = "disabled";
   process.env.MODERATION_PROVIDER = "disabled";
-  process.env.AUTO_DECISION_MODE = "always_pending";
   resetSessionCryptoForTests();
   resetFakeDb();
   resetFakeAzure();

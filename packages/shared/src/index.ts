@@ -524,6 +524,16 @@ export const WsEnvelopeSchema = z.discriminatedUnion("kind", [
     kind: z.literal("message"),
     message: MessageSchema,
   }),
+  // Push-mode work notification. The Transcription app (macOS + iOS)
+  // subscribes to the status socket and reacts to these by running the named
+  // steps locally, then POSTing results back to the worker callback endpoints.
+  // Carries no secrets (no SAS URLs / transcript text) — the worker fetches
+  // what it needs over its authenticated REST calls.
+  z.object({
+    kind: z.literal("work"),
+    messageId: z.string(),
+    needs: z.array(z.enum(["transcription", "translation", "moderation"])).min(1),
+  }),
 ]);
 export type WsEnvelope = z.infer<typeof WsEnvelopeSchema>;
 

@@ -286,22 +286,8 @@ model Transcription {
   translationLatencyMs   Int?
   translationCompletedAt DateTime?
 
-  // Lease columns for the pull-worker model. The transcription row itself
-  // doubles as a "transcription job" when status = pending and the
-  // translation row as a "translation job" when translationStatus = pending.
-  leaseToken                String?
-  leaseExpiresAt            DateTime?
-  leasedAt                  DateTime?
-  attemptCount              Int       @default(0)
-  translationLeaseToken     String?
-  translationLeaseExpiresAt DateTime?
-  translationLeasedAt       DateTime?
-  translationAttemptCount   Int       @default(0)
-
   @@index([messageId, createdAt])
   @@index([status, createdAt])
-  @@index([status, leaseExpiresAt])
-  @@index([translationStatus, translationLeaseExpiresAt])
 }
 
 // AI moderation attempts. Linked to the `Transcription` row whose text was
@@ -328,17 +314,8 @@ model Moderation {
   createdAt       DateTime                  @default(now())
   completedAt     DateTime?
 
-  // Lease columns for the pull-worker model. A moderation row is a
-  // "moderation job" when status = pending. See Transcription for the
-  // equivalent pattern on transcription/translation work units.
-  leaseToken     String?
-  leaseExpiresAt DateTime?
-  leasedAt       DateTime?
-  attemptCount   Int       @default(0)
-
   @@index([messageId, createdAt])
   @@index([recommendation, createdAt])
-  @@index([status, leaseExpiresAt])
 }
 
 // Mobile device registered for APNs / push notifications. One row per

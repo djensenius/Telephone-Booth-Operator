@@ -25,6 +25,18 @@ vi.mock("../src/lib/require-api-token.js", () => ({
     },
 }));
 
+vi.mock("../src/lib/api-tokens.js", async (importActual) => {
+  const actual = await importActual<typeof import("../src/lib/api-tokens.js")>();
+  return {
+    ...actual,
+    // The push-mode Transcription worker subscribes with a static API token.
+    // Accept a single well-known plaintext so the WS upgrade path can be tested
+    // without seeding a real Argon2id hash.
+    verifyToken: async (plaintext: string) =>
+      plaintext === "worker-token" ? ({ id: "worker-token-1" } as never) : null,
+  };
+});
+
 vi.mock("../src/lib/oidc.js", () => ({
   getOidcClient: vi.fn(async () => ({
     serverMetadata: () => ({ jwks_uri: "https://idp.example/jwks.json" }),
@@ -178,6 +190,39 @@ describe("status websocket", () => {
       kind: "status",
       status: { state: "recording" },
     });
+    ws.close();
+    await closeServer(server);
+  });
+
+  it("subscribes push-mode workers using their static API token", async () => {
+    // The worker's API token is not a valid Authentik JWT, so the bearer
+    // verifier rejects it; the upgrade must then fall through to the static
+    // API-token check and still authorize the read-only status/work stream.
+    installBearerVerifier();
+    const app = createApp();
+    const server = serve({ fetch: app.fetch, port: 0 });
+    attachStatusWebSocket(server);
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("missing test server address");
+
+    const ws = new WebSocket(`ws://127.0.0.1:${address.port}/v1/ws/status`, {
+      headers: { authorization: "Bearer worker-token" },
+    });
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", () => resolve());
+      ws.once("error", reject);
+    });
+
+    const message = new Promise<Record<string, unknown>>((resolve) => {
+      ws.once("message", (data) => resolve(JSON.parse(data.toString()) as Record<string, unknown>));
+    });
+    const put = await app.request("/v1/status", {
+      method: "PUT",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({ state: "recording" }),
+    });
+    expect(put.status).toBe(204);
+    await expect(message).resolves.toMatchObject({ kind: "status" });
     ws.close();
     await closeServer(server);
   });

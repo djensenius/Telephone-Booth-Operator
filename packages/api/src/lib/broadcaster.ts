@@ -31,7 +31,12 @@ export type WsEnvelope =
       receivedAt: string;
       version: string | null;
     }
-  | { kind: "message"; message: Message };
+  | { kind: "message"; message: Message }
+  | { kind: "work"; messageId: string; needs: WorkNeed[] };
+
+// The push-mode job steps a subscribed Transcription worker can be asked to
+// run. Mirrors the `work` arm of `WsEnvelopeSchema` in the shared package.
+export type WorkNeed = "transcription" | "translation" | "moderation";
 
 type Subscriber<T> = (event: T) => void;
 
@@ -66,6 +71,14 @@ export class Broadcaster<T> {
 // payloads now wraps them as `{ kind: "status", status }` before calling
 // `wsBroadcaster.broadcast(...)`.
 export const wsBroadcaster = new Broadcaster<WsEnvelope>();
+
+// Notify subscribed Transcription workers (macOS + iOS) that a message needs
+// one or more pipeline steps run and pushed back. This is the push-mode
+// replacement for the removed `/v1/jobs/next` poll loop.
+export const broadcastWork = (messageId: string, needs: WorkNeed[]): void => {
+  if (needs.length === 0) return;
+  wsBroadcaster.broadcast({ kind: "work", messageId, needs });
+};
 
 // Back-compat alias for code that still imports `statusBroadcaster`. Routes
 // should prefer `wsBroadcaster` directly going forward.

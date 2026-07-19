@@ -26,7 +26,7 @@ import { adminDataRouter } from "./routes/admin-data.js";
 import { authRoutes } from "./routes/auth.js";
 import { devicesRouter } from "./routes/devices.js";
 import { eventsRouter } from "./routes/events.js";
-import { jobsRouter } from "./routes/jobs.js";
+import { workerRouter } from "./routes/worker.js";
 import { messagesRouter } from "./routes/messages.js";
 import { questionsRouter } from "./routes/questions.js";
 import { sessionsRouter } from "./routes/sessions.js";
@@ -64,11 +64,12 @@ export const createApp = (): Hono<{ Variables: AuthVariables }> => {
 
   app.route("/v1/auth", authRoutes);
   app.route("/v1/api-tokens", apiTokensRouter);
-  // /v1/jobs is the pull-worker queue for the Mac transcription app. It uses
-  // a static API token via `requireApiToken` (applied inside the router) so
-  // it must be mounted BEFORE the operator-session middleware that guards
-  // the rest of /v1/*.
-  app.route("/v1/jobs", jobsRouter);
+  // /v1/worker is the push-mode result-callback surface for the Transcription
+  // app (macOS + iOS). It authenticates with a static API token via
+  // `requireApiToken` (applied inside the router) so it must be mounted BEFORE
+  // the operator-session middleware that guards the rest of /v1/*. This
+  // replaced the removed `/v1/jobs` pull queue.
+  app.route("/v1/worker", workerRouter);
   app.use("/v1/*", requireOperator());
 
   // Operator backend resource routes. Keep token-management mounts separate;

@@ -96,11 +96,13 @@ process:
    English. Stored on the same transcription row
    (`translatedText`, `translatedLanguage`, …). Skipped for English.
 3. **Moderation** — runs against the translated text when present,
-   otherwise the original transcript. Drives the message's auto-decision
-   (`approve` / `review` / `reject`).
+   otherwise the original transcript. Produces an **advisory** suggestion
+   (`recommendation`: `approve` / `review` / `reject` + scores). It never
+   decides the message: a human always approves/rejects via
+   `POST /v1/messages/:id/decision` (see [ADR 0009](./adr/0009-human-moderation-and-push-worker.md)).
 
 Each step has its own provider abstraction (`packages/api/src/lib/ai/`).
 Built-in providers: OpenAI (cloud), `mac_app` (push to a reachable Mac),
-and `disabled`. The Mac app can additionally be wired as a **pull** worker
-that leases jobs from `/v1/jobs/*` — see [`operator-pull.md`](./operator-pull.md).
-Both modes can coexist; the lease semantics make races safe.
+and `disabled`. The Transcription app (macOS + iOS) can additionally run as a
+**push** worker: it subscribes to `/v1/ws/status` for `work` events and posts
+results back to `/v1/worker/*` — see [`operator-push.md`](./operator-push.md).

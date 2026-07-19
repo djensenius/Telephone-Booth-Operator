@@ -3,6 +3,7 @@ import { Link, useParams } from "@tanstack/react-router";
 import type { Message, Moderation, Transcription } from "@telephone-booth-operator/shared";
 import { GlassPanel } from "../../components/booth/index.js";
 import {
+  useDecideMessage,
   useMessage,
   useMessageTranscriptions,
   useQuestionsList,
@@ -305,6 +306,81 @@ function HistoryCard({ transcriptions }: HistoryCardProps): JSX.Element | null {
   );
 }
 
+interface DecisionCardProps {
+  readonly message: Message;
+  readonly onDecide: (decision: "approve" | "reject", notes: string) => void;
+  readonly deciding: boolean;
+  readonly decideError: string | null;
+}
+
+// Human moderation control. The AI moderation result is shown here only as an
+// advisory suggestion; approving or rejecting a message is always an explicit
+// operator action. "uploading" messages have no content to judge yet.
+function DecisionCard({
+  message,
+  onDecide,
+  deciding,
+  decideError,
+}: DecisionCardProps): JSX.Element {
+  const [notes, setNotes] = useState("");
+  const moderation = message.latestModeration ?? null;
+  const { label, variant } = moderationVariant(moderation);
+  const decidable = message.status !== "uploading";
+  const alreadyDecided = message.status === "approved" || message.status === "rejected";
+  return (
+    <section className="feature-card feature-card--wide">
+      <header className="feature-card-header">
+        <h2>Decision</h2>
+        <span className={`feature-badge feature-badge--${message.status}`}>{message.status}</span>
+      </header>
+      <p className="feature-empty">
+        AI suggestion (advisory only):{" "}
+        <span className={`feature-badge feature-badge--moderation-${variant}`}>{label}</span>
+      </p>
+      {alreadyDecided ? (
+        <p className="feature-transcript-body">
+          This message is currently <strong>{message.status}</strong>
+          {message.decidedAt ? ` (decided ${formatDateTime(message.decidedAt)})` : ""}. You can
+          change the decision below.
+        </p>
+      ) : null}
+      <label className="feature-field">
+        <span>Notes (optional)</span>
+        <textarea
+          value={notes}
+          maxLength={2000}
+          rows={2}
+          onChange={(event) => setNotes(event.currentTarget.value)}
+          disabled={!decidable || deciding}
+          placeholder="Why you approved or rejected this message"
+        />
+      </label>
+      <div className="debug-button-row">
+        <button
+          type="button"
+          className="feature-button feature-button--approve"
+          onClick={() => onDecide("approve", notes)}
+          disabled={!decidable || deciding}
+        >
+          {deciding ? "Saving…" : "Approve"}
+        </button>
+        <button
+          type="button"
+          className="feature-button feature-button--reject"
+          onClick={() => onDecide("reject", notes)}
+          disabled={!decidable || deciding}
+        >
+          {deciding ? "Saving…" : "Reject"}
+        </button>
+      </div>
+      {!decidable ? (
+        <p className="feature-empty">Waiting for the recording to finish uploading.</p>
+      ) : null}
+      {decideError ? <p className="feature-error">{decideError}</p> : null}
+    </section>
+  );
+}
+
 export function MessageDetail(): JSX.Element {
   const { id } = useParams({ from: "/messages/$id" });
   const message = useMessage(id);
@@ -312,6 +388,7 @@ export function MessageDetail(): JSX.Element {
   const transcriptions = useMessageTranscriptions(id);
   const retranscribe = useRetranscribeMessage();
   const remoderate = useRemoderateMessage();
+  const decide = useDecideMessage();
   const [listened, setListened] = useState(() => readListened(id));
   const prompt = questions.data?.items.find(
     (question) => question.id === message.data?.questionId,
@@ -324,6 +401,7 @@ export function MessageDetail(): JSX.Element {
 
   const retranscribeError = retranscribe.error instanceof Error ? retranscribe.error.message : null;
   const remoderateError = remoderate.error instanceof Error ? remoderate.error.message : null;
+  const decideError = decide.error instanceof Error ? decide.error.message : null;
 
   return (
     <GlassPanel title="Message detail" className="feature-screen messages-screen">
@@ -390,6 +468,17 @@ export function MessageDetail(): JSX.Element {
             }}
             remoderating={remoderate.isPending}
             remoderateError={remoderateError}
+          />
+          <DecisionCard
+            message={message.data}
+            onDecide={(decision, notes) => {
+              decide.mutate({
+                id,
+                input: { decision, ...(notes.trim().length > 0 ? { notes: notes.trim() } : {}) },
+              });
+            }}
+            deciding={decide.isPending}
+            decideError={decideError}
           />
           {transcriptions.data ? <HistoryCard transcriptions={transcriptions.data.items} /> : null}
         </>
