@@ -236,12 +236,11 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
             </form>
           </li>
           <li>
-            <span
-              class="operator-sidebar__reserved"
+            <a
+              href="/instructions"
             >
-              8
-               · Reserved
-            </span>
+              8 · Instructions
+            </a>
           </li>
           <li>
             <a

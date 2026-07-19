@@ -3,6 +3,7 @@ import type {
   BoothStatusSnapshot,
   CallSession as PrismaCallSession,
   File,
+  Instruction,
   Message,
   Moderation as PrismaModeration,
   Question,
@@ -13,6 +14,7 @@ import type {
   BoothEventRecord,
   CallOutcome,
   CallSession as CallSessionPayload,
+  Instruction as InstructionPayload,
   Message as MessagePayload,
   Moderation as ModerationPayload,
   Question as QuestionPayload,
@@ -37,6 +39,14 @@ export const serializeQuestion = (question: WithAudio<Question>): QuestionPayloa
   status: question.status,
   createdAt: iso(question.createdAt),
   audio: audioRef(question.audio),
+});
+
+export const serializeInstruction = (instruction: WithAudio<Instruction>): InstructionPayload => ({
+  id: instruction.id,
+  description: instruction.description,
+  status: instruction.status,
+  createdAt: iso(instruction.createdAt),
+  audio: audioRef(instruction.audio),
 });
 
 export const serializeTranscription = (row: PrismaTranscription): TranscriptionPayload => ({

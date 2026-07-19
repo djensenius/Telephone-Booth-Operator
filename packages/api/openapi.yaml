@@ -192,6 +192,111 @@ paths:
               schema: { $ref: "#/components/schemas/Question" }
         "404": { description: not found }
 
+  /v1/instructions:
+    get:
+      summary: List instruction clips for management.
+      tags: [instructions]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      parameters:
+        - name: cursor
+          in: query
+          schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: status
+          in: query
+          description: Filter to a single lifecycle state.
+          schema: { $ref: "#/components/schemas/InstructionStatus" }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InstructionList" }
+    post:
+      summary: Create a new instruction from an already-uploaded audio file.
+      tags: [instructions]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InstructionCreate" }
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Instruction" }
+        "404": { description: audio file not found }
+        "409": { description: audio already attached }
+
+  /v1/instructions/current:
+    get:
+      summary: The most recent active instruction clip for the phone client to play.
+      tags: [instructions]
+      security:
+        - apiToken: []
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Instruction" }
+        "404": { description: no instructions available }
+
+  /v1/instructions/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      summary: Delete an instruction clip.
+      tags: [instructions]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      responses:
+        "204": { description: removed }
+        "404": { description: not found }
+
+  /v1/instructions/{id}/activate:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Activate an instruction clip so the booth can fetch it.
+      tags: [instructions]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Instruction" }
+        "404": { description: not found }
+
+  /v1/instructions/{id}/deactivate:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Deactivate an instruction clip so the booth stops fetching it.
+      tags: [instructions]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Instruction" }
+        "404": { description: not found }
+
   /v1/messages:
     get:
       summary: List messages, filterable by status and creation time.
@@ -1251,6 +1356,7 @@ components:
           uploading,
           playingMessage,
           playingInstructions,
+          callUnavailable,
           error,
         ]
     BoothStatus:
@@ -1318,6 +1424,36 @@ components:
           type: array
           items: { $ref: "#/components/schemas/Question" }
         nextCursor: { anyOf: [{ type: string, format: uuid }, { type: "null" }] }
+    Instruction:
+      type: object
+      required: [id, description, status, createdAt, audio]
+      properties:
+        id: { type: string, format: uuid }
+        description: { anyOf: [{ type: string, maxLength: 280 }, { type: "null" }] }
+        status: { $ref: "#/components/schemas/InstructionStatus" }
+        createdAt: { type: string, format: date-time }
+        audio: { $ref: "#/components/schemas/AudioRef" }
+    InstructionStatus:
+      type: string
+      enum: [active, inactive]
+    InstructionCreate:
+      type: object
+      required: [audioFileId]
+      properties:
+        description: { type: string, maxLength: 280 }
+        audioFileId: { type: string, format: uuid }
+        status:
+          allOf:
+            - $ref: "#/components/schemas/InstructionStatus"
+          description: Defaults to active when omitted.
+    InstructionList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Instruction" }
+        nextCursor: { anyOf: [{ type: string, format: uuid }, { type: "null" }] }
     MessageStatus:
       type: string
       enum: [uploading, received, pending, approved, rejected]
@@ -1374,7 +1510,7 @@ components:
       type: object
       required: [kind, sha256, sizeBytes, contentType]
       properties:
-        kind: { type: string, enum: [message, question-audio] }
+        kind: { type: string, enum: [message, question-audio, instruction-audio] }
         sha256: { $ref: "#/components/schemas/Sha256" }
         sizeBytes: { type: integer, minimum: 1 }
         contentType: { type: string, enum: [audio/flac] }
@@ -1386,7 +1522,7 @@ components:
         blobName: { type: string }
         expiresAt: { type: string, format: date-time }
         audioFileId:
-          { type: string, format: uuid, description: "Present for question-audio uploads." }
+          { type: string, format: uuid, description: "Present for question/instruction audio uploads." }
     OperatorMe:
       type: object
       required: [id, name, email, groups, isAdmin, providerName]

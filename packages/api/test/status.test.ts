@@ -104,6 +104,19 @@ describe("status routes", () => {
     await expect(latestSim.json()).resolves.toMatchObject({ runtimeMode: "simulator" });
   });
 
+  it("accepts the callUnavailable booth state", async () => {
+    const app = createApp();
+    const put = await app.request("/v1/status", {
+      method: "PUT",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({ state: "callUnavailable" }),
+    });
+    expect(put.status).toBe(204);
+
+    const latest = await app.request("/v1/status");
+    await expect(latest.json()).resolves.toMatchObject({ state: "callUnavailable" });
+  });
+
   it("rejects an invalid runtimeMode value", async () => {
     const app = createApp();
     const bad = await app.request("/v1/status", {

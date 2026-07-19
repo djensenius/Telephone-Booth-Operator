@@ -2,6 +2,8 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   BoothNetworkStatsSchema,
   BoothStatusSchema,
+  InstructionSchema,
+  InstructionStatusSchema,
   QuestionSchema,
   QuestionStatusSchema,
 } from "../src/index.js";
@@ -12,7 +14,40 @@ describe("BoothStatusSchema", () => {
       state: "idle",
       updatedAt: "2026-01-01T00:00:00.000Z",
     });
+
     expect(parsed.state).toBe("idle");
+  });
+
+  it("accepts callUnavailable", () => {
+    const parsed = BoothStatusSchema.parse({
+      state: "callUnavailable",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    expect(parsed.state).toBe("callUnavailable");
+  });
+
+  describe("InstructionStatusSchema", () => {
+    it("accepts the active/inactive lifecycle states", () => {
+      expect(InstructionStatusSchema.parse("active")).toBe("active");
+      expect(InstructionStatusSchema.parse("inactive")).toBe("inactive");
+    });
+
+    it("requires status on an Instruction payload", () => {
+      const instruction = {
+        id: "11111111-1111-1111-1111-111111111111",
+        description: null,
+        status: "active",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        audio: {
+          url: "https://example.com/a.flac",
+          sha256: "a".repeat(64),
+          durationMs: 1234,
+        },
+      };
+      expect(InstructionSchema.parse(instruction).status).toBe("active");
+      const { status: _status, ...withoutStatus } = instruction;
+      expect(() => InstructionSchema.parse(withoutStatus)).toThrow();
+    });
   });
 
   it("rejects an unknown state", () => {

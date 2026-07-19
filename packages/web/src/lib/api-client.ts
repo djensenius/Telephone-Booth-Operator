@@ -10,6 +10,9 @@ import {
   CallSessionDetailSchema,
   CallSessionListSchema,
   CreateApiTokenRequestSchema,
+  InstructionCreateSchema,
+  InstructionSchema,
+  InstructionStatusSchema,
   MessageSchema,
   MessageDecisionSchema,
   MessageStatusSchema,
@@ -37,6 +40,9 @@ import type {
   CallSessionDetail,
   CallSessionList,
   CreateApiTokenRequest,
+  Instruction,
+  InstructionCreate,
+  InstructionStatus,
   Message,
   MessageDecision,
   MessageStatus,
@@ -76,12 +82,17 @@ const QuestionListSchema = z.object({
   items: z.array(QuestionSchema),
   nextCursor: z.string().uuid().nullable(),
 });
+const InstructionListSchema = z.object({
+  items: z.array(InstructionSchema),
+  nextCursor: z.string().uuid().nullable(),
+});
 const MessageListSchema = z.object({ items: z.array(MessageSchema) });
 const ApiTokenListSchema = z.array(ApiTokenSchema);
 const ApiTokenUsageListSchema = z.array(ApiTokenUsageBucketSchema);
 
 export type StatusHistory = z.infer<typeof StatusHistorySchema>;
 export type QuestionList = z.infer<typeof QuestionListSchema>;
+export type InstructionList = z.infer<typeof InstructionListSchema>;
 export type MessageList = z.infer<typeof MessageListSchema>;
 
 const rawApiBaseUrl =
@@ -235,6 +246,37 @@ export const questions = {
       schema: QuestionSchema,
     }),
   delete: (id: string) => apiFetch<void>(`/v1/questions/${id}`, { method: "DELETE" }),
+};
+
+export const instructions = {
+  list: (
+    params: {
+      readonly cursor?: string;
+      readonly limit?: number;
+      readonly status?: InstructionStatus;
+    } = {},
+  ) =>
+    apiFetch<InstructionList>(
+      `/v1/instructions${query({ cursor: params.cursor, limit: params.limit ?? 50, status: params.status })}`,
+      { schema: InstructionListSchema },
+    ),
+  create: (input: InstructionCreate) =>
+    apiFetch<Instruction>("/v1/instructions", {
+      method: "POST",
+      body: InstructionCreateSchema.parse(input),
+      schema: InstructionSchema,
+    }),
+  activate: (id: string) =>
+    apiFetch<Instruction>(`/v1/instructions/${id}/activate`, {
+      method: "POST",
+      schema: InstructionSchema,
+    }),
+  deactivate: (id: string) =>
+    apiFetch<Instruction>(`/v1/instructions/${id}/deactivate`, {
+      method: "POST",
+      schema: InstructionSchema,
+    }),
+  delete: (id: string) => apiFetch<void>(`/v1/instructions/${id}`, { method: "DELETE" }),
 };
 
 export const messages = {
@@ -423,6 +465,8 @@ export const apiQueryKeys = {
   status: ["status", "current"] as const,
   statusHistory: ["status", "history"] as const,
   questions: (filter?: QuestionStatus | "all") => ["questions", "list", filter ?? "all"] as const,
+  instructions: (filter?: InstructionStatus | "all") =>
+    ["instructions", "list", filter ?? "all"] as const,
   messages: (filter?: MessageStatus | "all") => ["messages", "list", filter ?? "all"] as const,
   message: (id: string) => ["messages", id] as const,
   transcriptions: (id: string) => ["messages", id, "transcriptions"] as const,
@@ -573,6 +617,52 @@ export function useDeactivateQuestion() {
   return useMutation({
     mutationFn: questions.deactivate,
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["questions", "list"] }),
+  });
+}
+
+export function useInstructionsList(filter: InstructionStatus | "all" = "all") {
+  const statusFilter = InstructionStatusSchema.safeParse(filter).success
+    ? (filter as InstructionStatus)
+    : undefined;
+  return useQuery({
+    queryKey: apiQueryKeys.instructions(filter),
+    queryFn: () =>
+      instructions.list({
+        ...(statusFilter === undefined ? {} : { status: statusFilter }),
+        limit: 100,
+      }),
+  });
+}
+
+export function useCreateInstruction() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: instructions.create,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["instructions", "list"] }),
+  });
+}
+
+export function useDeleteInstruction() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: instructions.delete,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["instructions", "list"] }),
+  });
+}
+
+export function useActivateInstruction() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: instructions.activate,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["instructions", "list"] }),
+  });
+}
+
+export function useDeactivateInstruction() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: instructions.deactivate,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["instructions", "list"] }),
   });
 }
 

@@ -47,6 +47,25 @@ describe("uploads routes", () => {
     expect(ttlMs).toBeLessThanOrEqual(15 * 60_000 + 5000);
   });
 
+  it("creates file slots for instruction audio uploads", async () => {
+    const app = createApp();
+    const sha256 = "d".repeat(64);
+    const res = await app.request("/v1/uploads/sas", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: operatorCookie() },
+      body: JSON.stringify({
+        kind: "instruction-audio",
+        sha256,
+        sizeBytes: 100,
+        contentType: "audio/flac",
+      }),
+    });
+    expect(res.status, await res.clone().text()).toBe(201);
+    const body = await res.json();
+    expect(body).toMatchObject({ blobName: `instructions/dd/${sha256}.flac` });
+    expect(body.audioFileId).toEqual(expect.any(String));
+  });
+
   it("rejects malformed sha256 values", async () => {
     const app = createApp();
     const res = await app.request("/v1/uploads/sas", {

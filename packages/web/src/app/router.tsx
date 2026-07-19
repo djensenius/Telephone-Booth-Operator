@@ -15,6 +15,7 @@ import { RequireAdmin } from "../features/auth/RequireAdmin.js";
 import { useCurrentUser } from "../features/auth/useCurrentUser.js";
 import { DebugScreen } from "../features/debug/DebugScreen.js";
 import { EventsScreen } from "../features/events/EventsScreen.js";
+import { InstructionsScreen } from "../features/instructions/InstructionsScreen.js";
 import { MessageDetail } from "../features/messages/MessageDetail.js";
 import { MessagesScreen } from "../features/messages/MessagesScreen.js";
 import { QuestionsScreen } from "../features/questions/QuestionsScreen.js";
@@ -196,6 +197,12 @@ const debugRoute = createRoute({
   component: () => adminScreen(<DebugScreen />),
 });
 
+const instructionsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/instructions",
+  component: () => adminScreen(<InstructionsScreen />),
+});
+
 const systemRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/system",
@@ -252,6 +259,7 @@ const routeTree = rootRoute.addChildren([
   tokensRoute,
   settingsRoute,
   debugRoute,
+  instructionsRoute,
   systemRoute,
   eventsRoute,
   sessionsRoute,
