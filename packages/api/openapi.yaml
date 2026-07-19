@@ -1641,7 +1641,7 @@ components:
       enum: [approve, review, reject]
     AiProvider:
       type: string
-      enum: [openai, mac_app, disabled]
+      enum: [openai, mac_app, push, disabled]
     Transcription:
       type: object
       required: [id, messageId, provider, status, createdAt]

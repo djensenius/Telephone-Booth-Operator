@@ -6,10 +6,18 @@ vi.mock(
   async () => (await import("./support/fake-azure.js")).fakeAzureModule,
 );
 
-import { runModeration, runTranscription, type PipelineDeps } from "../src/lib/ai/pipeline.js";
+import {
+  runModeration,
+  runTranslationThenModeration,
+  runTranscription,
+  type PipelineDeps,
+} from "../src/lib/ai/pipeline.js";
 import { wsBroadcaster, type WsEnvelope } from "../src/lib/broadcaster.js";
-import type { ModerationProvider, TranscriptionProvider } from "../src/lib/ai/types.js";
-import { fakeDb } from "./support/fake-db.js";
+import type {
+  ModerationProvider,
+  TranscriptionProvider,
+} from "../src/lib/ai/types.js";
+import { fakeDb, store } from "./support/fake-db.js";
 import { resetFakeAzure } from "./support/fake-azure.js";
 import { resetFakeDb } from "./support/fake-db.js";
 
@@ -59,6 +67,10 @@ const baseDeps = (overrides: Partial<PipelineDeps> = {}): PipelineDeps => ({
     transcriptionOpenAiModel: "whisper-1",
     transcriptionMacAppUrl: null,
     transcriptionMacAppToken: null,
+    translationProvider: "disabled",
+    translationOpenAiModel: "gpt-4o-mini",
+    translationMacAppUrl: null,
+    translationMacAppToken: null,
     moderationProvider: "openai",
     moderationOpenAiModel: "omni-moderation-latest",
     moderationMacAppUrl: null,
@@ -80,6 +92,8 @@ const baseDeps = (overrides: Partial<PipelineDeps> = {}): PipelineDeps => ({
     "moderationProvider" in overrides
       ? (overrides.moderationProvider ?? null)
       : fakeModeration({ flagged: false, recommendation: "approve", maxScore: 0.05 }),
+  translationProvider:
+    "translationProvider" in overrides ? (overrides.translationProvider ?? null) : null,
 });
 
 describe("AI pipeline", () => {
@@ -451,5 +465,86 @@ describe("AI pipeline", () => {
     // The worker is told to transcribe via a `work` envelope.
     const work = events.find((e) => e.kind === "work");
     expect(work).toEqual({ kind: "work", messageId: id, needs: ["transcription"] });
+  });
+
+  it("defers moderation until the push translation callback completes", async () => {
+    const id = await seedReceivedMessage();
+    const transcription = await fakeDb.transcription.create({
+      data: {
+        messageId: id,
+        provider: "push",
+        model: null,
+        status: "succeeded",
+        text: "bonjour",
+        language: "fr",
+        requestedById: null,
+        completedAt: new Date(),
+      },
+    });
+    const events: WsEnvelope[] = [];
+    const clientId = `test-${Math.random()}`;
+    wsBroadcaster.subscribe(clientId, (e) => events.push(e));
+
+    await runTranslationThenModeration({
+      messageId: id,
+      transcriptionId: transcription.id,
+      deps: baseDeps({
+        translationProvider: null,
+        moderationProvider: fakeModeration({ flagged: false, recommendation: "approve", maxScore: 0.01 }),
+        config: { translationProvider: "push" } as never,
+      }),
+    });
+    wsBroadcaster.unsubscribe(clientId);
+
+    const updated = await fakeDb.transcription.findUnique({ where: { id: transcription.id } });
+    expect(updated?.translationStatus).toBe("pending");
+    expect([...store.moderations.values()]).toHaveLength(0);
+    expect(events.find((e) => e.kind === "work")).toEqual({
+      kind: "work",
+      messageId: id,
+      needs: ["translation"],
+    });
+  });
+
+  it("creates reusable pending moderation work in push mode", async () => {
+    const id = await seedReceivedMessage();
+    await fakeDb.transcription.create({
+      data: {
+        messageId: id,
+        provider: "push",
+        model: null,
+        status: "succeeded",
+        text: "hello",
+        language: "en",
+        requestedById: null,
+        completedAt: new Date(),
+      },
+    });
+    const events: WsEnvelope[] = [];
+    const clientId = `test-${Math.random()}`;
+    wsBroadcaster.subscribe(clientId, (e) => events.push(e));
+
+    await runModeration({
+      messageId: id,
+      deps: baseDeps({
+        moderationProvider: null,
+        config: { moderationProvider: "push" } as never,
+      }),
+      requestedByUserId: null,
+    });
+    await runModeration({
+      messageId: id,
+      deps: baseDeps({
+        moderationProvider: null,
+        config: { moderationProvider: "push" } as never,
+      }),
+      requestedByUserId: null,
+    });
+    wsBroadcaster.unsubscribe(clientId);
+
+    const moderations = [...store.moderations.values()].filter((m) => m.messageId === id);
+    expect(moderations).toHaveLength(1);
+    expect(moderations[0]).toMatchObject({ status: "pending", provider: "push" });
+    expect(events.filter((e) => e.kind === "work")).toHaveLength(2);
   });
 });

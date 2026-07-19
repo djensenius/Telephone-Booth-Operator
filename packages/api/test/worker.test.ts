@@ -27,7 +27,7 @@ import { createApp } from "../src/index.js";
 import { wsBroadcaster, type WsEnvelope } from "../src/lib/broadcaster.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { resetFakeAzure } from "./support/fake-azure.js";
-import { resetFakeDb, seedMessage, store } from "./support/fake-db.js";
+import { fakeDb, resetFakeDb, seedMessage, store } from "./support/fake-db.js";
 import { phoneHeaders } from "./support/http.js";
 
 const setup = () => {
@@ -56,6 +56,17 @@ const postJson = (app: ReturnType<typeof createApp>, path: string, body: unknown
     body: JSON.stringify(body),
   });
 
+const seedPendingTranscription = (messageId: string) =>
+  fakeDb.transcription.create({
+    data: {
+      messageId,
+      provider: "push",
+      model: null,
+      status: "pending",
+      requestedById: null,
+    },
+  });
+
 describe("worker push-back callbacks", () => {
   beforeEach(setup);
 
@@ -72,8 +83,10 @@ describe("worker push-back callbacks", () => {
   });
 
   it("stores an English transcription and broadcasts moderation work", async () => {
+    process.env.MODERATION_PROVIDER = "push";
     const app = createApp();
     const message = seedMessage({ status: "received" });
+    await seedPendingTranscription(message.id);
     const cap = captureEnvelopes();
 
     const res = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
@@ -99,8 +112,11 @@ describe("worker push-back callbacks", () => {
   });
 
   it("requests translation work first for non-English audio", async () => {
+    process.env.TRANSLATION_PROVIDER = "push";
+    process.env.MODERATION_PROVIDER = "push";
     const app = createApp();
     const message = seedMessage({ status: "received" });
+    await seedPendingTranscription(message.id);
     const cap = captureEnvelopes();
 
     const res = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
@@ -121,6 +137,7 @@ describe("worker push-back callbacks", () => {
   it("advances a silent (empty) recording without creating moderation work", async () => {
     const app = createApp();
     const message = seedMessage({ status: "received" });
+    await seedPendingTranscription(message.id);
     const cap = captureEnvelopes();
 
     const res = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
@@ -134,9 +151,57 @@ describe("worker push-back callbacks", () => {
     expect(cap.events.some((e) => e.kind === "work")).toBe(false);
   });
 
-  it("stores a translation and then requests moderation work", async () => {
+  it("does not create stale transcription rows for duplicate callbacks", async () => {
+    process.env.MODERATION_PROVIDER = "push";
     const app = createApp();
     const message = seedMessage({ status: "received" });
+    const res = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      text: "late duplicate",
+      language: "en",
+    });
+
+    expect(res.status).toBe(200);
+    expect([...store.transcriptions.values()].filter((t) => t.messageId === message.id)).toHaveLength(
+      0,
+    );
+    expect([...store.moderations.values()].filter((m) => m.messageId === message.id)).toHaveLength(
+      0,
+    );
+  });
+
+  it("uses provider-aware routing after transcription instead of always pushing work", async () => {
+    const app = createApp();
+    const message = seedMessage({ status: "received" });
+    const seeded = await fakeDb.transcription.create({
+      data: {
+        messageId: message.id,
+        provider: "push",
+        model: null,
+        status: "pending",
+        requestedById: null,
+      },
+    });
+    const cap = captureEnvelopes();
+    const res = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      text: "hello there",
+      language: "en",
+    });
+    cap.stop();
+
+    expect(res.status).toBe(200);
+    expect(store.transcriptions.get(seeded.id)?.status).toBe("succeeded");
+    expect([...store.moderations.values()].filter((m) => m.messageId === message.id)).toMatchObject([
+      { status: "failed", provider: "disabled" },
+    ]);
+    expect(cap.events.some((e) => e.kind === "work")).toBe(false);
+  });
+
+  it("stores a translation and then requests moderation work", async () => {
+    process.env.TRANSLATION_PROVIDER = "push";
+    process.env.MODERATION_PROVIDER = "push";
+    const app = createApp();
+    const message = seedMessage({ status: "received" });
+    await seedPendingTranscription(message.id);
     await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
       text: "bonjour",
       language: "fr",
@@ -162,9 +227,45 @@ describe("worker push-back callbacks", () => {
     expect(work).toEqual({ kind: "work", messageId: message.id, needs: ["moderation"] });
   });
 
-  it("records the moderation suggestion and surfaces the message without deciding it", async () => {
+  it("does not rerun downstream moderation for duplicate translation callbacks", async () => {
+    process.env.TRANSLATION_PROVIDER = "push";
+    process.env.MODERATION_PROVIDER = "push";
     const app = createApp();
     const message = seedMessage({ status: "received" });
+    await seedPendingTranscription(message.id);
+    await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      text: "bonjour",
+      language: "fr",
+    });
+    const transcription = [...store.transcriptions.values()].find(
+      (t) => t.messageId === message.id,
+    );
+    await postJson(app, `/v1/worker/messages/${message.id}/translation`, {
+      transcriptionId: transcription?.id,
+      translatedText: "hello",
+      targetLanguage: "en",
+    });
+    const cap = captureEnvelopes();
+    const duplicate = await postJson(app, `/v1/worker/messages/${message.id}/translation`, {
+      transcriptionId: transcription?.id,
+      translatedText: "stale hello",
+      targetLanguage: "en",
+    });
+    cap.stop();
+
+    expect(duplicate.status).toBe(200);
+    expect(store.transcriptions.get(transcription?.id ?? "")?.translatedText).toBe("hello");
+    expect([...store.moderations.values()].filter((m) => m.messageId === message.id)).toHaveLength(
+      1,
+    );
+    expect(cap.events.some((e) => e.kind === "work")).toBe(false);
+  });
+
+  it("records the moderation suggestion and surfaces the message without deciding it", async () => {
+    process.env.MODERATION_PROVIDER = "push";
+    const app = createApp();
+    const message = seedMessage({ status: "received" });
+    await seedPendingTranscription(message.id);
     await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
       text: "hello there",
       language: "en",
@@ -190,7 +291,25 @@ describe("worker push-back callbacks", () => {
     expect(finalMessage?.decidedAt ?? null).toBeNull();
   });
 
+  it("does not create stale moderation rows for duplicate callbacks", async () => {
+    const app = createApp();
+    const message = seedMessage({ status: "received" });
+    const res = await postJson(app, `/v1/worker/messages/${message.id}/moderation`, {
+      flagged: false,
+      recommendation: "approve",
+      maxScore: 0.01,
+    });
+
+    expect(res.status).toBe(200);
+    expect([...store.moderations.values()].filter((m) => m.messageId === message.id)).toHaveLength(
+      0,
+    );
+    expect(store.messages.get(message.id)?.status).toBe("received");
+  });
+
   it("serves work inputs (audio SAS + transcript) for a message", async () => {
+    process.env.TRANSLATION_PROVIDER = "push";
+    process.env.MODERATION_PROVIDER = "push";
     const app = createApp();
     const message = seedMessage({ status: "received" });
     // Before any transcription: audio SAS is present, transcription is null.
@@ -207,6 +326,7 @@ describe("worker push-back callbacks", () => {
 
     // After a non-English transcription + translation: moderationText is the
     // English translation, so the moderation step reads translated text.
+    await seedPendingTranscription(message.id);
     await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
       text: "bonjour",
       language: "fr",

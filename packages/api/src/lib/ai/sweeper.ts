@@ -3,6 +3,7 @@
 // Covers server restarts mid-pipeline and provider outages.
 
 import { db } from "../db.js";
+import { broadcastWork } from "../broadcaster.js";
 import { resolveAiConfig } from "./config.js";
 import { kickPipelineForMessage } from "./pipeline.js";
 
@@ -40,6 +41,40 @@ const findStrandedMessages = async (
   return stranded;
 };
 
+const reemitStalePushWork = async (staleThresholdMs: number): Promise<void> => {
+  const config = resolveAiConfig();
+  const staleBefore = new Date(Date.now() - staleThresholdMs);
+
+  if (config.translationProvider === "push") {
+    const translations = await db.transcription.findMany({
+      where: {
+        status: "succeeded",
+        translationStatus: "pending",
+        translationProvider: "push",
+        createdAt: { lt: staleBefore },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      select: { messageId: true },
+    });
+    for (const row of translations) broadcastWork(row.messageId, ["translation"]);
+  }
+
+  if (config.moderationProvider === "push") {
+    const moderations = await db.moderation.findMany({
+      where: {
+        status: "pending",
+        provider: "push",
+        createdAt: { lt: staleBefore },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      select: { messageId: true },
+    });
+    for (const row of moderations) broadcastWork(row.messageId, ["moderation"]);
+  }
+};
+
 export interface SweeperHandle {
   stop(): void;
 }
@@ -57,6 +92,7 @@ export const startAiSweeper = (): SweeperHandle | null => {
     try {
       const stranded = await findStrandedMessages(20, staleThresholdMs);
       for (const id of stranded) kickPipelineForMessage(id);
+      await reemitStalePushWork(staleThresholdMs);
     } catch (error) {
       const reason = error instanceof Error ? error.message : "sweeper failed";
       console.warn(JSON.stringify({ event: "ai.sweeper.error", reason }));

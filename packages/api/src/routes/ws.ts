@@ -46,6 +46,8 @@ const bearerTokenFromHeader = (header: string | undefined): string | null => {
 // Transcription worker (macOS + iOS) presents its static Argon2id API token,
 // verified the same way as the `/v1/worker` REST callbacks. Any one of these
 // grants the read-only status/work stream.
+// TODO(security): Static API tokens are currently unscoped. Add worker/operator
+// token scopes so phone-client tokens cannot subscribe to worker work events.
 const authorizeStatusUpgrade = async (request: IncomingMessage): Promise<boolean> => {
   const session = await readSessionFromCookieHeader(request.headers.cookie);
   if (session && !sessionIsExpired(session)) return true;

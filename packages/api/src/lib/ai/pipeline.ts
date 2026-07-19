@@ -304,7 +304,7 @@ export type TranslationOutcome =
   | { outcome: "skipped"; reason: "english" | "empty_text" | "not_found" }
   | { outcome: "succeeded" }
   | { outcome: "failed"; reason: string }
-  | { outcome: "deferred"; reason: "pending_pull" };
+  | { outcome: "deferred"; reason: "pending_push" };
 
 // Runs a translation against the given transcription's text. Returns
 // "deferred" when no in-process translation provider is configured but the
@@ -335,14 +335,29 @@ export const runTranslation = async (
   // (status = pending). The worker will POST the result back to
   // `/v1/worker/messages/:id/translation`, which flips the row to `succeeded`.
   if (transcription.translationStatus === "pending") {
-    return { outcome: "deferred", reason: "pending_pull" };
+    return { outcome: "deferred", reason: "pending_push" };
   }
 
   const provider = deps.translationProvider;
   if (!provider) {
-    // No in-process provider — defer to the push worker. Mark the row
-    // `pending` and broadcast a `work` event so a subscribed Transcription
-    // app translates it and POSTs the result to
+    if (deps.config.translationProvider !== "push") {
+      await db.transcription.updateMany({
+        where: {
+          id: transcription.id,
+          OR: [{ translationStatus: null }, { translationStatus: "failed" }],
+        },
+        data: {
+          translationStatus: "failed",
+          translationProvider: deps.config.translationProvider,
+          translationError: "translation provider disabled",
+          translationCompletedAt: new Date(),
+        },
+      });
+      await broadcastMessage(opts.messageId);
+      return { outcome: "failed", reason: "translation provider disabled" };
+    }
+    // Push mode — defer to the worker. Mark the row `pending` and broadcast a
+    // `work` event so a subscribed app translates it and POSTs the result to
     // `/v1/worker/messages/:id/translation`. Use updateMany so we never flip a
     // row that a worker has just finalized between the read above and this
     // write.
@@ -357,10 +372,8 @@ export const runTranslation = async (
       },
     });
     await broadcastMessage(opts.messageId);
-    if (deps.config.translationProvider === "push") {
-      broadcastWork(opts.messageId, ["translation"]);
-    }
-    return { outcome: "deferred", reason: "pending_pull" };
+    broadcastWork(opts.messageId, ["translation"]);
+    return { outcome: "deferred", reason: "pending_push" };
   }
 
   // Atomic claim: only proceed if the row is still null/failed. If a worker
@@ -381,7 +394,7 @@ export const runTranslation = async (
   });
   if (claimed.count === 0) {
     // Someone else (worker or a concurrent in-process run) owns the row.
-    return { outcome: "deferred", reason: "pending_pull" };
+    return { outcome: "deferred", reason: "pending_push" };
   }
   await broadcastMessage(opts.messageId);
 
@@ -445,30 +458,30 @@ export const runTranslation = async (
 // Helper: run translation (if applicable) then moderation. Used by the
 // in-process pipeline after a successful transcription. Moderation runs
 // against the translated text if available, otherwise the original transcript.
-const runTranslationThenModeration = async (opts: {
+export const runTranslationThenModeration = async (opts: {
   messageId: string;
   transcriptionId: string;
-  deps: PipelineDeps;
+  deps?: PipelineDeps;
 }): Promise<void> => {
-  await runTranslation({
+  const deps = opts.deps ?? buildDefaultPipelineDeps();
+  const translation = await runTranslation({
     messageId: opts.messageId,
     transcriptionId: opts.transcriptionId,
-    deps: opts.deps,
+    deps,
   });
-  // We always proceed to moderation regardless of the translation outcome:
+  if (translation.outcome === "deferred") return;
+  // Proceed to moderation for all non-deferred outcomes:
   //   - succeeded → moderation runs against translated text.
-  //   - skipped (English / not_found / disabled) → moderation runs against
+  //   - skipped (English / not_found / empty) → moderation runs against
   //     the original transcript.
-  //   - deferred (no in-process provider; pull worker will translate later)
-  //     → moderation runs now against original text so the push pipeline
-  //     isn't stalled; the worker's later translation does not retroactively
-  //     change the moderation verdict.
+  //   - deferred (push worker will translate later) → stop here; the
+  //     translation callback triggers moderation after translated text lands.
   //   - failed → moderation runs against original text; the failure is
   //     surfaced on the transcription row for human review.
   await runModeration({
     messageId: opts.messageId,
     transcriptionId: opts.transcriptionId,
-    deps: opts.deps,
+    deps,
     requestedByUserId: null,
   });
 };
@@ -503,6 +516,32 @@ export const runModeration = async (opts: RunModerationOptions): Promise<string 
   }
 
   if (!provider) {
+    if (deps.config.moderationProvider === "push") {
+      const existing = await db.moderation.findFirst({
+        where: {
+          messageId: opts.messageId,
+          transcriptionId: transcription.id,
+          status: "pending",
+          provider: "push",
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      const pending =
+        existing ??
+        (await db.moderation.create({
+          data: {
+            messageId: opts.messageId,
+            transcriptionId: transcription.id,
+            provider: "push",
+            model: null,
+            status: "pending",
+            requestedById: opts.requestedByUserId,
+          },
+        }));
+      await broadcastMessage(opts.messageId);
+      broadcastWork(opts.messageId, ["moderation"]);
+      return pending.id;
+    }
     const failed = await db.moderation.create({
       data: {
         messageId: opts.messageId,

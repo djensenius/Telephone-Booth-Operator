@@ -7,19 +7,21 @@
 // same static Argon2id API token used elsewhere by native clients
 // (`requireApiToken`).
 //
-// Unlike the pull queue there are no leases: callbacks are claim-free and
-// last-writer-wins. The worker only runs a step after being told to via a
-// `work` event, and every write is guarded so a stale/duplicate callback
-// cannot downgrade an already-finalized row.
+// Unlike the pull queue there are no leases: the worker only runs a step after
+// being told to via a `work` event, and every write is guarded so a stale or
+// duplicate callback cannot create a newer row or downgrade a finalized one.
 
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
 import { db } from "../lib/db.js";
-import { isEnglishLanguage } from "../lib/ai/config.js";
-import { advanceMessageAfterModeration } from "../lib/ai/pipeline.js";
+import {
+  advanceMessageAfterModeration,
+  runModeration,
+  runTranslationThenModeration,
+} from "../lib/ai/pipeline.js";
 import { generateSasUrl } from "../lib/azure-blob.js";
-import { broadcastWork, wsBroadcaster } from "../lib/broadcaster.js";
+import { wsBroadcaster } from "../lib/broadcaster.js";
 import { serializeMessage } from "../lib/serializers.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 
@@ -63,6 +65,9 @@ const broadcastMessageById = async (messageId: string): Promise<void> => {
   if (!full) return;
   wsBroadcaster.broadcast({ kind: "message", message: serializeMessage(full as never) });
 };
+
+// TODO(security): Static API tokens are currently unscoped. Add a worker-only
+// token scope before exposing this surface beyond trusted installation clients.
 
 // Nudge a message from "received" into the operator queue without deciding it.
 const advanceReceivedMessage = async (messageId: string): Promise<void> => {
@@ -159,7 +164,7 @@ workerRouter.post(
     let transcriptionId: string;
     if (pending) {
       const startedAt = pending.createdAt;
-      await db.transcription.updateMany({
+      const updated = await db.transcription.updateMany({
         where: { id: pending.id, status: "pending" },
         data: {
           status: "succeeded",
@@ -170,20 +175,10 @@ workerRouter.post(
           completedAt: now,
         },
       });
+      if (updated.count === 0) return c.json({ ok: true });
       transcriptionId = pending.id;
     } else {
-      const created = await db.transcription.create({
-        data: {
-          messageId: id,
-          provider: "mac_app",
-          model: data.model ?? null,
-          status: "succeeded",
-          text: data.text,
-          language: data.language ?? null,
-          completedAt: now,
-        },
-      });
-      transcriptionId = created.id;
+      return c.json({ ok: true });
     }
 
     const hasText = data.text.trim().length > 0;
@@ -194,27 +189,10 @@ workerRouter.post(
       return c.json({ ok: true });
     }
 
-    const needsTranslation = !isEnglishLanguage(data.language);
-    if (needsTranslation) {
-      await db.transcription.update({
-        where: { id: transcriptionId },
-        data: { translationStatus: "pending" },
-      });
-    }
-    // Create the pending moderation row now; it is only moderated after any
-    // translation has been pushed back (mirrors the pull-queue ordering).
-    await db.moderation.create({
-      data: {
-        messageId: id,
-        transcriptionId,
-        provider: "mac_app",
-        model: null,
-        status: "pending",
-        requestedById: null,
-      },
+    await runTranslationThenModeration({
+      messageId: id,
+      transcriptionId,
     });
-    await broadcastMessageById(id);
-    broadcastWork(id, needsTranslation ? ["translation"] : ["moderation"]);
     return c.json({ ok: true });
   },
 );
@@ -236,9 +214,10 @@ workerRouter.post(
     }
     const now = new Date();
     const startedAt = existing.createdAt;
-    // Guard: never downgrade an already-succeeded translation.
+    // Guard: only the pending push row can be finalized. Duplicate or stale
+    // callbacks for already-finalized / non-pending rows are idempotent no-ops.
     const updated = await db.transcription.updateMany({
-      where: { id: existing.id, translationStatus: { not: "succeeded" } },
+      where: { id: existing.id, translationStatus: "pending" },
       data: {
         translationStatus: "succeeded",
         translatedText: data.translatedText,
@@ -249,12 +228,15 @@ workerRouter.post(
         translationError: null,
       },
     });
-    if (updated.count === 0 && existing.translationStatus !== "succeeded") {
-      return c.json({ error: "not_found" }, 404);
-    }
+    if (updated.count === 0) return c.json({ ok: true });
     await broadcastMessageById(id);
-    // Translation done — the moderation step can now run against English text.
-    broadcastWork(id, ["moderation"]);
+    // Translation done — provider-aware moderation can now run against English
+    // text. Push mode emits work; in-process providers run immediately.
+    await runModeration({
+      messageId: id,
+      transcriptionId: existing.id,
+      requestedByUserId: null,
+    });
     return c.json({ ok: true });
   },
 );
@@ -284,7 +266,7 @@ workerRouter.post(
     const now = new Date();
     if (pending) {
       const startedAt = pending.createdAt;
-      await db.moderation.updateMany({
+      const updated = await db.moderation.updateMany({
         where: { id: pending.id, status: "pending" },
         data: {
           status: "succeeded",
@@ -298,27 +280,13 @@ workerRouter.post(
           completedAt: now,
         },
       });
+      if (updated.count === 0) return c.json({ ok: true });
     } else {
-      await db.moderation.create({
-        data: {
-          messageId: id,
-          transcriptionId: data.transcriptionId ?? null,
-          provider: "mac_app",
-          model: data.model ?? null,
-          status: "succeeded",
-          flagged: data.flagged,
-          recommendation: data.recommendation,
-          maxScore: data.maxScore,
-          categories: data.categories ?? {},
-          reasonSummary: data.reasonSummary ?? null,
-          completedAt: now,
-          requestedById: null,
-        },
-      });
+      return c.json({ ok: true });
     }
     // Advisory only: record the suggestion and surface the message for a human
     // decision. Never auto-approve / auto-reject.
-    await advanceMessageAfterModeration(id).catch(() => null);
+    await advanceMessageAfterModeration(id);
     await broadcastMessageById(id);
     return c.json({ ok: true });
   },
