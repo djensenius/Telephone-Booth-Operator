@@ -189,6 +189,26 @@ const cloneDate = (date: Date): Date => new Date(date.getTime());
 const byCreatedDesc = <T extends { createdAt: Date; id: string }>(a: T, b: T): number =>
   b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id);
 
+type CreatedIdOrder =
+  | { createdAt?: "asc" | "desc" }
+  | Array<{ createdAt?: "asc" | "desc"; id?: "asc" | "desc" }>;
+
+const sortByCreatedIdOrder = <T extends { createdAt: Date; id: string }>(
+  rows: T[],
+  orderBy: CreatedIdOrder | undefined,
+): T[] => {
+  const clauses = Array.isArray(orderBy) ? orderBy : [orderBy ?? { createdAt: "desc" as const }];
+  const createdAtOrder = clauses.find((clause) => clause?.createdAt)?.createdAt ?? "desc";
+  const idOrder = clauses.find((clause) => clause?.id)?.id;
+  const createdAtDirection = createdAtOrder === "asc" ? 1 : -1;
+  const idDirection = idOrder === "asc" ? 1 : -1;
+  return rows.sort((a, b) => {
+    const createdAtDiff = createdAtDirection * (a.createdAt.getTime() - b.createdAt.getTime());
+    if (createdAtDiff !== 0) return createdAtDiff;
+    return idOrder ? idDirection * a.id.localeCompare(b.id) : 0;
+  });
+};
+
 // Minimal Prisma-style predicate evaluator used by jobs.ts queries. Supports
 // equality, `not`, `lt`, `OR`, and the `is` relation filter we use for the
 // "moderation can only be claimed when translation isn't pending" guard.
@@ -207,7 +227,13 @@ const matchScalar = (value: unknown, expected: unknown): boolean => {
       if (value instanceof Date && expObj.lt instanceof Date) {
         return value.getTime() < expObj.lt.getTime();
       }
+      if (typeof value === "string" && typeof expObj.lt === "string") {
+        return value.localeCompare(expObj.lt) < 0;
+      }
       return (value as number) < (expObj.lt as number);
+    }
+    if ("in" in expObj && Array.isArray(expObj.in)) {
+      return expObj.in.includes(value);
     }
     if ("increment" in expObj) {
       // Should not appear in WHERE; ignore.
@@ -556,7 +582,7 @@ export const fakeDb = {
         prompt: data.prompt,
         status: data.status ?? "draft",
         audioId: data.audioId,
-        createdAt: new Date(),
+        createdAt: data.createdAt ?? new Date(),
         retiredAt: null,
       };
       store.questions.set(question.id, question);
@@ -935,21 +961,30 @@ export const fakeDb = {
       where,
       orderBy,
       take,
+      skip,
+      select,
     }: {
-      where: { messageId: string };
-      orderBy?: { createdAt?: "asc" | "desc" };
+      where?: Predicate;
+      orderBy?: CreatedIdOrder;
       take?: number;
+      skip?: number;
+      select?: { id?: boolean; createdAt?: boolean; messageId?: boolean };
     }) => {
-      const order = orderBy?.createdAt ?? "desc";
-      let rows = [...store.transcriptions.values()].filter(
-        (row) => row.messageId === where.messageId,
+      let rows = [...store.transcriptions.values()].filter((row) =>
+        matchPredicate(row as unknown as Record<string, unknown>, where),
       );
-      rows.sort((a, b) =>
-        order === "asc"
-          ? a.createdAt.getTime() - b.createdAt.getTime()
-          : b.createdAt.getTime() - a.createdAt.getTime(),
-      );
+      rows = sortByCreatedIdOrder(rows, orderBy);
+      if (typeof skip === "number") rows = rows.slice(skip);
       if (typeof take === "number") rows = rows.slice(0, take);
+      if (select) {
+        return rows.map((row) => {
+          const out: Partial<FakeTranscription> = {};
+          if (select.id) out.id = row.id;
+          if (select.createdAt) out.createdAt = row.createdAt;
+          if (select.messageId) out.messageId = row.messageId;
+          return out;
+        });
+      }
       return rows;
     },
   },
@@ -974,7 +1009,7 @@ export const fakeDb = {
         latencyMs: data.latencyMs ?? null,
         error: data.error ?? null,
         requestedById: data.requestedById ?? null,
-        createdAt: new Date(),
+        createdAt: data.createdAt ?? new Date(),
         completedAt: data.completedAt ?? null,
         leasedAt: data.leasedAt ?? null,
         leaseToken: data.leaseToken ?? null,
@@ -1062,19 +1097,31 @@ export const fakeDb = {
       where,
       orderBy,
       take,
+      skip,
+      select,
     }: {
-      where: { messageId: string };
-      orderBy?: { createdAt?: "asc" | "desc" };
+      where?: Predicate;
+      orderBy?: CreatedIdOrder;
       take?: number;
+      skip?: number;
+      select?: { id?: boolean; createdAt?: boolean; messageId?: boolean; transcriptionId?: boolean };
     }) => {
-      const order = orderBy?.createdAt ?? "desc";
-      let rows = [...store.moderations.values()].filter((row) => row.messageId === where.messageId);
-      rows.sort((a, b) =>
-        order === "asc"
-          ? a.createdAt.getTime() - b.createdAt.getTime()
-          : b.createdAt.getTime() - a.createdAt.getTime(),
+      let rows = [...store.moderations.values()].filter((row) =>
+        matchPredicate(row as unknown as Record<string, unknown>, where),
       );
+      rows = sortByCreatedIdOrder(rows, orderBy);
+      if (typeof skip === "number") rows = rows.slice(skip);
       if (typeof take === "number") rows = rows.slice(0, take);
+      if (select) {
+        return rows.map((row) => {
+          const out: Partial<FakeModeration> = {};
+          if (select.id) out.id = row.id;
+          if (select.createdAt) out.createdAt = row.createdAt;
+          if (select.messageId) out.messageId = row.messageId;
+          if (select.transcriptionId) out.transcriptionId = row.transcriptionId;
+          return out;
+        });
+      }
       return rows;
     },
   },

@@ -62,7 +62,7 @@ import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { attachStatusWebSocket } from "../src/routes/ws.js";
 import { broadcastWork } from "../src/lib/broadcaster.js";
 import { resetFakeAzure } from "./support/fake-azure.js";
-import { resetFakeDb } from "./support/fake-db.js";
+import { fakeDb, resetFakeDb, seedMessage } from "./support/fake-db.js";
 import { operatorCookie, phoneHeaders } from "./support/http.js";
 
 const setup = () => {
@@ -77,6 +77,8 @@ const setup = () => {
   delete process.env.OIDC_MOBILE_ISSUERS;
   delete process.env.OIDC_ALLOWED_EMAILS;
   delete process.env.AUTH_DISABLED;
+  delete process.env.TRANSLATION_PROVIDER;
+  delete process.env.MODERATION_PROVIDER;
   resetSessionCryptoForTests();
   resetAuthConfigForTests();
   resetBearerAuthForTests();
@@ -112,6 +114,23 @@ const installBearerVerifier = (): void => {
 
 const closeServer = async (server: ReturnType<typeof serve>): Promise<void> => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
+};
+
+const seedOutstandingTranslationWork = async (): Promise<string> => {
+  process.env.TRANSLATION_PROVIDER = "push";
+  const message = seedMessage({ status: "received" });
+  await fakeDb.transcription.create({
+    data: {
+      messageId: message.id,
+      provider: "push",
+      status: "succeeded",
+      text: "bonjour",
+      language: "fr",
+      translationStatus: "pending",
+      translationProvider: "push",
+    },
+  });
+  return message.id;
 };
 
 describe("status websocket", () => {
@@ -270,6 +289,62 @@ describe("status websocket", () => {
     });
     expect(put.status).toBe(204);
     await expect(received).resolves.toMatchObject({ kind: "status" });
+    ws.close();
+    await closeServer(server);
+  });
+
+  it("replays outstanding work to worker-scoped tokens on connect", async () => {
+    installBearerVerifier();
+    const messageId = await seedOutstandingTranslationWork();
+    const app = createApp();
+    const server = serve({ fetch: app.fetch, port: 0 });
+    attachStatusWebSocket(server);
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("missing test server address");
+
+    const ws = new WebSocket(`ws://127.0.0.1:${address.port}/v1/ws/status`, {
+      headers: { authorization: "Bearer worker-token" },
+    });
+    const received = new Promise<Record<string, unknown>>((resolve) => {
+      ws.once("message", (data) => resolve(JSON.parse(data.toString()) as Record<string, unknown>));
+    });
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", () => resolve());
+      ws.once("error", reject);
+    });
+
+    await expect(received).resolves.toMatchObject({
+      kind: "work",
+      messageId,
+      needs: ["translation"],
+    });
+    ws.close();
+    await closeServer(server);
+  });
+
+  it("does not replay outstanding work to operator sockets", async () => {
+    installBearerVerifier();
+    await seedOutstandingTranslationWork();
+    const app = createApp();
+    const server = serve({ fetch: app.fetch, port: 0 });
+    attachStatusWebSocket(server);
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("missing test server address");
+
+    const ws = new WebSocket(`ws://127.0.0.1:${address.port}/v1/ws/status`, {
+      headers: { cookie: operatorCookie() },
+    });
+    let replayed = false;
+    ws.once("message", () => {
+      replayed = true;
+    });
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", () => resolve());
+      ws.once("error", reject);
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+
+    expect(replayed).toBe(false);
     ws.close();
     await closeServer(server);
   });

@@ -64,8 +64,10 @@ envelope carries **no** audio URL or secrets — the status channel is shared
 with browser operators, so nothing sensitive is broadcast there. The worker
 fetches what it needs over its own authenticated connection.
 
-The Operator emits `work` when a step becomes runnable, and re-emits it on the
-crash-recovery sweep, so a reconnecting worker catches up.
+The Operator emits `work` when a step becomes runnable. When a worker connects
+or reconnects, the Operator also replays currently outstanding translation and
+moderation work directly to that socket; the crash-recovery sweep remains a
+fallback re-emitter for long-running missed work.
 
 ## Endpoints
 
@@ -176,7 +178,8 @@ envelope so live operator UIs update instantly, and a human decides via
 - `404 not_found` — the message or transcription was deleted (e.g. purged).
   Stop trying.
 - Transport errors — reconnect the WebSocket with capped backoff; the Operator
-  re-emits outstanding `work` on its recovery sweep, so nothing is lost.
+  replays outstanding translation/moderation `work` on connection and also
+  re-emits it on its recovery sweep, so nothing is lost.
 - There are no leases and no lease-lost errors: a late callback is simply
   ignored by the finalized-row guards.
 
