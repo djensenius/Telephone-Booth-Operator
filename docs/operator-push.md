@@ -37,9 +37,10 @@ Everything authenticates with the same static Argon2id API token the phone
 clients use (`requireApiToken`). Mint one via `POST /v1/api-tokens` and store
 it in the app's Keychain.
 
-- **WebSocket:** connect to `/v1/ws/status` with an `Authorization: <token>`
-  header. The upgrade authorizer accepts a browser session cookie, an
-  Authentik bearer, **or** a valid API token (this worker uses the token).
+- **WebSocket:** connect to `/v1/ws/status` with an
+  `Authorization: Bearer <token>` header. The upgrade authorizer accepts
+  a browser session cookie, an Authentik bearer, **or** a valid API token (this
+  worker uses the token).
 - **Callbacks:** the `/v1/worker/*` endpoints require the API token.
 
 ## The `work` envelope
@@ -62,8 +63,9 @@ crash-recovery sweep, so a reconnecting worker catches up.
 
 All under `/v1/worker/*` (tag `worker` in `packages/api/openapi.yaml`),
 API-token authenticated. Unlike the old pull queue there are **no leases**:
-callbacks are claim-free and last-writer-wins, and every write is guarded so a
-stale or duplicate callback can never downgrade an already-finalized row.
+callbacks finalize only existing pending push rows, and every write is guarded
+so a stale or duplicate callback can never create a newer row or downgrade an
+already-finalized row.
 
 | Method | Path                                          | Purpose                                     |
 | ------ | --------------------------------------------- | ------------------------------------------- |
@@ -179,8 +181,9 @@ cost of duplicated local compute. See [ADR 0009](./adr/0009-human-moderation-and
 
 ## Privacy
 
-The Operator stores **only metadata**; it never logs audio bytes or
-transcribed text. The Transcription app applies the same discipline (see
+The Operator stores transcribed text in `Transcription.text`, but logs only
+metadata; it never logs audio bytes or transcribed text. The Transcription app
+applies the same discipline (see
 [Telephone-Booth-Transcription `docs/moderation.md`][modlog]).
 
 [modlog]: https://github.com/djensenius/Telephone-Booth-Transcription/blob/main/docs/moderation.md
