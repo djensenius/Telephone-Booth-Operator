@@ -293,6 +293,7 @@ model Transcription {
 
   @@index([messageId, createdAt])
   @@index([status, createdAt])
+  @@index([status, translationStatus, translationProvider, createdAt(sort: Desc), id(sort: Desc)], map: "Transcription_push_translation_replay_idx")
 }
 
 // AI moderation attempts. Linked to the `Transcription` row whose text was
@@ -321,6 +322,7 @@ model Moderation {
 
   @@index([messageId, createdAt])
   @@index([recommendation, createdAt])
+  @@index([status, provider, createdAt(sort: Desc), id(sort: Desc)], map: "Moderation_push_replay_idx")
 }
 
 // Mobile device registered for APNs / push notifications. One row per

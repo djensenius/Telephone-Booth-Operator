@@ -6,7 +6,12 @@ import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer } from "ws";
 import { verifyToken } from "../lib/api-tokens.js";
 import { wsBroadcaster, type WsEnvelope } from "../lib/broadcaster.js";
+import {
+  findOutstandingPushWorkPage,
+  type OutstandingPushWorkCursor,
+} from "../lib/ai/push-work.js";
 import { verifyOperatorBearer } from "../lib/bearer-auth.js";
+import { log } from "../lib/logger.js";
 import {
   readSessionFromCookieHeader,
   sessionIsExpired,
@@ -29,6 +34,8 @@ type LiveSocket = WebSocket & {
 // this, the slow consumer is dropped with code 1009 ("message too big") so
 // one stuck client can't pin the whole broadcaster.
 const MAX_BUFFERED_BYTES = 1_048_576; // 1 MiB
+const REPLAY_WORK_BATCH_SIZE = 100;
+const REPLAY_BUFFER_YIELD_BYTES = MAX_BUFFERED_BYTES / 2;
 
 const isStatusWsPath = (request: IncomingMessage): boolean => {
   const host = request.headers.host ?? "localhost";
@@ -93,6 +100,49 @@ const authorizeStatusUpgrade = async (
 const envelopeVisibleTo = (kind: SubscriberKind, envelope: WsEnvelope): boolean =>
   kind === "worker" ? envelope.kind === "work" : envelope.kind !== "work";
 
+const sendEnvelopeToSocket = (ws: LiveSocket, envelope: WsEnvelope): void => {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  const kind = ws.subscriberKind ?? "operator";
+  if (!envelopeVisibleTo(kind, envelope)) return;
+  if (ws.bufferedAmount > MAX_BUFFERED_BYTES) {
+    ws.close(1009, "status socket slow consumer");
+    return;
+  }
+  ws.send(JSON.stringify(envelope));
+};
+
+const replayOutstandingWork = (ws: LiveSocket): void => {
+  void (async () => {
+    try {
+      let cursor: OutstandingPushWorkCursor | undefined;
+      while (ws.readyState === WebSocket.OPEN) {
+        const page = await findOutstandingPushWorkPage({
+          limit: REPLAY_WORK_BATCH_SIZE,
+          ...(cursor ? { cursor } : {}),
+        });
+        for (const work of page.work) {
+          while (
+            ws.readyState === WebSocket.OPEN &&
+            ws.bufferedAmount > REPLAY_BUFFER_YIELD_BYTES
+          ) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 10));
+          }
+          sendEnvelopeToSocket(ws, {
+            kind: "work",
+            messageId: work.messageId,
+            needs: work.needs,
+          });
+        }
+        if (!page.hasMore) return;
+        cursor = page.cursor;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+    } catch (err) {
+      log.warn({ err }, "failed to replay outstanding worker work");
+    }
+  })();
+};
+
 export const attachStatusWebSocket = (server: ServerType): void => {
   const wss = new WebSocketServer({ noServer: true });
   const heartbeat = setInterval(() => {
@@ -107,9 +157,10 @@ export const attachStatusWebSocket = (server: ServerType): void => {
   }, 30_000);
   heartbeat.unref();
 
-  wss.on("connection", (ws: LiveSocket) => {
+  wss.on("connection", (ws: LiveSocket, _request: IncomingMessage, kind?: SubscriberKind) => {
     ws.isAlive = true;
     ws.clientId = randomUUID();
+    if (kind) ws.subscriberKind = kind;
     ws.on("pong", () => {
       ws.isAlive = true;
     });
@@ -117,14 +168,7 @@ export const attachStatusWebSocket = (server: ServerType): void => {
       if (ws.clientId) wsBroadcaster.unsubscribe(ws.clientId);
     });
     wsBroadcaster.subscribe(ws.clientId, (envelope) => {
-      if (ws.readyState !== WebSocket.OPEN) return;
-      const kind = ws.subscriberKind ?? "operator";
-      if (!envelopeVisibleTo(kind, envelope)) return;
-      if (ws.bufferedAmount > MAX_BUFFERED_BYTES) {
-        ws.close(1009, "operator slow consumer");
-        return;
-      }
-      ws.send(JSON.stringify(envelope));
+      sendEnvelopeToSocket(ws, envelope);
     });
   });
 
@@ -138,8 +182,10 @@ export const attachStatusWebSocket = (server: ServerType): void => {
           closePolicyViolation(ws);
           return;
         }
-        (ws as LiveSocket).subscriberKind = kind;
-        wss.emit("connection", ws, request);
+        const liveSocket = ws as LiveSocket;
+        liveSocket.subscriberKind = kind;
+        wss.emit("connection", liveSocket, request, kind);
+        if (kind === "worker") setImmediate(() => replayOutstandingWork(liveSocket));
       })();
     });
   });

@@ -6,6 +6,7 @@ import { db } from "../db.js";
 import { broadcastWork } from "../broadcaster.js";
 import { resolveAiConfig } from "./config.js";
 import { kickPipelineForMessage } from "./pipeline.js";
+import { findOutstandingPushWork } from "./push-work.js";
 
 const findStrandedMessages = async (
   limit: number,
@@ -42,37 +43,9 @@ const findStrandedMessages = async (
 };
 
 const reemitStalePushWork = async (staleThresholdMs: number): Promise<void> => {
-  const config = resolveAiConfig();
   const staleBefore = new Date(Date.now() - staleThresholdMs);
-
-  if (config.translationProvider === "push") {
-    const translations = await db.transcription.findMany({
-      where: {
-        status: "succeeded",
-        translationStatus: "pending",
-        translationProvider: "push",
-        createdAt: { lt: staleBefore },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 20,
-      select: { messageId: true },
-    });
-    for (const row of translations) broadcastWork(row.messageId, ["translation"]);
-  }
-
-  if (config.moderationProvider === "push") {
-    const moderations = await db.moderation.findMany({
-      where: {
-        status: "pending",
-        provider: "push",
-        createdAt: { lt: staleBefore },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 20,
-      select: { messageId: true },
-    });
-    for (const row of moderations) broadcastWork(row.messageId, ["moderation"]);
-  }
+  const outstanding = await findOutstandingPushWork({ staleBefore, limit: 20 });
+  for (const work of outstanding) broadcastWork(work.messageId, work.needs);
 };
 
 export interface SweeperHandle {
