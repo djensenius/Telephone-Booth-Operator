@@ -76,8 +76,9 @@ control. Rotate the storage account key when staff access changes.
 ## CORS (required for browser uploads)
 
 The API never proxies file bytes — the browser `PUT`s recordings **directly**
-to the SAS URL, sending `x-ms-blob-type` and `Content-Type` headers. Those
-custom headers make it a cross-origin request, so the browser first fires a
+to the SAS URL. Because the Blob endpoint is a different origin from the web
+app, that `PUT` is cross-origin; the `PUT` method and the `x-ms-blob-type` /
+`Content-Type` headers make it non-simple, so the browser first fires a
 preflight `OPTIONS`. If the storage account has **no matching CORS rule**,
 Azure rejects the preflight with **HTTP 403** and the upload fails before any
 bytes are sent:
@@ -87,8 +88,9 @@ Preflight response is not successful. Status code: 403
 Fetch API cannot load https://<account>.blob.core.windows.net/booth-recordings/...flac
 ```
 
-Azurite allows all origins by default, so this only bites against a real
-account.
+Azurite also starts without a matching CORS rule. The local compose service
+does not initialize one, so browser uploads from another local port can hit the
+same preflight failure until Blob-service CORS is configured.
 
 > **CORS is not an authorization control.** It is a browser-enforced policy
 > about which *web origins* may make cross-origin requests; non-browser
@@ -96,8 +98,10 @@ account.
 > CORS rule does **not** widen who can upload — that gate is the SAS itself:
 > callers must authenticate to obtain one (`POST /v1/messages` /
 > `POST /v1/uploads/sas`), and each SAS is `cw`-only, pinned to a single
-> content-addressed blob key and `audio/flac`, with a short TTL. This is why
-> we keep direct-to-blob uploads (see
+> content-addressed blob key, with a short TTL. The API tells clients to upload
+> `audio/flac` and stores the resulting blob content type, but the SAS token is
+> not a media-type authorization boundary. This is why we keep direct-to-blob
+> uploads (see
 > [ADR 0003](./adr/0003-azure-blob-with-sas-uploads.md)) rather than proxying
 > bytes through the API.
 
@@ -110,6 +114,20 @@ az storage cors add \
   --account-name <account> \
   --account-key "<key>" \
   --origins "https://operator.example.com" "https://web.example.com" \
+  --methods GET HEAD PUT OPTIONS \
+  --allowed-headers "*" \
+  --exposed-headers "*" \
+  --max-age 3600
+```
+
+For the local Azurite compose service, target the emulator endpoint with its
+connection string instead of an Azure account name/key:
+
+```sh
+az storage cors add \
+  --services b \
+  --connection-string "$AZURE_STORAGE_CONNECTION_STRING" \
+  --origins "http://localhost:5173" \
   --methods GET HEAD PUT OPTIONS \
   --allowed-headers "*" \
   --exposed-headers "*" \
