@@ -36,33 +36,40 @@ export function NewInstructionDialog({
   const [description, setDescription] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [status, setStatus] = useState("");
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   if (!open) return null;
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (file === null) return;
-    setStatus("Reserving a clean line for the instruction audio…");
-    const sha256 = await sha256Hex(file);
-    const slot = await uploads.sas({
-      kind: "instruction-audio",
-      sha256,
-      sizeBytes: file.size,
-      contentType: "audio/flac",
-    });
-    if (slot.audioFileId === undefined)
-      throw new Error("Upload slot did not include an audio file id.");
-    setStatus("Sending the instruction audio up the wire…");
-    await uploadBlobToSas(slot.uploadUrl, file);
-    setStatus("Filing the instruction card…");
-    await createInstruction.mutateAsync({
-      description: description.trim() || undefined,
-      audioFileId: slot.audioFileId,
-    });
-    setDescription("");
-    setFile(null);
-    setStatus("");
-    onClose();
+    setUploadError(null);
+    try {
+      setStatus("Reserving a clean line for the instruction audio…");
+      const sha256 = await sha256Hex(file);
+      const slot = await uploads.sas({
+        kind: "instruction-audio",
+        sha256,
+        sizeBytes: file.size,
+        contentType: "audio/flac",
+      });
+      if (slot.audioFileId === undefined)
+        throw new Error("Upload slot did not include an audio file id.");
+      setStatus("Sending the instruction audio up the wire…");
+      await uploadBlobToSas(slot.uploadUrl, file);
+      setStatus("Filing the instruction card…");
+      await createInstruction.mutateAsync({
+        description: description.trim() || undefined,
+        audioFileId: slot.audioFileId,
+      });
+      setDescription("");
+      setFile(null);
+      setStatus("");
+      onClose();
+    } catch {
+      setStatus("");
+      setUploadError("The instructions could not be filed.");
+    }
   }
 
   return (
@@ -92,8 +99,8 @@ export function NewInstructionDialog({
               required
             />
           </label>
-          {createInstruction.error ? (
-            <FeatureError message="The instructions could not be filed." />
+          {createInstruction.error || uploadError !== null ? (
+            <FeatureError message={uploadError ?? "The instructions could not be filed."} />
           ) : null}
           <p aria-live="polite">{status}</p>
           <div className="debug-button-row">

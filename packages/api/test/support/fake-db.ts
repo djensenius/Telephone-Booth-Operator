@@ -752,6 +752,18 @@ export const fakeDb = {
       store.instructions.delete(where.id);
       return existing;
     },
+    upsert: async ({
+      where,
+      create,
+    }: {
+      where: { id: string };
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => {
+      const instruction = { ...(create as unknown as FakeInstruction), id: where.id };
+      store.instructions.set(where.id, instruction);
+      return instruction;
+    },
   },
   message: {
     findUnique: async ({

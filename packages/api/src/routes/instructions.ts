@@ -27,7 +27,7 @@ instructionsRouter.get("/current", requireApiToken(), async (c) => {
   return c.json(serializeInstruction(instruction));
 });
 
-instructionsRouter.get("/", zValidator("query", listQuerySchema), async (c) => {
+instructionsRouter.get("/", requireAdmin(), zValidator("query", listQuerySchema), async (c) => {
   const { cursor, limit, status } = c.req.valid("query");
   const where = status ? { status } : {};
   const instructions = await db.instruction.findMany({

@@ -15,6 +15,7 @@ import {
   resetFakeDb,
   seedCallSession,
   seedFile,
+  seedInstruction,
   seedMessage,
   seedQuestion,
   store,
@@ -74,6 +75,12 @@ describe("admin data export/import", () => {
     const message = seedMessage({ audioId: messageFile.id, questionId: question.id });
     seedBlobData(messageFile.blobKey, messageAudio, mSha);
 
+    const instructionAudio = Buffer.from("instruction-audio-bytes");
+    const iSha = createHash("sha256").update(instructionAudio).digest("hex");
+    const instructionFile = seedFile({ sha256: iSha, blobKey: `instructions/dd/${iSha}.flac` });
+    const instruction = seedInstruction({ audioId: instructionFile.id, status: "active" });
+    seedBlobData(instructionFile.blobKey, instructionAudio, iSha);
+
     seedCallSession({ id: "call-1", startedAt: new Date(), outcome: "recording_completed" });
 
     const exportRes = await app.request("/v1/admin/data/export", { headers: { cookie } });
@@ -101,15 +108,20 @@ describe("admin data export/import", () => {
     };
     expect(summary.rows.question).toBe(1);
     expect(summary.rows.message).toBe(1);
-    expect(summary.rows.file).toBe(2);
-    expect(summary.blobsUploaded).toBe(2);
+    expect(summary.rows.instruction).toBe(1);
+    expect(summary.rows.file).toBe(3);
+    expect(summary.blobsUploaded).toBe(3);
 
     // Data + audio are back.
     expect(store.questions.get(question.id)?.audioId).toBe(questionFile.id);
     expect(store.messages.get(message.id)?.questionId).toBe(question.id);
-    expect(store.files.size).toBe(2);
+    expect(store.instructions.get(instruction.id)?.audioId).toBe(instructionFile.id);
+    expect(store.files.size).toBe(3);
     expect(fakeBlobData.get(questionFile.blobKey)?.toString("utf8")).toBe("question-audio-bytes");
     expect(fakeBlobData.get(messageFile.blobKey)?.toString("utf8")).toBe("message-audio-bytes");
+    expect(fakeBlobData.get(instructionFile.blobKey)?.toString("utf8")).toBe(
+      "instruction-audio-bytes",
+    );
   });
 
   it("rejects an authenticated non-admin export with 403", async () => {

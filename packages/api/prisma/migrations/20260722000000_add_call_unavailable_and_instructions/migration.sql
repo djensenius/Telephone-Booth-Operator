@@ -1,4 +1,5 @@
--- Add the booth coarse status emitted when operator-hosted instruction audio is unavailable.
+-- Add the booth coarse status emitted while dials 3-9 play the bundled
+-- "call cannot be completed" prompt.
 ALTER TYPE "BoothState" ADD VALUE 'callUnavailable' AFTER 'playingInstructions';
 
 -- Instruction audio clips are File-backed and managed by admins.
