@@ -19,7 +19,7 @@ export const DIGIT_ROUTES: readonly DigitRoute[] = [
   { digit: "5", label: "Settings", href: "/settings" },
   { digit: "6", label: "About", href: "/about" },
   { digit: "7", label: "Logout", href: "/logout" },
-  { digit: "8", label: "Reserved", href: "#reserved-8", reserved: true },
+  { digit: "8", label: "Instructions", href: "/instructions", adminOnly: true },
   { digit: "9", label: "Debug", href: "/debug", adminOnly: true },
   { digit: "0", label: "Home", href: "/" },
 ];

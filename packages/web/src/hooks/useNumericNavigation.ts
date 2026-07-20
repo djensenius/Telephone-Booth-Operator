@@ -66,6 +66,13 @@ export function useNumericNavigation(enabled = true, isAdmin = false): void {
             form.submit();
           }
           break;
+        case "8":
+          // Instructions is admin-only; ignore for non-admins so the disabled
+          // sidebar entry cannot be reached from the keyboard.
+          if (isAdmin) {
+            void navigate({ to: "/instructions" });
+          }
+          break;
         case "9":
           // Debug is admin-only; ignore for non-admins.
           if (isAdmin) {

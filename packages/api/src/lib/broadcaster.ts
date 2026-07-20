@@ -12,6 +12,7 @@ export type BoothStatusEvent = {
     | "uploading"
     | "playingMessage"
     | "playingInstructions"
+    | "callUnavailable"
     | "error";
   updatedAt: string;
   currentQuestionId?: string | null;

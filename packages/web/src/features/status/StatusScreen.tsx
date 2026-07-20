@@ -16,6 +16,7 @@ import {
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
 
 function displayState(state: BoothState): string {
+  if (state === "callUnavailable") return "Call unavailable";
   return state.replace(/[A-Z]/g, (match) => ` ${match.toLowerCase()}`);
 }
 
@@ -26,7 +27,12 @@ function hookLabel(state: BoothState): "On hook" | "Off hook" {
 function boothDisplay(state: BoothState): "idle" | "playing" | "recording" | "error" {
   if (state === "error") return "error";
   if (state === "recording" || state === "uploading") return "recording";
-  if (state === "playingMessage" || state === "playingQuestion" || state === "playingInstructions")
+  if (
+    state === "playingMessage" ||
+    state === "playingQuestion" ||
+    state === "playingInstructions" ||
+    state === "callUnavailable"
+  )
     return "playing";
   return "idle";
 }

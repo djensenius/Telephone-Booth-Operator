@@ -13,10 +13,11 @@ booth-recordings/                          # container
 │   └── <sha256-prefix>/<sha256>.flac      # uploaded messages
 ├── questions/
 │   └── <sha256-prefix>/<sha256>.flac      # operator-recorded questions
+├── instructions/
+│   └── <sha256-prefix>/<sha256>.flac      # admin-uploaded instruction prompt (digit 0)
 └── system/
     ├── beep.flac                          # built into the Rust client too
-    ├── dial-tone.flac                     # built into the Rust client too
-    └── instructions/<sha256>.flac         # operator-recorded prompt
+    └── dial-tone.flac                     # built into the Rust client too
 ```
 
 `<sha256-prefix>` is the first 2 hex chars of the file's sha256, used as

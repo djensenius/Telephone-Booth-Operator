@@ -14,6 +14,7 @@ export const BoothStateSchema = z.enum([
   "uploading",
   "playingMessage",
   "playingInstructions",
+  "callUnavailable",
   "error",
 ]);
 export type BoothState = z.infer<typeof BoothStateSchema>;
@@ -122,6 +123,8 @@ export type StatusUpdate = z.infer<typeof StatusUpdateSchema>;
 
 export const QuestionStatusSchema = z.enum(["draft", "active", "archived"]);
 export type QuestionStatus = z.infer<typeof QuestionStatusSchema>;
+export const InstructionStatusSchema = z.enum(["active", "inactive"]);
+export type InstructionStatus = z.infer<typeof InstructionStatusSchema>;
 
 export const QuestionSchema = z.object({
   id: z.string().uuid(),
@@ -138,6 +141,22 @@ export const QuestionCreateSchema = z.object({
   status: QuestionStatusSchema.optional(),
 });
 export type QuestionCreate = z.infer<typeof QuestionCreateSchema>;
+
+export const InstructionSchema = z.object({
+  id: z.string().uuid(),
+  description: z.string().max(280).nullable(),
+  status: InstructionStatusSchema,
+  createdAt: z.string().datetime(),
+  audio: AudioRefSchema,
+});
+export type Instruction = z.infer<typeof InstructionSchema>;
+
+export const InstructionCreateSchema = z.object({
+  description: z.string().max(280).optional(),
+  audioFileId: z.string().uuid(),
+  status: InstructionStatusSchema.optional(),
+});
+export type InstructionCreate = z.infer<typeof InstructionCreateSchema>;
 
 export const MessageSchema = z.object({
   id: z.string().uuid(),
@@ -194,7 +213,7 @@ export const MessageCompleteSchema = z.object({
 export type MessageComplete = z.infer<typeof MessageCompleteSchema>;
 
 export const UploadSasRequestSchema = z.object({
-  kind: z.enum(["message", "question-audio"]),
+  kind: z.enum(["message", "question-audio", "instruction-audio"]),
   sha256: Sha256Schema,
   sizeBytes: z.number().int().positive(),
   contentType: z.literal("audio/flac"),

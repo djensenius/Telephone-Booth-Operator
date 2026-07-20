@@ -21,6 +21,14 @@ export type FakeQuestion = {
   retiredAt: Date | null;
 };
 
+export type FakeInstruction = {
+  id: string;
+  description: string | null;
+  status: string;
+  audioId: string;
+  createdAt: Date;
+};
+
 export type FakeMessage = {
   id: string;
   status: string;
@@ -172,6 +180,7 @@ export type FakeMetricFilter = {
 export const store = {
   files: new Map<string, FakeFile>(),
   questions: new Map<string, FakeQuestion>(),
+  instructions: new Map<string, FakeInstruction>(),
   messages: new Map<string, FakeMessage>(),
   statuses: [] as FakeStatus[],
   sessions: new Map<string, FakeSession>(),
@@ -369,6 +378,18 @@ export const seedQuestion = (overrides: Partial<FakeQuestion> = {}): FakeQuestio
   return question;
 };
 
+export const seedInstruction = (overrides: Partial<FakeInstruction> = {}): FakeInstruction => {
+  const instruction: FakeInstruction = {
+    id: overrides.id ?? randomUUID(),
+    description: overrides.description ?? null,
+    status: overrides.status ?? "active",
+    audioId: overrides.audioId ?? seedFile().id,
+    createdAt: overrides.createdAt ?? new Date(),
+  };
+  store.instructions.set(instruction.id, instruction);
+  return instruction;
+};
+
 export const seedMessage = (overrides: Partial<FakeMessage> = {}): FakeMessage => {
   const message: FakeMessage = {
     id: overrides.id ?? randomUUID(),
@@ -435,6 +456,7 @@ export const seedCallSession = (overrides: Partial<FakeCallSession> = {}): FakeC
 export const resetFakeDb = (): void => {
   store.files.clear();
   store.questions.clear();
+  store.instructions.clear();
   store.messages.clear();
   store.statuses.length = 0;
   store.sessions.clear();
@@ -651,6 +673,96 @@ export const fakeDb = {
       const question = { ...(create as unknown as FakeQuestion), id: where.id };
       store.questions.set(where.id, question);
       return question;
+    },
+  },
+  instruction: {
+    findUnique: async ({ where }: { where: { id: string } }) =>
+      store.instructions.get(where.id) ?? null,
+    create: async ({
+      data,
+      include,
+    }: {
+      data: { description?: string | null; audioId: string; status?: string };
+      include?: { audio?: boolean };
+    }) => {
+      const instruction: FakeInstruction = {
+        id: randomUUID(),
+        description: data.description ?? null,
+        status: data.status ?? "active",
+        audioId: data.audioId,
+        createdAt: new Date(),
+      };
+      store.instructions.set(instruction.id, instruction);
+      return include?.audio ? attachAudio(instruction) : instruction;
+    },
+    findMany: async (
+      params: {
+        cursor?: { id: string };
+        where?: Record<string, unknown>;
+        skip?: number;
+        take?: number;
+        include?: { audio?: boolean };
+      } = {},
+    ) => {
+      const { cursor, where = {}, skip = 0, take, include } = params;
+      let instructions = [...store.instructions.values()]
+        .filter((instruction) => matchesWhere(instruction, where))
+        .sort(byCreatedDesc);
+      if (cursor) {
+        const index = instructions.findIndex((instruction) => instruction.id === cursor.id);
+        instructions = index >= 0 ? instructions.slice(index + skip) : instructions;
+      }
+      const selected = typeof take === "number" ? instructions.slice(0, take) : instructions;
+      return include?.audio ? selected.map(attachAudio) : selected;
+    },
+    findFirst: async ({
+      where = {},
+      include,
+      orderBy,
+    }: {
+      where?: Record<string, unknown>;
+      include?: { audio?: boolean };
+      orderBy?: CreatedIdOrder;
+    }) => {
+      const instruction = sortByCreatedIdOrder(
+        [...store.instructions.values()].filter((item) => matchesWhere(item, where)),
+        orderBy,
+      )[0];
+      if (!instruction) return null;
+      return include?.audio ? attachAudio(instruction) : instruction;
+    },
+    update: async ({
+      where,
+      data,
+      include,
+    }: {
+      where: { id: string };
+      data: Partial<FakeInstruction>;
+      include?: { audio?: boolean };
+    }) => {
+      const existing = store.instructions.get(where.id);
+      if (!existing) throw new Error("instruction not found");
+      const updated = { ...existing, ...data };
+      store.instructions.set(where.id, updated);
+      return include?.audio ? attachAudio(updated) : updated;
+    },
+    delete: async ({ where }: { where: { id: string } }) => {
+      const existing = store.instructions.get(where.id);
+      if (!existing) throw new Error("instruction not found");
+      store.instructions.delete(where.id);
+      return existing;
+    },
+    upsert: async ({
+      where,
+      create,
+    }: {
+      where: { id: string };
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => {
+      const instruction = { ...(create as unknown as FakeInstruction), id: where.id };
+      store.instructions.set(where.id, instruction);
+      return instruction;
     },
   },
   message: {
@@ -1104,7 +1216,12 @@ export const fakeDb = {
       orderBy?: CreatedIdOrder;
       take?: number;
       skip?: number;
-      select?: { id?: boolean; createdAt?: boolean; messageId?: boolean; transcriptionId?: boolean };
+      select?: {
+        id?: boolean;
+        createdAt?: boolean;
+        messageId?: boolean;
+        transcriptionId?: boolean;
+      };
     }) => {
       let rows = [...store.moderations.values()].filter((row) =>
         matchPredicate(row as unknown as Record<string, unknown>, where),
@@ -1310,13 +1427,7 @@ export const fakeDb = {
       store.callSessions.set(where.id, merged);
       return merged;
     },
-    update: async ({
-      where,
-      data,
-    }: {
-      where: { id: string };
-      data: Partial<FakeCallSession>;
-    }) => {
+    update: async ({ where, data }: { where: { id: string }; data: Partial<FakeCallSession> }) => {
       const existing = store.callSessions.get(where.id);
       if (!existing) throw new Error(`callSession ${where.id} not found`);
       const merged: FakeCallSession = { ...existing, ...data };

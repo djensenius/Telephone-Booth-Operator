@@ -23,6 +23,7 @@ export const EXPORT_VERSION = 1;
 const IMPORT_ORDER = [
   "operatorUser",
   "file",
+  "instruction",
   "question",
   "callSession",
   "message",

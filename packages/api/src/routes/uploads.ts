@@ -5,8 +5,12 @@ import { generateSasUrl } from "../lib/azure-blob.js";
 import { db } from "../lib/db.js";
 import type { AuthVariables } from "../lib/session.js";
 
-const blobNameFor = (kind: "message" | "question-audio", sha256: string): string => {
-  const prefix = kind === "message" ? "messages" : "questions";
+const blobNameFor = (
+  kind: "message" | "question-audio" | "instruction-audio",
+  sha256: string,
+): string => {
+  const prefix =
+    kind === "message" ? "messages" : kind === "question-audio" ? "questions" : "instructions";
   return `${prefix}/${sha256.slice(0, 2)}/${sha256}.flac`;
 };
 
@@ -17,7 +21,7 @@ uploadsRouter.post("/sas", zValidator("json", UploadSasRequestSchema), async (c)
   const blobName = blobNameFor(body.kind, body.sha256);
 
   let audioFileId: string | undefined;
-  if (body.kind === "question-audio") {
+  if (body.kind === "question-audio" || body.kind === "instruction-audio") {
     const existing = await db.file.findUnique({ where: { sha256: body.sha256 } });
     const file =
       existing ??

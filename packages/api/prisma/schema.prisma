@@ -24,6 +24,11 @@ enum QuestionStatus {
   archived
 }
 
+enum InstructionStatus {
+  active
+  inactive
+}
+
 enum BoothState {
   idle
   dialTone
@@ -34,6 +39,7 @@ enum BoothState {
   uploading
   playingMessage
   playingInstructions
+  callUnavailable
   error
 }
 
@@ -68,6 +74,17 @@ model Question {
   @@index([status, createdAt])
 }
 
+model Instruction {
+  id          String            @id @default(uuid()) @db.Uuid
+  description String?
+  status      InstructionStatus @default(active)
+  audioId     String            @unique @db.Uuid
+  audio       File              @relation(fields: [audioId], references: [id])
+  createdAt   DateTime          @default(now())
+
+  @@index([status, createdAt])
+}
+
 model Message {
   id             String          @id @default(uuid()) @db.Uuid
   status         MessageStatus   @default(pending)
@@ -88,15 +105,16 @@ model Message {
 }
 
 model File {
-  id            String    @id @default(uuid()) @db.Uuid
+  id            String       @id @default(uuid()) @db.Uuid
   blobContainer String
-  blobKey       String    @unique
-  sha256        String    @unique
+  blobKey       String       @unique
+  sha256        String       @unique
   sizeBytes     Int
   durationMs    Int?
   contentType   String
-  createdAt     DateTime  @default(now())
+  createdAt     DateTime     @default(now())
   question      Question?
+  instruction   Instruction?
   message       Message?
 }
 
