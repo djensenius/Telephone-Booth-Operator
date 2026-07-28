@@ -68,25 +68,6 @@ function isRepeatOf(
   );
 }
 
-/**
- * Where a collapsed run starts once `reportedAt` is folded into it.
- *
- * A report that reaches us late can predate the run's `firstSeenAt`, and the
- * window widens to cover it. It must not widen past the preceding snapshot,
- * though: a delayed report from an *earlier* run of the same status would
- * otherwise make the current run appear to have started before the transition
- * that ended that earlier run.
- */
-function widenedStart(
-  latest: { firstSeenAt: Date },
-  previous: { updatedAt: Date } | undefined,
-  reportedAt: Date,
-): Date {
-  if (reportedAt >= latest.firstSeenAt) return latest.firstSeenAt;
-  if (previous && reportedAt <= previous.updatedAt) return latest.firstSeenAt;
-  return reportedAt;
-}
-
 statusRouter.get("/", requireOperatorOrApiToken(), async (c) => {
   // Authenticated read of the latest booth snapshot. Operator clients use a
   // session cookie or operator bearer; the booth/phone client uses its API token.
@@ -99,17 +80,25 @@ statusRouter.get("/", requireOperatorOrApiToken(), async (c) => {
 statusRouter.put("/", requireApiToken(), zValidator("json", StatusUpdateSchema), async (c) => {
   const update = c.req.valid("json");
   const reportedAt = update.updatedAt ? new Date(update.updatedAt) : new Date();
-  // The booth supplies `updatedAt`, so two rows can share a millisecond; the
-  // insertion order (`id`) breaks the tie so "newest row" is deterministic.
-  const [latest, previous] = await db.boothStatusSnapshot.findMany({
-    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-    take: 2,
+  // The run the booth was in when the report was produced. That is normally the
+  // newest row, but a delayed report belongs to the run that was current at its
+  // own timestamp — the booth supplies `updatedAt`, so `id` breaks ties and
+  // keeps the choice deterministic when two rows share a millisecond.
+  const enclosing = await db.boothStatusSnapshot.findFirst({
+    where: { firstSeenAt: { lte: reportedAt } },
+    orderBy: [{ firstSeenAt: "desc" }, { id: "desc" }],
   });
+  // A report predating every stored snapshot has no enclosing run; fold it into
+  // the oldest one when it matches, rather than filing a row before it.
+  const oldest = enclosing
+    ? undefined
+    : await db.boothStatusSnapshot.findFirst({ orderBy: [{ firstSeenAt: "asc" }, { id: "asc" }] });
+  const run = enclosing ?? oldest;
   // Collapse heartbeats. The booth re-pushes its current status every few
   // seconds so the operator never shows stale state, which meant an idle booth
   // wrote one snapshot row per beat and buried the genuine transitions under a
-  // page of identical `idle` rows. When the report is identical to the newest
-  // snapshot we fold it into that row instead: widen the [firstSeenAt,
+  // page of identical `idle` rows. When the report is identical to its own
+  // run we fold it into that row instead: widen the [firstSeenAt,
   // updatedAt] window and count the beat. Distinct fields (a real transition,
   // a new error, a runtime-mode change) still create a new row, so the history
   // reads as one row per booth state.
@@ -118,12 +107,12 @@ statusRouter.put("/", requireApiToken(), zValidator("json", StatusUpdateSchema),
   // case is a lost increment or a duplicate row, both harmless for a display
   // counter on a single-line booth.
   const snapshot =
-    latest && isRepeatOf(latest, update)
+    run && isRepeatOf(run, update)
       ? await db.boothStatusSnapshot.update({
-          where: { id: latest.id },
+          where: { id: run.id },
           data: {
-            firstSeenAt: widenedStart(latest, previous, reportedAt),
-            updatedAt: reportedAt > latest.updatedAt ? reportedAt : latest.updatedAt,
+            firstSeenAt: reportedAt < run.firstSeenAt ? reportedAt : run.firstSeenAt,
+            updatedAt: reportedAt > run.updatedAt ? reportedAt : run.updatedAt,
             repeatCount: { increment: 1 },
           },
         })

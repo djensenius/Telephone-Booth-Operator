@@ -7,6 +7,7 @@ vi.mock(
 );
 
 import { createTar, readTar } from "../src/lib/archive.js";
+import { EXPORT_FORMAT, EXPORT_VERSION } from "../src/lib/data-archive.js";
 import { createHash } from "node:crypto";
 import { createApp } from "../src/index.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
@@ -140,6 +141,49 @@ describe("admin data export/import", () => {
       body: Buffer.from("padding padding padding padding padding padding padding padding pad"),
     });
     expect(res.status).toBe(403);
+  });
+
+  it("restores a pre-collapse status snapshot with a window", async () => {
+    const app = createApp();
+    const cookie = operatorCookie();
+    const updatedAt = "2026-07-28T12:00:00.000Z";
+    // An archive written before status collapsing: no firstSeenAt/repeatCount.
+    const archive = createTar([
+      {
+        name: "manifest.json",
+        data: Buffer.from(
+          JSON.stringify({
+            format: EXPORT_FORMAT,
+            version: EXPORT_VERSION,
+            generatedAt: updatedAt,
+            container: "audio",
+            counts: {},
+            blobCount: 0,
+            missingBlobs: [],
+          }),
+          "utf8",
+        ),
+      },
+      {
+        name: "data.json",
+        data: Buffer.from(
+          JSON.stringify({ boothStatusSnapshot: [{ id: 1, state: "idle", updatedAt }] }),
+          "utf8",
+        ),
+      },
+    ]);
+
+    const res = await app.request("/v1/admin/data/import", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/x-tar" },
+      body: archive,
+    });
+    expect(res.status).toBe(200);
+
+    const restored = store.statuses.find((status) => status.id === 1);
+    // The window starts at the report, not at the restore.
+    expect(restored?.firstSeenAt.toISOString()).toBe(updatedAt);
+    expect(restored?.repeatCount).toBe(1);
   });
 
   it("rejects an empty import body", async () => {

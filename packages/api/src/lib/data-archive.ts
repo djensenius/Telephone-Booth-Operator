@@ -179,16 +179,26 @@ const parseArchive = (
   }
 
   const normalized = {} as DataDump;
+
   for (const name of IMPORT_ORDER) {
     const rows = dump[name] ?? [];
     if (!Array.isArray(rows)) {
       throw new ImportFormatError(`data.json entry "${name}" must be an array`);
     }
-    normalized[name] = rows;
+    normalized[name] = name === "boothStatusSnapshot" ? rows.map(withStatusWindow) : rows;
   }
 
   return { manifest, dump: normalized, blobs };
 };
+
+// Archives written before status collapsing carry no window on a snapshot. The
+// column defaults to `now()`, which would date a restored row to the restore
+// rather than to the report, so mirror the migration and start the window at
+// the report time.
+const withStatusWindow = (row: Row): Row =>
+  row.firstSeenAt === undefined || row.firstSeenAt === null
+    ? { ...row, firstSeenAt: row.updatedAt, repeatCount: row.repeatCount ?? 1 }
+    : row;
 
 // Restore an export archive into the current instance. Rows are upserted by id
 // (idempotent) inside a single transaction, so a mid-restore failure never

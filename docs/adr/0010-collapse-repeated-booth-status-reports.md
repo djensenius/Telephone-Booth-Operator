@@ -28,10 +28,11 @@ into that snapshot instead of inserting a new row
   excluded — it is what changes on every heartbeat.
 - A collapsed row spans a window: `firstSeenAt` is the earliest report of the
   status, `updatedAt` the most recent, and `repeatCount` the number of reports
-  folded in. An out-of-order (delayed) report widens the window rather than
-  rewinding `updatedAt`, but never back past the preceding snapshot: a report
-  belonging to an earlier run of the same status must not make the current run
-  appear to start before the transition that ended that earlier one.
+  folded in. A report is folded into the run that was current at its own
+  `updatedAt` — the newest row whose `firstSeenAt` is at or before it — so a
+  delayed report counts towards the run it actually belongs to instead of the
+  run that has since started. Folding widens that run's window; it never
+  rewinds `updatedAt`.
 - Anything that differs — a real transition, a new error string, a runtime-mode
   change — still creates a new row, so the history reads as one row per booth
   status.

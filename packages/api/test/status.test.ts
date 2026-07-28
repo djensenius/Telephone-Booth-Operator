@@ -178,7 +178,7 @@ describe("status routes", () => {
     });
   });
 
-  it("does not widen a run back across an earlier transition", async () => {
+  it("files a delayed report into the run it belongs to", async () => {
     const app = createApp();
 
     const beat = async (state: string, updatedAt: string) => {
@@ -202,13 +202,22 @@ describe("status routes", () => {
       headers: { cookie: operatorCookie() },
     });
     const body = await history.json();
+    expect(body.items).toHaveLength(3);
+    // The current run is untouched: the late report was not its heartbeat.
     expect(body.items[0]).toMatchObject({
       state: "idle",
-      repeatCount: 2,
+      repeatCount: 1,
       firstSeenAt: "2026-07-28T12:00:20.000Z",
       updatedAt: "2026-07-28T12:00:20.000Z",
     });
     expect(body.items[1]).toMatchObject({ state: "recording" });
+    // It belongs to the idle run that the recording ended.
+    expect(body.items[2]).toMatchObject({
+      state: "idle",
+      repeatCount: 2,
+      firstSeenAt: "2026-07-28T12:00:00.000Z",
+      updatedAt: "2026-07-28T12:00:05.000Z",
+    });
   });
 
   it("persists and echoes the booth runtimeMode", async () => {

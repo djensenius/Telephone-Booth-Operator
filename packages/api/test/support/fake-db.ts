@@ -200,7 +200,29 @@ const cloneDate = (date: Date): Date => new Date(date.getTime());
 const byCreatedDesc = <T extends { createdAt: Date; id: string }>(a: T, b: T): number =>
   b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id);
 
-type StatusOrder = { updatedAt?: "asc" | "desc"; id?: "asc" | "desc" };
+type StatusOrder = {
+  updatedAt?: "asc" | "desc";
+  firstSeenAt?: "asc" | "desc";
+  id?: "asc" | "desc";
+};
+
+const sortStatuses = <T extends { updatedAt: Date; firstSeenAt: Date; id: number }>(
+  rows: T[],
+  orderBy: StatusOrder | StatusOrder[] | undefined,
+): T[] => {
+  const clauses = Array.isArray(orderBy) ? orderBy : orderBy ? [orderBy] : [];
+  const dirOf = (value: "asc" | "desc" | undefined, fallback: number) =>
+    value === undefined ? fallback : value === "asc" ? 1 : -1;
+  const updatedDir = dirOf(clauses.find((clause) => clause.updatedAt)?.updatedAt, -1);
+  const firstSeenDir = dirOf(clauses.find((clause) => clause.firstSeenAt)?.firstSeenAt, 0);
+  const idDir = dirOf(clauses.find((clause) => clause.id)?.id, updatedDir);
+  return [...rows].sort(
+    (a, b) =>
+      firstSeenDir * (a.firstSeenAt.getTime() - b.firstSeenAt.getTime()) ||
+      updatedDir * (a.updatedAt.getTime() - b.updatedAt.getTime()) ||
+      idDir * (a.id - b.id),
+  );
+};
 
 type CreatedIdOrder =
   | { createdAt?: "asc" | "desc" }
@@ -1260,6 +1282,28 @@ export const fakeDb = {
       store.statuses.push(snapshot);
       return snapshot;
     },
+    upsert: async ({
+      where,
+      create,
+    }: {
+      where: { id: number };
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => {
+      // Archive rows carry ISO strings; Prisma coerces them to Date columns.
+      const row = create as FakeStatus & { firstSeenAt?: Date | string; updatedAt: Date | string };
+      const snapshot: FakeStatus = {
+        ...row,
+        id: where.id,
+        repeatCount: row.repeatCount ?? 1,
+        firstSeenAt: new Date(row.firstSeenAt ?? row.updatedAt),
+        updatedAt: new Date(row.updatedAt),
+      };
+      const index = store.statuses.findIndex((status) => status.id === where.id);
+      if (index === -1) store.statuses.push(snapshot);
+      else store.statuses[index] = snapshot;
+      return snapshot;
+    },
     update: async ({
       where,
       data,
@@ -1278,10 +1322,18 @@ export const fakeDb = {
       if (data.repeatCount) snapshot.repeatCount += data.repeatCount.increment;
       return snapshot;
     },
-    findFirst: async () =>
-      [...store.statuses].sort(
-        (a, b) => b.updatedAt.getTime() - a.updatedAt.getTime() || b.id - a.id,
-      )[0] ?? null,
+    findFirst: async (
+      args: {
+        where?: { firstSeenAt?: { lte?: Date } };
+        orderBy?: StatusOrder | StatusOrder[];
+      } = {},
+    ) => {
+      const lte = args.where?.firstSeenAt?.lte;
+      const statuses = lte
+        ? store.statuses.filter((status) => status.firstSeenAt <= lte)
+        : [...store.statuses];
+      return sortStatuses(statuses, args.orderBy)[0] ?? null;
+    },
     findMany: async ({
       where = {},
       take,
@@ -1301,12 +1353,7 @@ export const fakeDb = {
       if (where.updatedAt?.lt)
         statuses = statuses.filter((status) => status.updatedAt < where.updatedAt!.lt!);
       if (where.id?.lt) statuses = statuses.filter((status) => status.id < where.id!.lt!);
-      const clauses = Array.isArray(orderBy) ? orderBy : orderBy ? [orderBy] : [];
-      const dir = clauses.find((clause) => clause.updatedAt)?.updatedAt === "asc" ? 1 : -1;
-      const idDir = clauses.find((clause) => clause.id)?.id === "asc" ? 1 : dir;
-      statuses = statuses.sort(
-        (a, b) => dir * (a.updatedAt.getTime() - b.updatedAt.getTime()) || idDir * (a.id - b.id),
-      );
+      statuses = sortStatuses(statuses, orderBy);
       statuses = statuses.slice(skip, take !== undefined ? skip + take : undefined);
       if (select) {
         return statuses.map((s) => {
