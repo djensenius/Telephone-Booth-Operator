@@ -77,9 +77,13 @@ export function MessagesScreen(): JSX.Element {
 
   const rows = useMemo(() => {
     if (!needsReview) return listed.data?.items ?? [];
-    return [...(received.data?.items ?? []), ...(pending.data?.items ?? [])].sort(
-      (a, b) => receivedTime(b) - receivedTime(a),
-    );
+    // A message can flip from `received` to `pending` between the two
+    // requests and land in both responses, so dedupe before sorting.
+    const merged = new Map<string, Message>();
+    for (const item of [...(received.data?.items ?? []), ...(pending.data?.items ?? [])]) {
+      merged.set(item.id, item);
+    }
+    return [...merged.values()].sort((a, b) => receivedTime(b) - receivedTime(a));
   }, [needsReview, listed.data?.items, received.data?.items, pending.data?.items]);
 
   const promptById = useMemo(

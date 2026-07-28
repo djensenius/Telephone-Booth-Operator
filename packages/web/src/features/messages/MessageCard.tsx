@@ -55,7 +55,8 @@ export function MessageCard({
     text === null ? { snippet: "", truncated: false } : transcriptSnippet(text);
   // `uploading` messages have no finished recording to judge yet — the API
   // rejects a decision on them, so the buttons stay disabled here too.
-  const decidable = message.status !== "uploading" && !busy;
+  const uploading = message.status === "uploading";
+  const decidable = !uploading && !busy;
 
   return (
     <article className="message-card" aria-label={`Message received ${absolute}`}>
@@ -72,9 +73,15 @@ export function MessageCard({
 
       <h2 className="message-card__prompt">{prompt ?? "Unlinked booth recording"}</h2>
 
-      <audio className="message-card__audio" controls preload="none" src={message.audio.url}>
-        Message audio
-      </audio>
+      {uploading ? (
+        <p className="message-card__status message-card__status--pending">
+          Upload in progress — playback is available once the booth finishes sending.
+        </p>
+      ) : (
+        <audio className="message-card__audio" controls preload="none" src={message.audio.url}>
+          Message audio
+        </audio>
+      )}
 
       <div className="message-card__transcript">
         {text === null ? (
@@ -121,14 +128,16 @@ export function MessageCard({
         <Link to="/messages/$id" params={{ id: message.id }}>
           Open
         </Link>
-        {status.canRetry && message.status !== "uploading" ? (
+        {status.canRetry && !uploading ? (
           <button type="button" disabled={busy} onClick={() => onRetranscribe(message.id)}>
             Re-run transcription
           </button>
         ) : null}
-        <a href={message.audio.url} download>
-          Download
-        </a>
+        {uploading ? null : (
+          <a href={message.audio.url} download>
+            Download
+          </a>
+        )}
         <button type="button" disabled={busy} onClick={() => onDelete(message.id)}>
           Delete
         </button>
