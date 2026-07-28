@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { apiUrlFor } from "../../lib/api-client.js";
+import { clearDebugConnectionTokens } from "../../lib/debug-client.js";
 
 interface LogoutButtonProps {
   readonly children?: string;
@@ -12,6 +13,7 @@ export function LogoutButton({ children = "Sign out", className }: LogoutButtonP
   const [busy, setBusy] = useState(false);
 
   function prepareLogout(): void {
+    clearDebugConnectionTokens();
     queryClient.clear();
     setBusy(true);
   }

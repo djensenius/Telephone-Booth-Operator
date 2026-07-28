@@ -20,7 +20,9 @@ export function PhoneClientConnection({
   userSub = "anonymous",
 }: PhoneClientConnectionProps): JSX.Element {
   const [prefs, setPrefs] = useState(() => readDebugConnectionPrefs(userSub));
-  const [status, setStatus] = useState("Connection settings are stored in this browser.");
+  const [status, setStatus] = useState(
+    "URLs and the pinned fingerprint are stored in this browser. The debug token is kept in memory only and must be re-entered each session.",
+  );
   const [busy, setBusy] = useState(false);
 
   function updateField(field: keyof Omit<DebugConnectionPrefs, "updatedAt">, value: string): void {
@@ -119,6 +121,10 @@ export function PhoneClientConnection({
             autoComplete="off"
           />
         </label>
+        <p className="settings-connection__hint">
+          The debug token is kept in memory only for this session; it is never written to browser
+          storage and must be re-entered after a reload or sign-out.
+        </p>
         <label>
           Pinned LAN fingerprint
           <input

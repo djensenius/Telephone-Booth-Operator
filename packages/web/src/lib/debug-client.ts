@@ -138,6 +138,15 @@ export interface DebugConnectionPrefs {
   readonly updatedAt: string;
 }
 
+/**
+ * The subset of {@link DebugConnectionPrefs} that is safe to persist in
+ * `localStorage`. The bearer `token` is intentionally excluded: it is a
+ * long-lived credential for the booth's debug/control surface and
+ * `localStorage` is readable by any JavaScript in the origin (XSS or a
+ * compromised dependency), so the token is kept in memory only.
+ */
+export type PersistedDebugConnectionPrefs = Omit<DebugConnectionPrefs, "token">;
+
 export interface CreateDebugClientOptions {
   readonly tailscaleUrl?: string;
   readonly lanUrl?: string;
@@ -213,25 +222,49 @@ export function getDebugConnectionStorageKey(userSub = "anonymous"): string {
   return `${DEBUG_STORAGE_PREFIX}.${userSub}`;
 }
 
+/**
+ * In-memory, non-persistent store for the booth debug bearer token, keyed by
+ * OIDC user subject. The token never touches `localStorage`, so it cannot be
+ * exfiltrated by page JavaScript and does not outlive the browsing session.
+ */
+const inMemoryDebugTokens = new Map<string, string>();
+
+export function readDebugConnectionToken(userSub = "anonymous"): string {
+  return inMemoryDebugTokens.get(userSub) ?? "";
+}
+
+export function writeDebugConnectionToken(token: string, userSub = "anonymous"): void {
+  if (token.length === 0) {
+    inMemoryDebugTokens.delete(userSub);
+    return;
+  }
+  inMemoryDebugTokens.set(userSub, token);
+}
+
+export function clearDebugConnectionTokens(): void {
+  inMemoryDebugTokens.clear();
+}
+
 export function readDebugConnectionPrefs(userSub = "anonymous"): DebugConnectionPrefs {
+  const token = readDebugConnectionToken(userSub);
   if (typeof window === "undefined") {
-    return emptyDebugConnectionPrefs();
+    return { ...emptyDebugConnectionPrefs(), token };
   }
   try {
     const raw = window.localStorage.getItem(getDebugConnectionStorageKey(userSub));
     if (raw === null) {
-      return emptyDebugConnectionPrefs();
+      return { ...emptyDebugConnectionPrefs(), token };
     }
-    const parsed = JSON.parse(raw) as Partial<DebugConnectionPrefs>;
+    const parsed = JSON.parse(raw) as Partial<PersistedDebugConnectionPrefs>;
     return {
       tailscaleUrl: parsed.tailscaleUrl ?? "",
       lanUrl: parsed.lanUrl ?? "",
-      token: parsed.token ?? "",
+      token,
       pinnedFingerprint: parsed.pinnedFingerprint ?? "",
       updatedAt: parsed.updatedAt ?? "",
     };
   } catch {
-    return emptyDebugConnectionPrefs();
+    return { ...emptyDebugConnectionPrefs(), token };
   }
 }
 
@@ -239,13 +272,21 @@ export function writeDebugConnectionPrefs(
   prefs: DebugConnectionPrefs,
   userSub = "anonymous",
 ): void {
+  writeDebugConnectionToken(prefs.token, userSub);
   if (typeof window === "undefined") {
     return;
   }
-  window.localStorage.setItem(getDebugConnectionStorageKey(userSub), JSON.stringify(prefs));
+  const persisted: PersistedDebugConnectionPrefs = {
+    tailscaleUrl: prefs.tailscaleUrl,
+    lanUrl: prefs.lanUrl,
+    pinnedFingerprint: prefs.pinnedFingerprint,
+    updatedAt: prefs.updatedAt,
+  };
+  window.localStorage.setItem(getDebugConnectionStorageKey(userSub), JSON.stringify(persisted));
 }
 
 export function forgetDebugConnectionPrefs(userSub = "anonymous"): void {
+  inMemoryDebugTokens.delete(userSub);
   if (typeof window === "undefined") {
     return;
   }

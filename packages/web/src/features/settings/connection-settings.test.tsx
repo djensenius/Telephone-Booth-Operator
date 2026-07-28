@@ -1,6 +1,10 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vite-plus/test";
-import { getDebugConnectionStorageKey } from "../../lib/debug-client.js";
+import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+import {
+  forgetDebugConnectionPrefs,
+  getDebugConnectionStorageKey,
+  readDebugConnectionPrefs,
+} from "../../lib/debug-client.js";
 import { PhoneClientConnection } from "./PhoneClientConnection.js";
 
 class MemoryStorage implements Storage {
@@ -36,9 +40,14 @@ describe("PhoneClientConnection", () => {
   beforeEach(() => {
     installLocalStorage();
     window.localStorage.clear();
+    forgetDebugConnectionPrefs("user-123");
   });
 
-  it("persists edits to user-scoped localStorage", () => {
+  afterEach(() => {
+    forgetDebugConnectionPrefs("user-123");
+  });
+
+  it("persists non-secret edits to user-scoped localStorage but keeps the token in memory", () => {
     render(<PhoneClientConnection userSub="user-123" />);
 
     fireEvent.change(screen.getByLabelText("Tailscale URL"), {
@@ -51,29 +60,36 @@ describe("PhoneClientConnection", () => {
 
     const stored = window.localStorage.getItem(getDebugConnectionStorageKey("user-123"));
     expect(stored).not.toBeNull();
-    expect(JSON.parse(stored ?? "{}")).toMatchObject({
+    const parsed = JSON.parse(stored ?? "{}") as Record<string, unknown>;
+    expect(parsed).toMatchObject({
       tailscaleUrl: "https://tail.example",
       lanUrl: "https://192.168.1.42:8443",
-      token: "secret-token",
     });
+    // The bearer token must never be written to localStorage (XSS-exfiltratable).
+    expect(parsed.token).toBeUndefined();
+    // ...but it remains available in the in-memory store for the session.
+    expect(readDebugConnectionPrefs("user-123").token).toBe("secret-token");
   });
 
-  it("forgets persisted connection settings", () => {
+  it("forgets persisted connection settings and the in-memory token", () => {
     window.localStorage.setItem(
       getDebugConnectionStorageKey("user-123"),
       JSON.stringify({
         tailscaleUrl: "https://tail.example",
         lanUrl: "",
-        token: "",
         pinnedFingerprint: "",
         updatedAt: "2026-01-01T00:00:00Z",
       }),
     );
     render(<PhoneClientConnection userSub="user-123" />);
 
+    fireEvent.change(screen.getByLabelText("Debug token"), { target: { value: "secret-token" } });
+    expect(readDebugConnectionPrefs("user-123").token).toBe("secret-token");
+
     fireEvent.click(screen.getByText("Forget"));
 
     expect(window.localStorage.getItem(getDebugConnectionStorageKey("user-123"))).toBeNull();
+    expect(readDebugConnectionPrefs("user-123").token).toBe("");
     expect(screen.getByLabelText("Tailscale URL")).toHaveProperty("value", "");
   });
 });
