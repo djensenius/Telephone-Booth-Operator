@@ -80,20 +80,29 @@ statusRouter.get("/", requireOperatorOrApiToken(), async (c) => {
 statusRouter.put("/", requireApiToken(), zValidator("json", StatusUpdateSchema), async (c) => {
   const update = c.req.valid("json");
   const reportedAt = update.updatedAt ? new Date(update.updatedAt) : new Date();
-  // The run the booth was in when the report was produced. That is normally the
-  // newest row, but a delayed report belongs to the run that was current at its
-  // own timestamp — the booth supplies `updatedAt`, so `id` breaks ties and
-  // keeps the choice deterministic when two rows share a millisecond.
-  const enclosing = await db.boothStatusSnapshot.findFirst({
-    where: { firstSeenAt: { lte: reportedAt } },
-    orderBy: [{ firstSeenAt: "desc" }, { id: "desc" }],
-  });
-  // A report predating every stored snapshot has no enclosing run; fold it into
-  // the oldest one when it matches, rather than filing a row before it.
-  const oldest = enclosing
-    ? undefined
-    : await db.boothStatusSnapshot.findFirst({ orderBy: [{ firstSeenAt: "asc" }, { id: "asc" }] });
-  const run = enclosing ?? oldest;
+  // The run the report belongs to. That is normally the newest row, but a
+  // delayed report belongs to the run that was current at its own timestamp —
+  // the booth supplies `updatedAt`, so `id` breaks ties and keeps the choice
+  // deterministic when two rows share a millisecond.
+  const [enclosing, successor] = await Promise.all([
+    db.boothStatusSnapshot.findFirst({
+      where: { firstSeenAt: { lte: reportedAt } },
+      orderBy: [{ firstSeenAt: "desc" }, { id: "desc" }],
+    }),
+    // The run that started next. A report can fall in the gap between the run
+    // it belongs to and the row that recorded it — the booth reports a status
+    // change before its next heartbeat — so a delayed repeat of the following
+    // run widens that run backwards instead of filing a duplicate row between
+    // two identical ones. This is also the fallback for a report that predates
+    // every stored snapshot.
+    db.boothStatusSnapshot.findFirst({
+      where: { firstSeenAt: { gt: reportedAt } },
+      orderBy: [{ firstSeenAt: "asc" }, { id: "asc" }],
+    }),
+  ]);
+  const run = [enclosing, successor].find(
+    (candidate) => candidate && isRepeatOf(candidate, update),
+  );
   // Collapse heartbeats. The booth re-pushes its current status every few
   // seconds so the operator never shows stale state, which meant an idle booth
   // wrote one snapshot row per beat and buried the genuine transitions under a
@@ -106,27 +115,26 @@ statusRouter.put("/", requireApiToken(), zValidator("json", StatusUpdateSchema),
   // Concurrent PUTs can interleave between the read and the write; the worst
   // case is a lost increment or a duplicate row, both harmless for a display
   // counter on a single-line booth.
-  const snapshot =
-    run && isRepeatOf(run, update)
-      ? await db.boothStatusSnapshot.update({
-          where: { id: run.id },
-          data: {
-            firstSeenAt: reportedAt < run.firstSeenAt ? reportedAt : run.firstSeenAt,
-            updatedAt: reportedAt > run.updatedAt ? reportedAt : run.updatedAt,
-            repeatCount: { increment: 1 },
-          },
-        })
-      : await db.boothStatusSnapshot.create({
-          data: {
-            state: update.state,
-            currentQuestionId: update.currentQuestionId ?? null,
-            currentMessageId: update.currentMessageId ?? null,
-            lastError: update.lastError ?? null,
-            runtimeMode: update.runtimeMode ?? null,
-            firstSeenAt: reportedAt,
-            updatedAt: reportedAt,
-          },
-        });
+  const snapshot = run
+    ? await db.boothStatusSnapshot.update({
+        where: { id: run.id },
+        data: {
+          firstSeenAt: reportedAt < run.firstSeenAt ? reportedAt : run.firstSeenAt,
+          updatedAt: reportedAt > run.updatedAt ? reportedAt : run.updatedAt,
+          repeatCount: { increment: 1 },
+        },
+      })
+    : await db.boothStatusSnapshot.create({
+        data: {
+          state: update.state,
+          currentQuestionId: update.currentQuestionId ?? null,
+          currentMessageId: update.currentMessageId ?? null,
+          lastError: update.lastError ?? null,
+          runtimeMode: update.runtimeMode ?? null,
+          firstSeenAt: reportedAt,
+          updatedAt: reportedAt,
+        },
+      });
   if (update.state === "idle") {
     await reconcileStaleSessionsOnIdle(snapshot.updatedAt);
   }

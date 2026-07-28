@@ -29,10 +29,11 @@ new row (`packages/api/src/routes/status.ts`):
 - A collapsed row spans a window: `firstSeenAt` is the earliest report of the
   status, `updatedAt` the most recent, and `repeatCount` the number of reports
   folded in. A report is folded into the run that was current at its own
-  `updatedAt` — the newest row whose `firstSeenAt` is at or before it — so a
-  delayed report counts towards the run it actually belongs to instead of the
-  run that has since started. Folding widens that run's window; it never
-  rewinds `updatedAt`.
+  `updatedAt` — the newest row starting at or before it, or, when that row is a
+  different status, the next run to start — so a delayed report counts towards
+  the run it actually belongs to instead of the run that has since started, and
+  never lands as a duplicate row between two identical ones. Folding widens
+  that run's window; it never rewinds `updatedAt`.
 - Anything that differs — a real transition, a new error string, a runtime-mode
   change — still creates a new row, so the history reads as one row per booth
   status.

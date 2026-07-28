@@ -1330,14 +1330,14 @@ export const fakeDb = {
     },
     findFirst: async (
       args: {
-        where?: { firstSeenAt?: { lte?: Date } };
+        where?: { firstSeenAt?: { lte?: Date; gt?: Date } };
         orderBy?: StatusOrder | StatusOrder[];
       } = {},
     ) => {
-      const lte = args.where?.firstSeenAt?.lte;
-      const statuses = lte
-        ? store.statuses.filter((status) => status.firstSeenAt <= lte)
-        : [...store.statuses];
+      const { lte, gt } = args.where?.firstSeenAt ?? {};
+      let statuses = [...store.statuses];
+      if (lte) statuses = statuses.filter((status) => status.firstSeenAt <= lte);
+      if (gt) statuses = statuses.filter((status) => status.firstSeenAt > gt);
       return sortStatuses(statuses, args.orderBy)[0] ?? null;
     },
     findMany: async ({
