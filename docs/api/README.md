@@ -46,13 +46,16 @@ either a `/v2` path or a deliberate ADR.
 
 ## Security schemes
 
-The spec declares two:
+The spec declares three:
 
 - `apiToken` — HTTP Bearer for the phone client.
 - `operatorSession` — `__Host-booth_session` cookie set after Authentik OIDC login.
+- `operatorBearer` — Authentik-issued JWT access token, used by native mobile
+  apps that authenticate via PKCE.
 
 Every operation declares which one(s) it accepts. Routes with `security: []`
-are public (health check, login endpoints, and read-only `GET /v1/status`).
+are public (health check and login endpoints). `GET /v1/status` requires an
+operator session, operator bearer, or phone API token.
 
 ## Implemented backend routes
 

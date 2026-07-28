@@ -169,11 +169,18 @@ describe("/v1/stats/summary", () => {
     expect(body.email).toBe("operator@example.com");
   });
 
-  it("phone-side public endpoints still bypass bearer enforcement", async () => {
+  it("requires authentication for GET /v1/status", async () => {
     const app = createApp();
-    // No bearer header → public phone route is reachable by the booth even
-    // though `requireOperator()` is mounted globally on `/v1/*`.
-    const res = await app.request("/v1/status");
+    seedStatus({ state: "idle" });
+
+    // GET /v1/status is no longer public: an unauthenticated read is rejected
+    // even though `requireOperator()` bypasses it at the global layer (the
+    // per-route guard enforces operator-or-API-token auth).
+    const anon = await app.request("/v1/status");
+    expect(anon.status).toBe(401);
+
+    // An operator session (cookie) can read the snapshot.
+    const res = await app.request("/v1/status", { headers: { cookie: operatorCookie() } });
     expect(res.status).toBe(200);
   });
 });

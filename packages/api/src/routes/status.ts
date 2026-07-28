@@ -6,7 +6,7 @@ import { wsBroadcaster } from "../lib/broadcaster.js";
 import { db } from "../lib/db.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 import { defaultStatus, serializeStatus } from "../lib/serializers.js";
-import type { AuthVariables } from "../lib/session.js";
+import { requireOperatorOrApiToken, type AuthVariables } from "../lib/session.js";
 
 const historyQuerySchema = z.object({
   since: z.string().datetime().optional(),
@@ -44,10 +44,9 @@ async function reconcileStaleSessionsOnIdle(idleTime: Date): Promise<void> {
 
 export const statusRouter = new Hono<{ Variables: AuthVariables & ApiTokenVariables }>();
 
-statusRouter.get("/", async (c) => {
-  // Public for now: the operator UI reads this before establishing its WS and
-  // health probes use it without an auth challenge. TODO: require auth once the
-  // phone/operator clients are both ready to send credentials here.
+statusRouter.get("/", requireOperatorOrApiToken(), async (c) => {
+  // Authenticated read of the latest booth snapshot. Operator clients use a
+  // session cookie or operator bearer; the booth/phone client uses its API token.
   const latest = await db.boothStatusSnapshot.findFirst({ orderBy: { updatedAt: "desc" } });
   return c.json(latest ? serializeStatus(latest) : defaultStatus());
 });

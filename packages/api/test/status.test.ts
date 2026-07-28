@@ -41,10 +41,15 @@ const setup = () => {
 describe("status routes", () => {
   beforeEach(setup);
 
-  it("keeps GET public, protects PUT with bearer auth, and returns history to operators", async () => {
+  it("requires auth for GET, protects PUT with bearer auth, and returns history to operators", async () => {
     const app = createApp();
 
-    const initial = await app.request("/v1/status");
+    // GET now requires authentication — unauthenticated callers get 401.
+    const anon = await app.request("/v1/status");
+    expect(anon.status).toBe(401);
+
+    // An operator session (cookie) can read the snapshot.
+    const initial = await app.request("/v1/status", { headers: { cookie: operatorCookie() } });
     expect(initial.status).toBe(200);
     await expect(initial.json()).resolves.toMatchObject({ state: "idle" });
 
@@ -62,7 +67,8 @@ describe("status routes", () => {
     });
     expect(put.status).toBe(204);
 
-    const latest = await app.request("/v1/status");
+    // The booth/phone client can also read the snapshot with its API token.
+    const latest = await app.request("/v1/status", { headers: { ...phoneHeaders } });
     expect(latest.status).toBe(200);
     await expect(latest.json()).resolves.toMatchObject({ state: "recording", lastError: null });
 
@@ -88,7 +94,7 @@ describe("status routes", () => {
     });
     expect(put.status).toBe(204);
 
-    const latest = await app.request("/v1/status");
+    const latest = await app.request("/v1/status", { headers: { ...phoneHeaders } });
     expect(latest.status).toBe(200);
     await expect(latest.json()).resolves.toMatchObject({ state: "idle", runtimeMode: "mock" });
 
@@ -100,7 +106,7 @@ describe("status routes", () => {
       body: JSON.stringify({ state: "idle", runtimeMode: "simulator" }),
     });
     expect(sim.status).toBe(204);
-    const latestSim = await app.request("/v1/status");
+    const latestSim = await app.request("/v1/status", { headers: { ...phoneHeaders } });
     await expect(latestSim.json()).resolves.toMatchObject({ runtimeMode: "simulator" });
   });
 
@@ -113,7 +119,7 @@ describe("status routes", () => {
     });
     expect(put.status).toBe(204);
 
-    const latest = await app.request("/v1/status");
+    const latest = await app.request("/v1/status", { headers: { ...phoneHeaders } });
     await expect(latest.json()).resolves.toMatchObject({ state: "callUnavailable" });
   });
 
