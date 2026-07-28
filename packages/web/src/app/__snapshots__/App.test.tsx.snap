@@ -182,6 +182,9 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
         <ul>
           <li>
             <a
+              aria-current="page"
+              class="active"
+              data-status="active"
               href="/status"
             >
               1 · Status

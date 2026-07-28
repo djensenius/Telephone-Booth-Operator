@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { GlassPanel } from "../../components/booth/index.js";
+import { useCurrentUser } from "../auth/useCurrentUser.js";
 import { createDebugClient, readDebugConnectionPrefs } from "../../lib/debug-client.js";
 import type {
   AudioMeter,
@@ -172,7 +173,10 @@ function allowControls(config: RedactedConfig | undefined): boolean {
 }
 
 export function DebugScreen(): JSX.Element {
-  const [prefs] = useState(() => readDebugConnectionPrefs());
+  const { user } = useCurrentUser();
+  // Settings persists under the operator's subject, so read the same key here
+  // rather than the "anonymous" default.
+  const prefs = useMemo(() => readDebugConnectionPrefs(user?.id), [user?.id]);
   const hasPrefs = prefs.tailscaleUrl.length > 0 || prefs.lanUrl.length > 0;
   const [connection, setConnection] = useState<DebugConnectionChange>(INITIAL_CONNECTION);
   const [level, setLevel] = useState("info");

@@ -823,6 +823,12 @@ textarea:focus-visible,
   font-weight: 600;
 }
 
+.settings-connection__hint {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
 .settings-list label:has(input[type="checkbox"]) {
   grid-template-columns: auto 1fr;
   align-items: center;

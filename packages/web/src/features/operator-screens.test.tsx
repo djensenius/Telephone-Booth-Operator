@@ -16,6 +16,11 @@ import {
 import { App } from "../app/App.js";
 import { createAppRouter } from "../app/router.js";
 import { ApiError, apiFetch, sha256Hex } from "../lib/api-client.js";
+import {
+  clearDebugConnectionTokens,
+  readDebugConnectionToken,
+  writeDebugConnectionToken,
+} from "../lib/debug-client.js";
 
 const operator = {
   id: "user-1",
@@ -311,6 +316,49 @@ describe("Auth feature", () => {
 
     fireEvent.submit(form);
     expect(screen.getByText("Clearing the line…")).toBeTruthy();
+  });
+
+  it("clears every in-memory debug token on logout", async () => {
+    writeDebugConnectionToken("token-a", "user-1");
+    writeDebugConnectionToken("token-b", "user-2");
+    writeDebugConnectionToken("token-anon");
+
+    try {
+      renderPath("/settings");
+      const button = await screen.findByText("Sign out");
+      const form = button.closest("form");
+      if (!form) throw new Error("missing logout form");
+
+      fireEvent.submit(form);
+
+      expect(readDebugConnectionToken("user-1")).toBe("");
+      expect(readDebugConnectionToken("user-2")).toBe("");
+      expect(readDebugConnectionToken()).toBe("");
+    } finally {
+      clearDebugConnectionTokens();
+    }
+  });
+
+  it("clears in-memory debug tokens on the digit-7 logout shortcut", async () => {
+    // Digit 7 builds and submits its own form instead of using LogoutButton,
+    // so it needs the same cleanup.
+    const submit = vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(() => undefined);
+    writeDebugConnectionToken("token-a", "user-1");
+    writeDebugConnectionToken("token-anon");
+
+    try {
+      renderPath("/status");
+      await screen.findByRole("link", { name: "1 · Status" });
+
+      fireEvent.keyDown(document, { key: "7" });
+
+      expect(submit).toHaveBeenCalled();
+      expect(readDebugConnectionToken("user-1")).toBe("");
+      expect(readDebugConnectionToken()).toBe("");
+    } finally {
+      submit.mockRestore();
+      clearDebugConnectionTokens();
+    }
   });
 });
 

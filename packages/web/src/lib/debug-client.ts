@@ -138,6 +138,15 @@ export interface DebugConnectionPrefs {
   readonly updatedAt: string;
 }
 
+/**
+ * The subset of {@link DebugConnectionPrefs} that is safe to persist in
+ * `localStorage`. The bearer `token` is intentionally excluded: it is a
+ * long-lived credential for the booth's debug/control surface and
+ * `localStorage` is readable by any JavaScript in the origin (XSS or a
+ * compromised dependency), so the token is kept in memory only.
+ */
+export type PersistedDebugConnectionPrefs = Omit<DebugConnectionPrefs, "token">;
+
 export interface CreateDebugClientOptions {
   readonly tailscaleUrl?: string;
   readonly lanUrl?: string;
@@ -213,25 +222,124 @@ export function getDebugConnectionStorageKey(userSub = "anonymous"): string {
   return `${DEBUG_STORAGE_PREFIX}.${userSub}`;
 }
 
-export function readDebugConnectionPrefs(userSub = "anonymous"): DebugConnectionPrefs {
+/**
+ * In-memory, non-persistent store for the booth debug bearer token, keyed by
+ * OIDC user subject. Keeping the token out of `localStorage` does not make it
+ * unreachable from page JavaScript — hostile script running in the origin can
+ * still read the input or hook network APIs while the page is live. What it
+ * does buy is a much smaller exposure window: the token is not readable from
+ * persistent storage, is gone on reload, and cannot outlive the browsing
+ * session or an explicit sign-out.
+ */
+const inMemoryDebugTokens = new Map<string, string>();
+
+export function readDebugConnectionToken(userSub = "anonymous"): string {
+  return inMemoryDebugTokens.get(userSub) ?? "";
+}
+
+export function writeDebugConnectionToken(token: string, userSub = "anonymous"): void {
+  if (token.length === 0) {
+    inMemoryDebugTokens.delete(userSub);
+    return;
+  }
+  inMemoryDebugTokens.set(userSub, token);
+}
+
+export function clearDebugConnectionTokens(): void {
+  inMemoryDebugTokens.clear();
+}
+
+function toPersistedPrefs(parsed: Record<string, unknown>): PersistedDebugConnectionPrefs {
+  const readString = (value: unknown): string => (typeof value === "string" ? value : "");
+  return {
+    tailscaleUrl: readString(parsed.tailscaleUrl),
+    lanUrl: readString(parsed.lanUrl),
+    pinnedFingerprint: readString(parsed.pinnedFingerprint),
+    updatedAt: readString(parsed.updatedAt),
+  };
+}
+
+/**
+ * Rewrites a stored record in place when it still carries a legacy `token`
+ * field, so upgrading operators do not keep a readable credential in
+ * `localStorage` until they next edit or forget their settings.
+ */
+function stripLegacyToken(key: string, parsed: Record<string, unknown>): void {
+  if (!("token" in parsed)) {
+    return;
+  }
+  window.localStorage.setItem(key, JSON.stringify(toPersistedPrefs(parsed)));
+}
+
+/**
+ * One-shot upgrade migration: scans every `booth.debugConn.*` record and
+ * rewrites it to the allow-listed persisted shape, dropping any bearer token
+ * written by an older build. Unparseable records are removed outright, since
+ * they are already treated as empty on read and may still contain the secret.
+ *
+ * Runs at boot, so it must never throw: reading `window.localStorage` raises
+ * `SecurityError` when storage is blocked (privacy mode, third-party cookie
+ * blocking), and that would take the whole app down before React mounts.
+ */
+export function purgeLegacyDebugConnectionTokens(): void {
   if (typeof window === "undefined") {
-    return emptyDebugConnectionPrefs();
+    return;
   }
   try {
-    const raw = window.localStorage.getItem(getDebugConnectionStorageKey(userSub));
-    if (raw === null) {
-      return emptyDebugConnectionPrefs();
+    const storage = window.localStorage;
+    const keys: string[] = [];
+    for (let index = 0; index < storage.length; index += 1) {
+      const key = storage.key(index);
+      if (key !== null && key.startsWith(`${DEBUG_STORAGE_PREFIX}.`)) {
+        keys.push(key);
+      }
     }
-    const parsed = JSON.parse(raw) as Partial<DebugConnectionPrefs>;
-    return {
-      tailscaleUrl: parsed.tailscaleUrl ?? "",
-      lanUrl: parsed.lanUrl ?? "",
-      token: parsed.token ?? "",
-      pinnedFingerprint: parsed.pinnedFingerprint ?? "",
-      updatedAt: parsed.updatedAt ?? "",
-    };
+    for (const key of keys) {
+      const raw = storage.getItem(key);
+      if (raw === null) {
+        continue;
+      }
+      let record: Record<string, unknown> | null = null;
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        if (typeof parsed === "object" && parsed !== null) {
+          record = parsed as Record<string, unknown>;
+        }
+      } catch {
+        record = null;
+      }
+      if (record === null) {
+        storage.removeItem(key);
+      } else {
+        stripLegacyToken(key, record);
+      }
+    }
   } catch {
-    return emptyDebugConnectionPrefs();
+    // Storage is unavailable; there is nothing persisted to migrate.
+  }
+}
+
+export function readDebugConnectionPrefs(userSub = "anonymous"): DebugConnectionPrefs {
+  const token = readDebugConnectionToken(userSub);
+  if (typeof window === "undefined") {
+    return { ...emptyDebugConnectionPrefs(), token };
+  }
+  try {
+    const key = getDebugConnectionStorageKey(userSub);
+    const raw = window.localStorage.getItem(key);
+    if (raw === null) {
+      return { ...emptyDebugConnectionPrefs(), token };
+    }
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) {
+      window.localStorage.removeItem(key);
+      return { ...emptyDebugConnectionPrefs(), token };
+    }
+    const record = parsed as Record<string, unknown>;
+    stripLegacyToken(key, record);
+    return { ...toPersistedPrefs(record), token };
+  } catch {
+    return { ...emptyDebugConnectionPrefs(), token };
   }
 }
 
@@ -239,17 +347,33 @@ export function writeDebugConnectionPrefs(
   prefs: DebugConnectionPrefs,
   userSub = "anonymous",
 ): void {
+  writeDebugConnectionToken(prefs.token, userSub);
   if (typeof window === "undefined") {
     return;
   }
-  window.localStorage.setItem(getDebugConnectionStorageKey(userSub), JSON.stringify(prefs));
+  const persisted: PersistedDebugConnectionPrefs = {
+    tailscaleUrl: prefs.tailscaleUrl,
+    lanUrl: prefs.lanUrl,
+    pinnedFingerprint: prefs.pinnedFingerprint,
+    updatedAt: prefs.updatedAt,
+  };
+  try {
+    window.localStorage.setItem(getDebugConnectionStorageKey(userSub), JSON.stringify(persisted));
+  } catch {
+    // Storage is unavailable or full; the in-memory token is still set.
+  }
 }
 
 export function forgetDebugConnectionPrefs(userSub = "anonymous"): void {
+  inMemoryDebugTokens.delete(userSub);
   if (typeof window === "undefined") {
     return;
   }
-  window.localStorage.removeItem(getDebugConnectionStorageKey(userSub));
+  try {
+    window.localStorage.removeItem(getDebugConnectionStorageKey(userSub));
+  } catch {
+    // Storage is unavailable; there is nothing persisted to remove.
+  }
 }
 
 export function emptyDebugConnectionPrefs(): DebugConnectionPrefs {
