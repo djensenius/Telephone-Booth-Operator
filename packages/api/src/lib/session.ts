@@ -5,7 +5,7 @@ import {
   randomBytes,
   timingSafeEqual,
 } from "node:crypto";
-import type { OperatorSession, OperatorUser } from "@prisma/client";
+import type { OperatorSession, OperatorUser } from "../generated/prisma/client.js";
 import type { Context, MiddlewareHandler } from "hono";
 import { verifyOperatorBearer } from "./bearer-auth.js";
 import { getAuthConfig } from "./config.js";

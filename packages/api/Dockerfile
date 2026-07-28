@@ -28,6 +28,7 @@ COPY --from=build /app/packages/api/node_modules /app/packages/api/node_modules
 COPY --from=build /app/packages/api/dist /app/packages/api/dist
 COPY --from=build /app/packages/api/package.json /app/packages/api/
 COPY --from=build /app/packages/api/prisma /app/packages/api/prisma
+COPY --from=build /app/packages/api/prisma.config.ts /app/packages/api/
 COPY --from=build /app/packages/shared /app/packages/shared
 EXPOSE 8787
 USER node

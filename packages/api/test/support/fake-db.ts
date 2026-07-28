@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Prisma } from "@prisma/client";
+import { Prisma } from "../../src/generated/prisma/client.js";
 
 export type FakeFile = {
   id: string;

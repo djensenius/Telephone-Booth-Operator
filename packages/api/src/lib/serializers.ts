@@ -8,7 +8,7 @@ import type {
   Moderation as PrismaModeration,
   Question,
   Transcription as PrismaTranscription,
-} from "@prisma/client";
+} from "../generated/prisma/client.js";
 import type {
   AiProvider,
   BoothEventRecord,

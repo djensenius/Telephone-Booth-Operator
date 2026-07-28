@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { Prisma } from "@prisma/client";
+import { Prisma } from "../generated/prisma/client.js";
 import {
   MessageCreateSchema,
   MessageDecisionSchema,

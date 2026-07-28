@@ -9,6 +9,11 @@ default:
 # Install dependencies (Node packages only; use `mise install` for tools).
 setup:
     vp install --frozen-lockfile
+    pnpm --filter @telephone-booth-operator/api exec prisma generate
+
+# Regenerate the Prisma client into packages/api/src/generated/prisma.
+db-generate:
+    pnpm --filter @telephone-booth-operator/api exec prisma generate
 
 # Run the full local stack: containers + api + web.
 dev:

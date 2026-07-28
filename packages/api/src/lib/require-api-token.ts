@@ -1,4 +1,4 @@
-import type { ApiToken } from "@prisma/client";
+import type { ApiToken } from "../generated/prisma/client.js";
 import type { MiddlewareHandler } from "hono";
 import type { ApiTokenScope } from "@telephone-booth-operator/shared";
 import { verifyToken } from "./api-tokens.js";

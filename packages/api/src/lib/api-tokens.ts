@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import type { ApiToken } from "@prisma/client";
+import type { ApiToken } from "../generated/prisma/client.js";
 import argon2 from "argon2";
 import { db } from "./db.js";
 

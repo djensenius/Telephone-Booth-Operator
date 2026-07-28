@@ -156,9 +156,10 @@ See [`docs/architecture.md`](../docs/architecture.md),
 Use `just` (the workspace task runner). Generated and verified recipes:
 
 ```sh
-just setup          # vp install --frozen-lockfile
+just setup          # vp install --frozen-lockfile + prisma generate
 just dev            # docker compose up -d  +  vp run -r --parallel dev
 just down           # docker compose down
+just db-generate    # regenerate the Prisma client into src/generated/prisma
 just db-migrate     # prisma migrate dev
 just db-seed        # tsx tools/seed.ts via the api package
 just typecheck      # vp run -r typecheck
