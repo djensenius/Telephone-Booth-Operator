@@ -119,7 +119,13 @@ export function MessagesScreen(): JSX.Element {
     if (deleteId !== null) confirmRef.current?.focus();
   }, [deleteId]);
 
-  const busy = deleteMessage.isPending || decideMessage.isPending || retranscribe.isPending;
+  // Scoped per card: a synchronous re-transcription can take minutes, and it
+  // must not freeze moderation on every other recording in the queue.
+  const busyId =
+    (decideMessage.isPending ? decideMessage.variables?.id : undefined) ??
+    (retranscribe.isPending ? retranscribe.variables : undefined) ??
+    (deleteMessage.isPending ? deleteMessage.variables : undefined) ??
+    null;
 
   // A delete failure is reported inside the confirmation while it is open, so
   // the focused operator sees it without looking behind the backdrop.
@@ -172,7 +178,7 @@ export function MessagesScreen(): JSX.Element {
                     ? null
                     : (promptById.get(message.questionId) ?? message.questionId)
                 }
-                busy={busy}
+                busy={busyId === message.id}
                 now={now}
                 onDecide={(id, decision) => {
                   decideMessage.mutate({ id, input: { decision } });
@@ -221,7 +227,7 @@ export function MessagesScreen(): JSX.Element {
               >
                 Confirm delete
               </button>
-              <button type="button" onClick={closeConfirm}>
+              <button type="button" disabled={deleteMessage.isPending} onClick={closeConfirm}>
                 Cancel
               </button>
             </div>
