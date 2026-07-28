@@ -7,7 +7,7 @@ vi.mock(
 );
 
 import { createTar, readTar } from "../src/lib/archive.js";
-import { EXPORT_FORMAT, EXPORT_VERSION } from "../src/lib/data-archive.js";
+import { EXPORT_FORMAT } from "../src/lib/data-archive.js";
 import { createHash } from "node:crypto";
 import { createApp } from "../src/index.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
@@ -154,7 +154,8 @@ describe("admin data export/import", () => {
         data: Buffer.from(
           JSON.stringify({
             format: EXPORT_FORMAT,
-            version: EXPORT_VERSION,
+            // Pinned to 1 on purpose: this is a pre-collapse archive.
+            version: 1,
             generatedAt: updatedAt,
             container: "audio",
             counts: {},

@@ -8,3 +8,8 @@ ALTER TABLE "BoothStatusSnapshot"
   ADD COLUMN "repeatCount" INTEGER NOT NULL DEFAULT 1;
 
 UPDATE "BoothStatusSnapshot" SET "firstSeenAt" = "updatedAt";
+
+-- Every heartbeat resolves the run enclosing its own timestamp, so index the
+-- lookup rather than scanning a long pre-collapse heartbeat history.
+CREATE INDEX "BoothStatusSnapshot_firstSeenAt_id_idx"
+  ON "BoothStatusSnapshot" ("firstSeenAt", "id");

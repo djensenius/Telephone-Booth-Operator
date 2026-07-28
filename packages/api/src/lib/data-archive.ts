@@ -17,7 +17,11 @@ import { createTar, readTar } from "./archive.js";
 import { db } from "./db.js";
 
 export const EXPORT_FORMAT = "telephone-booth-export";
-export const EXPORT_VERSION = 1;
+// 1: original shape. 2: BoothStatusSnapshot carries `firstSeenAt`/`repeatCount`.
+// Bumped so a server that predates the collapse rejects the archive as newer
+// than supported instead of failing on unknown columns mid-restore. Version 1
+// archives still import — `withStatusWindow` fills the missing window.
+export const EXPORT_VERSION = 2;
 
 // Import order matters — parents before children so foreign keys resolve.
 const IMPORT_ORDER = [
