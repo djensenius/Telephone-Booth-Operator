@@ -178,6 +178,39 @@ describe("status routes", () => {
     });
   });
 
+  it("does not widen a run back across an earlier transition", async () => {
+    const app = createApp();
+
+    const beat = async (state: string, updatedAt: string) => {
+      const response = await app.request("/v1/status", {
+        method: "PUT",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ state, updatedAt }),
+      });
+      expect(response.status).toBe(204);
+    };
+
+    await beat("idle", "2026-07-28T12:00:00.000Z");
+    await beat("recording", "2026-07-28T12:00:10.000Z");
+    await beat("idle", "2026-07-28T12:00:20.000Z");
+    // A heartbeat from the *first* idle run arrives late. It belongs before the
+    // recording, so folding it into the current idle run must not make that run
+    // look like it started before the booth was recording.
+    await beat("idle", "2026-07-28T12:00:05.000Z");
+
+    const history = await app.request("/v1/status/history?limit=10", {
+      headers: { cookie: operatorCookie() },
+    });
+    const body = await history.json();
+    expect(body.items[0]).toMatchObject({
+      state: "idle",
+      repeatCount: 2,
+      firstSeenAt: "2026-07-28T12:00:20.000Z",
+      updatedAt: "2026-07-28T12:00:20.000Z",
+    });
+    expect(body.items[1]).toMatchObject({ state: "recording" });
+  });
+
   it("persists and echoes the booth runtimeMode", async () => {
     const app = createApp();
 

@@ -153,6 +153,29 @@ describe("mergeLiveStatus", () => {
     });
   });
 
+  it("ignores a frame for the head run that is older than the cached one", () => {
+    const history = [
+      status({
+        updatedAt: "2026-07-28T12:00:30.000Z",
+        firstSeenAt: "2026-07-28T12:00:00.000Z",
+        repeatCount: 4,
+      }),
+    ];
+    const stale = status({
+      updatedAt: "2026-07-28T12:00:20.000Z",
+      firstSeenAt: "2026-07-28T12:00:00.000Z",
+      repeatCount: 3,
+    });
+
+    const merged = mergeLiveStatus(history, stale);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      updatedAt: "2026-07-28T12:00:30.000Z",
+      repeatCount: 4,
+    });
+  });
+
   it("caps the history at the requested limit", () => {
     const history = Array.from({ length: STATUS_HISTORY_LIMIT }, (_, index) =>
       status({

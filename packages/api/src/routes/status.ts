@@ -68,6 +68,25 @@ function isRepeatOf(
   );
 }
 
+/**
+ * Where a collapsed run starts once `reportedAt` is folded into it.
+ *
+ * A report that reaches us late can predate the run's `firstSeenAt`, and the
+ * window widens to cover it. It must not widen past the preceding snapshot,
+ * though: a delayed report from an *earlier* run of the same status would
+ * otherwise make the current run appear to have started before the transition
+ * that ended that earlier run.
+ */
+function widenedStart(
+  latest: { firstSeenAt: Date },
+  previous: { updatedAt: Date } | undefined,
+  reportedAt: Date,
+): Date {
+  if (reportedAt >= latest.firstSeenAt) return latest.firstSeenAt;
+  if (previous && reportedAt <= previous.updatedAt) return latest.firstSeenAt;
+  return reportedAt;
+}
+
 statusRouter.get("/", requireOperatorOrApiToken(), async (c) => {
   // Authenticated read of the latest booth snapshot. Operator clients use a
   // session cookie or operator bearer; the booth/phone client uses its API token.
@@ -78,7 +97,10 @@ statusRouter.get("/", requireOperatorOrApiToken(), async (c) => {
 statusRouter.put("/", requireApiToken(), zValidator("json", StatusUpdateSchema), async (c) => {
   const update = c.req.valid("json");
   const reportedAt = update.updatedAt ? new Date(update.updatedAt) : new Date();
-  const latest = await db.boothStatusSnapshot.findFirst({ orderBy: { updatedAt: "desc" } });
+  const [latest, previous] = await db.boothStatusSnapshot.findMany({
+    orderBy: { updatedAt: "desc" },
+    take: 2,
+  });
   // Collapse heartbeats. The booth re-pushes its current status every few
   // seconds so the operator never shows stale state, which meant an idle booth
   // wrote one snapshot row per beat and buried the genuine transitions under a
@@ -96,7 +118,7 @@ statusRouter.put("/", requireApiToken(), zValidator("json", StatusUpdateSchema),
       ? await db.boothStatusSnapshot.update({
           where: { id: latest.id },
           data: {
-            firstSeenAt: reportedAt < latest.firstSeenAt ? reportedAt : latest.firstSeenAt,
+            firstSeenAt: widenedStart(latest, previous, reportedAt),
             updatedAt: reportedAt > latest.updatedAt ? reportedAt : latest.updatedAt,
             repeatCount: { increment: 1 },
           },

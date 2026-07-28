@@ -60,8 +60,20 @@ export function mergeLiveStatus(
   limit: number = STATUS_HISTORY_LIMIT,
 ): readonly BoothStatus[] {
   const [head, ...rest] = history;
-  if (head && isSameRun(head, status)) return [status, ...rest];
+  if (head && isSameRun(head, status)) {
+    // Frames for one row can arrive out of order (the API awaits idle
+    // reconciliation before broadcasting), so keep the newer of the two rather
+    // than rewinding the window and the count.
+    return isStaleFrame(head, status) ? history : [status, ...rest];
+  }
   return [status, ...history].slice(0, limit);
+}
+
+function isStaleFrame(head: BoothStatus, status: BoothStatus): boolean {
+  const headUpdatedAt = Date.parse(head.updatedAt);
+  const updatedAt = Date.parse(status.updatedAt);
+  if (updatedAt !== headUpdatedAt) return updatedAt < headUpdatedAt;
+  return repeatCountOf(status) < repeatCountOf(head);
 }
 
 // Same booth status *and* same run. Run identity is the reported window rather
