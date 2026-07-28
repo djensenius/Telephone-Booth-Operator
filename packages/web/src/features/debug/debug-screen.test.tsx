@@ -4,7 +4,11 @@ import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { App } from "../../app/App.js";
 import { createAppRouter } from "../../app/router.js";
-import { getDebugConnectionStorageKey } from "../../lib/debug-client.js";
+import {
+  clearDebugConnectionTokens,
+  getDebugConnectionStorageKey,
+  writeDebugConnectionToken,
+} from "../../lib/debug-client.js";
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -79,16 +83,18 @@ describe("DebugScreen", () => {
   beforeEach(() => {
     installBrowserStubs();
     window.localStorage.clear();
+    // Settings persists under the operator's subject, so the fixture must use
+    // the same key the Debug screen now reads. The token is memory-only.
     window.localStorage.setItem(
-      getDebugConnectionStorageKey(),
+      getDebugConnectionStorageKey("user-1"),
       JSON.stringify({
         tailscaleUrl: "https://tail.example",
         lanUrl: "https://192.168.1.42:8443",
-        token: "debug-token",
         pinnedFingerprint: "sha256:abc",
         updatedAt: "2026-01-01T00:00:00Z",
       }),
     );
+    writeDebugConnectionToken("debug-token", "user-1");
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL) => {
@@ -189,6 +195,7 @@ describe("DebugScreen", () => {
   });
 
   afterEach(() => {
+    clearDebugConnectionTokens();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });

@@ -338,6 +338,28 @@ describe("Auth feature", () => {
       clearDebugConnectionTokens();
     }
   });
+
+  it("clears in-memory debug tokens on the digit-7 logout shortcut", async () => {
+    // Digit 7 builds and submits its own form instead of using LogoutButton,
+    // so it needs the same cleanup.
+    const submit = vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(() => undefined);
+    writeDebugConnectionToken("token-a", "user-1");
+    writeDebugConnectionToken("token-anon");
+
+    try {
+      renderPath("/status");
+      await screen.findByRole("link", { name: "1 · Status" });
+
+      fireEvent.keyDown(document, { key: "7" });
+
+      expect(submit).toHaveBeenCalled();
+      expect(readDebugConnectionToken("user-1")).toBe("");
+      expect(readDebugConnectionToken()).toBe("");
+    } finally {
+      submit.mockRestore();
+      clearDebugConnectionTokens();
+    }
+  });
 });
 
 describe("Status feature", () => {

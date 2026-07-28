@@ -1,4 +1,4 @@
-import { Outlet, createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
+import { Link, Outlet, createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
 import type { RouterHistory } from "@tanstack/react-router";
 import { z } from "zod";
 import {
@@ -89,7 +89,7 @@ function AppLayout(): JSX.Element {
                         {`${route.digit} · ${route.label}`}
                       </LogoutButton>
                     ) : (
-                      <a href={route.href}>{`${route.digit} · ${route.label}`}</a>
+                      <Link to={route.href}>{`${route.digit} · ${route.label}`}</Link>
                     )}
                   </li>
                 ))}
@@ -99,16 +99,16 @@ function AppLayout(): JSX.Element {
               <h2>Observability</h2>
               <ul>
                 <li>
-                  <a href="/stats">Stats</a>
+                  <Link to="/stats">Stats</Link>
                 </li>
                 <li>
-                  <a href="/system">Live system</a>
+                  <Link to="/system">Live system</Link>
                 </li>
                 <li>
-                  <a href="/events">Events</a>
+                  <Link to="/events">Events</Link>
                 </li>
                 <li>
-                  <a href="/sessions">Sessions</a>
+                  <Link to="/sessions">Sessions</Link>
                 </li>
               </ul>
             </nav>

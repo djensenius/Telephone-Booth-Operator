@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { apiUrlFor } from "../lib/api-client.js";
+import { clearDebugConnectionTokens } from "../lib/debug-client.js";
 import { isNavigationDigit } from "../lib/navigation.js";
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -57,6 +58,7 @@ export function useNumericNavigation(enabled = true, isAdmin = false): void {
           void navigate({ to: "/about" });
           break;
         case "7":
+          clearDebugConnectionTokens();
           queryClient.clear();
           {
             const form = document.createElement("form");
