@@ -79,18 +79,23 @@ function isStaleFrame(head: BoothStatus, status: BoothStatus): boolean {
 // Same booth status *and* same run. Run identity is the reported window rather
 // than `firstSeenAt` alone: a repeat that reaches the API out of order widens
 // the window backwards, so the same row can be re-broadcast with an earlier
-// `firstSeenAt` than the copy we cached. Overlapping windows for an identical
-// status are the same run.
+// `firstSeenAt` than the copy we cached. A run's window only ever grows, so two
+// views of one run are an identical status where one window contains the other.
+//
+// Containment rather than plain overlap matters when transitions share a
+// timestamp: `idle [a, t]`, `recording [t, t]`, `idle [t, b]` leaves two idle
+// windows touching at `t`, and they are separate runs.
 //
 // A legacy API sends no window at all, so both sides collapse to their
-// `updatedAt` instant. Those never overlap, which is what we want there: every
-// legacy frame really is a separate row.
+// `updatedAt` instant and only an identical instant could match — which the
+// caller has already handled as a duplicate frame.
 function isSameRun(a: BoothStatus, b: BoothStatus): boolean {
   if (!isSameStatus(a, b)) return false;
-  return (
-    Date.parse(firstSeenAtOf(a)) <= Date.parse(b.updatedAt) &&
-    Date.parse(firstSeenAtOf(b)) <= Date.parse(a.updatedAt)
-  );
+  const aStart = Date.parse(firstSeenAtOf(a));
+  const bStart = Date.parse(firstSeenAtOf(b));
+  const aEnd = Date.parse(a.updatedAt);
+  const bEnd = Date.parse(b.updatedAt);
+  return (aStart <= bStart && aEnd >= bEnd) || (bStart <= aStart && bEnd >= aEnd);
 }
 
 /**

@@ -176,6 +176,28 @@ describe("mergeLiveStatus", () => {
     });
   });
 
+  it("keeps runs that only touch at a shared transition timestamp", () => {
+    const history = [
+      status({
+        updatedAt: "2026-07-28T12:00:30.000Z",
+        firstSeenAt: "2026-07-28T12:00:00.000Z",
+        repeatCount: 3,
+      }),
+    ];
+    // The console missed the transition away and back; the new run starts
+    // exactly where the cached one ended.
+    const live = status({
+      updatedAt: "2026-07-28T12:00:45.000Z",
+      firstSeenAt: "2026-07-28T12:00:30.000Z",
+      repeatCount: 2,
+    });
+
+    const merged = mergeLiveStatus(history, live);
+
+    expect(merged).toHaveLength(2);
+    expect(merged[0]).toMatchObject({ firstSeenAt: "2026-07-28T12:00:30.000Z" });
+  });
+
   it("caps the history at the requested limit", () => {
     const history = Array.from({ length: STATUS_HISTORY_LIMIT }, (_, index) =>
       status({
