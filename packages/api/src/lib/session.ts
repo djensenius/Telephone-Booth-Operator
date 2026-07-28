@@ -567,8 +567,7 @@ const authenticateOperator: MiddlewareHandler<{ Variables: AuthVariables }> = as
 // with none are rejected with 401. Used by `GET /v1/status` so booth state is no
 // longer disclosed to unauthenticated callers.
 export const requireOperatorOrApiToken =
-  (): MiddlewareHandler<{ Variables: AuthVariables & ApiTokenVariables }> =>
-  async (c, next) => {
+  (): MiddlewareHandler<{ Variables: AuthVariables & ApiTokenVariables }> => async (c, next) => {
     let authorizedByApiToken = false;
     const markAuthorized = (): Promise<void> => {
       authorizedByApiToken = true;

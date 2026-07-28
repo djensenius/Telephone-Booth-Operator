@@ -9,6 +9,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "seed": "node --env-file=../../.env --import tsx scripts/seed.ts",
+    "db:smoke": "tsx scripts/db-smoke.ts",
     "lint": "vp lint src",
     "format": "vp fmt src",
     "typecheck": "tsc --noEmit",

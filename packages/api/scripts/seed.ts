@@ -3,7 +3,7 @@
  * audio File rows so a fresh install has useful content to work with.
  *
  * Re-run with `just db-seed` or
- * `pnpm --filter @telephone-booth-operator/api exec tsx scripts/seed.ts`.
+ * `pnpm --filter @telephone-booth-operator/api run seed`.
  */
 import { createHash } from "node:crypto";
 

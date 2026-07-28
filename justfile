@@ -32,6 +32,10 @@ db-migrate:
 db-seed:
     pnpm --filter @telephone-booth-operator/api run seed
 
+# Check the Prisma client can talk to a real database (needs DATABASE_URL).
+db-smoke:
+    pnpm --filter @telephone-booth-operator/api run db:smoke
+
 # Typecheck every package.
 typecheck:
     vp run -r typecheck

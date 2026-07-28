@@ -49,6 +49,10 @@ jobs:
       - run: vp exec -F @telephone-booth-operator/api -- prisma migrate deploy
         env:
           DATABASE_URL: postgres://booth:booth@localhost:5432/telephone_booth
+      - name: Prisma client runtime smoke test
+        run: vp run -F @telephone-booth-operator/api db:smoke
+        env:
+          DATABASE_URL: postgresql://booth:booth@localhost:5432/telephone_booth
       - name: Skip if no e2e specs exist
         id: probe
         run: |
