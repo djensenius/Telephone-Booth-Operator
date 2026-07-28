@@ -47,8 +47,15 @@ export function MessageCard({
   const relative = relativeTime(receivedAt, now) ?? "Not received";
   const absolute = absoluteTime(receivedAt) ?? "Not received";
   const length = durationLabel(message.audio.durationMs);
-  const badge = moderationBadge(message.latestModeration ?? null);
   const transcription = message.latestTranscription ?? null;
+  // A re-run creates a new transcription before moderation catches up, so the
+  // previous verdict would otherwise be shown against different words.
+  const moderation = message.latestModeration ?? null;
+  const badge = moderationBadge(
+    moderation !== null && transcription !== null && moderation.transcriptionId !== transcription.id
+      ? null
+      : moderation,
+  );
   const status = transcriptionStatusView(transcription);
   const text = transcriptText(transcription);
   const { snippet, truncated } =

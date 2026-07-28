@@ -556,6 +556,21 @@ describe("Messages feature", () => {
     expect(await screen.findByText("What did the city sound like today?")).toBeTruthy();
   });
 
+  it("keeps an uploading message out of reach of moderation", async () => {
+    server.use(
+      http.get("http://localhost/v1/messages", () =>
+        HttpResponse.json({ items: [{ ...message, status: "uploading" }] }),
+      ),
+    );
+    renderPath("/messages");
+    const approve = await screen.findByRole("button", { name: "Approve" });
+    expect(approve.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Reject" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByRole("link", { name: "Download" })).toBeNull();
+    fireEvent.click(approve);
+    expect(lastDecision).toBeNull();
+  });
+
   it("deletes a message from the queue only after confirmation", async () => {
     renderPath("/messages");
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
