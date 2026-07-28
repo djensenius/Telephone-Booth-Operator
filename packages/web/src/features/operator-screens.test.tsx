@@ -556,9 +556,15 @@ describe("Messages feature", () => {
     expect(await screen.findByText("What did the city sound like today?")).toBeTruthy();
   });
 
-  it("deletes a message from the queue", async () => {
+  it("deletes a message from the queue only after confirmation", async () => {
     renderPath("/messages");
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    expect(deletedMessages).not.toContain(messageId);
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm delete" }));
     await waitFor(() => expect(deletedMessages).toContain(messageId));
   });
 

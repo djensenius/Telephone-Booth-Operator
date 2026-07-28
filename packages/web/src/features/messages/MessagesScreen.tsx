@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { Message, MessageStatus } from "@telephone-booth-operator/shared";
 import type { MessageRouteFilter } from "../../lib/navigation.js";
 import { GlassPanel } from "../../components/booth/index.js";
@@ -59,6 +59,7 @@ function emptyCopy(filter: MessageRouteFilter): string {
 
 export function MessagesScreen(): JSX.Element {
   const search = useSearch({ strict: false });
+  const [deleteId, setDeleteId] = useState<string | null>(null);
   const navigate = useNavigate();
   const now = useNow();
   const filter: MessageRouteFilter = isMessageFilter(search.status) ? search.status : "all";
@@ -145,12 +146,37 @@ export function MessagesScreen(): JSX.Element {
                   retranscribe.mutate(id);
                 }}
                 onDelete={(id) => {
-                  deleteMessage.mutate(id);
+                  setDeleteId(id);
                 }}
               />
             </li>
           ))}
         </ul>
+      )}
+      {deleteId === null ? null : (
+        <section
+          className="feature-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-message-heading"
+        >
+          <h2 id="delete-message-heading">Delete this recording?</h2>
+          <p>The audio and its transcript are removed for good. This cannot be undone.</p>
+          <div className="debug-button-row">
+            <button
+              type="button"
+              disabled={deleteMessage.isPending}
+              onClick={() => {
+                deleteMessage.mutate(deleteId, { onSuccess: () => setDeleteId(null) });
+              }}
+            >
+              Confirm delete
+            </button>
+            <button type="button" onClick={() => setDeleteId(null)}>
+              Cancel
+            </button>
+          </div>
+        </section>
       )}
     </GlassPanel>
   );
