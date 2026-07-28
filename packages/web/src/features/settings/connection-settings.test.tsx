@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import {
   forgetDebugConnectionPrefs,
   getDebugConnectionStorageKey,
+  purgeLegacyDebugConnectionTokens,
   readDebugConnectionPrefs,
 } from "../../lib/debug-client.js";
 import { PhoneClientConnection } from "./PhoneClientConnection.js";
@@ -91,5 +92,77 @@ describe("PhoneClientConnection", () => {
     expect(window.localStorage.getItem(getDebugConnectionStorageKey("user-123"))).toBeNull();
     expect(readDebugConnectionPrefs("user-123").token).toBe("");
     expect(screen.getByLabelText("Tailscale URL")).toHaveProperty("value", "");
+  });
+});
+
+describe("legacy debug token migration", () => {
+  beforeEach(() => {
+    installLocalStorage();
+    window.localStorage.clear();
+    forgetDebugConnectionPrefs("user-123");
+    forgetDebugConnectionPrefs("user-456");
+  });
+
+  afterEach(() => {
+    forgetDebugConnectionPrefs("user-123");
+    forgetDebugConnectionPrefs("user-456");
+  });
+
+  function writeLegacyRecord(userSub: string, token: string): void {
+    window.localStorage.setItem(
+      getDebugConnectionStorageKey(userSub),
+      JSON.stringify({
+        tailscaleUrl: "https://tail.example",
+        lanUrl: "https://192.168.1.42:8443",
+        token,
+        pinnedFingerprint: "ab:cd",
+        updatedAt: "2026-01-01T00:00:00Z",
+      }),
+    );
+  }
+
+  it("rewrites every legacy record without the token but keeps the other prefs", () => {
+    writeLegacyRecord("user-123", "legacy-secret");
+    writeLegacyRecord("user-456", "other-secret");
+    window.localStorage.setItem("unrelated.key", JSON.stringify({ token: "not-ours" }));
+
+    purgeLegacyDebugConnectionTokens();
+
+    for (const userSub of ["user-123", "user-456"]) {
+      const raw = window.localStorage.getItem(getDebugConnectionStorageKey(userSub)) ?? "{}";
+      expect(raw).not.toContain("secret");
+      expect(JSON.parse(raw) as Record<string, unknown>).toEqual({
+        tailscaleUrl: "https://tail.example",
+        lanUrl: "https://192.168.1.42:8443",
+        pinnedFingerprint: "ab:cd",
+        updatedAt: "2026-01-01T00:00:00Z",
+      });
+    }
+    // Records outside the debug-connection namespace are left alone.
+    expect(window.localStorage.getItem("unrelated.key")).toContain("not-ours");
+    // The legacy token is discarded rather than adopted into the session.
+    expect(readDebugConnectionPrefs("user-123").token).toBe("");
+  });
+
+  it("drops records that are not parseable objects", () => {
+    window.localStorage.setItem(getDebugConnectionStorageKey("user-123"), "{token: broken");
+    window.localStorage.setItem(getDebugConnectionStorageKey("user-456"), '"legacy-secret"');
+
+    purgeLegacyDebugConnectionTokens();
+
+    expect(window.localStorage.getItem(getDebugConnectionStorageKey("user-123"))).toBeNull();
+    expect(window.localStorage.getItem(getDebugConnectionStorageKey("user-456"))).toBeNull();
+  });
+
+  it("strips a legacy token lazily when prefs are read before the migration runs", () => {
+    writeLegacyRecord("user-123", "legacy-secret");
+
+    const prefs = readDebugConnectionPrefs("user-123");
+
+    expect(prefs.token).toBe("");
+    expect(prefs.tailscaleUrl).toBe("https://tail.example");
+    expect(window.localStorage.getItem(getDebugConnectionStorageKey("user-123"))).not.toContain(
+      "legacy-secret",
+    );
   });
 });

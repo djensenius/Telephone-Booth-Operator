@@ -18,7 +18,8 @@ logs, redacted config, and optional simulation controls.
 3. Paste the LAN fallback URL, for example `https://192.168.1.42:8443`.
 4. Paste the debug token from the phone client. The token is held in memory
    for the current browser session only — it is never written to
-   `localStorage`, and must be re-entered after a reload or sign-out.
+   `localStorage`, and must be re-entered after a reload or sign-out. Tokens
+   persisted by older builds are stripped from `localStorage` on next load.
 5. Click **Test connection**. The UI prefers Tailscale and falls back to
    LAN after repeated 2s failures.
 6. Click **Pin LAN cert** while Tailscale is reachable. The operator

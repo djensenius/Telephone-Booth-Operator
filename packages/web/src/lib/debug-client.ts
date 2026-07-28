@@ -224,8 +224,12 @@ export function getDebugConnectionStorageKey(userSub = "anonymous"): string {
 
 /**
  * In-memory, non-persistent store for the booth debug bearer token, keyed by
- * OIDC user subject. The token never touches `localStorage`, so it cannot be
- * exfiltrated by page JavaScript and does not outlive the browsing session.
+ * OIDC user subject. Keeping the token out of `localStorage` does not make it
+ * unreachable from page JavaScript — hostile script running in the origin can
+ * still read the input or hook network APIs while the page is live. What it
+ * does buy is a much smaller exposure window: the token is not readable from
+ * persistent storage, is gone on reload, and cannot outlive the browsing
+ * session or an explicit sign-out.
  */
 const inMemoryDebugTokens = new Map<string, string>();
 
@@ -245,24 +249,83 @@ export function clearDebugConnectionTokens(): void {
   inMemoryDebugTokens.clear();
 }
 
+function toPersistedPrefs(parsed: Record<string, unknown>): PersistedDebugConnectionPrefs {
+  const readString = (value: unknown): string => (typeof value === "string" ? value : "");
+  return {
+    tailscaleUrl: readString(parsed.tailscaleUrl),
+    lanUrl: readString(parsed.lanUrl),
+    pinnedFingerprint: readString(parsed.pinnedFingerprint),
+    updatedAt: readString(parsed.updatedAt),
+  };
+}
+
+/**
+ * Rewrites a stored record in place when it still carries a legacy `token`
+ * field, so upgrading operators do not keep a readable credential in
+ * `localStorage` until they next edit or forget their settings.
+ */
+function stripLegacyToken(key: string, parsed: Record<string, unknown>): void {
+  if (!("token" in parsed)) {
+    return;
+  }
+  window.localStorage.setItem(key, JSON.stringify(toPersistedPrefs(parsed)));
+}
+
+/**
+ * One-shot upgrade migration: scans every `booth.debugConn.*` record and
+ * rewrites it to the allow-listed persisted shape, dropping any bearer token
+ * written by an older build. Unparseable records are removed outright, since
+ * they are already treated as empty on read and may still contain the secret.
+ */
+export function purgeLegacyDebugConnectionTokens(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const storage = window.localStorage;
+  const keys: string[] = [];
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (key !== null && key.startsWith(`${DEBUG_STORAGE_PREFIX}.`)) {
+      keys.push(key);
+    }
+  }
+  for (const key of keys) {
+    const raw = storage.getItem(key);
+    if (raw === null) {
+      continue;
+    }
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (typeof parsed !== "object" || parsed === null) {
+        storage.removeItem(key);
+        continue;
+      }
+      stripLegacyToken(key, parsed as Record<string, unknown>);
+    } catch {
+      storage.removeItem(key);
+    }
+  }
+}
+
 export function readDebugConnectionPrefs(userSub = "anonymous"): DebugConnectionPrefs {
   const token = readDebugConnectionToken(userSub);
   if (typeof window === "undefined") {
     return { ...emptyDebugConnectionPrefs(), token };
   }
   try {
-    const raw = window.localStorage.getItem(getDebugConnectionStorageKey(userSub));
+    const key = getDebugConnectionStorageKey(userSub);
+    const raw = window.localStorage.getItem(key);
     if (raw === null) {
       return { ...emptyDebugConnectionPrefs(), token };
     }
-    const parsed = JSON.parse(raw) as Partial<PersistedDebugConnectionPrefs>;
-    return {
-      tailscaleUrl: parsed.tailscaleUrl ?? "",
-      lanUrl: parsed.lanUrl ?? "",
-      token,
-      pinnedFingerprint: parsed.pinnedFingerprint ?? "",
-      updatedAt: parsed.updatedAt ?? "",
-    };
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) {
+      window.localStorage.removeItem(key);
+      return { ...emptyDebugConnectionPrefs(), token };
+    }
+    const record = parsed as Record<string, unknown>;
+    stripLegacyToken(key, record);
+    return { ...toPersistedPrefs(record), token };
   } catch {
     return { ...emptyDebugConnectionPrefs(), token };
   }

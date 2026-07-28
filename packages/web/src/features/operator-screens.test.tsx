@@ -16,6 +16,11 @@ import {
 import { App } from "../app/App.js";
 import { createAppRouter } from "../app/router.js";
 import { ApiError, apiFetch, sha256Hex } from "../lib/api-client.js";
+import {
+  clearDebugConnectionTokens,
+  readDebugConnectionToken,
+  writeDebugConnectionToken,
+} from "../lib/debug-client.js";
 
 const operator = {
   id: "user-1",
@@ -311,6 +316,27 @@ describe("Auth feature", () => {
 
     fireEvent.submit(form);
     expect(screen.getByText("Clearing the line…")).toBeTruthy();
+  });
+
+  it("clears every in-memory debug token on logout", async () => {
+    writeDebugConnectionToken("token-a", "user-1");
+    writeDebugConnectionToken("token-b", "user-2");
+    writeDebugConnectionToken("token-anon");
+
+    try {
+      renderPath("/settings");
+      const button = await screen.findByText("Sign out");
+      const form = button.closest("form");
+      if (!form) throw new Error("missing logout form");
+
+      fireEvent.submit(form);
+
+      expect(readDebugConnectionToken("user-1")).toBe("");
+      expect(readDebugConnectionToken("user-2")).toBe("");
+      expect(readDebugConnectionToken()).toBe("");
+    } finally {
+      clearDebugConnectionTokens();
+    }
   });
 });
 
