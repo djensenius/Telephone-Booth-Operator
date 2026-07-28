@@ -121,7 +121,7 @@ export function MessageCard({
         <Link to="/messages/$id" params={{ id: message.id }}>
           Open
         </Link>
-        {status.canRetry ? (
+        {status.canRetry && message.status !== "uploading" ? (
           <button type="button" disabled={busy} onClick={() => onRetranscribe(message.id)}>
             Re-run transcription
           </button>

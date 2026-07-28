@@ -4,7 +4,8 @@ export type RouteStatusFilter = "pending" | "approved" | "rejected";
 
 // Queue filters shown on /messages. "needs-review" spans two backend statuses
 // (`received` before the AI worker claims a message, `pending` while its work
-// is in flight), so it is narrowed client-side rather than sent as `?status=`.
+// is in flight), so the screen requests each status separately and merges the
+// two lists rather than sending a single `?status=`.
 export type MessageRouteFilter = "all" | "needs-review" | "approved" | "rejected" | "uploading";
 
 export const MESSAGE_ROUTE_FILTERS: readonly MessageRouteFilter[] = [

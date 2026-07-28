@@ -43,8 +43,10 @@ shortcuts are ignored for non-admin operators.
 | `/v1/auth/callback`             | API OIDC callback handler                                          |
 
 An unrecognized `status` value falls back to the unfiltered queue. The
-`needs-review` filter spans two backend statuses, so it is narrowed in the
-browser rather than passed through as `?status=` to `GET /v1/messages`.
+`needs-review` filter spans two backend statuses, and `GET /v1/messages`
+accepts only one `status` at a time, so the screen issues two requests
+(`?status=received` and `?status=pending`) and merges the results by received
+time.
 
 ## Message queue
 
