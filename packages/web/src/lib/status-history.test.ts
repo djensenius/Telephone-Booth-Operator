@@ -234,6 +234,32 @@ describe("mergeLiveStatus", () => {
     expect(merged.map((item) => item.state)).toEqual(["recording", "uploading", "idle"]);
   });
 
+  it("replaces a cached run that a newer transition already pushed down", () => {
+    const history = [
+      status({
+        state: "recording",
+        updatedAt: "2026-07-28T12:00:40.000Z",
+        firstSeenAt: "2026-07-28T12:00:40.000Z",
+      }),
+      status({
+        updatedAt: "2026-07-28T12:00:20.000Z",
+        firstSeenAt: "2026-07-28T12:00:00.000Z",
+        repeatCount: 2,
+      }),
+    ];
+    // A delayed heartbeat for the idle run that has already ended.
+    const late = status({
+      updatedAt: "2026-07-28T12:00:30.000Z",
+      firstSeenAt: "2026-07-28T12:00:00.000Z",
+      repeatCount: 3,
+    });
+
+    const merged = mergeLiveStatus(history, late);
+
+    expect(merged).toHaveLength(2);
+    expect(collapseStatusHistory(merged)[1]).toMatchObject({ repeatCount: 3 });
+  });
+
   it("seeds an empty history", () => {
     expect(mergeLiveStatus([], status({ updatedAt: "2026-07-28T12:00:00.000Z" }))).toHaveLength(1);
   });

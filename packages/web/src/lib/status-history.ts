@@ -59,12 +59,18 @@ export function mergeLiveStatus(
   status: BoothStatus,
   limit: number = STATUS_HISTORY_LIMIT,
 ): readonly BoothStatus[] {
-  const [head, ...rest] = history;
-  if (head && isSameRun(head, status)) {
-    // Frames for one row can arrive out of order (the API awaits idle
-    // reconciliation before broadcasting), so keep the newer of the two rather
-    // than rewinding the window and the count.
-    return isStaleFrame(head, status) ? history : [status, ...rest];
+  // Frames for one row can arrive out of order (the API awaits idle
+  // reconciliation before broadcasting), so a repeat is matched against the
+  // whole cache, not just the head: a delayed repeat of a row that a newer
+  // transition has already pushed down would otherwise sit beside its cached
+  // copy and have both counts summed at render time. The newer of the two
+  // versions wins, so the window and the count never rewind.
+  const cachedRun = history.findIndex((item) => isSameRun(item, status));
+  if (cachedRun !== -1) {
+    if (isStaleFrame(history[cachedRun]!, status)) return history;
+    const replaced = [...history];
+    replaced[cachedRun] = status;
+    return replaced;
   }
   // A frame for a different row can also arrive late. It still belongs in the
   // history, but at its place in time rather than at the head.
