@@ -48,11 +48,12 @@ export function firstSeenAtOf(status: BoothStatus): string {
 /**
  * Fold a live status frame into the cached newest-first history.
  *
- * A frame that repeats the head *row* is that row re-broadcast by the API, so
- * it replaces the head (the server's window and `repeatCount` are
- * authoritative). Anything else is a genuine transition and is prepended,
- * including a return to a status the booth held earlier: that run's window
- * starts after the previous run ended, so it can never overwrite it.
+ * A frame that repeats a cached *row* is that row re-broadcast by the API, so
+ * it replaces the cached copy (the server's window and `repeatCount` are
+ * authoritative). Anything else is a genuine transition and is inserted at its
+ * place in time, including a return to a status the booth held earlier: that
+ * run's window starts after the previous run ended, so it can never overwrite
+ * it.
  */
 export function mergeLiveStatus(
   history: readonly BoothStatus[],
@@ -60,24 +61,31 @@ export function mergeLiveStatus(
   limit: number = STATUS_HISTORY_LIMIT,
 ): readonly BoothStatus[] {
   // Frames for one row can arrive out of order (the API awaits idle
-  // reconciliation before broadcasting), so a repeat is matched against the
-  // whole cache, not just the head: a delayed repeat of a row that a newer
-  // transition has already pushed down would otherwise sit beside its cached
-  // copy and have both counts summed at render time. The newer of the two
-  // versions wins, so the window and the count never rewind.
-  const cachedRun = history.findIndex((item) => isSameRun(item, status));
-  if (cachedRun !== -1) {
-    if (isStaleFrame(history[cachedRun]!, status)) return history;
-    const replaced = [...history];
-    replaced[cachedRun] = status;
-    return replaced;
-  }
-  // A frame for a different row can also arrive late. It still belongs in the
-  // history, but at its place in time rather than at the head.
+  // reconciliation before broadcasting), so place the frame at its position in
+  // time first: a delayed repeat of a row that a newer transition has already
+  // pushed down belongs beside its cached copy, not at the head.
   const at = history.findIndex(
     (item) => Date.parse(item.updatedAt) <= Date.parse(status.updatedAt),
   );
   const index = at === -1 ? history.length : at;
+  // Only the entries either side of that position can be the same row. Matching
+  // by value across the whole history would drop a genuine transition: the
+  // booth supplies `updatedAt`, so `idle`, a blip of `recording`, and `idle`
+  // again can share one millisecond, leaving two indistinguishable idle runs
+  // that only their position tells apart.
+  const cached = [index - 1, index].find((candidate) => {
+    const entry = history[candidate];
+    return entry !== undefined && isSameRun(entry, status);
+  });
+  if (cached !== undefined) {
+    // The server's window and `repeatCount` are authoritative, so the newer of
+    // the two views wins and neither ever rewinds.
+    const entry = history[cached] as BoothStatus;
+    if (isStaleFrame(entry, status)) return history;
+    const replaced = [...history];
+    replaced[cached] = status;
+    return replaced;
+  }
   return [...history.slice(0, index), status, ...history.slice(index)].slice(0, limit);
 }
 

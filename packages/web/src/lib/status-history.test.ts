@@ -203,6 +203,22 @@ describe("mergeLiveStatus", () => {
     expect(merged[0]).toMatchObject({ firstSeenAt: "2026-07-28T12:00:30.000Z" });
   });
 
+  it("keeps a short run bracketed by identical runs sharing a timestamp", () => {
+    // idle, a blip of recording, idle again — all in one booth millisecond.
+    const at = "2026-07-28T12:00:00.000Z";
+    const idle = status({ updatedAt: at, firstSeenAt: at, repeatCount: 1 });
+    const recording = status({
+      state: "recording",
+      updatedAt: at,
+      firstSeenAt: at,
+      repeatCount: 1,
+    });
+
+    const merged = mergeLiveStatus(mergeLiveStatus(mergeLiveStatus([], idle), recording), idle);
+
+    expect(merged.map((entry) => entry.state)).toEqual(["idle", "recording", "idle"]);
+  });
+
   it("caps the history at the requested limit", () => {
     const history = Array.from({ length: STATUS_HISTORY_LIMIT }, (_, index) =>
       status({
