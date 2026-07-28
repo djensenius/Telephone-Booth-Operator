@@ -130,6 +130,29 @@ describe("mergeLiveStatus", () => {
     expect(merged[1]).toMatchObject({ firstSeenAt: "2026-07-28T12:00:00.000Z", repeatCount: 2 });
   });
 
+  it("replaces the head when a delayed repeat widens the run's window", () => {
+    const history = [
+      status({
+        updatedAt: "2026-07-28T12:00:10.000Z",
+        firstSeenAt: "2026-07-28T12:00:10.000Z",
+        repeatCount: 1,
+      }),
+    ];
+    const live = status({
+      updatedAt: "2026-07-28T12:00:10.000Z",
+      firstSeenAt: "2026-07-28T12:00:00.000Z",
+      repeatCount: 2,
+    });
+
+    const merged = mergeLiveStatus(history, live);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      firstSeenAt: "2026-07-28T12:00:00.000Z",
+      repeatCount: 2,
+    });
+  });
+
   it("caps the history at the requested limit", () => {
     const history = Array.from({ length: STATUS_HISTORY_LIMIT }, (_, index) =>
       status({

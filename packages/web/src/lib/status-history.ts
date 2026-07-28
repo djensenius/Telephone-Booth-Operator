@@ -48,11 +48,11 @@ export function firstSeenAtOf(status: BoothStatus): string {
 /**
  * Fold a live status frame into the cached newest-first history.
  *
- * A frame that repeats the head *row* — same status and same `firstSeenAt` — is
- * that row re-broadcast by the API, so it replaces the head (its `repeatCount`
- * is already authoritative). Anything else is a genuine transition and is
- * prepended, including a return to a status the booth held earlier: that run
- * has its own `firstSeenAt`, so it can never overwrite the previous one.
+ * A frame that repeats the head *row* is that row re-broadcast by the API, so
+ * it replaces the head (the server's window and `repeatCount` are
+ * authoritative). Anything else is a genuine transition and is prepended,
+ * including a return to a status the booth held earlier: that run's window
+ * starts after the previous run ended, so it can never overwrite it.
  */
 export function mergeLiveStatus(
   history: readonly BoothStatus[],
@@ -64,11 +64,21 @@ export function mergeLiveStatus(
   return [status, ...history].slice(0, limit);
 }
 
-// Same booth status *and* same run. A legacy API sends neither `firstSeenAt`,
-// so both are `undefined` and this degrades to plain status equality — which is
-// what we want there, since every legacy frame is an identical new row.
+// Same booth status *and* same run. Run identity is the reported window rather
+// than `firstSeenAt` alone: a repeat that reaches the API out of order widens
+// the window backwards, so the same row can be re-broadcast with an earlier
+// `firstSeenAt` than the copy we cached. Overlapping windows for an identical
+// status are the same run.
+//
+// A legacy API sends no window at all, so both sides collapse to their
+// `updatedAt` instant. Those never overlap, which is what we want there: every
+// legacy frame really is a separate row.
 function isSameRun(a: BoothStatus, b: BoothStatus): boolean {
-  return isSameStatus(a, b) && a.firstSeenAt === b.firstSeenAt;
+  if (!isSameStatus(a, b)) return false;
+  return (
+    Date.parse(firstSeenAtOf(a)) <= Date.parse(b.updatedAt) &&
+    Date.parse(firstSeenAtOf(b)) <= Date.parse(a.updatedAt)
+  );
 }
 
 /**
