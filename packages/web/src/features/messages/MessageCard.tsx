@@ -30,7 +30,7 @@ export interface MessageCardProps {
   readonly now: number;
   readonly onDecide: (id: string, decision: "approve" | "reject") => void;
   readonly onRetranscribe: (id: string) => void;
-  readonly onDelete: (id: string) => void;
+  readonly onDelete: (id: string, trigger: HTMLButtonElement) => void;
 }
 
 export function MessageCard({
@@ -138,7 +138,11 @@ export function MessageCard({
             Download
           </a>
         )}
-        <button type="button" disabled={busy} onClick={() => onDelete(message.id)}>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={(event) => onDelete(message.id, event.currentTarget)}
+        >
           Delete
         </button>
       </div>

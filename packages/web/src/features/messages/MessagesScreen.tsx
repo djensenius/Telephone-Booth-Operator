@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Message, MessageStatus } from "@telephone-booth-operator/shared";
 import type { MessageRouteFilter } from "../../lib/navigation.js";
 import { GlassPanel } from "../../components/booth/index.js";
@@ -60,6 +60,10 @@ function emptyCopy(filter: MessageRouteFilter): string {
 export function MessagesScreen(): JSX.Element {
   const search = useSearch({ strict: false });
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  // Focus moves into the confirmation and returns to the card's Delete button
+  // when it closes, so the dialog is announced and keyboard users keep place.
+  const confirmRef = useRef<HTMLButtonElement | null>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
   const navigate = useNavigate();
   const now = useNow();
   const filter: MessageRouteFilter = isMessageFilter(search.status) ? search.status : "all";
@@ -91,6 +95,16 @@ export function MessagesScreen(): JSX.Element {
     () => new Map((questions.data?.items ?? []).map((question) => [question.id, question.prompt])),
     [questions.data?.items],
   );
+
+  const closeConfirm = useCallback(() => {
+    setDeleteId(null);
+    returnFocusRef.current?.focus();
+    returnFocusRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    if (deleteId !== null) confirmRef.current?.focus();
+  }, [deleteId]);
 
   const busy = deleteMessage.isPending || decideMessage.isPending || retranscribe.isPending;
 
@@ -145,7 +159,8 @@ export function MessagesScreen(): JSX.Element {
                 onRetranscribe={(id) => {
                   retranscribe.mutate(id);
                 }}
-                onDelete={(id) => {
+                onDelete={(id, trigger) => {
+                  returnFocusRef.current = trigger;
                   setDeleteId(id);
                 }}
               />
@@ -154,29 +169,38 @@ export function MessagesScreen(): JSX.Element {
         </ul>
       )}
       {deleteId === null ? null : (
-        <section
-          className="feature-dialog"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="delete-message-heading"
+        <div
+          className="feature-dialog-backdrop"
+          role="presentation"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") closeConfirm();
+          }}
         >
-          <h2 id="delete-message-heading">Delete this recording?</h2>
-          <p>The audio and its transcript are removed for good. This cannot be undone.</p>
-          <div className="debug-button-row">
-            <button
-              type="button"
-              disabled={deleteMessage.isPending}
-              onClick={() => {
-                deleteMessage.mutate(deleteId, { onSuccess: () => setDeleteId(null) });
-              }}
-            >
-              Confirm delete
-            </button>
-            <button type="button" onClick={() => setDeleteId(null)}>
-              Cancel
-            </button>
-          </div>
-        </section>
+          <section
+            className="feature-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-message-heading"
+          >
+            <h2 id="delete-message-heading">Delete this recording?</h2>
+            <p>The audio and its transcript are removed for good. This cannot be undone.</p>
+            <div className="debug-button-row">
+              <button
+                ref={confirmRef}
+                type="button"
+                disabled={deleteMessage.isPending}
+                onClick={() => {
+                  deleteMessage.mutate(deleteId, { onSuccess: closeConfirm });
+                }}
+              >
+                Confirm delete
+              </button>
+              <button type="button" onClick={closeConfirm}>
+                Cancel
+              </button>
+            </div>
+          </section>
+        </div>
       )}
     </GlassPanel>
   );
