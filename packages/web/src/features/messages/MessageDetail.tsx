@@ -107,6 +107,8 @@ function TranscriptCard({
           {status.label}
           {status.detail === null ? "." : `: ${status.detail}.`}
         </p>
+      ) : status.tone === "none" ? (
+        <p className="feature-empty">Silence — the recording has no speech.</p>
       ) : (
         <>
           <p className="feature-transcript-body">{transcription.text ?? ""}</p>

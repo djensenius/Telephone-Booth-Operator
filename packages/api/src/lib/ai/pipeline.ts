@@ -264,7 +264,12 @@ export const runTranscription = async (
       } else {
         // Silent recording: there is nothing to moderate, but we still want
         // the message in the operator queue rather than stuck in "received".
-        await db.message.update({ where: { id: message.id }, data: { status: "pending" } });
+        // Scoped to `received` like `advanceMessageAfterModeration`, so that
+        // re-transcribing an already-decided message cannot reopen it.
+        await db.message.updateMany({
+          where: { id: message.id, status: "received" },
+          data: { status: "pending" },
+        });
         await broadcastMessage(message.id);
       }
     }

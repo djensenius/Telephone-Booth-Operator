@@ -237,6 +237,18 @@ describe("AI pipeline", () => {
     expect(moderation.moderate).not.toHaveBeenCalled();
   });
 
+  it("does not roll back an operator decision when a re-run transcribes silence", async () => {
+    const id = await seedReceivedMessage();
+    await runTranscription({ messageId: id, deps: baseDeps() });
+    await fakeDb.message.update({ where: { id }, data: { status: "approved" } });
+    await runTranscription({
+      messageId: id,
+      deps: baseDeps({ transcriptionProvider: fakeTranscription("   ") }),
+    });
+    const message = await fakeDb.message.findUnique({ where: { id } });
+    expect((message as unknown as { status: string }).status).toBe("approved");
+  });
+
   it("advances messages to pending when moderation is disabled so they reach the operator queue", async () => {
     const id = await seedReceivedMessage();
     await runTranscription({
