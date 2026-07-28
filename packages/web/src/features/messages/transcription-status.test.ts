@@ -50,6 +50,22 @@ describe("transcriptionStatusView", () => {
     expect(view.canRetry).toBe(false);
   });
 
+  it("keeps a mac_app job from offering a retry that the API would reject", () => {
+    const view = transcriptionStatusView({ ...base, provider: "mac_app", status: "pending" });
+    expect(view.canRetry).toBe(false);
+  });
+
+  it("offers a retry for push work, which only rebroadcasts", () => {
+    expect(transcriptionStatusView({ ...base, provider: "push", status: "pending" }).canRetry).toBe(
+      true,
+    );
+  });
+
+  it("labels a successful but empty transcript as silence", () => {
+    const view = transcriptionStatusView({ ...base, text: "   " });
+    expect(view.label).toBe("Silence");
+  });
+
   it("surfaces the failure reason and provider", () => {
     const view = transcriptionStatusView({
       ...base,

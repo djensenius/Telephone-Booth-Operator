@@ -666,7 +666,13 @@ export function useDeactivateInstruction() {
   });
 }
 
-export function useMessagesList(filter: MessageStatus | "all", limit = 100) {
+export interface MessagesListOptions {
+  readonly limit?: number;
+  readonly enabled?: boolean;
+}
+
+export function useMessagesList(filter: MessageStatus | "all", options: MessagesListOptions = {}) {
+  const limit = options.limit ?? 100;
   const statusFilter = MessageStatusSchema.safeParse(filter).success
     ? (filter as MessageStatus)
     : undefined;
@@ -677,6 +683,7 @@ export function useMessagesList(filter: MessageStatus | "all", limit = 100) {
         ...(statusFilter === undefined ? {} : { status: statusFilter }),
         limit,
       }),
+    enabled: options.enabled ?? true,
   });
 }
 

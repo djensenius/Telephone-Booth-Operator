@@ -107,6 +107,7 @@ let deletedMessages: string[] = [];
 let revokedToken = false;
 let lastCreatedTokenScope: string | undefined;
 let lastMessageUrl = "";
+let messageUrls: string[] = [];
 let lastDecision: { decision: string; notes?: string } | null = null;
 let writeTextMock: ReturnType<typeof vi.fn>;
 
@@ -176,6 +177,11 @@ const server = setupServer(
   }),
   http.get("http://localhost/v1/messages", ({ request }) => {
     lastMessageUrl = request.url;
+    messageUrls.push(request.url);
+    const status = new URL(request.url).searchParams.get("status");
+    if (status !== null && status !== message.status) {
+      return HttpResponse.json({ items: [] });
+    }
     return HttpResponse.json({ items: [message] });
   }),
   http.get("http://localhost/v1/messages/:id", () => HttpResponse.json(message)),
@@ -302,6 +308,7 @@ beforeEach(() => {
   revokedToken = false;
   lastCreatedTokenScope = undefined;
   lastMessageUrl = "";
+  messageUrls = [];
   lastDecision = null;
   installBrowserStubs();
   window.localStorage.clear();
@@ -537,10 +544,15 @@ describe("Messages feature", () => {
     await waitFor(() => expect(lastMessageUrl).toContain("status=rejected"));
   });
 
-  it("narrows the needs-review filter client side without a status param", async () => {
+  it("narrows the needs-review filter to received and pending requests", async () => {
     renderPath("/messages");
     fireEvent.click(await screen.findByText("Needs review"));
-    await waitFor(() => expect(lastMessageUrl).not.toContain("status="));
+    await waitFor(() =>
+      expect(messageUrls.some((url) => url.includes("status=received"))).toBe(true),
+    );
+    await waitFor(() =>
+      expect(messageUrls.some((url) => url.includes("status=pending"))).toBe(true),
+    );
     expect(await screen.findByText("What did the city sound like today?")).toBeTruthy();
   });
 

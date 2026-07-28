@@ -27,6 +27,7 @@ export interface MessageCardProps {
   readonly message: Message;
   readonly prompt: string | null;
   readonly busy: boolean;
+  readonly now: number;
   readonly onDecide: (id: string, decision: "approve" | "reject") => void;
   readonly onRetranscribe: (id: string) => void;
   readonly onDelete: (id: string) => void;
@@ -36,13 +37,14 @@ export function MessageCard({
   message,
   prompt,
   busy,
+  now,
   onDecide,
   onRetranscribe,
   onDelete,
 }: MessageCardProps): JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const receivedAt = message.receivedAt ?? message.createdAt;
-  const relative = relativeTime(receivedAt) ?? "Not received";
+  const relative = relativeTime(receivedAt, now) ?? "Not received";
   const absolute = absoluteTime(receivedAt) ?? "Not received";
   const length = durationLabel(message.audio.durationMs);
   const badge = moderationBadge(message.latestModeration ?? null);
@@ -68,7 +70,7 @@ export function MessageCard({
         {length === null ? null : <span className="message-card__duration">{length}</span>}
       </header>
 
-      <h3 className="message-card__prompt">{prompt ?? "Unlinked booth recording"}</h3>
+      <h2 className="message-card__prompt">{prompt ?? "Unlinked booth recording"}</h2>
 
       <audio className="message-card__audio" controls preload="none" src={message.audio.url}>
         Message audio

@@ -14,6 +14,7 @@ import {
 import { FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
 import { transcriptionStatusView } from "./transcription-status.js";
 import { absoluteTime, relativeTime } from "../../lib/time-format.js";
+import { useNow } from "../../hooks/useNow.js";
 
 const listenedKey = (id: string): string => `booth.message.listened.${id}`;
 
@@ -38,10 +39,10 @@ function formatDateTime(value: string | null | undefined): string {
 }
 
 // "3h ago (12/03/2026, 18:04)" — relative reads faster, absolute stays exact.
-function formatMoment(value: string | null | undefined): string {
+function formatMoment(value: string | null | undefined, now: number): string {
   const absolute = absoluteTime(value);
   if (absolute === null) return "—";
-  const relative = relativeTime(value);
+  const relative = relativeTime(value, now);
   return relative === null ? absolute : `${relative} (${absolute})`;
 }
 
@@ -396,6 +397,7 @@ function DecisionCard({
 
 export function MessageDetail(): JSX.Element {
   const { id } = useParams({ from: "/messages/$id" });
+  const now = useNow();
   const message = useMessage(id);
   const questions = useQuestionsList();
   const transcriptions = useMessageTranscriptions(id);
@@ -439,12 +441,12 @@ export function MessageDetail(): JSX.Element {
                 <dd>
                   {message.data.receivedAt === null || message.data.receivedAt === undefined
                     ? "Not received"
-                    : formatMoment(message.data.receivedAt)}
+                    : formatMoment(message.data.receivedAt, now)}
                 </dd>
               </div>
               <div>
                 <dt>Created</dt>
-                <dd>{formatMoment(message.data.createdAt)}</dd>
+                <dd>{formatMoment(message.data.createdAt, now)}</dd>
               </div>
               <div>
                 <dt>SHA-256</dt>

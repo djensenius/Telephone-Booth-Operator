@@ -16,17 +16,17 @@ import {
   isMessageFilter,
   messageFilterLabel,
 } from "../../lib/navigation.js";
+import { useNow } from "../../hooks/useNow.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
 import { MessageCard } from "./MessageCard.js";
 
-// Backend statuses that still want a human verdict. `received` is a recording
-// the AI worker has not claimed yet; `pending` is one with AI work in flight.
-// `GET /v1/messages` only takes a single `status`, so this filter fetches the
-// unfiltered list and narrows here instead.
-const NEEDS_REVIEW: readonly MessageStatus[] = ["received", "pending"];
-
-const NEEDS_REVIEW_LIMIT = 200;
-
+// "Needs review" spans two backend statuses: `received` is a recording the AI
+// worker has not claimed yet, `pending` is one with AI work in flight.
+// `GET /v1/messages` only takes a single `status`, and an unfiltered fetch
+// would be truncated to the newest N rows across *all* statuses — burying
+// older unreviewed work behind a wall of approved messages. So the two
+// statuses are fetched separately and merged here, letting the server truncate
+// after filtering.
 function backendFilter(filter: MessageRouteFilter): MessageStatus | "all" {
   switch (filter) {
     case "approved":
@@ -36,6 +36,10 @@ function backendFilter(filter: MessageRouteFilter): MessageStatus | "all" {
     default:
       return "all";
   }
+}
+
+function receivedTime(message: Message): number {
+  return Date.parse(message.receivedAt ?? message.createdAt);
 }
 
 function emptyCopy(filter: MessageRouteFilter): string {
@@ -56,22 +60,27 @@ function emptyCopy(filter: MessageRouteFilter): string {
 export function MessagesScreen(): JSX.Element {
   const search = useSearch({ strict: false });
   const navigate = useNavigate();
+  const now = useNow();
   const filter: MessageRouteFilter = isMessageFilter(search.status) ? search.status : "all";
-  const messages = useMessagesList(
-    backendFilter(filter),
-    filter === "needs-review" ? NEEDS_REVIEW_LIMIT : undefined,
-  );
+  const needsReview = filter === "needs-review";
+  const listed = useMessagesList(backendFilter(filter), { enabled: !needsReview });
+  const received = useMessagesList("received", { enabled: needsReview });
+  const pending = useMessagesList("pending", { enabled: needsReview });
   const questions = useQuestionsList();
   const deleteMessage = useDeleteMessage();
   const decideMessage = useDecideMessage();
   const retranscribe = useRetranscribeMessage();
 
+  const queries = needsReview ? [received, pending] : [listed];
+  const isLoading = queries.some((query) => query.isLoading);
+  const loadError = queries.some((query) => query.error);
+
   const rows = useMemo(() => {
-    const items = messages.data?.items ?? [];
-    return filter === "needs-review"
-      ? items.filter((message: Message) => NEEDS_REVIEW.includes(message.status))
-      : items;
-  }, [messages.data?.items, filter]);
+    if (!needsReview) return listed.data?.items ?? [];
+    return [...(received.data?.items ?? []), ...(pending.data?.items ?? [])].sort(
+      (a, b) => receivedTime(b) - receivedTime(a),
+    );
+  }, [needsReview, listed.data?.items, received.data?.items, pending.data?.items]);
 
   const promptById = useMemo(
     () => new Map((questions.data?.items ?? []).map((question) => [question.id, question.prompt])),
@@ -107,9 +116,9 @@ export function MessagesScreen(): JSX.Element {
         ))}
       </div>
       {actionError ? <p className="feature-error">{actionError.message}</p> : null}
-      {messages.isLoading ? <FeatureSkeleton /> : null}
-      {messages.error ? <FeatureError message="Could not load the message queue." /> : null}
-      {!messages.isLoading && !messages.error && rows.length === 0 ? (
+      {isLoading ? <FeatureSkeleton /> : null}
+      {loadError ? <FeatureError message="Could not load the message queue." /> : null}
+      {!isLoading && !loadError && rows.length === 0 ? (
         <FeatureEmpty title="No messages on the line">{emptyCopy(filter)}</FeatureEmpty>
       ) : null}
       {rows.length === 0 ? null : (
@@ -124,6 +133,7 @@ export function MessagesScreen(): JSX.Element {
                     : (promptById.get(message.questionId) ?? message.questionId)
                 }
                 busy={busy}
+                now={now}
                 onDecide={(id, decision) => {
                   decideMessage.mutate({ id, input: { decision } });
                 }}
@@ -131,7 +141,7 @@ export function MessagesScreen(): JSX.Element {
                   retranscribe.mutate(id);
                 }}
                 onDelete={(id) => {
-                  void deleteMessage.mutateAsync(id);
+                  deleteMessage.mutate(id);
                 }}
               />
             </li>

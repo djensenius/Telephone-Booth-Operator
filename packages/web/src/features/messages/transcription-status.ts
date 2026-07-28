@@ -23,8 +23,13 @@ export interface TranscriptionStatusView {
   readonly canRetry: boolean;
 }
 
-// Providers that do the work off-box, driven by a push notification.
-const PUSH_PROVIDERS = new Set(["push", "mac_app"]);
+// Providers whose work happens off-box. Both are driven by a device rather
+// than by the API process, but only `push` is safe to re-request while a row
+// is pending: `push` rebroadcasts the work envelope, whereas an in-process
+// provider like `mac_app` is already awaiting its own HTTP call and answers a
+// second request with `409 transcription_already_pending`.
+const DEVICE_PROVIDERS = new Set(["push", "mac_app"]);
+const REBROADCASTABLE_PROVIDERS = new Set(["push"]);
 
 function providerLabel(transcription: Transcription): string {
   return transcription.model
@@ -39,12 +44,12 @@ export function transcriptionStatusView(
     return { label: "No transcription yet", tone: "none", detail: null, canRetry: true };
   }
   if (transcription.status === "pending") {
-    return PUSH_PROVIDERS.has(transcription.provider)
+    return DEVICE_PROVIDERS.has(transcription.provider)
       ? {
           label: "Waiting on transcription device",
           tone: "waiting",
           detail: `Queued for ${providerLabel(transcription)}`,
-          canRetry: true,
+          canRetry: REBROADCASTABLE_PROVIDERS.has(transcription.provider),
         }
       : { label: "Transcribing…", tone: "pending", detail: null, canRetry: false };
   }
@@ -59,6 +64,11 @@ export function transcriptionStatusView(
           : providerLabel(transcription),
       canRetry: true,
     };
+  }
+  // A succeeded transcription with no words is a silent recording, which is a
+  // meaningful review signal — don't collapse it into a generic status line.
+  if (transcriptText(transcription) === null) {
+    return { label: "Silence", tone: "none", detail: null, canRetry: true };
   }
   return { label: "Transcribed", tone: "ok", detail: null, canRetry: true };
 }
