@@ -87,7 +87,11 @@ function TranscriptCard({
     <section className="feature-card feature-card--wide">
       <header className="feature-card-header">
         <h2>Transcript</h2>
-        <button type="button" onClick={onRetranscribe} disabled={retranscribing}>
+        <button
+          type="button"
+          onClick={onRetranscribe}
+          disabled={retranscribing || !status.canRetry || message.status === "uploading"}
+        >
           {retranscribing ? "Re-running…" : "Re-run transcription"}
         </button>
       </header>
