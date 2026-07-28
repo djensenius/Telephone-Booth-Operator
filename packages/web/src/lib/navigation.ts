@@ -1,7 +1,31 @@
 export type NavigationDigit = "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "0";
 
 export type RouteStatusFilter = "pending" | "approved" | "rejected";
-export type MessageRouteFilter = "all" | "received" | "uploading" | "failed";
+
+// Queue filters shown on /messages. "needs-review" spans two backend statuses
+// (`received` before the AI worker claims a message, `pending` while its work
+// is in flight), so it is narrowed client-side rather than sent as `?status=`.
+export type MessageRouteFilter = "all" | "needs-review" | "approved" | "rejected" | "uploading";
+
+export const MESSAGE_ROUTE_FILTERS: readonly MessageRouteFilter[] = [
+  "all",
+  "needs-review",
+  "approved",
+  "rejected",
+  "uploading",
+];
+
+const MESSAGE_FILTER_LABELS: Record<MessageRouteFilter, string> = {
+  all: "All",
+  "needs-review": "Needs review",
+  approved: "Approved",
+  rejected: "Rejected",
+  uploading: "Uploading",
+};
+
+export function messageFilterLabel(filter: MessageRouteFilter): string {
+  return MESSAGE_FILTER_LABELS[filter];
+}
 
 export interface DigitRoute {
   readonly digit: NavigationDigit;
@@ -45,5 +69,5 @@ export function isRouteStatusFilter(value: unknown): value is RouteStatusFilter 
 }
 
 export function isMessageFilter(value: unknown): value is MessageRouteFilter {
-  return value === "all" || value === "received" || value === "uploading" || value === "failed";
+  return MESSAGE_ROUTE_FILTERS.some((filter) => filter === value);
 }

@@ -54,6 +54,40 @@ const message = {
   receivedAt: "2026-01-02T00:01:00.000Z",
   audio: { url: "https://media.example/message.flac", sha256: sha, durationMs: 9000 },
 };
+const transcriptionBase = {
+  id: "55555555-5555-4555-8555-555555555555",
+  messageId,
+  model: null,
+  text: null,
+  language: null,
+  durationMs: 9000,
+  latencyMs: null,
+  error: null,
+  requestedById: null,
+  createdAt: "2026-01-02T00:02:00.000Z",
+  completedAt: null,
+  translationStatus: null,
+  translatedText: null,
+  translatedLanguage: null,
+  translationProvider: null,
+  translationModel: null,
+  translationError: null,
+  translationLatencyMs: null,
+  translationCompletedAt: null,
+};
+const pendingPushTranscription = {
+  ...transcriptionBase,
+  provider: "push",
+  status: "pending",
+};
+const failedTranscription = {
+  ...transcriptionBase,
+  provider: "openai",
+  model: "whisper-1",
+  status: "failed",
+  error: "audio too large: 40000000 bytes exceeds 26214400 limit",
+  completedAt: "2026-01-02T00:03:00.000Z",
+};
 const token = {
   id: tokenId,
   name: "booth client",
@@ -497,17 +531,60 @@ describe("Messages feature", () => {
     expect(screen.getAllByText("received").length).toBeGreaterThan(0);
   });
 
-  it("filters failed messages through the rejected backend status", async () => {
+  it("filters rejected messages through the backend status", async () => {
     renderPath("/messages");
-    fireEvent.click(await screen.findByText("failed"));
+    fireEvent.click(await screen.findByText("Rejected"));
     await waitFor(() => expect(lastMessageUrl).toContain("status=rejected"));
   });
 
-  it("bulk deletes selected messages", async () => {
+  it("narrows the needs-review filter client side without a status param", async () => {
     renderPath("/messages");
-    fireEvent.click(await screen.findByLabelText(`Select message ${messageId}`));
-    fireEvent.click(screen.getByText("Delete selected"));
+    fireEvent.click(await screen.findByText("Needs review"));
+    await waitFor(() => expect(lastMessageUrl).not.toContain("status="));
+    expect(await screen.findByText("What did the city sound like today?")).toBeTruthy();
+  });
+
+  it("deletes a message from the queue", async () => {
+    renderPath("/messages");
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
     await waitFor(() => expect(deletedMessages).toContain(messageId));
+  });
+
+  it("approves a message inline from the queue", async () => {
+    renderPath("/messages");
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(lastDecision?.decision).toBe("approve"));
+  });
+
+  it("rejects a message inline from the queue", async () => {
+    renderPath("/messages");
+    fireEvent.click(await screen.findByRole("button", { name: "Reject" }));
+    await waitFor(() => expect(lastDecision?.decision).toBe("reject"));
+  });
+
+  it("explains that push transcription is waiting on a device", async () => {
+    server.use(
+      http.get("http://localhost/v1/messages", () =>
+        HttpResponse.json({
+          items: [{ ...message, latestTranscription: pendingPushTranscription }],
+        }),
+      ),
+    );
+    renderPath("/messages");
+    expect(await screen.findByText("Waiting on transcription device")).toBeTruthy();
+  });
+
+  it("surfaces the reason a transcription failed", async () => {
+    server.use(
+      http.get("http://localhost/v1/messages", () =>
+        HttpResponse.json({
+          items: [{ ...message, latestTranscription: failedTranscription }],
+        }),
+      ),
+    );
+    renderPath("/messages");
+    expect(await screen.findByText("Transcription failed")).toBeTruthy();
+    expect(await screen.findByText(/audio too large/)).toBeTruthy();
   });
 
   it("renders message detail playback", async () => {
@@ -536,7 +613,7 @@ describe("Messages feature", () => {
 
   it("has no critical axe violations", async () => {
     const { container } = renderPath("/messages");
-    await screen.findByText("Message queue");
+    await screen.findByRole("list", { name: "Message queue" });
     await expectNoCriticalAxe(container);
   });
 });

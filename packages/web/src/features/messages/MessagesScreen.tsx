@@ -1,196 +1,142 @@
 import type { JSX } from "react";
-import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
-import type { Message, Moderation, Transcription } from "@telephone-booth-operator/shared";
+import { useNavigate, useSearch } from "@tanstack/react-router";
+import { useMemo } from "react";
+import type { Message, MessageStatus } from "@telephone-booth-operator/shared";
 import type { MessageRouteFilter } from "../../lib/navigation.js";
 import { GlassPanel } from "../../components/booth/index.js";
 import {
+  useDecideMessage,
   useDeleteMessage,
-  useDeleteMessages,
   useMessagesList,
   useQuestionsList,
+  useRetranscribeMessage,
 } from "../../lib/api-client.js";
-import { isMessageFilter } from "../../lib/navigation.js";
+import {
+  MESSAGE_ROUTE_FILTERS,
+  isMessageFilter,
+  messageFilterLabel,
+} from "../../lib/navigation.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
+import { MessageCard } from "./MessageCard.js";
 
-const filters: readonly MessageRouteFilter[] = ["all", "received", "uploading", "failed"];
+// Backend statuses that still want a human verdict. `received` is a recording
+// the AI worker has not claimed yet; `pending` is one with AI work in flight.
+// `GET /v1/messages` only takes a single `status`, so this filter fetches the
+// unfiltered list and narrows here instead.
+const NEEDS_REVIEW: readonly MessageStatus[] = ["received", "pending"];
 
-function duration(ms: number | null): string {
-  if (ms === null) return "Unknown";
-  return `${Math.round(ms / 1000)}s`;
+const NEEDS_REVIEW_LIMIT = 200;
+
+function backendFilter(filter: MessageRouteFilter): MessageStatus | "all" {
+  switch (filter) {
+    case "approved":
+    case "rejected":
+    case "uploading":
+      return filter;
+    default:
+      return "all";
+  }
 }
 
-function date(value: string | null | undefined): string {
-  return value === null || value === undefined ? "Not received" : new Date(value).toLocaleString();
-}
-
-const TRANSCRIPT_SNIPPET_CHARS = 80;
-
-function transcriptSnippet(transcription: Transcription | null | undefined): string {
-  if (!transcription) return "—";
-  if (transcription.status === "pending") return "Transcribing…";
-  if (transcription.status === "failed") return "Transcription failed";
-  // Prefer translated text in the list snippet so operators read the same
-  // copy that drives moderation; full original text is still visible in the
-  // detail view via MessageDetail.
-  const candidate =
-    transcription.translationStatus === "succeeded" &&
-    typeof transcription.translatedText === "string" &&
-    transcription.translatedText.trim().length > 0
-      ? transcription.translatedText
-      : transcription.text;
-  const text = candidate?.replace(/\s+/g, " ").trim() ?? "";
-  if (text.length === 0) return "Silence";
-  return text.length <= TRANSCRIPT_SNIPPET_CHARS
-    ? text
-    : `${text.slice(0, TRANSCRIPT_SNIPPET_CHARS - 1)}…`;
-}
-
-interface ModerationBadge {
-  readonly label: string;
-  readonly variant: "approve" | "reject" | "review" | "pending" | "failed" | "none";
-}
-
-function moderationBadge(moderation: Moderation | null | undefined): ModerationBadge {
-  if (!moderation) return { label: "—", variant: "none" };
-  if (moderation.status === "pending") return { label: "Moderating…", variant: "pending" };
-  if (moderation.status === "failed") return { label: "Moderation failed", variant: "failed" };
-  if (moderation.recommendation === "approve") return { label: "Looks clean", variant: "approve" };
-  if (moderation.recommendation === "reject") return { label: "Flagged", variant: "reject" };
-  return { label: "Needs review", variant: "review" };
+function emptyCopy(filter: MessageRouteFilter): string {
+  switch (filter) {
+    case "needs-review":
+      return "Nothing is waiting on a verdict right now.";
+    case "approved":
+      return "No messages have been approved yet.";
+    case "rejected":
+      return "No messages have been rejected yet.";
+    case "uploading":
+      return "No recordings are mid-upload.";
+    default:
+      return "The booth has not sent any recordings yet.";
+  }
 }
 
 export function MessagesScreen(): JSX.Element {
   const search = useSearch({ strict: false });
   const navigate = useNavigate();
-  const status = isMessageFilter(search.status) ? search.status : "all";
-  const messages = useMessagesList(status === "failed" ? "rejected" : status);
+  const filter: MessageRouteFilter = isMessageFilter(search.status) ? search.status : "all";
+  const messages = useMessagesList(
+    backendFilter(filter),
+    filter === "needs-review" ? NEEDS_REVIEW_LIMIT : undefined,
+  );
   const questions = useQuestionsList();
   const deleteMessage = useDeleteMessage();
-  const deleteMessages = useDeleteMessages();
-  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
-  const rows = messages.data?.items ?? [];
+  const decideMessage = useDecideMessage();
+  const retranscribe = useRetranscribeMessage();
+
+  const rows = useMemo(() => {
+    const items = messages.data?.items ?? [];
+    return filter === "needs-review"
+      ? items.filter((message: Message) => NEEDS_REVIEW.includes(message.status))
+      : items;
+  }, [messages.data?.items, filter]);
+
   const promptById = useMemo(
     () => new Map((questions.data?.items ?? []).map((question) => [question.id, question.prompt])),
     [questions.data?.items],
   );
 
-  function toggle(id: string): void {
-    setSelected((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
+  const busy = deleteMessage.isPending || decideMessage.isPending || retranscribe.isPending;
+
+  const actionError = [decideMessage.error, deleteMessage.error, retranscribe.error].find(
+    (error): error is Error => error instanceof Error,
+  );
 
   return (
     <GlassPanel title="Message review queue" className="feature-screen messages-screen">
       <p className="screen-kicker">Digit 2</p>
       <h1>Messages</h1>
-      <p>Review recordings from the booth, download keepers, and clear crossed lines.</p>
+      <p>Review recordings from the booth, approve or reject them, and clear crossed lines.</p>
       <div className="feature-toolbar" role="toolbar" aria-label="Message filters">
-        {filters.map((filter) => (
+        {MESSAGE_ROUTE_FILTERS.map((option) => (
           <button
-            key={filter}
+            key={option}
             type="button"
-            aria-pressed={status === filter}
+            aria-pressed={filter === option}
             onClick={() =>
-              void navigate({ to: "/messages", search: filter === "all" ? {} : { status: filter } })
+              void navigate({
+                to: "/messages",
+                search: option === "all" ? {} : { status: option },
+              })
             }
           >
-            {filter}
+            {messageFilterLabel(option)}
           </button>
         ))}
-        <button
-          type="button"
-          disabled={selected.size === 0 || deleteMessages.isPending}
-          onClick={() =>
-            void deleteMessages.mutateAsync([...selected]).then(() => setSelected(new Set()))
-          }
-        >
-          Delete selected
-        </button>
       </div>
+      {actionError ? <p className="feature-error">{actionError.message}</p> : null}
       {messages.isLoading ? <FeatureSkeleton /> : null}
       {messages.error ? <FeatureError message="Could not load the message queue." /> : null}
-      {!messages.isLoading && rows.length === 0 ? (
-        <FeatureEmpty title="No messages on the line">
-          The booth has not sent recordings for this filter.
-        </FeatureEmpty>
+      {!messages.isLoading && !messages.error && rows.length === 0 ? (
+        <FeatureEmpty title="No messages on the line">{emptyCopy(filter)}</FeatureEmpty>
       ) : null}
       {rows.length === 0 ? null : (
-        <div className="feature-table-wrap">
-          <table className="feature-table">
-            <caption>Message queue</caption>
-            <thead>
-              <tr>
-                <th>Select</th>
-                <th>Received at</th>
-                <th>Duration</th>
-                <th>Question</th>
-                <th>Transcript</th>
-                <th>Moderation</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((message: Message) => {
-                const badge = moderationBadge(message.latestModeration ?? null);
-                return (
-                  <tr key={message.id}>
-                    <td>
-                      <input
-                        aria-label={`Select message ${message.id}`}
-                        type="checkbox"
-                        checked={selected.has(message.id)}
-                        onChange={() => toggle(message.id)}
-                      />
-                    </td>
-                    <td>{date(message.receivedAt ?? message.createdAt)}</td>
-                    <td>{duration(message.audio.durationMs)}</td>
-                    <td>
-                      {message.questionId === null || message.questionId === undefined
-                        ? "Unlinked"
-                        : (promptById.get(message.questionId) ?? message.questionId)}
-                    </td>
-                    <td
-                      className="feature-row-transcript"
-                      title={message.latestTranscription?.text ?? undefined}
-                    >
-                      {transcriptSnippet(message.latestTranscription ?? null)}
-                    </td>
-                    <td>
-                      <span className={`feature-badge feature-badge--moderation-${badge.variant}`}>
-                        {badge.label}
-                      </span>
-                    </td>
-                    <td>
-                      <span className={`feature-badge feature-badge--${message.status}`}>
-                        {message.status}
-                      </span>
-                    </td>
-                    <td className="feature-row-actions">
-                      <Link to="/messages/$id" params={{ id: message.id }}>
-                        Play
-                      </Link>
-                      <a href={message.audio.url} download>
-                        Download
-                      </a>
-                      <button
-                        type="button"
-                        onClick={() => void deleteMessage.mutateAsync(message.id)}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <ul className="message-card-list" aria-label="Message queue">
+          {rows.map((message: Message) => (
+            <li key={message.id}>
+              <MessageCard
+                message={message}
+                prompt={
+                  message.questionId === null || message.questionId === undefined
+                    ? null
+                    : (promptById.get(message.questionId) ?? message.questionId)
+                }
+                busy={busy}
+                onDecide={(id, decision) => {
+                  decideMessage.mutate({ id, input: { decision } });
+                }}
+                onRetranscribe={(id) => {
+                  retranscribe.mutate(id);
+                }}
+                onDelete={(id) => {
+                  void deleteMessage.mutateAsync(id);
+                }}
+              />
+            </li>
+          ))}
+        </ul>
       )}
     </GlassPanel>
   );

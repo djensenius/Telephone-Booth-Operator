@@ -31,7 +31,7 @@ import { useNumericNavigation } from "../hooks/useNumericNavigation.js";
 import { DIGIT_ROUTES, isMessageFilter } from "../lib/navigation.js";
 
 const messagesSearchSchema = z.object({
-  status: z.enum(["all", "received", "uploading", "failed"]).optional(),
+  status: z.enum(["all", "needs-review", "approved", "rejected", "uploading"]).optional(),
 });
 
 const loginSearchSchema = z.object({
