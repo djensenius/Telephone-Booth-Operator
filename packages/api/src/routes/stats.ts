@@ -520,7 +520,7 @@ const serializeMetricFilter = (row: MetricFilterRow): MetricFilter => ({
   updatedAt: row.updatedAt.toISOString(),
 });
 
-const idParamSchema = z.object({ id: z.string().uuid() });
+const idParamSchema = z.object({ id: z.guid() });
 
 export const statsRouter = new Hono<{ Variables: AuthVariables }>();
 
@@ -582,9 +582,9 @@ statsRouter.get(
   async (c) => {
     const user = c.get("user");
     const { id } = c.req.valid("param");
-    const existing = (await db.metricFilter.findUnique({
+    const existing = await db.metricFilter.findUnique({
       where: { id },
-    })) as unknown as (MetricFilterRow & { userId: string }) | null;
+    });
     if (!existing || existing.userId !== user.id) return c.json({ error: "not_found" }, 404);
     return c.json(serializeMetricFilter(existing));
   },

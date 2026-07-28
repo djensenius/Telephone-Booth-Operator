@@ -36,13 +36,13 @@ Push is **off** unless all four required variables are present
 (`apnsEnvConfigured()` gates the fan-out). Without them the API falls back to a
 no-op sender, so dev and CI never emit pushes.
 
-| Variable           | Required | Description                                                              |
-| ------------------ | -------- | ------------------------------------------------------------------------ |
-| `APNS_TEAM_ID`     | yes      | 10-char Apple Developer Team ID.                                         |
-| `APNS_KEY_ID`      | yes      | 10-char Key ID of the APNs Auth Key (`.p8`).                             |
-| `APNS_AUTH_KEY`    | yes      | PEM contents of the `.p8`. Literal `\n` escapes are accepted.            |
-| `APNS_BUNDLE_ID`   | yes      | App bundle id. The watch topic is derived as `<APNS_BUNDLE_ID>.watch`.   |
-| `APNS_ENVIRONMENT` | no       | `production` → `api.push.apple.com`; anything else → sandbox (default).  |
+| Variable           | Required | Description                                                             |
+| ------------------ | -------- | ----------------------------------------------------------------------- |
+| `APNS_TEAM_ID`     | yes      | 10-char Apple Developer Team ID.                                        |
+| `APNS_KEY_ID`      | yes      | 10-char Key ID of the APNs Auth Key (`.p8`).                            |
+| `APNS_AUTH_KEY`    | yes      | PEM contents of the `.p8`. Literal `\n` escapes are accepted.           |
+| `APNS_BUNDLE_ID`   | yes      | App bundle id. The watch topic is derived as `<APNS_BUNDLE_ID>.watch`.  |
+| `APNS_ENVIRONMENT` | no       | `production` → `api.push.apple.com`; anything else → sandbox (default). |
 
 ### About the APNs Auth Key
 

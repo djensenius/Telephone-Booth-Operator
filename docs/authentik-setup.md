@@ -28,10 +28,10 @@ Create a second group for them:
 
 > _Authentik admin UI → Directory → Groups → Create_
 
-| Field   | Value                       |
-| ------- | --------------------------- |
-| Name    | `telephone-booth-admins`    |
-| Members | Add your admin user(s)      |
+| Field   | Value                    |
+| ------- | ------------------------ |
+| Name    | `telephone-booth-admins` |
+| Members | Add your admin user(s)   |
 
 Admins must **also** be in `telephone-booth-operators` — admin is additive
 on top of operator access. Wire the group name into `AUTHENTIK_ADMIN_GROUPS`

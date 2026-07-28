@@ -183,7 +183,11 @@ describe("Saved metric filters CRUD", () => {
     const res = await app.request("/v1/stats/filters", {
       method: "POST",
       headers: { cookie, "content-type": "application/json" },
-      body: JSON.stringify({ name: "Contradiction", window: "7d", start: daysAgo(3).toISOString() }),
+      body: JSON.stringify({
+        name: "Contradiction",
+        window: "7d",
+        start: daysAgo(3).toISOString(),
+      }),
     });
     expect(res.status).toBe(400);
   });

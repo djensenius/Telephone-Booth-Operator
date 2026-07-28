@@ -8,12 +8,12 @@ import { serializeInstruction } from "../lib/serializers.js";
 import { requireAdmin, type AuthVariables } from "../lib/session.js";
 
 const listQuerySchema = z.object({
-  cursor: z.string().uuid().optional(),
+  cursor: z.guid().optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   status: InstructionStatusSchema.optional(),
 });
 
-const idParamSchema = z.object({ id: z.string().uuid() });
+const idParamSchema = z.object({ id: z.guid() });
 
 export const instructionsRouter = new Hono<{ Variables: AuthVariables & ApiTokenVariables }>();
 

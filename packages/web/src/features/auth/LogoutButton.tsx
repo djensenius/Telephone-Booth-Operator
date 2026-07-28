@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { apiUrlFor } from "../../lib/api-client.js";

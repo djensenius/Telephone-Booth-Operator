@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import type { RedactedConfig } from "../../lib/debug-client.js";
 
 export interface ConfigPanelProps {

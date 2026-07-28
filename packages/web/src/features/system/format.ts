@@ -3,7 +3,10 @@
 // the operator sidebar, so units and rounding stay identical between the
 // two surfaces.
 
-export function fmtPercent(used: number | null | undefined, total: number | null | undefined): string {
+export function fmtPercent(
+  used: number | null | undefined,
+  total: number | null | undefined,
+): string {
   if (typeof used !== "number" || typeof total !== "number" || total <= 0) return "—";
   return `${((used / total) * 100).toFixed(1)}%`;
 }

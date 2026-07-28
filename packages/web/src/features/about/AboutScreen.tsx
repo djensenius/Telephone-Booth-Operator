@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { GlassPanel } from "../../components/booth/index.js";
 
 export function AboutScreen(): JSX.Element {

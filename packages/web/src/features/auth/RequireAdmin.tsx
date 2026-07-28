@@ -1,4 +1,4 @@
-import type { PropsWithChildren } from "react";
+import type { JSX, PropsWithChildren } from "react";
 import { GlassPanel } from "../../components/booth/index.js";
 import { useCurrentUser } from "./useCurrentUser.js";
 

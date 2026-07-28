@@ -15,7 +15,7 @@
 //   • be unexpired (`exp` claim, with a small allowed clock skew),
 //   • pass `validateAuthorization()` (group + email allow-lists).
 
-import type { OperatorUser } from "@prisma/client";
+import type { OperatorUser } from "../generated/prisma/client.js";
 import { createRemoteJWKSet, errors as joseErrors, jwtVerify } from "jose";
 import type { JWTPayload, JWTVerifyGetKey } from "jose";
 import { getRequiredOidcConfig } from "./config.js";

@@ -18,17 +18,13 @@ describe("useStatusCurrent", () => {
   it("polls every 5 s when not paused", () => {
     mockUseQuery.mockClear();
     useStatusCurrent();
-    expect(mockUseQuery).toHaveBeenCalledWith(
-      expect.objectContaining({ refetchInterval: 5_000 }),
-    );
+    expect(mockUseQuery).toHaveBeenCalledWith(expect.objectContaining({ refetchInterval: 5_000 }));
   });
 
   it("disables polling when paused", () => {
     mockUseQuery.mockClear();
     useStatusCurrent({ paused: true });
-    expect(mockUseQuery).toHaveBeenCalledWith(
-      expect.objectContaining({ refetchInterval: false }),
-    );
+    expect(mockUseQuery).toHaveBeenCalledWith(expect.objectContaining({ refetchInterval: false }));
   });
 });
 
@@ -36,16 +32,12 @@ describe("useStatusHistory", () => {
   it("polls every 5 s when not paused", () => {
     mockUseQuery.mockClear();
     useStatusHistory();
-    expect(mockUseQuery).toHaveBeenCalledWith(
-      expect.objectContaining({ refetchInterval: 5_000 }),
-    );
+    expect(mockUseQuery).toHaveBeenCalledWith(expect.objectContaining({ refetchInterval: 5_000 }));
   });
 
   it("disables polling when paused", () => {
     mockUseQuery.mockClear();
     useStatusHistory({ paused: true });
-    expect(mockUseQuery).toHaveBeenCalledWith(
-      expect.objectContaining({ refetchInterval: false }),
-    );
+    expect(mockUseQuery).toHaveBeenCalledWith(expect.objectContaining({ refetchInterval: false }));
   });
 });

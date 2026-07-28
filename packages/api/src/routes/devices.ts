@@ -16,7 +16,7 @@ import { z } from "zod";
 import { db } from "../lib/db.js";
 import { type AuthVariables } from "../lib/session.js";
 
-const idParam = z.object({ id: z.string().uuid() });
+const idParam = z.object({ id: z.guid() });
 
 const defaultPreferences: MobileDevicePreferences = {
   callStarted: true,

@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import type { AudioMeter, BoothStatus } from "../../lib/debug-client.js";
 
 export interface AudioPanelProps {

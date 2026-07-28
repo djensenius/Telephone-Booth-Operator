@@ -15,7 +15,10 @@ const { AdminBackupPanel } = await import("./AdminBackupPanel.js");
 beforeEach(() => {
   exportMock.mockReset();
   importMock.mockReset();
-  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:x") });
+  Object.defineProperty(URL, "createObjectURL", {
+    configurable: true,
+    value: vi.fn(() => "blob:x"),
+  });
   Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
 });
 
@@ -46,7 +49,11 @@ describe("AdminBackupPanel", () => {
   });
 
   it("restores an archive on successful import", async () => {
-    importMock.mockResolvedValue({ rows: { question: 2, message: 3 }, blobsUploaded: 4, blobsSkipped: 1 });
+    importMock.mockResolvedValue({
+      rows: { question: 2, message: 3 },
+      blobsUploaded: 4,
+      blobsSkipped: 1,
+    });
     const { container } = render(<AdminBackupPanel />);
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
     fireEvent.change(input, {

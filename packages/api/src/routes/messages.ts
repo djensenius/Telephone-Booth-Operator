@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { Prisma } from "@prisma/client";
+import { Prisma } from "../generated/prisma/client.js";
 import {
   MessageCreateSchema,
   MessageDecisionSchema,
@@ -29,7 +29,7 @@ const listQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
 });
 
-const idParamSchema = z.object({ id: z.string().uuid() });
+const idParamSchema = z.object({ id: z.guid() });
 
 const messageBlobName = (sha256: string): string => `messages/${sha256.slice(0, 2)}/${sha256}.flac`;
 
@@ -120,7 +120,8 @@ messagesRouter.post("/", requireApiToken(), zValidator("json", MessageCreateSche
 
   if (body.questionId) {
     const question = await db.question.findUnique({ where: { id: body.questionId } });
-    if (!question || question.status !== "active") return c.json({ error: "question_not_found" }, 404);
+    if (!question || question.status !== "active")
+      return c.json({ error: "question_not_found" }, 404);
   }
   if (existingFile && existingFile.blobKey !== blobName) {
     return c.json({ error: "message_already_exists" }, 409);
@@ -184,8 +185,7 @@ messagesRouter.post(
     const blob = await headBlob(message.audio.blobKey);
     if (!blob.exists) return c.json({ error: "blob_not_found" }, 409);
     if (!blob.sha256) return c.json({ error: "sha256_metadata_missing" }, 422);
-    if (blob.sha256 !== message.audio.sha256)
-      return c.json({ error: "sha256_mismatch" }, 422);
+    if (blob.sha256 !== message.audio.sha256) return c.json({ error: "sha256_mismatch" }, 422);
 
     const { maxAudioBytes } = resolveAiConfig();
     if (blob.sizeBytes > maxAudioBytes) {
@@ -301,7 +301,7 @@ const messageWithAi = {
 const broadcastMessageById = async (messageId: string): Promise<void> => {
   const full = await db.message.findUnique({ where: { id: messageId }, include: messageWithAi });
   if (!full) return;
-  wsBroadcaster.broadcast({ kind: "message", message: serializeMessage(full as never) });
+  wsBroadcaster.broadcast({ kind: "message", message: serializeMessage(full) });
 };
 
 // Human moderation decision: a logged-in operator approves or rejects a
@@ -334,7 +334,7 @@ messagesRouter.post(
     });
     const message = await db.message.findUnique({ where: { id }, include: messageWithAi });
     if (!message) return c.json({ error: "not_found" }, 404);
-    wsBroadcaster.broadcast({ kind: "message", message: serializeMessage(message as never) });
+    wsBroadcaster.broadcast({ kind: "message", message: serializeMessage(message) });
     return c.json(serializeMessage(message as never));
   },
 );

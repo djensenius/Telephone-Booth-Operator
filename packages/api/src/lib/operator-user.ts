@@ -4,7 +4,7 @@
 // `lib/bearer-auth.ts` so the authorization + upsert logic stays in one
 // place.
 
-import type { OperatorUser } from "@prisma/client";
+import type { OperatorUser } from "../generated/prisma/client.js";
 import { getAuthConfig, getRequiredOidcConfig } from "./config.js";
 import { db } from "./db.js";
 import type { IDTokenClaims } from "./oidc.js";

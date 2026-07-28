@@ -11,7 +11,7 @@ installation is run:
 
 1. **Auto-decision.** `AUTO_DECISION_MODE` let the pipeline auto-approve or
    auto-reject a message from the moderation score. The owner wants **every**
-   message decided by a human; the AI output is only a *suggestion*.
+   message decided by a human; the AI output is only a _suggestion_.
 2. **Pull-mode work queue.** The standalone Transcription app
    (`../Telephone-Booth-Transcription`, macOS **and** iOS) fetched work by
    polling `/v1/jobs/*` and leasing rows. Polling adds latency and lease

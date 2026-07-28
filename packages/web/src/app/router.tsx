@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { Link, Outlet, createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
 import type { RouterHistory } from "@tanstack/react-router";
 import { z } from "zod";

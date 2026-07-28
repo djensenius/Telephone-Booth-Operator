@@ -75,6 +75,14 @@ storage details.
 
 See `packages/api/prisma/schema.prisma` for the canonical schema.
 
+Prisma 7 keeps the connection URL out of the schema: `packages/api/prisma.config.ts`
+reads `DATABASE_URL` for the CLI (migrations, introspection), and the runtime
+client is constructed with the `@prisma/adapter-pg` driver adapter in
+`packages/api/src/lib/db.ts`. The client is generated as TypeScript into
+`packages/api/src/generated/prisma`, which is gitignored and compiled into
+`dist` alongside the rest of the API, so `prisma generate` must run before
+`build`.
+
 - `Question`, `Message`, `File` — content tables. `File` is content-addressed
   by `sha256` so duplicate uploads dedupe.
 - `OperatorUser` — humans authenticated via OIDC, keyed by `oidcSub`. Created

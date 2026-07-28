@@ -15,6 +15,7 @@ playwright-report/
 test-results/
 *.tsbuildinfo
 packages/web/src/api/schema.gen.ts
+packages/api/src/generated/
 packages/api/prisma/migrations/*.lock
 
 # Stray npm lockfiles (this repo uses pnpm)

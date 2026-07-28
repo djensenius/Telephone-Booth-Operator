@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { useEffect, useState } from "react";
 import { GlassPanel, useBoothStatus } from "../../components/booth/index.js";
 import { LogoutButton } from "../auth/LogoutButton.js";
@@ -65,7 +66,10 @@ export function SettingsScreen(): JSX.Element {
     <GlassPanel title="Operator settings" className="feature-screen settings-screen">
       <p className="screen-kicker">Digit 5</p>
       <h1>Settings</h1>
-      <p>Set operator preferences from one place.{user?.isAdmin ? " Admins also manage the phone-client connection here." : ""}</p>
+      <p>
+        Set operator preferences from one place.
+        {user?.isAdmin ? " Admins also manage the phone-client connection here." : ""}
+      </p>
       <section className="feature-card">
         <div className="settings-account-heading">
           <h2>Account</h2>

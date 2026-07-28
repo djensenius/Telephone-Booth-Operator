@@ -69,9 +69,7 @@ describe("normalizePemKey", () => {
   it("unescapes literal \\n sequences into real newlines", () => {
     const raw = "-----BEGIN PRIVATE KEY-----\\nMIIBVAIB\\n-----END PRIVATE KEY-----";
     const normalized = normalizePemKey(raw);
-    expect(normalized).toBe(
-      "-----BEGIN PRIVATE KEY-----\nMIIBVAIB\n-----END PRIVATE KEY-----",
-    );
+    expect(normalized).toBe("-----BEGIN PRIVATE KEY-----\nMIIBVAIB\n-----END PRIVATE KEY-----");
   });
 
   it("returns undefined for empty or non-PEM input", () => {

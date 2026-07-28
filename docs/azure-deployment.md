@@ -136,13 +136,13 @@ export SESSION_ENCRYPTION_KEY="$(openssl rand -base64 32)"
 
 Collect Authentik values:
 
-| Variable                   | Value                                                                             |
-| -------------------------- | --------------------------------------------------------------------------------- |
-| `AUTHENTIK_ISSUER`         | Authentik provider issuer, ending in `/application/o/<slug>/`                     |
-| `AUTHENTIK_CLIENT_ID`      | Operator web provider client ID                                                   |
-| `AUTHENTIK_CLIENT_SECRET`  | Operator web provider client secret                                               |
-| `AUTHENTIK_ALLOWED_GROUPS` | Comma-separated group names allowed into the operator UI                          |
-| `OIDC_MOBILE_AUDIENCES`    | Mobile/native Authentik client IDs, for example `telephone-booth-operator-mobile` |
+| Variable                   | Value                                                                                                                                                                                                                                |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `AUTHENTIK_ISSUER`         | Authentik provider issuer, ending in `/application/o/<slug>/`                                                                                                                                                                        |
+| `AUTHENTIK_CLIENT_ID`      | Operator web provider client ID                                                                                                                                                                                                      |
+| `AUTHENTIK_CLIENT_SECRET`  | Operator web provider client secret                                                                                                                                                                                                  |
+| `AUTHENTIK_ALLOWED_GROUPS` | Comma-separated group names allowed into the operator UI                                                                                                                                                                             |
+| `OIDC_MOBILE_AUDIENCES`    | Mobile/native Authentik client IDs, for example `telephone-booth-operator-mobile`                                                                                                                                                    |
 | `OIDC_MOBILE_ISSUERS`      | Optional. Comma-separated `iss` URLs of separately-registered mobile Authentik providers (e.g. `https://authentik.example/application/o/telephone-booth-operator-mobile/`). Leave unset when the mobile app reuses the web provider. |
 
 For a single public hostname, use these URLs:

@@ -6,18 +6,18 @@ without needing a decorative rotary control.
 
 ## Digit shortcut map
 
-| Digit | Route                 | Purpose                                              |
-| ----- | --------------------- | ---------------------------------------------------- |
-| **1** | `/status`             | Live status panel (the default landing route)        |
-| **2** | `/messages`           | Message review queue                                 |
-| **3** | `/questions`          | Manage the question library                          |
-| **4** | `/tokens`             | API token lifecycle and usage (**admin-only**)       |
-| **5** | `/settings`           | Operator account, theme, and phone-client connection |
-| **6** | `/about`              | Console context, credits, version, license           |
-| **7** | `/login` after logout | Clear the operator session / auth line               |
-| **8** | `/instructions`       | Manage the booth instructions clip (**admin-only**)  |
+| Digit | Route                 | Purpose                                                   |
+| ----- | --------------------- | --------------------------------------------------------- |
+| **1** | `/status`             | Live status panel (the default landing route)             |
+| **2** | `/messages`           | Message review queue                                      |
+| **3** | `/questions`          | Manage the question library                               |
+| **4** | `/tokens`             | API token lifecycle and usage (**admin-only**)            |
+| **5** | `/settings`           | Operator account, theme, and phone-client connection      |
+| **6** | `/about`              | Console context, credits, version, license                |
+| **7** | `/login` after logout | Clear the operator session / auth line                    |
+| **8** | `/instructions`       | Manage the booth instructions clip (**admin-only**)       |
 | **9** | `/debug`              | Phone-booth debug surface (LAN/Tailscale, **admin-only**) |
-| **0** | `/`                   | Home (Status)                                        |
+| **0** | `/`                   | Home (Status)                                             |
 
 Routes are reachable via direct numeric shortcuts: press `1`–`9` or `0`
 from any non-input context to navigate. The sidebar shows the same digit

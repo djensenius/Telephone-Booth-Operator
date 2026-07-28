@@ -40,7 +40,7 @@ repository (`rust-client` branch). The two sides communicate over a versioned
 | Path              | Contents                                                           |
 | ----------------- | ------------------------------------------------------------------ |
 | `packages/api`    | Hono backend on Node, Prisma + Postgres, Authentik OIDC, WebSocket |
-| `packages/web`    | React 18 + Vite + TS, TanStack Router/Query, themed booth shell    |
+| `packages/web`    | React 19 + Vite + TS, TanStack Router/Query, themed booth shell    |
 | `packages/shared` | Zod schemas + generated TS types shared by `api` and `web`         |
 | `tools/`          | One-off scripts (seed, docs index generator)                       |
 | `docs/`           | Architecture, setup, theme, runbooks, ADRs, provider guides        |
@@ -66,7 +66,7 @@ toolchain. Use `vp` for install/dev/build/test/lint/format workflows; use raw
 - **Database:** Prisma + Postgres. Schema is the source of truth in
   `packages/api/prisma/schema.prisma`. Generate a migration with
   `prisma migrate dev`; never hand-edit migration SQL after it has shipped.
-- **Frontend:** React 18 function components only — **no class components**.
+- **Frontend:** React 19 function components only — **no class components**.
   Routing is TanStack Router, data is TanStack Query. Wrap screen bodies in
   `<GlassPanel>` to keep the theme consistent.
 - **Styling:** Design tokens from `packages/web/src/styles/theme.css` only.
@@ -156,9 +156,10 @@ See [`docs/architecture.md`](../docs/architecture.md),
 Use `just` (the workspace task runner). Generated and verified recipes:
 
 ```sh
-just setup          # vp install --frozen-lockfile
+just setup          # vp install --frozen-lockfile + prisma generate
 just dev            # docker compose up -d  +  vp run -r --parallel dev
 just down           # docker compose down
+just db-generate    # regenerate the Prisma client into src/generated/prisma
 just db-migrate     # prisma migrate dev
 just db-seed        # tsx tools/seed.ts via the api package
 just typecheck      # vp run -r typecheck

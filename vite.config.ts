@@ -13,7 +13,7 @@ export default defineConfig({
     env: {
       builtin: true,
     },
-    ignorePatterns: ["**/dist/**", "**/build/**", "**/*.gen.ts"],
+    ignorePatterns: ["**/dist/**", "**/build/**", "**/*.gen.ts", "**/src/generated/**"],
     rules: {
       "constructor-super": "error",
       "for-direction": "error",

@@ -147,8 +147,9 @@ describe("OIDC config", () => {
       ...baseEnv,
       OIDC_MOBILE_ISSUERS: "http://authentik.example/application/o/mobile/",
     });
-    expect(() => assertOidcIssuerAllowed(config, { NODE_ENV: "production" }))
-      .toThrow(AuthConfigurationError);
+    expect(() => assertOidcIssuerAllowed(config, { NODE_ENV: "production" })).toThrow(
+      AuthConfigurationError,
+    );
   });
 
   it("allows an HTTP mobile issuer in production with the escape hatch", () => {
@@ -197,16 +198,14 @@ describe("OIDC config", () => {
     expect(noListConfig.disabled).toBe(false);
     if (noListConfig.disabled) throw new Error("unexpected");
 
-    expect(() =>
-      assertAuthorizationConfigured(noListConfig, { NODE_ENV: "production" }),
-    ).toThrow(AuthConfigurationError);
+    expect(() => assertAuthorizationConfigured(noListConfig, { NODE_ENV: "production" })).toThrow(
+      AuthConfigurationError,
+    );
   });
 
   it("allows production startup when allowed groups are configured", () => {
     const config = resolveAuthConfig(baseEnv);
-    expect(() =>
-      assertAuthorizationConfigured(config, { NODE_ENV: "production" }),
-    ).not.toThrow();
+    expect(() => assertAuthorizationConfigured(config, { NODE_ENV: "production" })).not.toThrow();
   });
 
   it("allows production startup when only allowed emails are configured", () => {
@@ -215,9 +214,7 @@ describe("OIDC config", () => {
       AUTHENTIK_ALLOWED_GROUPS: "",
       OIDC_ALLOWED_EMAILS: "admin@example.com",
     });
-    expect(() =>
-      assertAuthorizationConfigured(config, { NODE_ENV: "production" }),
-    ).not.toThrow();
+    expect(() => assertAuthorizationConfigured(config, { NODE_ENV: "production" })).not.toThrow();
   });
 
   it("skips allow-list check in non-production environments", () => {
@@ -225,12 +222,8 @@ describe("OIDC config", () => {
       ...baseEnv,
       AUTHENTIK_ALLOWED_GROUPS: "",
     });
-    expect(() =>
-      assertAuthorizationConfigured(config, { NODE_ENV: "test" }),
-    ).not.toThrow();
-    expect(() =>
-      assertAuthorizationConfigured(config, {}),
-    ).not.toThrow();
+    expect(() => assertAuthorizationConfigured(config, { NODE_ENV: "test" })).not.toThrow();
+    expect(() => assertAuthorizationConfigured(config, {})).not.toThrow();
   });
 
   it("parses OIDC_MOBILE_AUDIENCES and OIDC_MOBILE_ISSUERS as CSV", () => {
@@ -256,9 +249,7 @@ describe("OIDC config", () => {
     });
     expect(config.disabled).toBe(false);
     if (config.disabled) throw new Error("unexpected");
-    expect(config.mobileIssuers).toEqual([
-      "https://authentik.example/application/o/mobile/",
-    ]);
+    expect(config.mobileIssuers).toEqual(["https://authentik.example/application/o/mobile/"]);
   });
 
   it("defaults mobile audiences and issuers to empty arrays", () => {

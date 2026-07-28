@@ -1,4 +1,4 @@
-import type { PropsWithChildren } from "react";
+import type { JSX, PropsWithChildren } from "react";
 
 export interface BoothFrameProps extends PropsWithChildren {
   readonly noise?: boolean;

@@ -9,6 +9,11 @@ default:
 # Install dependencies (Node packages only; use `mise install` for tools).
 setup:
     vp install --frozen-lockfile
+    pnpm --filter @telephone-booth-operator/api exec prisma generate
+
+# Regenerate the Prisma client into packages/api/src/generated/prisma.
+db-generate:
+    pnpm --filter @telephone-booth-operator/api exec prisma generate
 
 # Run the full local stack: containers + api + web.
 dev:
@@ -25,7 +30,11 @@ db-migrate:
 
 # Reset and seed the local database with sample data.
 db-seed:
-    pnpm --filter @telephone-booth-operator/api exec tsx scripts/seed.ts
+    pnpm --filter @telephone-booth-operator/api run seed
+
+# Check the Prisma client can talk to a real database (needs DATABASE_URL).
+db-smoke:
+    pnpm --filter @telephone-booth-operator/api run db:smoke
 
 # Typecheck every package.
 typecheck:

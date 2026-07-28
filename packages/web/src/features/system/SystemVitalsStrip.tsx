@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 // Compact, always-visible vitals strip for the operator sidebar. Pi-Hole
 // shows host vitals on every page; this is the same idea — once an operator
 // is signed in, we want them to see the booth's CPU temperature, load, and
@@ -10,10 +11,7 @@
 // authenticated page it refreshes at the polling cadence (5 s, matching the
 // booth's `PUT /v1/system` interval).
 
-import type {
-  BoothSystemSnapshot,
-  BoothThrottlingFlags,
-} from "@telephone-booth-operator/shared";
+import type { BoothThrottlingFlags } from "@telephone-booth-operator/shared";
 import { useSystemCurrent } from "../../lib/api-client.js";
 import { fmtBytes, fmtNumber, fmtPercent, fmtUptime } from "./format.js";
 
@@ -61,7 +59,10 @@ function memorySeverity(
   return "ok";
 }
 
-function loadSeverity(value: number | null | undefined, cores: number | null | undefined): Severity {
+function loadSeverity(
+  value: number | null | undefined,
+  cores: number | null | undefined,
+): Severity {
   if (typeof value !== "number") return "ok";
   // Treat one runnable task per core as the warning threshold; double that
   // as critical. Falls back to a sane single-core default if we don't know
@@ -99,7 +100,7 @@ export function SystemVitalsStrip({
   boothId = DEFAULT_BOOTH_ID,
 }: SystemVitalsStripProps): JSX.Element {
   const query = useSystemCurrent(boothId);
-  const snapshot = query.data?.snapshot as BoothSystemSnapshot | undefined;
+  const snapshot = query.data?.snapshot;
   const receivedAt = query.data?.receivedAt;
 
   // Pull commonly-used nested fields up so the JSX below stays readable. The
@@ -152,7 +153,10 @@ export function SystemVitalsStrip({
   const tailscaleSev: Severity = tailscale?.connected === false ? "crit" : "ok";
   const aggregateSeverity: Severity = (
     [tempSev, memSev, loadSev, throttleSev, tailscaleSev] as readonly Severity[]
-  ).reduce<Severity>((acc, s) => (s === "crit" ? "crit" : s === "warn" && acc === "ok" ? "warn" : acc), "ok");
+  ).reduce<Severity>(
+    (acc, s) => (s === "crit" ? "crit" : s === "warn" && acc === "ok" ? "warn" : acc),
+    "ok",
+  );
   const liveSummary = isEmpty
     ? ""
     : aggregateSeverity === "crit"
@@ -176,29 +180,21 @@ export function SystemVitalsStrip({
         <VitalTile
           label="CPU temp"
           value={
-            typeof temperatureCelsius === "number"
-              ? `${fmtNumber(temperatureCelsius, 1)}°C`
-              : "—"
+            typeof temperatureCelsius === "number" ? `${fmtNumber(temperatureCelsius, 1)}°C` : "—"
           }
           severity={tempSev}
           hint={`CPU temperature (warn ≥${TEMP_WARN_C}°C, crit ≥${TEMP_CRIT_C}°C)`}
         />
         <VitalTile
           label="CPU"
-          value={
-            typeof cpuUsageRatio === "number" ? `${(cpuUsageRatio * 100).toFixed(0)}%` : "—"
-          }
+          value={typeof cpuUsageRatio === "number" ? `${(cpuUsageRatio * 100).toFixed(0)}%` : "—"}
           hint="Average CPU usage across all cores"
         />
         <VitalTile
           label="Load 1m"
           value={fmtNumber(loadAvg1m)}
           severity={loadSev}
-          hint={
-            cpuCores
-              ? `1-minute load average (${cpuCores} cores)`
-              : "1-minute load average"
-          }
+          hint={cpuCores ? `1-minute load average (${cpuCores} cores)` : "1-minute load average"}
         />
         <VitalTile
           label="Memory"

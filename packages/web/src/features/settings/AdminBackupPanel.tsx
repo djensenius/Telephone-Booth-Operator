@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { useRef, useState } from "react";
 import { adminData, type AdminImportSummary } from "../../lib/api-client.js";
 

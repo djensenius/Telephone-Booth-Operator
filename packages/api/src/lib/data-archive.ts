@@ -11,7 +11,7 @@
 //     blobKey/sha256 are stored, so scope/lifetime rules are untouched.
 
 import { createHash } from "node:crypto";
-import { Prisma } from "@prisma/client";
+import { Prisma } from "../generated/prisma/client.js";
 import { downloadBlob, headBlob, uploadBlob } from "./azure-blob.js";
 import { createTar, readTar } from "./archive.js";
 import { db } from "./db.js";

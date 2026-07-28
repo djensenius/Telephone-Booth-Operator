@@ -89,7 +89,10 @@ describe("message review actions", () => {
       expect(body).toMatchObject({ id, status: "approved", decidedById: "operator-1" });
       expect(typeof body.decidedAt).toBe("string");
       expect(broadcasts).toContainEqual(
-        expect.objectContaining({ kind: "message", message: expect.objectContaining({ id, status: "approved" }) }),
+        expect.objectContaining({
+          kind: "message",
+          message: expect.objectContaining({ id, status: "approved" }),
+        }),
       );
     });
 
@@ -129,14 +132,11 @@ describe("message review actions", () => {
     it("returns 404 for an unknown message", async () => {
       const app = createApp();
       const cookie = operatorCookie();
-      const res = await app.request(
-        "/v1/messages/00000000-0000-0000-0000-000000000000/decision",
-        {
-          method: "POST",
-          headers: { cookie, "content-type": "application/json" },
-          body: JSON.stringify({ decision: "approve" }),
-        },
-      );
+      const res = await app.request("/v1/messages/00000000-0000-0000-0000-000000000000/decision", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ decision: "approve" }),
+      });
       expect(res.status).toBe(404);
     });
 

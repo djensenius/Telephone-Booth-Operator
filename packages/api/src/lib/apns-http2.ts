@@ -100,9 +100,7 @@ export class Http2ApnsSender {
     if (devices.length === 0) return;
     const jwt = await this.providerToken();
     const payload = JSON.stringify(buildApnsPayload(notification));
-    await Promise.allSettled(
-      devices.map((device) => this.deliver(device, jwt, payload)),
-    );
+    await Promise.allSettled(devices.map((device) => this.deliver(device, jwt, payload)));
   }
 
   private async deliver(
@@ -163,8 +161,8 @@ export class Http2ApnsSender {
       req.on("response", (headers) => {
         status = Number(headers[":status"] ?? 0);
       });
-      req.on("data", (chunk) => {
-        body += chunk;
+      req.on("data", (chunk: string | Buffer) => {
+        body += typeof chunk === "string" ? chunk : chunk.toString("utf8");
       });
       req.on("error", reject);
       req.on("end", () => {

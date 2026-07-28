@@ -80,11 +80,11 @@ export interface ApiFetchOptions<T> extends Omit<RequestInit, "body"> {
 const StatusHistorySchema = z.object({ items: z.array(BoothStatusSchema) });
 const QuestionListSchema = z.object({
   items: z.array(QuestionSchema),
-  nextCursor: z.string().uuid().nullable(),
+  nextCursor: z.guid().nullable(),
 });
 const InstructionListSchema = z.object({
   items: z.array(InstructionSchema),
-  nextCursor: z.string().uuid().nullable(),
+  nextCursor: z.guid().nullable(),
 });
 const MessageListSchema = z.object({ items: z.array(MessageSchema) });
 const ApiTokenListSchema = z.array(ApiTokenSchema);

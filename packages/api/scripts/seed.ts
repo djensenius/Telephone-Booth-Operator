@@ -3,13 +3,11 @@
  * audio File rows so a fresh install has useful content to work with.
  *
  * Re-run with `just db-seed` or
- * `pnpm --filter @telephone-booth-operator/api exec tsx scripts/seed.ts`.
+ * `pnpm --filter @telephone-booth-operator/api run seed`.
  */
 import { createHash } from "node:crypto";
 
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
+import { db as prisma } from "../src/lib/db.js";
 
 const BLOB_CONTAINER = process.env.AZURE_BLOB_CONTAINER ?? "booth-recordings";
 const CONTENT_TYPE = "audio/flac";
@@ -30,13 +28,17 @@ function placeholderSha256(blobKey: string): string {
 }
 
 async function upsertPlaceholderFile(blobKey: string, sizeBytes: number, durationMs?: number) {
+  // `exactOptionalPropertyTypes` means an explicit `undefined` is not a valid
+  // value for Prisma's optional columns, so omit the key entirely instead.
+  const duration = durationMs === undefined ? {} : { durationMs };
+
   return prisma.file.upsert({
     where: { blobKey },
     update: {
       blobContainer: BLOB_CONTAINER,
       sha256: placeholderSha256(blobKey),
       sizeBytes,
-      durationMs,
+      ...duration,
       contentType: CONTENT_TYPE,
     },
     create: {
@@ -44,7 +46,7 @@ async function upsertPlaceholderFile(blobKey: string, sizeBytes: number, duratio
       blobKey,
       sha256: placeholderSha256(blobKey),
       sizeBytes,
-      durationMs,
+      ...duration,
       contentType: CONTENT_TYPE,
     },
   });

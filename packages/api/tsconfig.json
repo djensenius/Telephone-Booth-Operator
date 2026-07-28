@@ -14,8 +14,7 @@
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
     "types": ["node"],
-    "outDir": "dist",
-    "rootDir": "src"
+    "outDir": "dist"
   },
-  "include": ["src"]
+  "include": ["src", "scripts"]
 }

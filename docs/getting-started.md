@@ -41,6 +41,7 @@ cp .env.example .env
 ```sh
 just db-migrate
 just db-seed                   # sample questions + first-run prompt
+just db-smoke                  # verify the Prisma client can reach the database
 ```
 
 ## 5. Run the stack

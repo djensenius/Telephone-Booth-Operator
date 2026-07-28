@@ -2,12 +2,15 @@
 // Datasource: Postgres. ORM: Prisma. Migrations live in prisma/migrations.
 
 generator client {
-  provider = "prisma-client-js"
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  importFileExtension = "js"
 }
 
+// The connection URL lives in prisma.config.ts (Prisma 7 no longer accepts
+// `url` here); the runtime client gets it via the pg driver adapter.
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 enum MessageStatus {

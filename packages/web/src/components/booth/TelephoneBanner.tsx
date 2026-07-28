@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 export function TelephoneBanner(): JSX.Element {
   return (
     <header className="telephone-banner" aria-label="Application header">

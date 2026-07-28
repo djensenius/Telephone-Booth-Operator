@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import type { BoothEventType } from "@telephone-booth-operator/shared";
@@ -22,7 +23,8 @@ function eventDetail(payload: unknown): { summary: string; hasPayload: boolean }
   if (typeof payload !== "object") return { summary: "View payload", hasPayload: false };
   const record = payload as Record<string, unknown>;
   const candidate = record.message ?? record.error ?? record.reason ?? record.detail;
-  const summary = typeof candidate === "string" && candidate.length > 0 ? candidate : "View payload";
+  const summary =
+    typeof candidate === "string" && candidate.length > 0 ? candidate : "View payload";
   return { summary, hasPayload: true };
 }
 

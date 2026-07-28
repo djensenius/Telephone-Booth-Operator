@@ -73,7 +73,8 @@ const setupEnv = () => {
 // equality rather than `Array.prototype.includes`, which CodeQL flags
 // as an incomplete-URL-substring-sanitization pattern.
 const issuerList = (issuer: string | string[] | undefined): string[] => {
-  if (Array.isArray(issuer)) return issuer.filter((value): value is string => typeof value === "string");
+  if (Array.isArray(issuer))
+    return issuer.filter((value): value is string => typeof value === "string");
   return typeof issuer === "string" ? [issuer] : [];
 };
 

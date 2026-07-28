@@ -1,7 +1,7 @@
+import type { JSX } from "react";
 import { useMemo } from "react";
-import type { BoothSystemSnapshot, BoothThrottlingFlags } from "@telephone-booth-operator/shared";
+import type { BoothThrottlingFlags } from "@telephone-booth-operator/shared";
 import { GlassPanel, RuntimeModeBadge } from "../../components/booth/index.js";
-import type { BoothRuntimeMode } from "../../components/booth/index.js";
 import { useSystemCurrent } from "../../lib/api-client.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
 import { fmtBytes, fmtNumber, fmtPercent, fmtUptime } from "./format.js";
@@ -29,7 +29,7 @@ interface LiveSystemPanelProps {
 
 export function LiveSystemPanel({ boothId = DEFAULT_BOOTH_ID }: LiveSystemPanelProps): JSX.Element {
   const query = useSystemCurrent(boothId);
-  const snapshot = query.data?.snapshot as BoothSystemSnapshot | undefined;
+  const snapshot = query.data?.snapshot;
   const receivedAt = query.data?.receivedAt;
   const clientVersion = query.data?.version ?? null;
 
@@ -93,7 +93,7 @@ export function LiveSystemPanel({ boothId = DEFAULT_BOOTH_ID }: LiveSystemPanelP
         <div className="live-system-panel__heading">
           <h2>Live system</h2>
           <RuntimeModeBadge
-            mode={(snapshot?.runtimeMode ?? null) as BoothRuntimeMode | null}
+            mode={snapshot?.runtimeMode ?? null}
             className="live-system-panel__mode"
           />
         </div>
