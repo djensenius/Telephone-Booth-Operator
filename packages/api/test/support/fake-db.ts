@@ -48,6 +48,8 @@ export type FakeStatus = {
   currentMessageId: string | null;
   lastError: string | null;
   runtimeMode: "real" | "mock" | "simulator" | null;
+  firstSeenAt: Date;
+  repeatCount: number;
   updatedAt: Date;
 };
 
@@ -430,6 +432,8 @@ export const seedStatus = (overrides: Partial<FakeStatus> = {}): FakeStatus => {
     currentMessageId: overrides.currentMessageId ?? null,
     lastError: overrides.lastError ?? null,
     runtimeMode: overrides.runtimeMode ?? null,
+    firstSeenAt: overrides.firstSeenAt ?? overrides.updatedAt ?? new Date(),
+    repeatCount: overrides.repeatCount ?? 1,
     updatedAt: overrides.updatedAt ?? new Date(),
   };
   store.statuses.push(status);
@@ -1243,13 +1247,33 @@ export const fakeDb = {
     },
   },
   boothStatusSnapshot: {
-    create: async ({ data }: { data: Omit<FakeStatus, "id"> }) => {
+    create: async ({ data }: { data: Omit<FakeStatus, "id" | "repeatCount"> }) => {
       const snapshot: FakeStatus = {
         id: store.statuses.length + 1,
+        repeatCount: 1,
         ...data,
+        firstSeenAt: cloneDate(data.firstSeenAt ?? data.updatedAt),
         updatedAt: cloneDate(data.updatedAt),
       };
       store.statuses.push(snapshot);
+      return snapshot;
+    },
+    update: async ({
+      where,
+      data,
+    }: {
+      where: { id: number };
+      data: {
+        firstSeenAt?: Date;
+        updatedAt?: Date;
+        repeatCount?: { increment: number };
+      };
+    }) => {
+      const snapshot = store.statuses.find((status) => status.id === where.id);
+      if (!snapshot) throw new Error(`no BoothStatusSnapshot ${where.id}`);
+      if (data.firstSeenAt) snapshot.firstSeenAt = cloneDate(data.firstSeenAt);
+      if (data.updatedAt) snapshot.updatedAt = cloneDate(data.updatedAt);
+      if (data.repeatCount) snapshot.repeatCount += data.repeatCount.increment;
       return snapshot;
     },
     findFirst: async () =>

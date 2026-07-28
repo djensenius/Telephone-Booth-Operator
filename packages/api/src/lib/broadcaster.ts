@@ -19,6 +19,10 @@ export type BoothStatusEvent = {
   currentMessageId?: string | null;
   lastError?: string | null;
   runtimeMode?: "real" | "mock" | "simulator" | null;
+  // Collapsing metadata: identical consecutive booth reports fold into one
+  // snapshot spanning `firstSeenAt`..`updatedAt`. See `routes/status.ts`.
+  firstSeenAt?: string;
+  repeatCount?: number;
 };
 
 // Discriminated union mirroring `@telephone-booth-operator/shared`

@@ -45,8 +45,9 @@ spec change.
 4. Phone client `POST /v1/messages/{id}/complete`. The API stat's the
    blob, checks the content-addressed SHA-256, marks the message
    `received`, and returns `{id, status, receivedAt}`.
-5. Phone status updates sent to `PUT /v1/status` are appended to
-   `BoothStatusSnapshot` and broadcast over the
+5. Phone status updates sent to `PUT /v1/status` are recorded in
+   `BoothStatusSnapshot` — a report identical to the newest snapshot is
+   collapsed into it rather than appended — and broadcast over the
    `/v1/ws/status` WebSocket. Browser operators authenticate with the
    session cookie; native clients (iOS/watchOS/tvOS, the Rust CLI) present
    an `Authorization: Bearer` token. Clients that present neither a valid
@@ -91,8 +92,11 @@ client is constructed with the `@prisma/adapter-pg` driver adapter in
   refresh tokens are encrypted at rest.
 - `ApiToken` — phone-client tokens, stored hashed with Argon2id; plaintext
   shown to the operator once on creation.
-- `BoothStatusSnapshot` — append-only log of status updates from the phone
-  client, used to power the live status panel and historical charts.
+- `BoothStatusSnapshot` — log of status updates from the phone client, used to
+  power the live status panel and historical charts. Identical consecutive
+  reports (the booth's status heartbeat) are collapsed into a single row
+  spanning `firstSeenAt`..`updatedAt` with a `repeatCount`
+  (see [ADR 0010](adr/0010-collapse-repeated-booth-status-reports.md)).
 
 ## AI pipeline: transcription, translation, moderation
 

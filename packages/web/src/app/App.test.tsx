@@ -178,7 +178,7 @@ describe("App shell", () => {
     renderShell();
     await screen.findByText("Status");
     expect(screen.getByText("Build date")).toBeTruthy();
-    const timeEl = document.querySelector("time[datetime]");
+    const timeEl = document.querySelector(".build-footer time[datetime]");
     expect(timeEl).toBeTruthy();
     expect(timeEl!.getAttribute("datetime")).toBe("1970-01-01T00:00:00.000Z");
   });

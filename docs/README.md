@@ -44,3 +44,4 @@ rebuilds it from the filesystem; CI fails if it drifts.
 - [0005 — AI transcription and moderation](adr/0005-ai-transcription-and-moderation.md)
 - [0006 — Reconcile stale call sessions on booth idle](adr/0006-reconcile-stale-call-sessions-on-idle.md)
 - [0009 — Human-only moderation and push-based transcription worker](adr/0009-human-moderation-and-push-worker.md)
+- [0010 — Collapse repeated booth status reports](adr/0010-collapse-repeated-booth-status-reports.md)

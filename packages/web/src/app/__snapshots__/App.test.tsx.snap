@@ -334,7 +334,7 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
               On hook
             </strong>
             <span>
-              idle · updated 2025-12-31, 7:00:00 p.m.
+              idle · since 2025-12-31, 7:00:00 p.m. · updated 2025-12-31, 7:00:00 p.m.
             </span>
           </div>
         </section>
@@ -383,7 +383,7 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
             class="feature-table"
           >
             <caption>
-              Last 50 status snapshots
+              Last 50 booth statuses. The booth repeats its status on a heartbeat, so identical reports are counted rather than listed.
             </caption>
             <thead>
               <tr>
@@ -392,6 +392,9 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
                 </th>
                 <th>
                   State
+                </th>
+                <th>
+                  Reports
                 </th>
                 <th>
                   Question
@@ -404,10 +407,19 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
             <tbody>
               <tr>
                 <td>
-                  2025-12-31, 7:00:00 p.m.
+                  <time
+                    datetime="2026-01-01T00:00:00.000Z"
+                  >
+                    2025-12-31, 7:00:00 p.m.
+                  </time>
                 </td>
                 <td>
                   idle
+                </td>
+                <td
+                  title="1 report"
+                >
+                  ×1
                 </td>
                 <td>
                   —

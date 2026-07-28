@@ -1368,6 +1368,17 @@ components:
       properties:
         state: { $ref: "#/components/schemas/BoothState" }
         updatedAt: { type: string, format: date-time }
+        firstSeenAt:
+          type: string
+          format: date-time
+          description: >-
+            First time the booth reported this status. Identical consecutive
+            reports (heartbeats) are collapsed into one snapshot spanning
+            firstSeenAt..updatedAt.
+        repeatCount:
+          type: integer
+          minimum: 1
+          description: Number of identical booth reports collapsed into this snapshot.
         currentQuestionId: { anyOf: [{ type: string, format: uuid }, { type: "null" }] }
         currentMessageId: { anyOf: [{ type: string, format: uuid }, { type: "null" }] }
         lastError: { anyOf: [{ type: string }, { type: "null" }] }

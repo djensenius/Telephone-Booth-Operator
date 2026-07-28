@@ -113,10 +113,24 @@ export const BoothStatusSchema = z.object({
   currentMessageId: z.guid().nullable().optional(),
   lastError: z.string().nullable().optional(),
   runtimeMode: RuntimeModeSchema.nullable().optional(),
+  // The booth re-reports its current status on a heartbeat, so an unchanged
+  // booth produces many identical reports. The operator collapses those into a
+  // single snapshot: `firstSeenAt` is when the booth entered this status,
+  // `updatedAt` is the newest report of it, and `repeatCount` is how many
+  // reports were folded in (1 for a status reported exactly once). Both are
+  // optional so older API builds still validate.
+  firstSeenAt: z.string().datetime().optional(),
+  repeatCount: z.number().int().min(1).optional(),
 });
 export type BoothStatus = z.infer<typeof BoothStatusSchema>;
 
-export const StatusUpdateSchema = BoothStatusSchema.omit({ updatedAt: true }).extend({
+// Booth-supplied half of the wire shape: collapsing metadata is derived by the
+// operator, never sent by the booth.
+export const StatusUpdateSchema = BoothStatusSchema.omit({
+  updatedAt: true,
+  firstSeenAt: true,
+  repeatCount: true,
+}).extend({
   updatedAt: z.string().datetime().optional(),
 });
 export type StatusUpdate = z.infer<typeof StatusUpdateSchema>;

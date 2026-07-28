@@ -84,6 +84,100 @@ describe("status routes", () => {
     expect(body.items[0]).toMatchObject({ state: "recording" });
   });
 
+  it("collapses repeated identical status reports into one counted snapshot", async () => {
+    const app = createApp();
+
+    const beat = async (body: Record<string, unknown>) => {
+      const response = await app.request("/v1/status", {
+        method: "PUT",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify(body),
+      });
+      expect(response.status).toBe(204);
+    };
+
+    // Three identical idle heartbeats plus a genuine transition and a return to
+    // idle: the history should read as three rows, not five.
+    await beat({ state: "idle", updatedAt: "2026-07-28T12:00:00.000Z" });
+    await beat({ state: "idle", updatedAt: "2026-07-28T12:00:10.000Z" });
+    await beat({ state: "idle", updatedAt: "2026-07-28T12:00:20.000Z" });
+    await beat({ state: "recording", updatedAt: "2026-07-28T12:00:30.000Z" });
+    await beat({ state: "idle", updatedAt: "2026-07-28T12:00:40.000Z" });
+
+    const history = await app.request("/v1/status/history?limit=10", {
+      headers: { cookie: operatorCookie() },
+    });
+    const body = await history.json();
+    expect(body.items).toHaveLength(3);
+    expect(body.items[0]).toMatchObject({
+      state: "idle",
+      repeatCount: 1,
+      firstSeenAt: "2026-07-28T12:00:40.000Z",
+      updatedAt: "2026-07-28T12:00:40.000Z",
+    });
+    expect(body.items[1]).toMatchObject({ state: "recording", repeatCount: 1 });
+    // The collapsed run spans its first report through its most recent one.
+    expect(body.items[2]).toMatchObject({
+      state: "idle",
+      repeatCount: 3,
+      firstSeenAt: "2026-07-28T12:00:00.000Z",
+      updatedAt: "2026-07-28T12:00:20.000Z",
+    });
+  });
+
+  it("does not collapse reports whose fields differ", async () => {
+    const app = createApp();
+
+    const beat = async (body: Record<string, unknown>) => {
+      const response = await app.request("/v1/status", {
+        method: "PUT",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify(body),
+      });
+      expect(response.status).toBe(204);
+    };
+
+    await beat({ state: "error", lastError: "no dial tone" });
+    await beat({ state: "error", lastError: "line down" });
+    await beat({ state: "error", lastError: "line down", runtimeMode: "mock" });
+
+    const history = await app.request("/v1/status/history?limit=10", {
+      headers: { cookie: operatorCookie() },
+    });
+    const body = await history.json();
+    expect(body.items).toHaveLength(3);
+    expect(body.items.every((item: { repeatCount: number }) => item.repeatCount === 1)).toBe(true);
+  });
+
+  it("widens the collapsed window when a repeat arrives out of order", async () => {
+    const app = createApp();
+
+    const beat = async (updatedAt: string) => {
+      const response = await app.request("/v1/status", {
+        method: "PUT",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ state: "idle", updatedAt }),
+      });
+      expect(response.status).toBe(204);
+    };
+
+    await beat("2026-07-28T12:00:10.000Z");
+    // A delayed heartbeat generated before the one already stored must not
+    // rewind `updatedAt`, but it does extend the window backwards.
+    await beat("2026-07-28T12:00:00.000Z");
+
+    const history = await app.request("/v1/status/history?limit=10", {
+      headers: { cookie: operatorCookie() },
+    });
+    const body = await history.json();
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]).toMatchObject({
+      repeatCount: 2,
+      firstSeenAt: "2026-07-28T12:00:00.000Z",
+      updatedAt: "2026-07-28T12:00:10.000Z",
+    });
+  });
+
   it("persists and echoes the booth runtimeMode", async () => {
     const app = createApp();
 
