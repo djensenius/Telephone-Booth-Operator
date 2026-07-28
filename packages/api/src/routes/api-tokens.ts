@@ -11,7 +11,7 @@ import { generateToken, invalidateApiTokenCache } from "../lib/api-tokens.js";
 import { db } from "../lib/db.js";
 import { requireOperator, type AuthVariables } from "../lib/session.js";
 
-const idParamSchema = z.object({ id: z.string().uuid() });
+const idParamSchema = z.object({ id: z.guid() });
 const usageQuerySchema = z.object({
   days: z.coerce.number().int().positive().max(365).default(30),
 });

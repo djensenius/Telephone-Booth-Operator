@@ -10,7 +10,7 @@
 // authenticated page it refreshes at the polling cadence (5 s, matching the
 // booth's `PUT /v1/system` interval).
 
-import type { BoothSystemSnapshot, BoothThrottlingFlags } from "@telephone-booth-operator/shared";
+import type { BoothThrottlingFlags } from "@telephone-booth-operator/shared";
 import { useSystemCurrent } from "../../lib/api-client.js";
 import { fmtBytes, fmtNumber, fmtPercent, fmtUptime } from "./format.js";
 
@@ -99,7 +99,7 @@ export function SystemVitalsStrip({
   boothId = DEFAULT_BOOTH_ID,
 }: SystemVitalsStripProps): JSX.Element {
   const query = useSystemCurrent(boothId);
-  const snapshot = query.data?.snapshot as BoothSystemSnapshot | undefined;
+  const snapshot = query.data?.snapshot;
   const receivedAt = query.data?.receivedAt;
 
   // Pull commonly-used nested fields up so the JSX below stays readable. The

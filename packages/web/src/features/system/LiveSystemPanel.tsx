@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { BoothSystemSnapshot, BoothThrottlingFlags } from "@telephone-booth-operator/shared";
+import type { BoothThrottlingFlags } from "@telephone-booth-operator/shared";
 import { GlassPanel, RuntimeModeBadge } from "../../components/booth/index.js";
 import { useSystemCurrent } from "../../lib/api-client.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
@@ -28,7 +28,7 @@ interface LiveSystemPanelProps {
 
 export function LiveSystemPanel({ boothId = DEFAULT_BOOTH_ID }: LiveSystemPanelProps): JSX.Element {
   const query = useSystemCurrent(boothId);
-  const snapshot = query.data?.snapshot as BoothSystemSnapshot | undefined;
+  const snapshot = query.data?.snapshot;
   const receivedAt = query.data?.receivedAt;
   const clientVersion = query.data?.version ?? null;
 

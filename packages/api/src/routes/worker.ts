@@ -25,7 +25,7 @@ import { wsBroadcaster } from "../lib/broadcaster.js";
 import { serializeMessage } from "../lib/serializers.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 
-const idParamSchema = z.object({ id: z.string().uuid() });
+const idParamSchema = z.object({ id: z.guid() });
 
 const transcriptionBody = z.object({
   text: z.string(),
@@ -46,7 +46,7 @@ const moderationBody = z.object({
   flagged: z.boolean(),
   recommendation: z.enum(["approve", "review", "reject"]),
   maxScore: z.number().min(0).max(1),
-  categories: z.record(z.number()).optional(),
+  categories: z.record(z.string(), z.number()).optional(),
   reasonSummary: z.string().optional(),
   model: z.string().nullable().optional(),
 });

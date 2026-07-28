@@ -50,8 +50,8 @@ export const AiProviderSchema = z.enum(["openai", "mac_app", "push", "disabled"]
 export type AiProvider = z.infer<typeof AiProviderSchema>;
 
 export const TranscriptionSchema = z.object({
-  id: z.string().uuid(),
-  messageId: z.string().uuid(),
+  id: z.guid(),
+  messageId: z.guid(),
   provider: AiProviderSchema,
   model: z.string().nullable(),
   status: TranscriptionStatusSchema,
@@ -78,16 +78,16 @@ export const TranscriptionListSchema = z.object({ items: z.array(TranscriptionSc
 export type TranscriptionList = z.infer<typeof TranscriptionListSchema>;
 
 export const ModerationSchema = z.object({
-  id: z.string().uuid(),
-  messageId: z.string().uuid(),
-  transcriptionId: z.string().uuid().nullable(),
+  id: z.guid(),
+  messageId: z.guid(),
+  transcriptionId: z.guid().nullable(),
   provider: AiProviderSchema,
   model: z.string().nullable(),
   status: TranscriptionStatusSchema,
   flagged: z.boolean().nullable(),
   recommendation: ModerationRecommendationSchema.nullable(),
   maxScore: z.number().min(0).max(1).nullable(),
-  categories: z.record(z.number()).nullable(),
+  categories: z.record(z.string(), z.number()).nullable(),
   reasonSummary: z.string().nullable(),
   latencyMs: z.number().int().nonnegative().nullable(),
   error: z.string().nullable(),
@@ -109,8 +109,8 @@ export type RuntimeMode = z.infer<typeof RuntimeModeSchema>;
 export const BoothStatusSchema = z.object({
   state: BoothStateSchema,
   updatedAt: z.string().datetime(),
-  currentQuestionId: z.string().uuid().nullable().optional(),
-  currentMessageId: z.string().uuid().nullable().optional(),
+  currentQuestionId: z.guid().nullable().optional(),
+  currentMessageId: z.guid().nullable().optional(),
   lastError: z.string().nullable().optional(),
   runtimeMode: RuntimeModeSchema.nullable().optional(),
 });
@@ -127,7 +127,7 @@ export const InstructionStatusSchema = z.enum(["active", "inactive"]);
 export type InstructionStatus = z.infer<typeof InstructionStatusSchema>;
 
 export const QuestionSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   prompt: z.string().min(1).max(280),
   status: QuestionStatusSchema,
   createdAt: z.string().datetime(),
@@ -137,13 +137,13 @@ export type Question = z.infer<typeof QuestionSchema>;
 
 export const QuestionCreateSchema = z.object({
   prompt: z.string().min(1).max(280),
-  audioFileId: z.string().uuid(),
+  audioFileId: z.guid(),
   status: QuestionStatusSchema.optional(),
 });
 export type QuestionCreate = z.infer<typeof QuestionCreateSchema>;
 
 export const InstructionSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   description: z.string().max(280).nullable(),
   status: InstructionStatusSchema,
   createdAt: z.string().datetime(),
@@ -153,15 +153,15 @@ export type Instruction = z.infer<typeof InstructionSchema>;
 
 export const InstructionCreateSchema = z.object({
   description: z.string().max(280).optional(),
-  audioFileId: z.string().uuid(),
+  audioFileId: z.guid(),
   status: InstructionStatusSchema.optional(),
 });
 export type InstructionCreate = z.infer<typeof InstructionCreateSchema>;
 
 export const MessageSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   status: MessageStatusSchema,
-  questionId: z.string().uuid().nullable().optional(),
+  questionId: z.guid().nullable().optional(),
   notes: z.string().nullable().optional(),
   createdAt: z.string().datetime(),
   receivedAt: z.string().datetime().nullable().optional(),
@@ -192,21 +192,21 @@ export type TranslationSubmit = z.infer<typeof TranslationSubmitSchema>;
 export const MAX_AUDIO_DURATION_MS = 300_000;
 
 export const MessageCreateSchema = z.object({
-  questionId: z.string().uuid().optional(),
+  questionId: z.guid().optional(),
   durationMs: z.number().int().positive().max(MAX_AUDIO_DURATION_MS),
   sha256: Sha256Schema,
 });
 export type MessageCreate = z.infer<typeof MessageCreateSchema>;
 
 export const MessageInitiatedSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   uploadUrl: z.string().url(),
   blobName: z.string().min(1),
 });
 export type MessageInitiated = z.infer<typeof MessageInitiatedSchema>;
 
 export const MessageCompleteSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   status: z.literal("received"),
   receivedAt: z.string().datetime(),
 });
@@ -224,7 +224,7 @@ export const UploadSlotSchema = z.object({
   uploadUrl: z.string().url(),
   blobName: z.string().min(1),
   expiresAt: z.string().datetime(),
-  audioFileId: z.string().uuid().optional(),
+  audioFileId: z.guid().optional(),
 });
 export type UploadSlot = z.infer<typeof UploadSlotSchema>;
 
@@ -250,7 +250,7 @@ export const CreateApiTokenRequestSchema = z.object({
 export type CreateApiTokenRequest = z.infer<typeof CreateApiTokenRequestSchema>;
 
 export const ApiTokenSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   name: z.string(),
   scope: ApiTokenScopeSchema,
   last4: z.string().length(4),
@@ -327,10 +327,10 @@ export const BOOTH_CLIENT_VERSION_MAX = 64;
 export const BoothEventSchema = z.object({
   eventId: z.string().min(1).max(128),
   boothId: z.string().min(1).max(64),
-  bootId: z.string().uuid(),
+  bootId: z.guid(),
   type: BoothEventTypeSchema,
   occurredAt: z.string().datetime(),
-  sessionId: z.string().uuid().nullable().optional(),
+  sessionId: z.guid().nullable().optional(),
   recordingId: z.string().min(1).max(128).nullable().optional(),
   payload: z.unknown().optional(),
   // Running version of the `telephone-booth` Rust client that produced the
@@ -372,9 +372,9 @@ export const BoothEventListSchema = z.object({
 export type BoothEventList = z.infer<typeof BoothEventListSchema>;
 
 export const CallSessionSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   boothId: z.string(),
-  bootId: z.string().uuid(),
+  bootId: z.guid(),
   startedAt: z.string().datetime(),
   endedAt: z.string().datetime().nullable(),
   digitsDialed: z.string().nullable(),
@@ -584,7 +584,7 @@ export const MobileDevicePreferencesSchema = z.object({
 export type MobileDevicePreferences = z.infer<typeof MobileDevicePreferencesSchema>;
 
 export const MobileDeviceSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   apnsToken: z.string().min(32),
   platform: MobileDevicePlatformSchema,
   deviceName: z.string().nullable(),
@@ -653,7 +653,7 @@ export const StatsHourlyBucketSchema = z.object({
 export type StatsHourlyBucket = z.infer<typeof StatsHourlyBucketSchema>;
 
 export const StatsTopQuestionSchema = z.object({
-  questionId: z.string().uuid(),
+  questionId: z.guid(),
   prompt: z.string(),
   messageCount: z.number().int().nonnegative(),
   lastUsedAt: z.string().datetime().nullable(),
@@ -693,7 +693,7 @@ export const StatsOverviewSchema = z.object({
     // rather than being normalised, so clients should render unrecognised
     // keys directly. The literal "unknown" key is only emitted when the DB
     // value was null.
-    outcomes: z.record(z.number().int().nonnegative()),
+    outcomes: z.record(z.string(), z.number().int().nonnegative()),
     perDay: z.array(StatsCallsPerDaySchema),
   }),
   messages: z.object({
@@ -701,7 +701,7 @@ export const StatsOverviewSchema = z.object({
     // Keyed by MessageStatus string. As with `outcomes`, unrecognised
     // server-side values appear under their raw key — clients should
     // render whatever key arrives rather than special-casing "unknown".
-    byStatus: z.record(z.number().int().nonnegative()),
+    byStatus: z.record(z.string(), z.number().int().nonnegative()),
     averageDurationMs: z.number().nonnegative().nullable(),
   }),
   playback: z.object({
@@ -714,7 +714,7 @@ export const StatsOverviewSchema = z.object({
     pickups: z.number().int().nonnegative(),
     hangups: z.number().int().nonnegative(),
     // 10-entry zero-filled record keyed "0".."9".
-    digitsDialed: z.record(z.number().int().nonnegative()),
+    digitsDialed: z.record(z.string(), z.number().int().nonnegative()),
   }),
   uploads: z.object({
     succeeded: z.number().int().nonnegative(),
@@ -739,7 +739,7 @@ export type StatsOverview = z.infer<typeof StatsOverviewSchema>;
 // -----------------------------------------------------------------------------
 
 export const MetricFilterSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   name: z.string(),
   window: StatsWindowSchema.nullable(),
   start: z.string().datetime().nullable(),

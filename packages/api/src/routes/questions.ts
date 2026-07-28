@@ -8,12 +8,12 @@ import { serializeQuestion } from "../lib/serializers.js";
 import { requireAdmin, type AuthVariables } from "../lib/session.js";
 
 const listQuerySchema = z.object({
-  cursor: z.string().uuid().optional(),
+  cursor: z.guid().optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   status: QuestionStatusSchema.optional(),
 });
 
-const idParamSchema = z.object({ id: z.string().uuid() });
+const idParamSchema = z.object({ id: z.guid() });
 
 export const questionsRouter = new Hono<{ Variables: AuthVariables & ApiTokenVariables }>();
 

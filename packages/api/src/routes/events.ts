@@ -42,7 +42,7 @@ const listQuerySchema = z.object({
     .transform((value) =>
       value === undefined ? undefined : Array.isArray(value) ? value : [value],
     ),
-  sessionId: z.string().uuid().optional(),
+  sessionId: z.guid().optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(MAX_LIMIT).default(DEFAULT_LIMIT),
 });
@@ -55,7 +55,7 @@ const streamQuerySchema = z.object({
     .transform((value) =>
       value === undefined ? undefined : Array.isArray(value) ? value : [value],
     ),
-  sessionId: z.string().uuid().optional(),
+  sessionId: z.guid().optional(),
 });
 
 const eventsRouter = new Hono<{ Variables: AuthVariables & ApiTokenVariables }>();

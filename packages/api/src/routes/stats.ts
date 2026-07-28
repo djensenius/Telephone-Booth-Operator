@@ -520,7 +520,7 @@ const serializeMetricFilter = (row: MetricFilterRow): MetricFilter => ({
   updatedAt: row.updatedAt.toISOString(),
 });
 
-const idParamSchema = z.object({ id: z.string().uuid() });
+const idParamSchema = z.object({ id: z.guid() });
 
 export const statsRouter = new Hono<{ Variables: AuthVariables }>();
 
