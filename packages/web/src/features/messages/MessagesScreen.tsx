@@ -57,6 +57,19 @@ function emptyCopy(filter: MessageRouteFilter): string {
   }
 }
 
+// API failures arrive as machine codes (`not_found`, `conflict`, …), which are
+// no help to an operator, so map the ones an action can realistically hit.
+const ACTION_MESSAGES: Readonly<Record<string, string>> = {
+  not_found: "That message is no longer on file — refresh the queue.",
+  conflict: "That message changed while you were working on it. Refresh and try again.",
+  forbidden: "Your account is not allowed to do that.",
+  unauthorized: "Your session expired. Sign in again.",
+};
+
+function actionMessage(error: Error): string {
+  return ACTION_MESSAGES[error.message] ?? "That action could not be completed. Try again.";
+}
+
 export function MessagesScreen(): JSX.Element {
   const search = useSearch({ strict: false });
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -138,7 +151,11 @@ export function MessagesScreen(): JSX.Element {
           </button>
         ))}
       </div>
-      {actionError ? <p className="feature-error">{actionError.message}</p> : null}
+      {actionError ? (
+        <p className="feature-error" role="alert">
+          {actionMessage(actionError)}
+        </p>
+      ) : null}
       {isLoading ? <FeatureSkeleton /> : null}
       {loadError ? <FeatureError message="Could not load the message queue." /> : null}
       {!isLoading && !loadError && rows.length === 0 ? (
@@ -190,7 +207,7 @@ export function MessagesScreen(): JSX.Element {
             <p>The audio and its transcript are removed for good. This cannot be undone.</p>
             {deleteMessage.error instanceof Error ? (
               <p className="feature-error" role="alert">
-                {deleteMessage.error.message}
+                {actionMessage(deleteMessage.error)}
               </p>
             ) : null}
             <div className="debug-button-row">
