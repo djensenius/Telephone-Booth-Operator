@@ -276,34 +276,46 @@ function stripLegacyToken(key: string, parsed: Record<string, unknown>): void {
  * rewrites it to the allow-listed persisted shape, dropping any bearer token
  * written by an older build. Unparseable records are removed outright, since
  * they are already treated as empty on read and may still contain the secret.
+ *
+ * Runs at boot, so it must never throw: reading `window.localStorage` raises
+ * `SecurityError` when storage is blocked (privacy mode, third-party cookie
+ * blocking), and that would take the whole app down before React mounts.
  */
 export function purgeLegacyDebugConnectionTokens(): void {
   if (typeof window === "undefined") {
     return;
   }
-  const storage = window.localStorage;
-  const keys: string[] = [];
-  for (let index = 0; index < storage.length; index += 1) {
-    const key = storage.key(index);
-    if (key !== null && key.startsWith(`${DEBUG_STORAGE_PREFIX}.`)) {
-      keys.push(key);
+  try {
+    const storage = window.localStorage;
+    const keys: string[] = [];
+    for (let index = 0; index < storage.length; index += 1) {
+      const key = storage.key(index);
+      if (key !== null && key.startsWith(`${DEBUG_STORAGE_PREFIX}.`)) {
+        keys.push(key);
+      }
     }
-  }
-  for (const key of keys) {
-    const raw = storage.getItem(key);
-    if (raw === null) {
-      continue;
-    }
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      if (typeof parsed !== "object" || parsed === null) {
-        storage.removeItem(key);
+    for (const key of keys) {
+      const raw = storage.getItem(key);
+      if (raw === null) {
         continue;
       }
-      stripLegacyToken(key, parsed as Record<string, unknown>);
-    } catch {
-      storage.removeItem(key);
+      let record: Record<string, unknown> | null = null;
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        if (typeof parsed === "object" && parsed !== null) {
+          record = parsed as Record<string, unknown>;
+        }
+      } catch {
+        record = null;
+      }
+      if (record === null) {
+        storage.removeItem(key);
+      } else {
+        stripLegacyToken(key, record);
+      }
     }
+  } catch {
+    // Storage is unavailable; there is nothing persisted to migrate.
   }
 }
 
@@ -345,7 +357,11 @@ export function writeDebugConnectionPrefs(
     pinnedFingerprint: prefs.pinnedFingerprint,
     updatedAt: prefs.updatedAt,
   };
-  window.localStorage.setItem(getDebugConnectionStorageKey(userSub), JSON.stringify(persisted));
+  try {
+    window.localStorage.setItem(getDebugConnectionStorageKey(userSub), JSON.stringify(persisted));
+  } catch {
+    // Storage is unavailable or full; the in-memory token is still set.
+  }
 }
 
 export function forgetDebugConnectionPrefs(userSub = "anonymous"): void {
@@ -353,7 +369,11 @@ export function forgetDebugConnectionPrefs(userSub = "anonymous"): void {
   if (typeof window === "undefined") {
     return;
   }
-  window.localStorage.removeItem(getDebugConnectionStorageKey(userSub));
+  try {
+    window.localStorage.removeItem(getDebugConnectionStorageKey(userSub));
+  } catch {
+    // Storage is unavailable; there is nothing persisted to remove.
+  }
 }
 
 export function emptyDebugConnectionPrefs(): DebugConnectionPrefs {

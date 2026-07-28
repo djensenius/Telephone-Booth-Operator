@@ -1,10 +1,12 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import {
+  emptyDebugConnectionPrefs,
   forgetDebugConnectionPrefs,
   getDebugConnectionStorageKey,
   purgeLegacyDebugConnectionTokens,
   readDebugConnectionPrefs,
+  writeDebugConnectionPrefs,
 } from "../../lib/debug-client.js";
 import { PhoneClientConnection } from "./PhoneClientConnection.js";
 
@@ -152,6 +154,36 @@ describe("legacy debug token migration", () => {
 
     expect(window.localStorage.getItem(getDebugConnectionStorageKey("user-123"))).toBeNull();
     expect(window.localStorage.getItem(getDebugConnectionStorageKey("user-456"))).toBeNull();
+  });
+
+  it("treats blocked localStorage as non-fatal", () => {
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      get() {
+        throw new DOMException("storage is blocked", "SecurityError");
+      },
+    });
+
+    try {
+      // The boot-time migration must never take the app down before React mounts.
+      expect(() => {
+        purgeLegacyDebugConnectionTokens();
+      }).not.toThrow();
+      expect(() => {
+        writeDebugConnectionPrefs(
+          { ...emptyDebugConnectionPrefs(), token: "secret-token" },
+          "user-123",
+        );
+      }).not.toThrow();
+      // The token still reaches the in-memory store even with no persistence.
+      expect(readDebugConnectionPrefs("user-123").token).toBe("secret-token");
+      expect(() => {
+        forgetDebugConnectionPrefs("user-123");
+      }).not.toThrow();
+      expect(readDebugConnectionPrefs("user-123").token).toBe("");
+    } finally {
+      installLocalStorage();
+    }
   });
 
   it("strips a legacy token lazily when prefs are read before the migration runs", () => {
