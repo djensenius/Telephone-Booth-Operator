@@ -161,7 +161,7 @@ export class Http2ApnsSender {
       req.on("response", (headers) => {
         status = Number(headers[":status"] ?? 0);
       });
-      req.on("data", (chunk) => {
+      req.on("data", (chunk: string | Buffer) => {
         body += typeof chunk === "string" ? chunk : chunk.toString("utf8");
       });
       req.on("error", reject);
