@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { BoothStatus } from "@telephone-booth-operator/shared";
 
-import { STATUS_HISTORY_LIMIT, collapseStatusHistory, mergeLiveStatus } from "./status-history.js";
+import {
+  STATUS_HISTORY_LIMIT,
+  collapseStatusHistory,
+  isNewerThan,
+  mergeLiveStatus,
+} from "./status-history.js";
 
 const status = (overrides: Partial<BoothStatus> & { updatedAt: string }): BoothStatus => ({
   state: "idle",
@@ -215,7 +220,49 @@ describe("mergeLiveStatus", () => {
     expect(merged[0]?.state).toBe("uploading");
   });
 
+  it("files a late frame for another status at its place in time", () => {
+    const history = [
+      status({ state: "recording", updatedAt: "2026-07-28T12:00:30.000Z" }),
+      status({ updatedAt: "2026-07-28T12:00:00.000Z" }),
+    ];
+
+    const merged = mergeLiveStatus(
+      history,
+      status({ state: "uploading", updatedAt: "2026-07-28T12:00:15.000Z" }),
+    );
+
+    expect(merged.map((item) => item.state)).toEqual(["recording", "uploading", "idle"]);
+  });
+
   it("seeds an empty history", () => {
     expect(mergeLiveStatus([], status({ updatedAt: "2026-07-28T12:00:00.000Z" }))).toHaveLength(1);
+  });
+});
+
+describe("isNewerThan", () => {
+  it("accepts the first frame", () => {
+    expect(isNewerThan(status({ updatedAt: "2026-07-28T12:00:00.000Z" }), null)).toBe(true);
+  });
+
+  it("rejects a late frame for another status", () => {
+    const current = status({ state: "recording", updatedAt: "2026-07-28T12:00:30.000Z" });
+    const late = status({ updatedAt: "2026-07-28T12:00:10.000Z" });
+
+    expect(isNewerThan(late, current)).toBe(false);
+  });
+
+  it("accepts a repeat that only widens the window", () => {
+    const current = status({
+      updatedAt: "2026-07-28T12:00:30.000Z",
+      firstSeenAt: "2026-07-28T12:00:30.000Z",
+      repeatCount: 1,
+    });
+    const widened = status({
+      updatedAt: "2026-07-28T12:00:30.000Z",
+      firstSeenAt: "2026-07-28T12:00:00.000Z",
+      repeatCount: 2,
+    });
+
+    expect(isNewerThan(widened, current)).toBe(true);
   });
 });

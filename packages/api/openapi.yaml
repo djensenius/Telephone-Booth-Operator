@@ -1382,6 +1382,14 @@ components:
         currentQuestionId: { anyOf: [{ type: string, format: uuid }, { type: "null" }] }
         currentMessageId: { anyOf: [{ type: string, format: uuid }, { type: "null" }] }
         lastError: { anyOf: [{ type: string }, { type: "null" }] }
+        runtimeMode:
+          anyOf:
+            - { type: string, enum: [real, mock, simulator] }
+            - { type: "null" }
+          description: >-
+            How the booth is being driven. Part of the status identity, so a
+            change here starts a new snapshot rather than collapsing into the
+            current one.
     StatusUpdate:
       type: object
       required: [state]
@@ -1391,6 +1399,14 @@ components:
         currentQuestionId: { anyOf: [{ type: string, format: uuid }, { type: "null" }] }
         currentMessageId: { anyOf: [{ type: string, format: uuid }, { type: "null" }] }
         lastError: { anyOf: [{ type: string }, { type: "null" }] }
+        runtimeMode:
+          anyOf:
+            - { type: string, enum: [real, mock, simulator] }
+            - { type: "null" }
+          description: >-
+            How the booth is being driven. Part of the status identity, so a
+            change here starts a new snapshot rather than collapsing into the
+            current one.
     StatusHistory:
       type: object
       required: [items]

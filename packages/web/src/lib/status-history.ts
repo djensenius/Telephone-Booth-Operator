@@ -66,7 +66,22 @@ export function mergeLiveStatus(
     // than rewinding the window and the count.
     return isStaleFrame(head, status) ? history : [status, ...rest];
   }
-  return [status, ...history].slice(0, limit);
+  // A frame for a different row can also arrive late. It still belongs in the
+  // history, but at its place in time rather than at the head.
+  const at = history.findIndex(
+    (item) => Date.parse(item.updatedAt) <= Date.parse(status.updatedAt),
+  );
+  const index = at === -1 ? history.length : at;
+  return [...history.slice(0, index), status, ...history.slice(index)].slice(0, limit);
+}
+
+/** Whether `status` is the newest report the console has seen. */
+export function isNewerThan(status: BoothStatus, current: BoothStatus | null): boolean {
+  if (!current) return true;
+  if (!isSameStatus(current, status)) {
+    return Date.parse(status.updatedAt) >= Date.parse(current.updatedAt);
+  }
+  return !isStaleFrame(current, status);
 }
 
 function isStaleFrame(head: BoothStatus, status: BoothStatus): boolean {

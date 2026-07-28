@@ -19,6 +19,7 @@ import {
   STATUS_HISTORY_DISPLAY_LIMIT,
   collapseStatusHistory,
   firstSeenAtOf,
+  isNewerThan,
   mergeLiveStatus,
   repeatCountOf,
 } from "../../lib/status-history.js";
@@ -93,9 +94,14 @@ export function StatusScreen(): JSX.Element {
       if (envelope.success) {
         if (envelope.data.kind === "status") {
           const status = envelope.data.status;
-          setLiveStatus(status);
-          setLastStatusAt(new Date(status.updatedAt));
-          queryClient.setQueryData(apiQueryKeys.status, status);
+          // Frames can arrive out of order, so an older one is recorded in the
+          // history but never becomes the displayed current status.
+          const cached = queryClient.getQueryData<BoothStatus>(apiQueryKeys.status) ?? null;
+          if (isNewerThan(status, cached)) {
+            setLiveStatus(status);
+            setLastStatusAt(new Date(status.updatedAt));
+            queryClient.setQueryData(apiQueryKeys.status, status);
+          }
           queryClient.setQueryData(
             apiQueryKeys.statusHistory,
             (current: { readonly items: readonly BoothStatus[] } | undefined) => ({
