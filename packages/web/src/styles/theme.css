@@ -1249,7 +1249,6 @@ textarea:focus-visible,
 .debug-pulse-buttons,
 .feature-actions,
 .feature-toolbar,
-.feature-row-actions,
 .feature-check {
   display: flex;
   flex-wrap: wrap;
@@ -1265,7 +1264,8 @@ textarea:focus-visible,
 .feature-toolbar button,
 .feature-table button,
 .feature-dialog button,
-.feature-row-actions a,
+.message-card__actions a,
+.message-card__actions button,
 .debug-button-row a,
 .debug-button-row button,
 .debug-pulse-buttons button,
@@ -1292,6 +1292,19 @@ textarea:focus-visible,
 .feature-toolbar button:disabled,
 .feature-table button:disabled,
 .feature-dialog button:disabled,
+/* The shared action-row rule above is more specific than the variant classes,
+   so restate them here to keep Approve green and Reject red. */
+.message-card__actions button.feature-button--approve {
+  color: color-mix(in srgb, var(--accent-green) 72%, var(--text-primary));
+  border-color: color-mix(in srgb, var(--accent-green) 40%, var(--border-subtle));
+}
+
+.message-card__actions button.feature-button--reject {
+  color: color-mix(in srgb, var(--accent-red) 70%, var(--text-primary));
+  border-color: color-mix(in srgb, var(--accent-red) 40%, var(--border-subtle));
+}
+
+.message-card__actions button:disabled,
 .debug-button-row button:disabled,
 .debug-pulse-buttons button:disabled {
   cursor: not-allowed;
@@ -1327,11 +1340,93 @@ textarea:focus-visible,
   max-width: 220px;
 }
 
-.feature-row-transcript {
-  max-width: 320px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* Message review queue — card list. Replaces the old wide table, which
+   overflowed horizontally and wrapped timestamps onto several lines. */
+.message-card-list {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  margin-block: 16px 0;
+  list-style: none;
+}
+
+.message-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  background: var(--surface-panel-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.message-card__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  align-items: center;
+}
+
+.message-card__time {
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
   white-space: nowrap;
+}
+
+.message-card__duration {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  margin-inline-start: auto;
+}
+
+.message-card__prompt {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.message-card__audio {
+  width: 100%;
+  max-width: 520px;
+}
+
+.message-card__text {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.message-card__status {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.message-card__status--failed {
+  color: var(--accent-red);
+}
+
+.message-card__status-detail {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.message-card__expand {
+  padding: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+  background: none;
+  border: 0;
+  font: inherit;
+  font-size: 0.86rem;
+  text-decoration: underline;
+}
+
+.message-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
 }
 
 .feature-transcript-body {
@@ -1463,6 +1558,16 @@ textarea:focus-visible,
   .debug-filters,
   .debug-log-entry {
     grid-template-columns: 1fr;
+  }
+
+  .message-card__duration {
+    margin-inline-start: 0;
+  }
+
+  .message-card__actions a,
+  .message-card__actions button {
+    flex: 1 1 auto;
+    text-align: center;
   }
 }
 

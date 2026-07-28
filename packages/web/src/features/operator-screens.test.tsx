@@ -54,6 +54,40 @@ const message = {
   receivedAt: "2026-01-02T00:01:00.000Z",
   audio: { url: "https://media.example/message.flac", sha256: sha, durationMs: 9000 },
 };
+const transcriptionBase = {
+  id: "55555555-5555-4555-8555-555555555555",
+  messageId,
+  model: null,
+  text: null,
+  language: null,
+  durationMs: 9000,
+  latencyMs: null,
+  error: null,
+  requestedById: null,
+  createdAt: "2026-01-02T00:02:00.000Z",
+  completedAt: null,
+  translationStatus: null,
+  translatedText: null,
+  translatedLanguage: null,
+  translationProvider: null,
+  translationModel: null,
+  translationError: null,
+  translationLatencyMs: null,
+  translationCompletedAt: null,
+};
+const pendingPushTranscription = {
+  ...transcriptionBase,
+  provider: "push",
+  status: "pending",
+};
+const failedTranscription = {
+  ...transcriptionBase,
+  provider: "openai",
+  model: "whisper-1",
+  status: "failed",
+  error: "audio too large: 40000000 bytes exceeds 26214400 limit",
+  completedAt: "2026-01-02T00:03:00.000Z",
+};
 const token = {
   id: tokenId,
   name: "booth client",
@@ -73,6 +107,7 @@ let deletedMessages: string[] = [];
 let revokedToken = false;
 let lastCreatedTokenScope: string | undefined;
 let lastMessageUrl = "";
+let messageUrls: string[] = [];
 let lastDecision: { decision: string; notes?: string } | null = null;
 let writeTextMock: ReturnType<typeof vi.fn>;
 
@@ -142,6 +177,11 @@ const server = setupServer(
   }),
   http.get("http://localhost/v1/messages", ({ request }) => {
     lastMessageUrl = request.url;
+    messageUrls.push(request.url);
+    const status = new URL(request.url).searchParams.get("status");
+    if (status !== null && status !== message.status) {
+      return HttpResponse.json({ items: [] });
+    }
     return HttpResponse.json({ items: [message] });
   }),
   http.get("http://localhost/v1/messages/:id", () => HttpResponse.json(message)),
@@ -268,6 +308,7 @@ beforeEach(() => {
   revokedToken = false;
   lastCreatedTokenScope = undefined;
   lastMessageUrl = "";
+  messageUrls = [];
   lastDecision = null;
   installBrowserStubs();
   window.localStorage.clear();
@@ -497,17 +538,86 @@ describe("Messages feature", () => {
     expect(screen.getAllByText("received").length).toBeGreaterThan(0);
   });
 
-  it("filters failed messages through the rejected backend status", async () => {
+  it("filters rejected messages through the backend status", async () => {
     renderPath("/messages");
-    fireEvent.click(await screen.findByText("failed"));
+    fireEvent.click(await screen.findByText("Rejected"));
     await waitFor(() => expect(lastMessageUrl).toContain("status=rejected"));
   });
 
-  it("bulk deletes selected messages", async () => {
+  it("narrows the needs-review filter to received and pending requests", async () => {
     renderPath("/messages");
-    fireEvent.click(await screen.findByLabelText(`Select message ${messageId}`));
-    fireEvent.click(screen.getByText("Delete selected"));
+    fireEvent.click(await screen.findByText("Needs review"));
+    await waitFor(() =>
+      expect(messageUrls.some((url) => url.includes("status=received"))).toBe(true),
+    );
+    await waitFor(() =>
+      expect(messageUrls.some((url) => url.includes("status=pending"))).toBe(true),
+    );
+    expect(await screen.findByText("What did the city sound like today?")).toBeTruthy();
+  });
+
+  it("keeps an uploading message out of reach of moderation", async () => {
+    server.use(
+      http.get("http://localhost/v1/messages", () =>
+        HttpResponse.json({ items: [{ ...message, status: "uploading" }] }),
+      ),
+    );
+    renderPath("/messages");
+    const approve = await screen.findByRole("button", { name: "Approve" });
+    expect(approve.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Reject" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByRole("link", { name: "Download" })).toBeNull();
+    fireEvent.click(approve);
+    expect(lastDecision).toBeNull();
+  });
+
+  it("deletes a message from the queue only after confirmation", async () => {
+    renderPath("/messages");
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    expect(deletedMessages).not.toContain(messageId);
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm delete" }));
     await waitFor(() => expect(deletedMessages).toContain(messageId));
+  });
+
+  it("approves a message inline from the queue", async () => {
+    renderPath("/messages");
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(lastDecision?.decision).toBe("approve"));
+  });
+
+  it("rejects a message inline from the queue", async () => {
+    renderPath("/messages");
+    fireEvent.click(await screen.findByRole("button", { name: "Reject" }));
+    await waitFor(() => expect(lastDecision?.decision).toBe("reject"));
+  });
+
+  it("explains that push transcription is waiting on a device", async () => {
+    server.use(
+      http.get("http://localhost/v1/messages", () =>
+        HttpResponse.json({
+          items: [{ ...message, latestTranscription: pendingPushTranscription }],
+        }),
+      ),
+    );
+    renderPath("/messages");
+    expect(await screen.findByText("Waiting on transcription device")).toBeTruthy();
+  });
+
+  it("surfaces the reason a transcription failed", async () => {
+    server.use(
+      http.get("http://localhost/v1/messages", () =>
+        HttpResponse.json({
+          items: [{ ...message, latestTranscription: failedTranscription }],
+        }),
+      ),
+    );
+    renderPath("/messages");
+    expect(await screen.findByText("Transcription failed")).toBeTruthy();
+    expect(await screen.findByText(/audio too large/)).toBeTruthy();
   });
 
   it("renders message detail playback", async () => {
@@ -536,7 +646,7 @@ describe("Messages feature", () => {
 
   it("has no critical axe violations", async () => {
     const { container } = renderPath("/messages");
-    await screen.findByText("Message queue");
+    await screen.findByRole("list", { name: "Message queue" });
     await expectNoCriticalAxe(container);
   });
 });

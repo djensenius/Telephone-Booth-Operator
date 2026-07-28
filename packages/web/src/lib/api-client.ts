@@ -666,17 +666,24 @@ export function useDeactivateInstruction() {
   });
 }
 
-export function useMessagesList(filter: MessageStatus | "all") {
+export interface MessagesListOptions {
+  readonly limit?: number;
+  readonly enabled?: boolean;
+}
+
+export function useMessagesList(filter: MessageStatus | "all", options: MessagesListOptions = {}) {
+  const limit = options.limit ?? 100;
   const statusFilter = MessageStatusSchema.safeParse(filter).success
     ? (filter as MessageStatus)
     : undefined;
   return useQuery({
-    queryKey: apiQueryKeys.messages(filter),
+    queryKey: [...apiQueryKeys.messages(filter), limit],
     queryFn: () =>
       messages.list({
         ...(statusFilter === undefined ? {} : { status: statusFilter }),
-        limit: 100,
+        limit,
       }),
+    enabled: options.enabled ?? true,
   });
 }
 
@@ -688,16 +695,6 @@ export function useDeleteMessage() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: messages.delete,
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["messages"] });
-    },
-  });
-}
-
-export function useDeleteMessages() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (ids: readonly string[]) => Promise.all(ids.map((id) => messages.delete(id))),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["messages"] });
     },

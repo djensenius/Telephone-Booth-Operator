@@ -12,6 +12,9 @@ import {
   useRetranscribeMessage,
 } from "../../lib/api-client.js";
 import { FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
+import { transcriptionStatusView } from "./transcription-status.js";
+import { absoluteTime, relativeTime } from "../../lib/time-format.js";
+import { useNow } from "../../hooks/useNow.js";
 
 const listenedKey = (id: string): string => `booth.message.listened.${id}`;
 
@@ -32,8 +35,15 @@ function writeListened(id: string, value: boolean): void {
 }
 
 function formatDateTime(value: string | null | undefined): string {
-  if (value === null || value === undefined) return "—";
-  return new Date(value).toLocaleString();
+  return absoluteTime(value) ?? "—";
+}
+
+// "3h ago (12/03/2026, 18:04)" — relative reads faster, absolute stays exact.
+function formatMoment(value: string | null | undefined, now: number): string {
+  const absolute = absoluteTime(value);
+  if (absolute === null) return "—";
+  const relative = relativeTime(value, now);
+  return relative === null ? absolute : `${relative} (${absolute})`;
 }
 
 interface ModerationBadgeProps {
@@ -72,22 +82,33 @@ function TranscriptCard({
   retranscribeError,
 }: TranscriptCardProps): JSX.Element {
   const transcription = message.latestTranscription ?? null;
+  const status = transcriptionStatusView(transcription);
   return (
     <section className="feature-card feature-card--wide">
       <header className="feature-card-header">
         <h2>Transcript</h2>
-        <button type="button" onClick={onRetranscribe} disabled={retranscribing}>
+        <button
+          type="button"
+          onClick={onRetranscribe}
+          disabled={retranscribing || !status.canRetry || message.status === "uploading"}
+        >
           {retranscribing ? "Re-running…" : "Re-run transcription"}
         </button>
       </header>
       {transcription === null ? (
         <p className="feature-empty">No transcription yet. Run one to populate moderation.</p>
       ) : transcription.status === "pending" ? (
-        <p className="feature-empty">Transcription in progress…</p>
+        <p className="feature-empty">
+          {status.label}
+          {status.detail === null ? "" : ` — ${status.detail}`}
+        </p>
       ) : transcription.status === "failed" ? (
         <p className="feature-error">
-          Transcription failed{transcription.error ? `: ${transcription.error}` : ""}.
+          {status.label}
+          {status.detail === null ? "." : `: ${status.detail}.`}
         </p>
+      ) : status.tone === "none" ? (
+        <p className="feature-empty">Silence — the recording has no speech.</p>
       ) : (
         <>
           <p className="feature-transcript-body">{transcription.text ?? ""}</p>
@@ -382,6 +403,7 @@ function DecisionCard({
 
 export function MessageDetail(): JSX.Element {
   const { id } = useParams({ from: "/messages/$id" });
+  const now = useNow();
   const message = useMessage(id);
   const questions = useQuestionsList();
   const transcriptions = useMessageTranscriptions(id);
@@ -422,11 +444,15 @@ export function MessageDetail(): JSX.Element {
               </div>
               <div>
                 <dt>Received</dt>
-                <dd>{message.data.receivedAt ?? "Not received"}</dd>
+                <dd>
+                  {message.data.receivedAt === null || message.data.receivedAt === undefined
+                    ? "Not received"
+                    : formatMoment(message.data.receivedAt, now)}
+                </dd>
               </div>
               <div>
                 <dt>Created</dt>
-                <dd>{message.data.createdAt}</dd>
+                <dd>{formatMoment(message.data.createdAt, now)}</dd>
               </div>
               <div>
                 <dt>SHA-256</dt>

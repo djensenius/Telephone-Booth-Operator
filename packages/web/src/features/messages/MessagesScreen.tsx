@@ -1,195 +1,250 @@
 import type { JSX } from "react";
-import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
-import type { Message, Moderation, Transcription } from "@telephone-booth-operator/shared";
+import { useNavigate, useSearch } from "@tanstack/react-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Message, MessageStatus } from "@telephone-booth-operator/shared";
 import type { MessageRouteFilter } from "../../lib/navigation.js";
 import { GlassPanel } from "../../components/booth/index.js";
 import {
+  useDecideMessage,
   useDeleteMessage,
-  useDeleteMessages,
   useMessagesList,
   useQuestionsList,
+  useRetranscribeMessage,
 } from "../../lib/api-client.js";
-import { isMessageFilter } from "../../lib/navigation.js";
+import {
+  MESSAGE_ROUTE_FILTERS,
+  isMessageFilter,
+  messageFilterLabel,
+} from "../../lib/navigation.js";
+import { useNow } from "../../hooks/useNow.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
+import { MessageCard } from "./MessageCard.js";
 
-const filters: readonly MessageRouteFilter[] = ["all", "received", "uploading", "failed"];
-
-function duration(ms: number | null): string {
-  if (ms === null) return "Unknown";
-  return `${Math.round(ms / 1000)}s`;
+// "Needs review" spans two backend statuses: `received` is a recording the AI
+// worker has not claimed yet, `pending` is one with AI work in flight.
+// `GET /v1/messages` only takes a single `status`, and an unfiltered fetch
+// would be truncated to the newest N rows across *all* statuses — burying
+// older unreviewed work behind a wall of approved messages. So the two
+// statuses are fetched separately and merged here, letting the server truncate
+// after filtering.
+function backendFilter(filter: MessageRouteFilter): MessageStatus | "all" {
+  switch (filter) {
+    case "approved":
+    case "rejected":
+    case "uploading":
+      return filter;
+    default:
+      return "all";
+  }
 }
 
-function date(value: string | null | undefined): string {
-  return value === null || value === undefined ? "Not received" : new Date(value).toLocaleString();
+function receivedTime(message: Message): number {
+  return Date.parse(message.receivedAt ?? message.createdAt);
 }
 
-const TRANSCRIPT_SNIPPET_CHARS = 80;
-
-function transcriptSnippet(transcription: Transcription | null | undefined): string {
-  if (!transcription) return "—";
-  if (transcription.status === "pending") return "Transcribing…";
-  if (transcription.status === "failed") return "Transcription failed";
-  // Prefer translated text in the list snippet so operators read the same
-  // copy that drives moderation; full original text is still visible in the
-  // detail view via MessageDetail.
-  const candidate =
-    transcription.translationStatus === "succeeded" &&
-    typeof transcription.translatedText === "string" &&
-    transcription.translatedText.trim().length > 0
-      ? transcription.translatedText
-      : transcription.text;
-  const text = candidate?.replace(/\s+/g, " ").trim() ?? "";
-  if (text.length === 0) return "Silence";
-  return text.length <= TRANSCRIPT_SNIPPET_CHARS
-    ? text
-    : `${text.slice(0, TRANSCRIPT_SNIPPET_CHARS - 1)}…`;
+function emptyCopy(filter: MessageRouteFilter): string {
+  switch (filter) {
+    case "needs-review":
+      return "Nothing is waiting on a verdict right now.";
+    case "approved":
+      return "No messages have been approved yet.";
+    case "rejected":
+      return "No messages have been rejected yet.";
+    case "uploading":
+      return "No recordings are mid-upload.";
+    default:
+      return "The booth has not sent any recordings yet.";
+  }
 }
 
-interface ModerationBadge {
-  readonly label: string;
-  readonly variant: "approve" | "reject" | "review" | "pending" | "failed" | "none";
-}
+// API failures arrive as machine codes (`not_found`, `conflict`, …), which are
+// no help to an operator, so map the ones an action can realistically hit.
+const ACTION_MESSAGES: Readonly<Record<string, string>> = {
+  not_found: "That message is no longer on file — refresh the queue.",
+  conflict: "That message changed while you were working on it. Refresh and try again.",
+  forbidden: "Your account is not allowed to do that.",
+  unauthorized: "Your session expired. Sign in again.",
+};
 
-function moderationBadge(moderation: Moderation | null | undefined): ModerationBadge {
-  if (!moderation) return { label: "—", variant: "none" };
-  if (moderation.status === "pending") return { label: "Moderating…", variant: "pending" };
-  if (moderation.status === "failed") return { label: "Moderation failed", variant: "failed" };
-  if (moderation.recommendation === "approve") return { label: "Looks clean", variant: "approve" };
-  if (moderation.recommendation === "reject") return { label: "Flagged", variant: "reject" };
-  return { label: "Needs review", variant: "review" };
+function actionMessage(error: Error): string {
+  return ACTION_MESSAGES[error.message] ?? "That action could not be completed. Try again.";
 }
 
 export function MessagesScreen(): JSX.Element {
   const search = useSearch({ strict: false });
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  // Focus moves into the confirmation and returns to the card's Delete button
+  // when it closes, so the dialog is announced and keyboard users keep place.
+  const confirmRef = useRef<HTMLButtonElement | null>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(() => new Set());
   const navigate = useNavigate();
-  const status = isMessageFilter(search.status) ? search.status : "all";
-  const messages = useMessagesList(status === "failed" ? "rejected" : status);
+  const now = useNow();
+  const filter: MessageRouteFilter = isMessageFilter(search.status) ? search.status : "all";
+  const needsReview = filter === "needs-review";
+  const listed = useMessagesList(backendFilter(filter), { enabled: !needsReview });
+  const received = useMessagesList("received", { enabled: needsReview });
+  const pending = useMessagesList("pending", { enabled: needsReview });
   const questions = useQuestionsList();
   const deleteMessage = useDeleteMessage();
-  const deleteMessages = useDeleteMessages();
-  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
-  const rows = messages.data?.items ?? [];
+  const decideMessage = useDecideMessage();
+  const retranscribe = useRetranscribeMessage();
+
+  const queries = needsReview ? [received, pending] : [listed];
+  const isLoading = queries.some((query) => query.isLoading);
+  const loadError = queries.some((query) => query.error);
+
+  const rows = useMemo(() => {
+    if (!needsReview) return listed.data?.items ?? [];
+    // A message can flip from `received` to `pending` between the two
+    // requests and land in both responses, so dedupe before sorting.
+    const merged = new Map<string, Message>();
+    for (const item of [...(received.data?.items ?? []), ...(pending.data?.items ?? [])]) {
+      merged.set(item.id, item);
+    }
+    return [...merged.values()].sort((a, b) => receivedTime(b) - receivedTime(a));
+  }, [needsReview, listed.data?.items, received.data?.items, pending.data?.items]);
+
   const promptById = useMemo(
     () => new Map((questions.data?.items ?? []).map((question) => [question.id, question.prompt])),
     [questions.data?.items],
   );
 
-  function toggle(id: string): void {
-    setSelected((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+  const closeConfirm = useCallback(() => {
+    setDeleteId(null);
+    returnFocusRef.current?.focus();
+    returnFocusRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    if (deleteId !== null) confirmRef.current?.focus();
+  }, [deleteId]);
+
+  // Every card with work in flight, not just the latest one: a synchronous
+  // re-transcription can take minutes, so it must neither freeze the rest of
+  // the queue nor stop marking its own card busy once another action starts.
+  const clearBusy = useCallback((id: string) => {
+    setBusyIds((previous) => {
+      const next = new Set(previous);
+      next.delete(id);
       return next;
     });
-  }
+  }, []);
+
+  // A delete failure is reported inside the confirmation while it is open, so
+  // the focused operator sees it without looking behind the backdrop.
+  const actionError = [
+    decideMessage.error,
+    deleteId === null ? deleteMessage.error : null,
+    retranscribe.error,
+  ].find((error): error is Error => error instanceof Error);
 
   return (
     <GlassPanel title="Message review queue" className="feature-screen messages-screen">
       <p className="screen-kicker">Digit 2</p>
       <h1>Messages</h1>
-      <p>Review recordings from the booth, download keepers, and clear crossed lines.</p>
+      <p>Review recordings from the booth, approve or reject them, and clear crossed lines.</p>
       <div className="feature-toolbar" role="toolbar" aria-label="Message filters">
-        {filters.map((filter) => (
+        {MESSAGE_ROUTE_FILTERS.map((option) => (
           <button
-            key={filter}
+            key={option}
             type="button"
-            aria-pressed={status === filter}
+            aria-pressed={filter === option}
             onClick={() =>
-              void navigate({ to: "/messages", search: filter === "all" ? {} : { status: filter } })
+              void navigate({
+                to: "/messages",
+                search: option === "all" ? {} : { status: option },
+              })
             }
           >
-            {filter}
+            {messageFilterLabel(option)}
           </button>
         ))}
-        <button
-          type="button"
-          disabled={selected.size === 0 || deleteMessages.isPending}
-          onClick={() =>
-            void deleteMessages.mutateAsync([...selected]).then(() => setSelected(new Set()))
-          }
-        >
-          Delete selected
-        </button>
       </div>
-      {messages.isLoading ? <FeatureSkeleton /> : null}
-      {messages.error ? <FeatureError message="Could not load the message queue." /> : null}
-      {!messages.isLoading && rows.length === 0 ? (
-        <FeatureEmpty title="No messages on the line">
-          The booth has not sent recordings for this filter.
-        </FeatureEmpty>
+      {actionError ? (
+        <p className="feature-error" role="alert">
+          {actionMessage(actionError)}
+        </p>
+      ) : null}
+      {isLoading ? <FeatureSkeleton /> : null}
+      {loadError ? <FeatureError message="Could not load the message queue." /> : null}
+      {!isLoading && !loadError && rows.length === 0 ? (
+        <FeatureEmpty title="No messages on the line">{emptyCopy(filter)}</FeatureEmpty>
       ) : null}
       {rows.length === 0 ? null : (
-        <div className="feature-table-wrap">
-          <table className="feature-table">
-            <caption>Message queue</caption>
-            <thead>
-              <tr>
-                <th>Select</th>
-                <th>Received at</th>
-                <th>Duration</th>
-                <th>Question</th>
-                <th>Transcript</th>
-                <th>Moderation</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((message: Message) => {
-                const badge = moderationBadge(message.latestModeration ?? null);
-                return (
-                  <tr key={message.id}>
-                    <td>
-                      <input
-                        aria-label={`Select message ${message.id}`}
-                        type="checkbox"
-                        checked={selected.has(message.id)}
-                        onChange={() => toggle(message.id)}
-                      />
-                    </td>
-                    <td>{date(message.receivedAt ?? message.createdAt)}</td>
-                    <td>{duration(message.audio.durationMs)}</td>
-                    <td>
-                      {message.questionId === null || message.questionId === undefined
-                        ? "Unlinked"
-                        : (promptById.get(message.questionId) ?? message.questionId)}
-                    </td>
-                    <td
-                      className="feature-row-transcript"
-                      title={message.latestTranscription?.text ?? undefined}
-                    >
-                      {transcriptSnippet(message.latestTranscription ?? null)}
-                    </td>
-                    <td>
-                      <span className={`feature-badge feature-badge--moderation-${badge.variant}`}>
-                        {badge.label}
-                      </span>
-                    </td>
-                    <td>
-                      <span className={`feature-badge feature-badge--${message.status}`}>
-                        {message.status}
-                      </span>
-                    </td>
-                    <td className="feature-row-actions">
-                      <Link to="/messages/$id" params={{ id: message.id }}>
-                        Play
-                      </Link>
-                      <a href={message.audio.url} download>
-                        Download
-                      </a>
-                      <button
-                        type="button"
-                        onClick={() => void deleteMessage.mutateAsync(message.id)}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <ul className="message-card-list" aria-label="Message queue">
+          {rows.map((message: Message) => (
+            <li key={message.id}>
+              <MessageCard
+                message={message}
+                prompt={
+                  message.questionId === null || message.questionId === undefined
+                    ? null
+                    : (promptById.get(message.questionId) ?? message.questionId)
+                }
+                busy={busyIds.has(message.id)}
+                now={now}
+                onDecide={(id, decision) => {
+                  setBusyIds((previous) => new Set(previous).add(id));
+                  decideMessage.mutate(
+                    { id, input: { decision } },
+                    { onSettled: () => clearBusy(id) },
+                  );
+                }}
+                onRetranscribe={(id) => {
+                  setBusyIds((previous) => new Set(previous).add(id));
+                  retranscribe.mutate(id, { onSettled: () => clearBusy(id) });
+                }}
+                onDelete={(id, trigger) => {
+                  returnFocusRef.current = trigger;
+                  setDeleteId(id);
+                }}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+      {deleteId === null ? null : (
+        <div
+          className="feature-dialog-backdrop"
+          role="presentation"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") closeConfirm();
+          }}
+        >
+          <section
+            className="feature-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-message-heading"
+          >
+            <h2 id="delete-message-heading">Delete this recording?</h2>
+            <p>The audio and its transcript are removed for good. This cannot be undone.</p>
+            {deleteMessage.error instanceof Error ? (
+              <p className="feature-error" role="alert">
+                {actionMessage(deleteMessage.error)}
+              </p>
+            ) : null}
+            <div className="debug-button-row">
+              <button
+                ref={confirmRef}
+                type="button"
+                disabled={deleteMessage.isPending}
+                onClick={() => {
+                  setBusyIds((previous) => new Set(previous).add(deleteId));
+                  deleteMessage.mutate(deleteId, {
+                    onSuccess: closeConfirm,
+                    onSettled: () => clearBusy(deleteId),
+                  });
+                }}
+              >
+                Confirm delete
+              </button>
+              <button type="button" disabled={deleteMessage.isPending} onClick={closeConfirm}>
+                Cancel
+              </button>
+            </div>
+          </section>
         </div>
       )}
     </GlassPanel>

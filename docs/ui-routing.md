@@ -27,19 +27,39 @@ shortcuts are ignored for non-admin operators.
 
 ## Routes deeper than digits
 
-| Route                        | Notes                                          |
-| ---------------------------- | ---------------------------------------------- |
-| `/login`                     | Public OIDC login launcher                     |
-| `/messages?status=received`  | Filter the queue to received recordings        |
-| `/messages?status=uploading` | Filter uploads still in progress               |
-| `/messages?status=failed`    | Filter failed/rejected recordings              |
-| `/messages/:id`              | Single-message review screen with audio player |
-| `/questions/new`             | Open the new-question upload flow              |
-| `/tokens`                    | API token CRUD and usage sparklines            |
-| `/settings`                  | Account, theme, and phone-client connection    |
-| `/about`                     | Public lore and credits page                   |
-| `/debug`                     | Debug panel for the configured phone client    |
-| `/v1/auth/callback`          | API OIDC callback handler                      |
+| Route                           | Notes                                                              |
+| ------------------------------- | ------------------------------------------------------------------ |
+| `/login`                        | Public OIDC login launcher                                         |
+| `/messages?status=needs-review` | Recordings still awaiting a human verdict (`received` + `pending`) |
+| `/messages?status=approved`     | Filter the queue to approved recordings                            |
+| `/messages?status=rejected`     | Filter the queue to rejected recordings                            |
+| `/messages?status=uploading`    | Filter uploads still in progress                                   |
+| `/messages/:id`                 | Single-message review screen with audio player                     |
+| `/questions/new`                | Open the new-question upload flow                                  |
+| `/tokens`                       | API token CRUD and usage sparklines                                |
+| `/settings`                     | Account, theme, and phone-client connection                        |
+| `/about`                        | Public lore and credits page                                       |
+| `/debug`                        | Debug panel for the configured phone client                        |
+| `/v1/auth/callback`             | API OIDC callback handler                                          |
+
+An unrecognized `status` value falls back to the unfiltered queue. The
+`needs-review` filter spans two backend statuses, and `GET /v1/messages`
+accepts only one `status` at a time, so the screen issues two requests
+(`?status=received` and `?status=pending`) and merges the results by received
+time.
+
+## Message queue
+
+`/messages` renders one card per recording — inline playback, the linked
+question, transcript, AI moderation verdict, and the operator's own
+Approve/Reject controls. Decisions can be made directly from the queue or from
+the single-message screen. The AI verdict is always advisory — the recorded
+decision is the operator's.
+
+Transcription state is push-aware: when `AI_TRANSCRIPTION_PROVIDER=push` a
+queued job reads "Waiting on transcription device" rather than "Transcribing…",
+because the work happens in the Transcription app rather than on the API. See
+[`transcription-providers.md`](transcription-providers.md).
 
 ## Reduced motion
 
