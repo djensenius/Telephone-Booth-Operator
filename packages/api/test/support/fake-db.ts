@@ -206,22 +206,28 @@ type StatusOrder = {
   id?: "asc" | "desc";
 };
 
+// Sorts by the requested fields in clause order, like Prisma. Callers that pass
+// no `orderBy` get the default the routes rely on: newest row first.
 const sortStatuses = <T extends { updatedAt: Date; firstSeenAt: Date; id: number }>(
   rows: T[],
   orderBy: StatusOrder | StatusOrder[] | undefined,
 ): T[] => {
-  const clauses = Array.isArray(orderBy) ? orderBy : orderBy ? [orderBy] : [];
-  const dirOf = (value: "asc" | "desc" | undefined, fallback: number) =>
-    value === undefined ? fallback : value === "asc" ? 1 : -1;
-  const updatedDir = dirOf(clauses.find((clause) => clause.updatedAt)?.updatedAt, -1);
-  const firstSeenDir = dirOf(clauses.find((clause) => clause.firstSeenAt)?.firstSeenAt, 0);
-  const idDir = dirOf(clauses.find((clause) => clause.id)?.id, updatedDir);
-  return [...rows].sort(
-    (a, b) =>
-      firstSeenDir * (a.firstSeenAt.getTime() - b.firstSeenAt.getTime()) ||
-      updatedDir * (a.updatedAt.getTime() - b.updatedAt.getTime()) ||
-      idDir * (a.id - b.id),
-  );
+  const requested = Array.isArray(orderBy) ? orderBy : orderBy ? [orderBy] : [];
+  const clauses: StatusOrder[] = requested.length
+    ? requested
+    : [{ updatedAt: "desc" }, { id: "desc" }];
+  const valueOf = (row: T, field: keyof StatusOrder) =>
+    field === "id" ? row.id : row[field].getTime();
+  return [...rows].sort((a, b) => {
+    for (const clause of clauses) {
+      for (const field of Object.keys(clause) as (keyof StatusOrder)[]) {
+        const direction = clause[field] === "asc" ? 1 : -1;
+        const delta = direction * (valueOf(a, field) - valueOf(b, field));
+        if (delta !== 0) return delta;
+      }
+    }
+    return 0;
+  });
 };
 
 type CreatedIdOrder =

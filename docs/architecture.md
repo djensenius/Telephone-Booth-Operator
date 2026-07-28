@@ -46,8 +46,9 @@ spec change.
    blob, checks the content-addressed SHA-256, marks the message
    `received`, and returns `{id, status, receivedAt}`.
 5. Phone status updates sent to `PUT /v1/status` are recorded in
-   `BoothStatusSnapshot` — a report identical to the newest snapshot is
-   collapsed into it rather than appended — and broadcast over the
+   `BoothStatusSnapshot` — a report identical to the run that was current at
+   its own timestamp is collapsed into that run rather than appended — and
+   broadcast over the
    `/v1/ws/status` WebSocket. Browser operators authenticate with the
    session cookie; native clients (iOS/watchOS/tvOS, the Rust CLI) present
    an `Authorization: Bearer` token. Clients that present neither a valid

@@ -19,9 +19,9 @@ same duplication reached the mobile app's status chart, and the API needed a
 
 ## Decision
 
-`PUT /v1/status` collapses a report that is identical to the newest snapshot
-into that snapshot instead of inserting a new row
-(`packages/api/src/routes/status.ts`):
+`PUT /v1/status` collapses a report into the run that was current at the
+report's own timestamp — normally the newest snapshot — instead of inserting a
+new row (`packages/api/src/routes/status.ts`):
 
 - Two reports are identical when `state`, `currentQuestionId`,
   `currentMessageId`, `lastError`, and `runtimeMode` all match. `updatedAt` is
