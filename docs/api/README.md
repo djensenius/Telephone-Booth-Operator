@@ -52,7 +52,8 @@ The spec declares two:
 - `operatorSession` — `__Host-booth_session` cookie set after Authentik OIDC login.
 
 Every operation declares which one(s) it accepts. Routes with `security: []`
-are public (health check, login endpoints, and read-only `GET /v1/status`).
+are public (health check and login endpoints). `GET /v1/status` requires an
+operator session, operator bearer, or phone API token.
 
 ## Implemented backend routes
 

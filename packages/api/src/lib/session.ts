@@ -17,6 +17,7 @@ import {
   type TokenSet,
 } from "./oidc.js";
 import { revalidateOperatorFromClaims } from "./operator-user.js";
+import { requireApiToken, type ApiTokenVariables } from "./require-api-token.js";
 
 export const SESSION_COOKIE_NAME = "__Host-booth_session";
 const DEV_SESSION_COOKIE_NAME = "booth_session";
@@ -499,7 +500,10 @@ export const readValidSession = async (c: Context): Promise<SessionUser | null> 
 const publicV1Route = (path: string, method: string): boolean => {
   if (path.startsWith("/v1/auth/")) return true;
   if (path === "/v1/healthz") return true;
-  // `/v1/status` GET remains public for read-only realtime state for now; PUT is protected by phone API-token middleware.
+  // `/v1/status` is authenticated per-route: GET accepts an operator session,
+  // operator bearer, or phone API token (see `requireOperatorOrApiToken`); PUT is
+  // protected by phone API-token middleware. Both bypass the operator-only global
+  // guard so the booth (which has no operator cookie) is not rejected here.
   if (method === "GET" && path === "/v1/status") return true;
   if (method === "PUT" && path === "/v1/status") return true;
   // Booth → API observability endpoints use bearer-token auth; the per-route
@@ -530,24 +534,59 @@ export const requireOperator =
       return;
     }
 
-    const token = bearerToken(c);
-    if (token) {
-      const result = await verifyOperatorBearer(token);
-      if (!result.ok) {
-        return c.json({ error: result.reason }, result.status);
-      }
-      c.set("user", result.user);
-      c.set("session", null);
+    return authenticateOperator(c, next);
+  };
+
+// Operator authentication core shared by `requireOperator` (after the public
+// allow-list) and by mixed-auth routes such as `GET /v1/status`. Accepts an
+// operator bearer (JWT) or an operator session cookie.
+const authenticateOperator: MiddlewareHandler<{ Variables: AuthVariables }> = async (c, next) => {
+  const token = bearerToken(c);
+  if (token) {
+    const result = await verifyOperatorBearer(token);
+    if (!result.ok) {
+      return c.json({ error: result.reason }, result.status);
+    }
+    c.set("user", result.user);
+    c.set("session", null);
+    await next();
+    return;
+  }
+
+  const session = await readValidSession(c);
+  if (!session) return unauthorized(c);
+
+  c.set("user", session.user);
+  c.set("session", session);
+  await next();
+};
+
+// Guard for read endpoints consumed by both operator clients and the booth. The
+// booth/phone client presents a static API token; operator clients use a session
+// cookie or an operator bearer (JWT). Any valid credential is accepted; requests
+// with none are rejected with 401. Used by `GET /v1/status` so booth state is no
+// longer disclosed to unauthenticated callers.
+export const requireOperatorOrApiToken =
+  (): MiddlewareHandler<{ Variables: AuthVariables & ApiTokenVariables }> =>
+  async (c, next) => {
+    let authorizedByApiToken = false;
+    const markAuthorized = (): Promise<void> => {
+      authorizedByApiToken = true;
+      return Promise.resolve();
+    };
+    await requireApiToken()(
+      c as unknown as Context<{ Variables: ApiTokenVariables }, string, Record<string, never>>,
+      markAuthorized,
+    );
+    if (authorizedByApiToken) {
       await next();
       return;
     }
 
-    const session = await readValidSession(c);
-    if (!session) return unauthorized(c);
-
-    c.set("user", session.user);
-    c.set("session", session);
-    await next();
+    return authenticateOperator(
+      c as unknown as Context<{ Variables: AuthVariables }, string, Record<string, never>>,
+      next,
+    );
   };
 
 export const requireSession = requireOperator;

@@ -46,7 +46,10 @@ paths:
     get:
       summary: Current booth status as last reported by the phone client.
       tags: [status]
-      security: []
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+        - apiToken: []
       responses:
         "200":
           description: ok
