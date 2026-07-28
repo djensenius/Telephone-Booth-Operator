@@ -35,7 +35,7 @@ function installFetch(options: { readonly authenticated?: boolean } = {}): void 
                 headers: { "Content-Type": "application/json" },
               }),
         );
-      if (url.endsWith("/v1/status/history?limit=50"))
+      if (url.endsWith("/v1/status/history?limit=200"))
         return Promise.resolve(
           jsonResponse({
             items: [

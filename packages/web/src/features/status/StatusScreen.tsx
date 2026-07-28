@@ -16,11 +16,20 @@ import {
 } from "../../lib/api-client.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
 import {
+  STATUS_HISTORY_DISPLAY_LIMIT,
   collapseStatusHistory,
   firstSeenAtOf,
   mergeLiveStatus,
   repeatCountOf,
 } from "../../lib/status-history.js";
+
+function sinceLabel(firstSeenAt: string, updatedAt: string): string {
+  const start = new Date(firstSeenAt);
+  const end = new Date(updatedAt);
+  return start.toDateString() === end.toDateString()
+    ? start.toLocaleTimeString()
+    : start.toLocaleString();
+}
 
 function displayState(state: BoothState): string {
   if (state === "callUnavailable") return "Call unavailable";
@@ -140,7 +149,8 @@ export function StatusScreen(): JSX.Element {
   }, [liveStatus, setRuntimeMode]);
 
   const history = useMemo(
-    () => collapseStatusHistory(historyQuery.data?.items ?? []),
+    () =>
+      collapseStatusHistory(historyQuery.data?.items ?? []).slice(0, STATUS_HISTORY_DISPLAY_LIMIT),
     [historyQuery.data],
   );
   const current = liveStatus ?? history[0] ?? null;
@@ -219,7 +229,7 @@ export function StatusScreen(): JSX.Element {
                         </time>
                         {repeats > 1 ? (
                           <span className="status-screen__since">
-                            {`since ${new Date(firstSeenAt).toLocaleTimeString()}`}
+                            {`since ${sinceLabel(firstSeenAt, item.updatedAt)}`}
                           </span>
                         ) : null}
                       </td>

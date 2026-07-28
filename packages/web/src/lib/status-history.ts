@@ -14,8 +14,15 @@
 
 import type { BoothStatus } from "@telephone-booth-operator/shared";
 
-/** Newest-first history capped to the same window the API returns. */
-export const STATUS_HISTORY_LIMIT = 50;
+// Raw snapshots to request/cache. Pre-migration history is one row per
+// heartbeat, so a 50-row fetch could collapse to a single displayed status and
+// hide every transition before it. Over-fetching raw rows and collapsing down
+// to `STATUS_HISTORY_DISPLAY_LIMIT` keeps the panel useful for that legacy data
+// (post-migration the API already returns one row per status).
+export const STATUS_HISTORY_LIMIT = 200;
+
+/** How many collapsed booth statuses the status panel shows. */
+export const STATUS_HISTORY_DISPLAY_LIMIT = 50;
 
 /** True when two snapshots describe the same booth status (ignoring timing). */
 export function isSameStatus(a: BoothStatus, b: BoothStatus): boolean {
@@ -41,9 +48,11 @@ export function firstSeenAtOf(status: BoothStatus): string {
 /**
  * Fold a live status frame into the cached newest-first history.
  *
- * A frame that repeats the head is the head row re-broadcast by the API, so it
- * replaces the head (its `repeatCount` is already authoritative). Anything else
- * is a genuine transition and is prepended.
+ * A frame that repeats the head *row* — same status and same `firstSeenAt` — is
+ * that row re-broadcast by the API, so it replaces the head (its `repeatCount`
+ * is already authoritative). Anything else is a genuine transition and is
+ * prepended, including a return to a status the booth held earlier: that run
+ * has its own `firstSeenAt`, so it can never overwrite the previous one.
  */
 export function mergeLiveStatus(
   history: readonly BoothStatus[],
@@ -51,8 +60,15 @@ export function mergeLiveStatus(
   limit: number = STATUS_HISTORY_LIMIT,
 ): readonly BoothStatus[] {
   const [head, ...rest] = history;
-  if (head && isSameStatus(head, status)) return [status, ...rest];
+  if (head && isSameRun(head, status)) return [status, ...rest];
   return [status, ...history].slice(0, limit);
+}
+
+// Same booth status *and* same run. A legacy API sends neither `firstSeenAt`,
+// so both are `undefined` and this degrades to plain status equality — which is
+// what we want there, since every legacy frame is an identical new row.
+function isSameRun(a: BoothStatus, b: BoothStatus): boolean {
+  return isSameStatus(a, b) && a.firstSeenAt === b.firstSeenAt;
 }
 
 /**

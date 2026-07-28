@@ -44,7 +44,9 @@ The operator console renders the count instead of the repeats
   frame re-broadcasts the same collapsed row, instead of prepending a duplicate.
 - `collapseStatusHistory` folds consecutive identical entries at render time so
   snapshots written before this change (and any client-side duplication) read
-  the same as new history.
+  the same as new history. The console fetches 200 raw snapshots and shows the
+  first 50 collapsed statuses, so a pre-migration run of heartbeats cannot
+  squeeze every genuine transition out of the panel.
 
 ## Consequences
 

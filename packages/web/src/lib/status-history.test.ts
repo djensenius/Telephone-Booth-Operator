@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { BoothStatus } from "@telephone-booth-operator/shared";
 
-import { collapseStatusHistory, mergeLiveStatus } from "./status-history.js";
+import { STATUS_HISTORY_LIMIT, collapseStatusHistory, mergeLiveStatus } from "./status-history.js";
 
 const status = (overrides: Partial<BoothStatus> & { updatedAt: string }): BoothStatus => ({
   state: "idle",
@@ -110,8 +110,28 @@ describe("mergeLiveStatus", () => {
     expect(merged.map((item) => item.state)).toEqual(["recording", "idle"]);
   });
 
+  it("prepends a repeat of an earlier status that started a new run", () => {
+    const history = [
+      status({
+        updatedAt: "2026-07-28T12:00:10.000Z",
+        firstSeenAt: "2026-07-28T12:00:00.000Z",
+        repeatCount: 2,
+      }),
+    ];
+    const live = status({
+      updatedAt: "2026-07-28T12:05:00.000Z",
+      firstSeenAt: "2026-07-28T12:05:00.000Z",
+    });
+
+    const merged = mergeLiveStatus(history, live);
+
+    expect(merged).toHaveLength(2);
+    expect(merged[0]).toMatchObject({ firstSeenAt: "2026-07-28T12:05:00.000Z" });
+    expect(merged[1]).toMatchObject({ firstSeenAt: "2026-07-28T12:00:00.000Z", repeatCount: 2 });
+  });
+
   it("caps the history at the requested limit", () => {
-    const history = Array.from({ length: 50 }, (_, index) =>
+    const history = Array.from({ length: STATUS_HISTORY_LIMIT }, (_, index) =>
       status({
         state: index % 2 === 0 ? "idle" : "recording",
         updatedAt: `2026-07-28T12:00:0${0}.000Z`,
@@ -123,7 +143,7 @@ describe("mergeLiveStatus", () => {
       status({ state: "uploading", updatedAt: "2026-07-28T12:01:00.000Z" }),
     );
 
-    expect(merged).toHaveLength(50);
+    expect(merged).toHaveLength(STATUS_HISTORY_LIMIT);
     expect(merged[0]?.state).toBe("uploading");
   });
 
