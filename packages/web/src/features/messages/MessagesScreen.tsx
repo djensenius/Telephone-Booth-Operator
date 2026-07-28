@@ -108,9 +108,13 @@ export function MessagesScreen(): JSX.Element {
 
   const busy = deleteMessage.isPending || decideMessage.isPending || retranscribe.isPending;
 
-  const actionError = [decideMessage.error, deleteMessage.error, retranscribe.error].find(
-    (error): error is Error => error instanceof Error,
-  );
+  // A delete failure is reported inside the confirmation while it is open, so
+  // the focused operator sees it without looking behind the backdrop.
+  const actionError = [
+    decideMessage.error,
+    deleteId === null ? deleteMessage.error : null,
+    retranscribe.error,
+  ].find((error): error is Error => error instanceof Error);
 
   return (
     <GlassPanel title="Message review queue" className="feature-screen messages-screen">
@@ -184,6 +188,11 @@ export function MessagesScreen(): JSX.Element {
           >
             <h2 id="delete-message-heading">Delete this recording?</h2>
             <p>The audio and its transcript are removed for good. This cannot be undone.</p>
+            {deleteMessage.error instanceof Error ? (
+              <p className="feature-error" role="alert">
+                {deleteMessage.error.message}
+              </p>
+            ) : null}
             <div className="debug-button-row">
               <button
                 ref={confirmRef}
