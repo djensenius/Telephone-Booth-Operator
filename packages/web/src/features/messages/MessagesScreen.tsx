@@ -77,6 +77,7 @@ export function MessagesScreen(): JSX.Element {
   // when it closes, so the dialog is announced and keyboard users keep place.
   const confirmRef = useRef<HTMLButtonElement | null>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
+  const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(() => new Set());
   const navigate = useNavigate();
   const now = useNow();
   const filter: MessageRouteFilter = isMessageFilter(search.status) ? search.status : "all";
@@ -119,13 +120,16 @@ export function MessagesScreen(): JSX.Element {
     if (deleteId !== null) confirmRef.current?.focus();
   }, [deleteId]);
 
-  // Scoped per card: a synchronous re-transcription can take minutes, and it
-  // must not freeze moderation on every other recording in the queue.
-  const busyId =
-    (decideMessage.isPending ? decideMessage.variables?.id : undefined) ??
-    (retranscribe.isPending ? retranscribe.variables : undefined) ??
-    (deleteMessage.isPending ? deleteMessage.variables : undefined) ??
-    null;
+  // Every card with work in flight, not just the latest one: a synchronous
+  // re-transcription can take minutes, so it must neither freeze the rest of
+  // the queue nor stop marking its own card busy once another action starts.
+  const clearBusy = useCallback((id: string) => {
+    setBusyIds((previous) => {
+      const next = new Set(previous);
+      next.delete(id);
+      return next;
+    });
+  }, []);
 
   // A delete failure is reported inside the confirmation while it is open, so
   // the focused operator sees it without looking behind the backdrop.
@@ -178,13 +182,18 @@ export function MessagesScreen(): JSX.Element {
                     ? null
                     : (promptById.get(message.questionId) ?? message.questionId)
                 }
-                busy={busyId === message.id}
+                busy={busyIds.has(message.id)}
                 now={now}
                 onDecide={(id, decision) => {
-                  decideMessage.mutate({ id, input: { decision } });
+                  setBusyIds((previous) => new Set(previous).add(id));
+                  decideMessage.mutate(
+                    { id, input: { decision } },
+                    { onSettled: () => clearBusy(id) },
+                  );
                 }}
                 onRetranscribe={(id) => {
-                  retranscribe.mutate(id);
+                  setBusyIds((previous) => new Set(previous).add(id));
+                  retranscribe.mutate(id, { onSettled: () => clearBusy(id) });
                 }}
                 onDelete={(id, trigger) => {
                   returnFocusRef.current = trigger;
@@ -222,7 +231,11 @@ export function MessagesScreen(): JSX.Element {
                 type="button"
                 disabled={deleteMessage.isPending}
                 onClick={() => {
-                  deleteMessage.mutate(deleteId, { onSuccess: closeConfirm });
+                  setBusyIds((previous) => new Set(previous).add(deleteId));
+                  deleteMessage.mutate(deleteId, {
+                    onSuccess: closeConfirm,
+                    onSettled: () => clearBusy(deleteId),
+                  });
                 }}
               >
                 Confirm delete

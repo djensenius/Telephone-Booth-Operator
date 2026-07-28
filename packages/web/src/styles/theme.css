@@ -1292,6 +1292,18 @@ textarea:focus-visible,
 .feature-toolbar button:disabled,
 .feature-table button:disabled,
 .feature-dialog button:disabled,
+/* The shared action-row rule above is more specific than the variant classes,
+   so restate them here to keep Approve green and Reject red. */
+.message-card__actions button.feature-button--approve {
+  color: color-mix(in srgb, var(--accent-green) 72%, var(--text-primary));
+  border-color: color-mix(in srgb, var(--accent-green) 40%, var(--border-subtle));
+}
+
+.message-card__actions button.feature-button--reject {
+  color: color-mix(in srgb, var(--accent-red) 70%, var(--text-primary));
+  border-color: color-mix(in srgb, var(--accent-red) 40%, var(--border-subtle));
+}
+
 .message-card__actions button:disabled,
 .debug-button-row button:disabled,
 .debug-pulse-buttons button:disabled {
