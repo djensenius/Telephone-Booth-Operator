@@ -60,10 +60,15 @@ The operator console renders the count instead of the repeats
 - Reconciliation of stale call sessions ([ADR 0006](0006-reconcile-stale-call-sessions-on-idle.md))
   is unchanged: it still runs on every idle report, using the collapsed row's
   `updatedAt`.
-- The `repeatCount` increment is a read-then-write, so two concurrent PUTs can
-  lose an increment or insert a duplicate row. Both are harmless for a display
-  counter on a single-line booth, and the render-time collapse hides the
-  duplicate row.
+- The collapse decision is a read-then-write, so concurrent PUTs that interleave
+  between the read and the write can lose an increment, insert a duplicate row,
+  or — if the two reports are applied out of order — leave the row's window at
+  the earlier `updatedAt`. Serializing the decision would need a transaction
+  with conflict retries. It isn't worth it here: the booth is a single writer
+  pushing its status sequentially over one connection, so the interleaving needs
+  a retried or duplicated request to happen at all, and the blast radius is a
+  display window and a counter. The render-time collapse hides a duplicate row,
+  and the next heartbeat corrects the window.
 - Charts that plot one point per snapshot (the mobile status chart) now get one
   point per status rather than one per heartbeat. Consumers that need beat-level
   resolution should use booth events, which remain append-only.

@@ -200,6 +200,8 @@ const cloneDate = (date: Date): Date => new Date(date.getTime());
 const byCreatedDesc = <T extends { createdAt: Date; id: string }>(a: T, b: T): number =>
   b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id);
 
+type StatusOrder = { updatedAt?: "asc" | "desc"; id?: "asc" | "desc" };
+
 type CreatedIdOrder =
   | { createdAt?: "asc" | "desc" }
   | Array<{ createdAt?: "asc" | "desc"; id?: "asc" | "desc" }>;
@@ -1290,7 +1292,7 @@ export const fakeDb = {
       where?: { updatedAt?: { gte?: Date; lt?: Date }; id?: { lt?: number } };
       take?: number;
       skip?: number;
-      orderBy?: { updatedAt?: "asc" | "desc" };
+      orderBy?: StatusOrder | StatusOrder[];
       select?: { id?: boolean; updatedAt?: boolean };
     }) => {
       let statuses = [...store.statuses];
@@ -1299,8 +1301,12 @@ export const fakeDb = {
       if (where.updatedAt?.lt)
         statuses = statuses.filter((status) => status.updatedAt < where.updatedAt!.lt!);
       if (where.id?.lt) statuses = statuses.filter((status) => status.id < where.id!.lt!);
-      const dir = orderBy?.updatedAt === "asc" ? 1 : -1;
-      statuses = statuses.sort((a, b) => dir * (a.updatedAt.getTime() - b.updatedAt.getTime()));
+      const clauses = Array.isArray(orderBy) ? orderBy : orderBy ? [orderBy] : [];
+      const dir = clauses.find((clause) => clause.updatedAt)?.updatedAt === "asc" ? 1 : -1;
+      const idDir = clauses.find((clause) => clause.id)?.id === "asc" ? 1 : dir;
+      statuses = statuses.sort(
+        (a, b) => dir * (a.updatedAt.getTime() - b.updatedAt.getTime()) || idDir * (a.id - b.id),
+      );
       statuses = statuses.slice(skip, take !== undefined ? skip + take : undefined);
       if (select) {
         return statuses.map((s) => {

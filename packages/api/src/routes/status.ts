@@ -90,15 +90,19 @@ function widenedStart(
 statusRouter.get("/", requireOperatorOrApiToken(), async (c) => {
   // Authenticated read of the latest booth snapshot. Operator clients use a
   // session cookie or operator bearer; the booth/phone client uses its API token.
-  const latest = await db.boothStatusSnapshot.findFirst({ orderBy: { updatedAt: "desc" } });
+  const latest = await db.boothStatusSnapshot.findFirst({
+    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+  });
   return c.json(latest ? serializeStatus(latest) : defaultStatus());
 });
 
 statusRouter.put("/", requireApiToken(), zValidator("json", StatusUpdateSchema), async (c) => {
   const update = c.req.valid("json");
   const reportedAt = update.updatedAt ? new Date(update.updatedAt) : new Date();
+  // The booth supplies `updatedAt`, so two rows can share a millisecond; the
+  // insertion order (`id`) breaks the tie so "newest row" is deterministic.
   const [latest, previous] = await db.boothStatusSnapshot.findMany({
-    orderBy: { updatedAt: "desc" },
+    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
     take: 2,
   });
   // Collapse heartbeats. The booth re-pushes its current status every few
@@ -145,7 +149,7 @@ statusRouter.get("/history", zValidator("query", historyQuerySchema), async (c) 
   const { since, limit } = c.req.valid("query");
   const snapshots = await db.boothStatusSnapshot.findMany({
     where: since ? { updatedAt: { gte: new Date(since) } } : {},
-    orderBy: { updatedAt: "desc" },
+    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
     take: limit,
   });
   return c.json({ items: snapshots.map(serializeStatus) });
