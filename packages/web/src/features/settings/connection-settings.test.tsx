@@ -74,6 +74,15 @@ describe("PhoneClientConnection", () => {
     expect(readDebugConnectionPrefs("user-123").token).toBe("secret-token");
   });
 
+  it("describes the token field with the memory-only hint", () => {
+    render(<PhoneClientConnection userSub="user-123" />);
+
+    const input = screen.getByLabelText("Debug token");
+    const describedBy = input.getAttribute("aria-describedby");
+    expect(describedBy).not.toBeNull();
+    expect(document.getElementById(describedBy ?? "")?.textContent).toContain("memory only");
+  });
+
   it("forgets persisted connection settings and the in-memory token", () => {
     window.localStorage.setItem(
       getDebugConnectionStorageKey("user-123"),

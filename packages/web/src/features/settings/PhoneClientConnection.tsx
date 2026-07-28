@@ -119,9 +119,10 @@ export function PhoneClientConnection({
             value={prefs.token}
             onChange={(event) => updateField("token", event.currentTarget.value)}
             autoComplete="off"
+            aria-describedby="debug-token-hint"
           />
         </label>
-        <p className="settings-connection__hint">
+        <p className="settings-connection__hint" id="debug-token-hint">
           The debug token is kept in memory only for this session; it is never written to browser
           storage and must be re-entered after a reload or sign-out.
         </p>
