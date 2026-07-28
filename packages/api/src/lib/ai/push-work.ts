@@ -57,11 +57,13 @@ const keysetWhere = (cursor: PushWorkCursor | undefined) =>
       }
     : {};
 
-export const findOutstandingPushWorkPage = async (options: {
-  staleBefore?: Date;
-  limit?: number;
-  cursor?: OutstandingPushWorkCursor;
-} = {}): Promise<OutstandingPushWorkPage> => {
+export const findOutstandingPushWorkPage = async (
+  options: {
+    staleBefore?: Date;
+    limit?: number;
+    cursor?: OutstandingPushWorkCursor;
+  } = {},
+): Promise<OutstandingPushWorkPage> => {
   const config = resolveAiConfig();
   const workByMessage = new Map<string, WorkNeed[]>();
   const createdAt = options.staleBefore ? { lt: options.staleBefore } : undefined;
@@ -107,7 +109,8 @@ export const findOutstandingPushWorkPage = async (options: {
 
   if (config.translationProvider === "push") {
     for (const row of translations) {
-      if (latestIds.get(row.messageId) === row.id) addNeed(workByMessage, row.messageId, "translation");
+      if (latestIds.get(row.messageId) === row.id)
+        addNeed(workByMessage, row.messageId, "translation");
     }
     const last = translations.at(-1);
     if (last) cursor.translation = { id: last.id, createdAt: last.createdAt };
@@ -132,10 +135,12 @@ export const findOutstandingPushWorkPage = async (options: {
   };
 };
 
-export const findOutstandingPushWork = async (options: {
-  staleBefore?: Date;
-  limit?: number;
-} = {}): Promise<OutstandingPushWork[]> => {
+export const findOutstandingPushWork = async (
+  options: {
+    staleBefore?: Date;
+    limit?: number;
+  } = {},
+): Promise<OutstandingPushWork[]> => {
   const targetLimit = options.limit ?? 100;
   const work: OutstandingPushWork[] = [];
   let cursor: OutstandingPushWorkCursor | undefined;

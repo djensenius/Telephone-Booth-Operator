@@ -63,7 +63,7 @@ const broadcastMessageById = async (messageId: string): Promise<void> => {
     },
   });
   if (!full) return;
-  wsBroadcaster.broadcast({ kind: "message", message: serializeMessage(full as never) });
+  wsBroadcaster.broadcast({ kind: "message", message: serializeMessage(full) });
 };
 
 // This surface is gated by `requireApiToken("worker")` (see below): only a
@@ -91,59 +91,55 @@ workerRouter.use("*", requireApiToken("worker"));
 // with browser operators); the worker pulls the actual inputs here over its
 // authenticated connection. Claim-free and read-only: it just reflects the
 // message's current state so the worker can transcribe / translate / moderate.
-workerRouter.get(
-  "/messages/:id/work",
-  zValidator("param", idParamSchema),
-  async (c) => {
-    const { id } = c.req.valid("param");
-    const message = await db.message.findUnique({
-      where: { id },
-      include: {
-        audio: true,
-        transcriptions: { orderBy: { createdAt: "desc" }, take: 1 },
-      },
-    });
-    if (!message) return c.json({ error: "not_found" }, 404);
+workerRouter.get("/messages/:id/work", zValidator("param", idParamSchema), async (c) => {
+  const { id } = c.req.valid("param");
+  const message = await db.message.findUnique({
+    where: { id },
+    include: {
+      audio: true,
+      transcriptions: { orderBy: { createdAt: "desc" }, take: 1 },
+    },
+  });
+  if (!message) return c.json({ error: "not_found" }, 404);
 
-    const transcription = message.transcriptions[0] ?? null;
-    const audio = message.audio;
-    const audioBody = audio
+  const transcription = message.transcriptions[0] ?? null;
+  const audio = message.audio;
+  const audioBody = audio
+    ? {
+        url: generateSasUrl(audio.blobKey, { permissions: "r" as const }).url,
+        sha256: audio.sha256,
+        durationMs: audio.durationMs,
+        contentType: audio.contentType,
+        filename: `${audio.sha256}.flac`,
+      }
+    : null;
+
+  // The text to moderate is the English translation when available, else the
+  // original transcript. Mirrors the old pull-queue moderation payload.
+  const moderationText =
+    transcription?.translationStatus === "succeeded" &&
+    typeof transcription.translatedText === "string" &&
+    transcription.translatedText.trim().length > 0
+      ? transcription.translatedText
+      : (transcription?.text ?? "");
+
+  return c.json({
+    id: message.id,
+    status: message.status,
+    audio: audioBody,
+    transcription: transcription
       ? {
-          url: generateSasUrl(audio.blobKey, { permissions: "r" as const }).url,
-          sha256: audio.sha256,
-          durationMs: audio.durationMs,
-          contentType: audio.contentType,
-          filename: `${audio.sha256}.flac`,
+          id: transcription.id,
+          text: transcription.text ?? "",
+          language: transcription.language,
+          model: transcription.model,
+          translationStatus: transcription.translationStatus,
+          translatedText: transcription.translatedText,
+          moderationText,
         }
-      : null;
-
-    // The text to moderate is the English translation when available, else the
-    // original transcript. Mirrors the old pull-queue moderation payload.
-    const moderationText =
-      transcription?.translationStatus === "succeeded" &&
-      typeof transcription.translatedText === "string" &&
-      transcription.translatedText.trim().length > 0
-        ? transcription.translatedText
-        : (transcription?.text ?? "");
-
-    return c.json({
-      id: message.id,
-      status: message.status,
-      audio: audioBody,
-      transcription: transcription
-        ? {
-            id: transcription.id,
-            text: transcription.text ?? "",
-            language: transcription.language,
-            model: transcription.model,
-            translationStatus: transcription.translationStatus,
-            translatedText: transcription.translatedText,
-            moderationText,
-          }
-        : null,
-    });
-  },
-);
+      : null,
+  });
+});
 
 // POST /v1/worker/messages/:id/transcription — the worker finished
 // transcribing the message audio and is pushing the text back.

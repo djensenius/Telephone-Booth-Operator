@@ -66,9 +66,7 @@ const bearerTokenFromHeader = (header: string | undefined): string | null => {
 // ONLY `work` envelopes. A generic (operator-scoped) API token therefore cannot
 // read work events, and a worker-scoped token cannot read message content.
 // Returns `null` when the upgrade is not authorized.
-const authorizeStatusUpgrade = async (
-  request: IncomingMessage,
-): Promise<SubscriberKind | null> => {
+const authorizeStatusUpgrade = async (request: IncomingMessage): Promise<SubscriberKind | null> => {
   const session = await readSessionFromCookieHeader(request.headers.cookie);
   if (session && !sessionIsExpired(session)) return "operator";
 

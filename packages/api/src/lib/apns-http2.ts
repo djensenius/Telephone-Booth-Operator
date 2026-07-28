@@ -100,9 +100,7 @@ export class Http2ApnsSender {
     if (devices.length === 0) return;
     const jwt = await this.providerToken();
     const payload = JSON.stringify(buildApnsPayload(notification));
-    await Promise.allSettled(
-      devices.map((device) => this.deliver(device, jwt, payload)),
-    );
+    await Promise.allSettled(devices.map((device) => this.deliver(device, jwt, payload)));
   }
 
   private async deliver(

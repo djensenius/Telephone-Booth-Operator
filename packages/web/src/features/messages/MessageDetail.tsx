@@ -96,9 +96,7 @@ function TranscriptCard({
             <p className="feature-transcript-body feature-transcript-body--translated">
               <span className="feature-transcript-label">
                 Translated from {transcription.language ?? "unknown"}
-                {transcription.translatedLanguage
-                  ? ` to ${transcription.translatedLanguage}`
-                  : ""}
+                {transcription.translatedLanguage ? ` to ${transcription.translatedLanguage}` : ""}
               </span>
               {transcription.translatedText}
             </p>

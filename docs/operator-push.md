@@ -77,12 +77,12 @@ callbacks finalize only existing pending push rows, and every write is guarded
 so a stale or duplicate callback can never create a newer row or downgrade an
 already-finalized row.
 
-| Method | Path                                          | Purpose                                     |
-| ------ | --------------------------------------------- | ------------------------------------------- |
-| GET    | `/v1/worker/messages/{id}/work`               | Fetch work inputs (audio SAS + transcript)  |
-| POST   | `/v1/worker/messages/{id}/transcription`      | Push a transcription result                 |
-| POST   | `/v1/worker/messages/{id}/translation`        | Push a translation result                   |
-| POST   | `/v1/worker/messages/{id}/moderation`         | Push a moderation **suggestion**            |
+| Method | Path                                     | Purpose                                    |
+| ------ | ---------------------------------------- | ------------------------------------------ |
+| GET    | `/v1/worker/messages/{id}/work`          | Fetch work inputs (audio SAS + transcript) |
+| POST   | `/v1/worker/messages/{id}/transcription` | Push a transcription result                |
+| POST   | `/v1/worker/messages/{id}/translation`   | Push a translation result                  |
+| POST   | `/v1/worker/messages/{id}/moderation`    | Push a moderation **suggestion**           |
 
 ### `GET /v1/worker/messages/{id}/work`
 

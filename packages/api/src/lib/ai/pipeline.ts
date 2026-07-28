@@ -17,11 +17,7 @@ import {
   buildTranscriptionProvider,
   buildTranslationProvider,
 } from "./factory.js";
-import type {
-  ModerationProvider,
-  TranscriptionProvider,
-  TranslationProvider,
-} from "./types.js";
+import type { ModerationProvider, TranscriptionProvider, TranslationProvider } from "./types.js";
 import { ProviderError } from "./types.js";
 
 // Build a sanitized error string safe for persistence and logging.
@@ -311,9 +307,7 @@ export type TranslationOutcome =
 // transcription is non-English — in that case the row is marked
 // `translationStatus = pending` so the pull worker can lease it. Returns
 // "skipped" when translation is not needed (English) or impossible (no text).
-export const runTranslation = async (
-  opts: RunTranslationOptions,
-): Promise<TranslationOutcome> => {
+export const runTranslation = async (opts: RunTranslationOptions): Promise<TranslationOutcome> => {
   const deps = opts.deps ?? buildDefaultPipelineDeps();
   const transcription = await db.transcription.findUnique({
     where: { id: opts.transcriptionId },
@@ -381,10 +375,7 @@ export const runTranslation = async (
   const claimed = await db.transcription.updateMany({
     where: {
       id: transcription.id,
-      OR: [
-        { translationStatus: null },
-        { translationStatus: "failed" },
-      ],
+      OR: [{ translationStatus: null }, { translationStatus: "failed" }],
     },
     data: {
       translationStatus: "pending",

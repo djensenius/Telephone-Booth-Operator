@@ -49,7 +49,12 @@ const captureEnvelopes = (): { events: WsEnvelope[]; stop: () => void } => {
   return { events, stop: () => wsBroadcaster.unsubscribe(clientId) };
 };
 
-const postJson = (app: ReturnType<typeof createApp>, path: string, body: unknown, headers = phoneHeaders) =>
+const postJson = (
+  app: ReturnType<typeof createApp>,
+  path: string,
+  body: unknown,
+  headers = phoneHeaders,
+) =>
   app.request(path, {
     method: "POST",
     headers: { ...headers, "content-type": "application/json" },
@@ -161,9 +166,9 @@ describe("worker push-back callbacks", () => {
     });
 
     expect(res.status).toBe(200);
-    expect([...store.transcriptions.values()].filter((t) => t.messageId === message.id)).toHaveLength(
-      0,
-    );
+    expect(
+      [...store.transcriptions.values()].filter((t) => t.messageId === message.id),
+    ).toHaveLength(0);
     expect([...store.moderations.values()].filter((m) => m.messageId === message.id)).toHaveLength(
       0,
     );
@@ -190,9 +195,9 @@ describe("worker push-back callbacks", () => {
 
     expect(res.status).toBe(200);
     expect(store.transcriptions.get(seeded.id)?.status).toBe("succeeded");
-    expect([...store.moderations.values()].filter((m) => m.messageId === message.id)).toMatchObject([
-      { status: "failed", provider: "disabled" },
-    ]);
+    expect([...store.moderations.values()].filter((m) => m.messageId === message.id)).toMatchObject(
+      [{ status: "failed", provider: "disabled" }],
+    );
     expect(cap.events.some((e) => e.kind === "work")).toBe(false);
   });
 

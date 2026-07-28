@@ -19,7 +19,9 @@ const bearerTokenFromHeader = (authorization: string | undefined): string | null
 // booth/phone and native-operator routes reject worker-scoped tokens; the push
 // worker router opts in with `requireApiToken("worker")`.
 export const requireApiToken =
-  (requiredScope: ApiTokenScope = "operator"): MiddlewareHandler<{ Variables: ApiTokenVariables }> =>
+  (
+    requiredScope: ApiTokenScope = "operator",
+  ): MiddlewareHandler<{ Variables: ApiTokenVariables }> =>
   async (c, next) => {
     const plaintext = bearerTokenFromHeader(c.req.header("authorization"));
     if (!plaintext) return c.json({ error: "invalid_token" }, 401);

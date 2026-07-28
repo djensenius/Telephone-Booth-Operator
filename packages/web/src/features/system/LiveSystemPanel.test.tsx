@@ -162,9 +162,7 @@ describe("LiveSystemPanel", () => {
       },
       receivedAt: "2026-05-27T00:00:05.000Z",
     });
-    expect(
-      screen.getByText("under-voltage, throttled, under-voltage-occurred"),
-    ).toBeDefined();
+    expect(screen.getByText("under-voltage, throttled, under-voltage-occurred")).toBeDefined();
   });
 
   it("renders 'none' when throttling is present but every flag is false", () => {

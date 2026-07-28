@@ -157,8 +157,7 @@ export const fetchOperatorUserInfo = async (
     // signing valid operators out during an IdP outage.
     const rejected =
       error instanceof oidc.WWWAuthenticateChallengeError ||
-      (error instanceof oidc.ResponseBodyError &&
-        (error.status === 401 || error.status === 403));
+      (error instanceof oidc.ResponseBodyError && (error.status === 401 || error.status === 403));
     throw new UserRevalidationError(
       error instanceof Error ? error.message : "userinfo request failed",
       rejected,

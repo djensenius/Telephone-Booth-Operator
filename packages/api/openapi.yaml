@@ -1525,7 +1525,11 @@ components:
         blobName: { type: string }
         expiresAt: { type: string, format: date-time }
         audioFileId:
-          { type: string, format: uuid, description: "Present for question/instruction audio uploads." }
+          {
+            type: string,
+            format: uuid,
+            description: "Present for question/instruction audio uploads.",
+          }
     OperatorMe:
       type: object
       required: [id, name, email, groups, isAdmin, providerName]

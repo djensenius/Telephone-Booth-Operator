@@ -27,7 +27,13 @@ import { createApp } from "../src/index.js";
 import { resetApnsSenderForTests, setApnsSenderForTests } from "../src/lib/apns.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { fakeBlobs, resetFakeAzure } from "./support/fake-azure.js";
-import { resetFakeDb, seedFile, seedMessage, seedMobileDevice, seedQuestion } from "./support/fake-db.js";
+import {
+  resetFakeDb,
+  seedFile,
+  seedMessage,
+  seedMobileDevice,
+  seedQuestion,
+} from "./support/fake-db.js";
 import { operatorCookie, phoneHeaders } from "./support/http.js";
 
 const setup = () => {
@@ -361,9 +367,9 @@ describe("messages routes", () => {
       expect(secondSlot.id).toBe(firstSlot.id);
       expect(secondSlot.blobName).toBe(firstSlot.blobName);
       expect(secondSlot.uploadUrl).toContain("sp=cw");
-      expect(Date.parse(new URL(secondSlot.uploadUrl).searchParams.get("se") ?? "")).toBeGreaterThan(
-        Date.parse(new URL(firstSlot.uploadUrl).searchParams.get("se") ?? ""),
-      );
+      expect(
+        Date.parse(new URL(secondSlot.uploadUrl).searchParams.get("se") ?? ""),
+      ).toBeGreaterThan(Date.parse(new URL(firstSlot.uploadUrl).searchParams.get("se") ?? ""));
     } finally {
       vi.useRealTimers();
     }

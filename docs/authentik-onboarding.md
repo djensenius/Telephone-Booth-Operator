@@ -42,18 +42,18 @@ This is the stage type that _registers_ a passkey. (The similarly named
 **Authenticator Validation Stage** _checks_ an existing passkey at login —
 that's a different type, used in [step 8](#8-require-the-passkey-at-every-login-recommended).)
 
-| Field                       | Value                                                            |
-| --------------------------- | ---------------------------------------------------------------- |
-| Name                        | `booth-webauthn-setup`                                           |
-| Authenticator type name     | `Passkey` (the label users see when enrolling)                   |
-| User verification           | **Required** — forces biometric / PIN                            |
-| Resident key requirement    | **Required** — makes it a true _passkey_ (discoverable credential) |
-| Authenticator Attachment    | **No preference** (phones, laptops, keys), or **Platform** to force built-in Face ID / Windows Hello |
-| Hints                       | leave empty (advisory only)                                      |
-| Maximum registration attempts | `0` (unlimited — don't lock people out mid-enrollment)         |
-| Prevent duplicate devices   | **On**                                                           |
-| Device type restrictions    | leave empty (allows all passkey-capable devices)                |
-| Configuration flow          | **leave empty**                                                  |
+| Field                         | Value                                                                                                |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Name                          | `booth-webauthn-setup`                                                                               |
+| Authenticator type name       | `Passkey` (the label users see when enrolling)                                                       |
+| User verification             | **Required** — forces biometric / PIN                                                                |
+| Resident key requirement      | **Required** — makes it a true _passkey_ (discoverable credential)                                   |
+| Authenticator Attachment      | **No preference** (phones, laptops, keys), or **Platform** to force built-in Face ID / Windows Hello |
+| Hints                         | leave empty (advisory only)                                                                          |
+| Maximum registration attempts | `0` (unlimited — don't lock people out mid-enrollment)                                               |
+| Prevent duplicate devices     | **On**                                                                                               |
+| Device type restrictions      | leave empty (allows all passkey-capable devices)                                                     |
+| Configuration flow            | **leave empty**                                                                                      |
 
 - **Resident key = Required** + **User verification = Required** is what
   turns a plain WebAuthn second-factor key into a passwordless **passkey**.
@@ -94,17 +94,17 @@ Placeholder / Initial value / Help text empty unless you want a hint.
 
 > _Flows & Stages → Stages → Create → **Prompt Stage**_
 
-| Field               | Value                                                            |
-| ------------------- | --------------------------------------------------------------- |
-| Name                | `booth-enroll-prompt`                                            |
-| Fields              | select **only** the three `booth-prompt-*` fields above         |
+| Field               | Value                                                                                            |
+| ------------------- | ------------------------------------------------------------------------------------------------ |
+| Name                | `booth-enroll-prompt`                                                                            |
+| Fields              | select **only** the three `booth-prompt-*` fields above                                          |
 | Validation Policies | leave the **Selected** column empty (the Available column just lists all policies in the system) |
 
 ## 3. Create the user-write stage
 
 > _Flows & Stages → Stages → Create → **User Write Stage**_
 
-| Field                    | Value                                                              |
+| Field                    | Value                                                             |
 | ------------------------ | ----------------------------------------------------------------- |
 | Name                     | `booth-user-write`                                                |
 | Create users as inactive | **Off** — new operators are active and can log in immediately     |
@@ -123,9 +123,9 @@ each user by hand, which breaks the fully self-serve goal.
 
 > _Flows & Stages → Stages → Create → **Invitation Stage**_
 
-| Field                            | Value                                        |
-| -------------------------------- | -------------------------------------------- |
-| Name                             | `booth-invitation`                           |
+| Field                            | Value                                           |
+| -------------------------------- | ----------------------------------------------- |
+| Name                             | `booth-invitation`                              |
 | Continue flow without invitation | **Off** — refuse anyone without an invite token |
 
 This is what makes the flow invite-only: with the toggle off, opening the
@@ -142,25 +142,25 @@ Stage) you can reuse — no need to create one. If it's missing, create a
 
 > _Flows & Stages → Flows → Create_
 
-| Field          | Value                                        |
-| -------------- | -------------------------------------------- |
-| Name           | `Booth operator enrollment`                  |
-| Title          | `Set up your operator passkey`               |
-| Slug           | `booth-enrollment` (becomes part of the invite URL) |
-| Designation    | **Enrollment**                               |
+| Field          | Value                                                          |
+| -------------- | -------------------------------------------------------------- |
+| Name           | `Booth operator enrollment`                                    |
+| Title          | `Set up your operator passkey`                                 |
+| Slug           | `booth-enrollment` (becomes part of the invite URL)            |
+| Designation    | **Enrollment**                                                 |
 | Authentication | **Require no authentication** (new users aren't logged in yet) |
 
 Then open the flow **by clicking its name** in the Flows list (the pencil
 only opens settings) → **Stage Bindings** tab → **Bind stage → Bind existing
 stage**. Do this five times, setting **Order** each time:
 
-| Order | Stage                                        | Purpose                              |
-| ----- | -------------------------------------------- | ------------------------------------ |
-| 10    | `booth-invitation`                           | validate the invite token            |
-| 20    | `booth-enroll-prompt`                        | collect user details                 |
-| 30    | `booth-user-write`                           | create user + add to operators group |
-| 40    | `booth-webauthn-setup`                       | **force** passkey registration       |
-| 50    | `default-source-enrollment-login` (or `booth-user-login`) | log the new operator in |
+| Order | Stage                                                     | Purpose                              |
+| ----- | --------------------------------------------------------- | ------------------------------------ |
+| 10    | `booth-invitation`                                        | validate the invite token            |
+| 20    | `booth-enroll-prompt`                                     | collect user details                 |
+| 30    | `booth-user-write`                                        | create user + add to operators group |
+| 40    | `booth-webauthn-setup`                                    | **force** passkey registration       |
+| 50    | `default-source-enrollment-login` (or `booth-user-login`) | log the new operator in              |
 
 For each binding, keep the defaults:
 
@@ -176,12 +176,12 @@ Don't mark the WebAuthn binding optional or users could skip the passkey.
 
 > _Directory → Invitations → Create_
 
-| Field             | Value                                                     |
-| ----------------- | --------------------------------------------------------- |
-| Name              | a label for you, e.g. `invite-jane`                       |
-| Expires           | a short window, e.g. 7 days                               |
-| Flow              | `Booth operator enrollment` (`booth-enrollment`)          |
-| Single use        | **On** for one person, **Off** to reuse for many          |
+| Field             | Value                                                                                 |
+| ----------------- | ------------------------------------------------------------------------------------- |
+| Name              | a label for you, e.g. `invite-jane`                                                   |
+| Expires           | a short window, e.g. 7 days                                                           |
+| Flow              | `Booth operator enrollment` (`booth-enrollment`)                                      |
+| Single use        | **On** for one person, **Off** to reuse for many                                      |
 | Custom attributes | _optional_ JSON to pre-fill, e.g. `{"email": "jane@example.com", "name": "Jane Doe"}` |
 
 Save, then open the invitation to copy the link (or construct it):
@@ -255,14 +255,14 @@ Two different settings get confused here:
 
 ## 10. Troubleshooting
 
-| Symptom                                | Likely cause                                                                 |
-| -------------------------------------- | ---------------------------------------------------------------------------- |
-| "No available authenticators found"    | Browser/device doesn't support passkeys, or Authentik isn't served over HTTPS |
-| Passkey prompt never appears           | WebAuthn binding marked optional, or ordered after the login stage           |
-| Prompt is missing fields / wrong keys  | Prompt field keys aren't exactly `username` / `name` / `email`, or not attached to the stage |
-| Anyone can enroll without a link       | Invitation stage is missing from the flow, or its "continue without invitation" toggle is On |
-| New user can't reach the operator UI   | User-write group isn't `telephone-booth-operators`, or it differs from `AUTHENTIK_ALLOWED_GROUPS` |
-| New user created but can't log in      | "Create users as inactive" is On — activate the user or turn it off          |
-| Invite link says expired / used        | Single-use invitation already consumed, or past its expiry — issue a new one  |
-| Operators see other apps' tiles        | Those apps have no group binding — bind each to its own group                 |
-| Tile opens `localhost`                 | Fix the app's **Launch URL** (not the provider Redirect URIs)                |
+| Symptom                               | Likely cause                                                                                      |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| "No available authenticators found"   | Browser/device doesn't support passkeys, or Authentik isn't served over HTTPS                     |
+| Passkey prompt never appears          | WebAuthn binding marked optional, or ordered after the login stage                                |
+| Prompt is missing fields / wrong keys | Prompt field keys aren't exactly `username` / `name` / `email`, or not attached to the stage      |
+| Anyone can enroll without a link      | Invitation stage is missing from the flow, or its "continue without invitation" toggle is On      |
+| New user can't reach the operator UI  | User-write group isn't `telephone-booth-operators`, or it differs from `AUTHENTIK_ALLOWED_GROUPS` |
+| New user created but can't log in     | "Create users as inactive" is On — activate the user or turn it off                               |
+| Invite link says expired / used       | Single-use invitation already consumed, or past its expiry — issue a new one                      |
+| Operators see other apps' tiles       | Those apps have no group binding — bind each to its own group                                     |
+| Tile opens `localhost`                | Fix the app's **Launch URL** (not the provider Redirect URIs)                                     |

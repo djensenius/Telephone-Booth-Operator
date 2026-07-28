@@ -94,7 +94,7 @@ does not initialize one, so browser uploads from another local port can hit the
 same preflight failure until Blob-service CORS is configured.
 
 > **CORS is not an authorization control.** It is a browser-enforced policy
-> about which *web origins* may make cross-origin requests; non-browser
+> about which _web origins_ may make cross-origin requests; non-browser
 > clients (e.g. the Rust phone client, `curl`) ignore it entirely. Adding a
 > CORS rule does **not** widen who can upload — that gate is the SAS itself:
 > callers must authenticate to obtain one (`POST /v1/messages` /

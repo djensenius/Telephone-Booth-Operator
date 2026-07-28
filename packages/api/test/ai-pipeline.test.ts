@@ -13,10 +13,7 @@ import {
   type PipelineDeps,
 } from "../src/lib/ai/pipeline.js";
 import { wsBroadcaster, type WsEnvelope } from "../src/lib/broadcaster.js";
-import type {
-  ModerationProvider,
-  TranscriptionProvider,
-} from "../src/lib/ai/types.js";
+import type { ModerationProvider, TranscriptionProvider } from "../src/lib/ai/types.js";
 import { fakeDb, store } from "./support/fake-db.js";
 import { resetFakeAzure } from "./support/fake-azure.js";
 import { resetFakeDb } from "./support/fake-db.js";
@@ -426,7 +423,9 @@ describe("AI pipeline", () => {
     };
     // Should have 2 rows: the stale one marked failed and the new successful one
     expect(withRelations.transcriptions).toHaveLength(2);
-    const staleRow = withRelations.transcriptions.find((t) => t.error?.includes("superseded by newer attempt"));
+    const staleRow = withRelations.transcriptions.find((t) =>
+      t.error?.includes("superseded by newer attempt"),
+    );
     expect(staleRow?.status).toBe("failed");
     const newRow = withRelations.transcriptions.find((t) => t.status === "succeeded");
     expect(newRow).toBeDefined();
@@ -490,7 +489,11 @@ describe("AI pipeline", () => {
       transcriptionId: transcription.id,
       deps: baseDeps({
         translationProvider: null,
-        moderationProvider: fakeModeration({ flagged: false, recommendation: "approve", maxScore: 0.01 }),
+        moderationProvider: fakeModeration({
+          flagged: false,
+          recommendation: "approve",
+          maxScore: 0.01,
+        }),
         config: { translationProvider: "push" } as never,
       }),
     });

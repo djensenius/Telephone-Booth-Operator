@@ -79,7 +79,7 @@ rate; they surface honestly under the `aborted` bucket.
 **Trade-offs / caveats:**
 
 - **Booth scoping.** `BoothStatusSnapshot` has no `boothId`, so reconciliation
-  is scoped only by time and closes *all* open sessions. This is safe for the
+  is scoped only by time and closes _all_ open sessions. This is safe for the
   current single-booth installation. A multi-booth deployment must add the
   reporting booth id to the snapshot and scope reconciliation by it so one
   booth's idle report can never end another booth's live call.

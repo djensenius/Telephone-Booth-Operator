@@ -10,11 +10,11 @@ audio blobs** — and restore it into another instance. Both operations are
 
 A single `.tar` file containing:
 
-| Entry | Contents |
-| --- | --- |
-| `manifest.json` | Format/version, generation time, row counts, blob count, and any `missingBlobs` (files whose audio was absent from storage at export time). |
-| `data.json` | Every exported table: questions, messages, files, booth events, call sessions, operator users, API tokens, transcriptions, moderations, metric filters, mobile devices, booth status snapshots. |
-| `blobs/<sha256>` | One entry per unique audio file, content-addressed by SHA-256. |
+| Entry            | Contents                                                                                                                                                                                        |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `manifest.json`  | Format/version, generation time, row counts, blob count, and any `missingBlobs` (files whose audio was absent from storage at export time).                                                     |
+| `data.json`      | Every exported table: questions, messages, files, booth events, call sessions, operator users, API tokens, transcriptions, moderations, metric filters, mobile devices, booth status snapshots. |
+| `blobs/<sha256>` | One entry per unique audio file, content-addressed by SHA-256.                                                                                                                                  |
 
 Deliberately **excluded**:
 

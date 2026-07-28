@@ -53,10 +53,7 @@ vi.mock("../src/lib/oidc.js", () => ({
 }));
 
 import { createApp } from "../src/index.js";
-import {
-  __setBearerVerifierForTests,
-  resetBearerAuthForTests,
-} from "../src/lib/bearer-auth.js";
+import { __setBearerVerifierForTests, resetBearerAuthForTests } from "../src/lib/bearer-auth.js";
 import { resetAuthConfigForTests } from "../src/lib/config.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { attachStatusWebSocket } from "../src/routes/ws.js";

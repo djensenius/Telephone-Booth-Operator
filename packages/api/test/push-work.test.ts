@@ -2,10 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.js")).fakeDb }));
 
-import {
-  findOutstandingPushWork,
-  findOutstandingPushWorkPage,
-} from "../src/lib/ai/push-work.js";
+import { findOutstandingPushWork, findOutstandingPushWorkPage } from "../src/lib/ai/push-work.js";
 import { fakeDb, resetFakeDb, seedMessage } from "./support/fake-db.js";
 
 describe("push work discovery", () => {

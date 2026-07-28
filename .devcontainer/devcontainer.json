@@ -17,12 +17,7 @@
     }
   },
   "postCreateCommand": "mise trust && mise install --jobs=1 && mise exec -- just setup",
-  "forwardPorts": [
-    5173,
-    8787,
-    5432,
-    10000
-  ],
+  "forwardPorts": [5173, 8787, 5432, 10000],
   "portsAttributes": {
     "5173": {
       "label": "Operator web"
