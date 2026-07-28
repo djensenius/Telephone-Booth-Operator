@@ -218,11 +218,13 @@ export function StatusScreen(): JSX.Element {
                 </tr>
               </thead>
               <tbody>
-                {history.map((item) => {
+                {history.map((item, index) => {
                   const repeats = repeatCountOf(item);
                   const firstSeenAt = firstSeenAtOf(item);
                   return (
-                    <tr key={`${firstSeenAt}-${item.state}`}>
+                    // Snapshot ids aren't on the wire and timestamps can tie,
+                    // so position in the collapsed list is the row identity.
+                    <tr key={`${index}-${firstSeenAt}-${item.state}`}>
                       <td>
                         <time dateTime={item.updatedAt}>
                           {new Date(item.updatedAt).toLocaleString()}
