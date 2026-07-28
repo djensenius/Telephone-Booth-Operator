@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { useBoothStatus } from "./BoothStatusContext.js";
 
 export interface LineBusyPlacardProps {

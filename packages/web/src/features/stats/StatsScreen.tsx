@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 // Operator-facing usage stats screen. Reads aggregated counters from
 // `/v1/stats/overview`; the API is responsible for time-window bucketing
 // (all in UTC) and we reformat for the local operator here.

@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { useSearch } from "@tanstack/react-router";
 import { GlassPanel } from "../../components/booth/index.js";
 import { apiUrlFor } from "../../lib/api-client.js";

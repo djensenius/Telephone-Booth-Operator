@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 // Compact, always-visible vitals strip for the operator sidebar. Pi-Hole
 // shows host vitals on every page; this is the same idea — once an operator
 // is signed in, we want them to see the booth's CPU temperature, load, and

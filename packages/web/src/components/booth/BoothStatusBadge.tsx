@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { useEffect, useState } from "react";
 import { useBoothStatus } from "./BoothStatusContext.js";
 import type { BoothDisplayStatus } from "./BoothStatusContext.js";

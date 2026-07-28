@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import type { BoothRuntimeMode } from "./BoothStatusContext.js";
 
 const LABELS: Record<BoothRuntimeMode, string> = {

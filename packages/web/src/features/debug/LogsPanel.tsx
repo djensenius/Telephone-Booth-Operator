@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { LogEntry } from "../../lib/debug-client.js";
 

@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { useMemo } from "react";
 import { Link } from "@tanstack/react-router";
 import { GlassPanel } from "../../components/booth/index.js";

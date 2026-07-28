@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { useMemo, useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { GlassPanel } from "../../components/booth/index.js";

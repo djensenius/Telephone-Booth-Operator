@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import type { BoothEventType } from "@telephone-booth-operator/shared";

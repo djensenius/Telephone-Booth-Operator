@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { WsEnvelopeSchema, BoothStatusSchema } from "@telephone-booth-operator/shared";

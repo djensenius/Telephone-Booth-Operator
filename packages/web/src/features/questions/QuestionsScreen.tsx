@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, JSX } from "react";
 import { GlassPanel } from "../../components/booth/index.js";
 import {
   sha256Hex,

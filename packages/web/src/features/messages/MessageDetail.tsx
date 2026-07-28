@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { useState } from "react";
 import { Link, useParams } from "@tanstack/react-router";
 import type { Message, Moderation, Transcription } from "@telephone-booth-operator/shared";

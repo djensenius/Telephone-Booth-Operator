@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { useEffect, useState } from "react";
 import { GlassPanel, useBoothStatus } from "../../components/booth/index.js";
 import { LogoutButton } from "../auth/LogoutButton.js";

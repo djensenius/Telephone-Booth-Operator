@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import type { BoothStatus, TelemetryRecord } from "../../lib/debug-client.js";
 
 export interface StateTransitionRow {

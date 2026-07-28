@@ -1,5 +1,5 @@
 import { createContext, useContext, useMemo, useState } from "react";
-import type { PropsWithChildren } from "react";
+import type { JSX, PropsWithChildren } from "react";
 
 export type BoothDisplayStatus = "idle" | "playing" | "recording" | "error";
 export type BoothConnectionStatus = "connected" | "disconnected";
