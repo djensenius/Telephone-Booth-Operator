@@ -227,7 +227,10 @@ export type MessageInitiated = z.infer<typeof MessageInitiatedSchema>;
 
 export const MessageCompleteSchema = z.object({
   id: z.guid(),
-  status: z.literal("received"),
+  // A completed upload goes straight to "pending" (the operator review queue).
+  // "received" is only ever returned for the idempotent replay of a message
+  // recorded before transcription became optional enrichment.
+  status: MessageStatusSchema,
   receivedAt: z.string().datetime(),
 });
 export type MessageComplete = z.infer<typeof MessageCompleteSchema>;

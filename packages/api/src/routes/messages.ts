@@ -200,13 +200,18 @@ messagesRouter.post(
       },
     });
 
-    // Idempotent transition: only move from "uploading" → "received".
+    // Idempotent transition: only move from "uploading" → "pending".
     // If the message already advanced past "uploading" (e.g. retry after
     // timeout), skip the pipeline and return the current state.
+    //
+    // A landed recording goes straight into the operator review queue.
+    // Transcription is optional enrichment pushed in later by the external
+    // Transcription app (see docs/transcription-providers.md), so it must
+    // never gate whether an operator can see and decide a message.
     const receivedAt = new Date();
     const { count } = await db.message.updateMany({
       where: { id, status: "uploading" },
-      data: { status: "received", receivedAt },
+      data: { status: "pending", receivedAt },
     });
 
     if (count === 0) {
@@ -220,10 +225,12 @@ messagesRouter.post(
 
     // Fire-and-forget. The pipeline catches its own errors and updates the
     // DB asynchronously; the booth's `/complete` call does not wait on AI.
+    // In push/disabled transcription modes this is a no-op — the external app
+    // decides when to transcribe and posts the result back.
     kickPipelineForMessage(id);
     // Push fan-out: notify mobile devices that a new message has landed.
     // The badge reflects the number of messages awaiting moderation (this
-    // one is now "received", so it is already included in the count).
+    // one is now "pending", so it is already included in the count).
     const badge = await countMessagesAwaitingModeration();
     void fanOutNotification({
       preferenceKey: "messageReceived",
@@ -234,7 +241,7 @@ messagesRouter.post(
       category: "BOOTH_MESSAGE",
       data: { messageId: id },
     });
-    return c.json({ id, status: "received", receivedAt: receivedAt.toISOString() });
+    return c.json({ id, status: "pending", receivedAt: receivedAt.toISOString() });
   },
 );
 

@@ -25,6 +25,7 @@ vi.mock("../src/lib/require-api-token.js", () => ({
 
 import { createApp } from "../src/index.js";
 import { resetApnsSenderForTests, setApnsSenderForTests } from "../src/lib/apns.js";
+import { wsBroadcaster, type WsEnvelope } from "../src/lib/broadcaster.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { fakeBlobs, resetFakeAzure } from "./support/fake-azure.js";
 import {
@@ -33,12 +34,14 @@ import {
   seedMessage,
   seedMobileDevice,
   seedQuestion,
+  store,
 } from "./support/fake-db.js";
 import { operatorCookie, phoneHeaders } from "./support/http.js";
 
 const setup = () => {
   process.env.NODE_ENV = "test";
   process.env.SESSION_SECRET = "test-session-secret";
+  process.env.TRANSCRIPTION_PROVIDER = "disabled";
   resetSessionCryptoForTests();
   resetApnsSenderForTests();
   resetFakeDb();
@@ -46,8 +49,52 @@ const setup = () => {
   return createApp();
 };
 
+// Capture every envelope the router broadcasts during a test.
+const captureEnvelopes = (): { events: WsEnvelope[]; stop: () => void } => {
+  const events: WsEnvelope[] = [];
+  const clientId = `test-${Math.random()}`;
+  wsBroadcaster.subscribe(clientId, (e) => events.push(e));
+  return { events, stop: () => wsBroadcaster.unsubscribe(clientId) };
+};
+
 describe("messages routes", () => {
   beforeEach(setup);
+
+  it("queues a completed message for review without waiting on a transcription", async () => {
+    // Transcription is push-only and optional: the external app posts one when
+    // it has it. A landed recording must never wait on that to be reviewable,
+    // and the API must not solicit the work.
+    process.env.TRANSCRIPTION_PROVIDER = "push";
+    const app = createApp();
+    const sha256 = "e".repeat(64);
+    const initiated = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({ durationMs: 3000, sha256 }),
+    });
+    const slot = await initiated.json();
+    fakeBlobs.set(slot.blobName, {
+      exists: true,
+      sizeBytes: 4242,
+      contentType: "audio/flac",
+      sha256,
+    });
+
+    const cap = captureEnvelopes();
+    const completed = await app.request(`/v1/messages/${slot.id}/complete`, {
+      method: "POST",
+      headers: phoneHeaders,
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    cap.stop();
+
+    expect(completed.status).toBe(200);
+    await expect(completed.json()).resolves.toMatchObject({ status: "pending" });
+    expect(store.messages.get(slot.id)?.status).toBe("pending");
+    expect([...store.transcriptions.values()]).toHaveLength(0);
+    expect(cap.events.some((e) => e.kind === "work")).toBe(false);
+  });
 
   it("runs the message upload flow and lists the received message", async () => {
     const app = createApp();
@@ -82,22 +129,22 @@ describe("messages routes", () => {
       headers: phoneHeaders,
     });
     expect(completed.status, await completed.clone().text()).toBe(200);
-    await expect(completed.json()).resolves.toMatchObject({ id: slot.id, status: "received" });
+    await expect(completed.json()).resolves.toMatchObject({ id: slot.id, status: "pending" });
 
     const cookie = operatorCookie();
-    const list = await app.request("/v1/messages?status=received&limit=5", { headers: { cookie } });
+    const list = await app.request("/v1/messages?status=pending&limit=5", { headers: { cookie } });
     expect(list.status).toBe(200);
     const listed = await list.json();
     expect(listed.items).toHaveLength(1);
     expect(listed.items[0]).toMatchObject({
       id: slot.id,
-      status: "received",
+      status: "pending",
       audio: { sha256, durationMs: 3000 },
     });
 
     const detail = await app.request(`/v1/messages/${slot.id}`, { headers: { cookie } });
     expect(detail.status).toBe(200);
-    await expect(detail.json()).resolves.toMatchObject({ id: slot.id, status: "received" });
+    await expect(detail.json()).resolves.toMatchObject({ id: slot.id, status: "pending" });
 
     const deleted = await app.request(`/v1/messages/${slot.id}`, {
       method: "DELETE",
@@ -218,13 +265,13 @@ describe("messages routes", () => {
       sha256,
     });
 
-    // First /complete transitions uploading → received
+    // First /complete transitions uploading → pending
     const first = await app.request(`/v1/messages/${slot.id}/complete`, {
       method: "POST",
       headers: phoneHeaders,
     });
     expect(first.status).toBe(200);
-    await expect(first.json()).resolves.toMatchObject({ id: slot.id, status: "received" });
+    await expect(first.json()).resolves.toMatchObject({ id: slot.id, status: "pending" });
 
     // Second /complete is a no-op retry — should not reset state
     const second = await app.request(`/v1/messages/${slot.id}/complete`, {
@@ -234,14 +281,14 @@ describe("messages routes", () => {
     expect(second.status).toBe(200);
     const body = await second.json();
     expect(body.id).toBe(slot.id);
-    // Status should still be "received" (not rolled back to "uploading")
-    expect(body.status).toBe("received");
+    // Status should still be "pending" (not rolled back to "uploading")
+    expect(body.status).toBe("pending");
   });
 
   it("fans out a messageReceived push with an awaiting-moderation badge on /complete", async () => {
     const app = createApp();
     // One message already awaiting moderation (pending) plus the new one that
-    // /complete promotes to "received" → badge should be 2.
+    // /complete promotes to "pending" → badge should be 2.
     seedMessage({ audioId: seedFile({ sha256: "f".repeat(64) }).id, status: "pending" });
     seedMobileDevice({ userId: "operator-1", platform: "ios" });
 

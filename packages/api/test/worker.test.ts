@@ -156,21 +156,32 @@ describe("worker push-back callbacks", () => {
     expect(cap.events.some((e) => e.kind === "work")).toBe(false);
   });
 
-  it("does not create stale transcription rows for duplicate callbacks", async () => {
+  it("records an unsolicited transcription when no pending row was requested", async () => {
+    // Transcription is push-only and optional: the app decides when to
+    // transcribe, so the API never pre-creates a pending row. The result must
+    // still land instead of being dropped.
     process.env.MODERATION_PROVIDER = "push";
     const app = createApp();
-    const message = seedMessage({ status: "received" });
+    const message = seedMessage({ status: "pending" });
     const res = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
-      text: "late duplicate",
+      text: "unsolicited transcript",
       language: "en",
+      model: "parakeet",
     });
 
     expect(res.status).toBe(200);
-    expect(
-      [...store.transcriptions.values()].filter((t) => t.messageId === message.id),
-    ).toHaveLength(0);
+    const rows = [...store.transcriptions.values()].filter((t) => t.messageId === message.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      provider: "push",
+      model: "parakeet",
+      status: "succeeded",
+      text: "unsolicited transcript",
+      language: "en",
+    });
+    // English text still flows on to the push moderation step.
     expect([...store.moderations.values()].filter((m) => m.messageId === message.id)).toHaveLength(
-      0,
+      1,
     );
   });
 

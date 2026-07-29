@@ -7,9 +7,10 @@
 // same static Argon2id API token used elsewhere by native clients
 // (`requireApiToken`).
 //
-// Unlike the pull queue there are no leases: the worker only runs a step after
-// being told to via a `work` event, and every write is guarded so a stale or
-// duplicate callback cannot create a newer row or downgrade a finalized one.
+// Unlike the pull queue there are no leases. Translation and moderation are
+// still solicited via `work` events; transcription is not — the app pushes one
+// whenever it has it. Every write is guarded so a stale or duplicate callback
+// cannot create a newer row or downgrade a finalized one.
 
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
@@ -141,8 +142,13 @@ workerRouter.get("/messages/:id/work", zValidator("param", idParamSchema), async
   });
 });
 
-// POST /v1/worker/messages/:id/transcription — the worker finished
-// transcribing the message audio and is pushing the text back.
+// POST /v1/worker/messages/:id/transcription — the app finished transcribing
+// the message audio and is pushing the text back.
+//
+// Transcriptions are unsolicited by design: the message is already `pending`
+// in the operator queue and the app decides on its own when (or whether) to
+// transcribe. So when there is no pending row to finalize we record a new
+// succeeded one rather than dropping the text on the floor.
 workerRouter.post(
   "/messages/:id/transcription",
   zValidator("param", idParamSchema),
@@ -150,7 +156,10 @@ workerRouter.post(
   async (c) => {
     const { id } = c.req.valid("param");
     const data = c.req.valid("json");
-    const message = await db.message.findUnique({ where: { id }, select: { id: true } });
+    const message = await db.message.findUnique({
+      where: { id },
+      select: { id: true, audio: { select: { durationMs: true } } },
+    });
     if (!message) return c.json({ error: "not_found" }, 404);
 
     const pending = await db.transcription.findFirst({
@@ -175,12 +184,29 @@ workerRouter.post(
       if (updated.count === 0) return c.json({ ok: true });
       transcriptionId = pending.id;
     } else {
-      return c.json({ ok: true });
+      // Unsolicited push: no row was ever requested for this message. The app
+      // owns the latency, so we do not invent one.
+      const created = await db.transcription.create({
+        data: {
+          messageId: id,
+          provider: "push",
+          model: data.model ?? null,
+          status: "succeeded",
+          text: data.text,
+          language: data.language ?? null,
+          durationMs: message.audio?.durationMs ?? null,
+          completedAt: now,
+        },
+      });
+      transcriptionId = created.id;
     }
+
+    await broadcastMessageById(id);
 
     const hasText = data.text.trim().length > 0;
     if (!hasText) {
-      // Silent recording: nothing to translate or moderate — surface it.
+      // Silent recording: nothing to translate or moderate. Legacy `received`
+      // messages still need surfacing; anything newer is already `pending`.
       await advanceReceivedMessage(id);
       await broadcastMessageById(id);
       return c.json({ ok: true });
