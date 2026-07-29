@@ -273,8 +273,10 @@ export const auditWrites =
     try {
       await next();
     } catch (error) {
+      // Only a classification, never the message: provider and Prisma errors
+      // can quote query values, and audit rows are long-lived and queryable.
       recordAudit(c, {
-        metadata: { error: error instanceof Error ? error.message : "unhandled error" },
+        metadata: { error: error instanceof Error ? error.name : "unhandled" },
       });
       await persist(500);
       throw error;

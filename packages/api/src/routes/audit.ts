@@ -20,6 +20,19 @@ import { requireAdmin, type AuthVariables } from "../lib/session.js";
 const MAX_LIMIT = 200;
 const DEFAULT_LIMIT = 50;
 
+// `AuditLog.id` is a UUID column, so a forged cursor carrying anything else
+// must be rejected here rather than reaching Prisma as a malformed query.
+const keysetFromCursor = (raw: string): Record<string, unknown>[] | null => {
+  const decoded = decodeCursor(raw);
+  if (!decoded || !z.guid().safeParse(decoded.id).success) return null;
+  // Tuple comparison over (createdAt, id) — matches the composite index and
+  // stays stable when several rows share a timestamp.
+  return [
+    { createdAt: { lt: new Date(decoded.timestamp) } },
+    { createdAt: new Date(decoded.timestamp), id: { lt: decoded.id } },
+  ];
+};
+
 const listQuerySchema = z.object({
   // Exact action (`message.approve`) or dotted prefix (`message.`).
   action: z.string().min(1).max(128).optional(),
@@ -55,17 +68,11 @@ auditRouter.get("/", requireAdmin(), zValidator("query", listQuerySchema), async
     };
   }
   if (cursor) {
-    const decoded = decodeCursor(cursor);
-    if (!decoded) return c.json({ error: "invalid_cursor" }, 400);
-    // Tuple comparison over (createdAt, id) — matches the composite index and
-    // stays stable when several rows share a timestamp.
-    const keyset = [
-      { createdAt: { lt: new Date(decoded.timestamp) } },
-      { createdAt: new Date(decoded.timestamp), id: { lt: decoded.id } },
-    ];
+    const keyset = keysetFromCursor(cursor);
+    if (!keyset) return c.json({ error: "invalid_cursor" }, 400);
     // `createdAt` may already be constrained by since/until, so nest the
     // keyset under AND rather than overwriting it.
-    where.AND = keyset.length > 0 ? [{ OR: keyset }] : [];
+    where.AND = [{ OR: keyset }];
   }
 
   const rows = await db.auditLog.findMany({
@@ -80,8 +87,9 @@ auditRouter.get("/", requireAdmin(), zValidator("query", listQuerySchema), async
   return c.json({ items, nextCursor });
 });
 
-// Convenience view used by the message review screen: the full trail for one
-// target, newest first.
+// Convenience view used by the message review screen: the trail for one
+// target, newest first, paginated the same way as the list endpoint so a
+// long-lived target's older history stays reachable.
 auditRouter.get(
   "/targets/:targetType/:targetId",
   requireAdmin(),
@@ -94,16 +102,31 @@ auditRouter.get(
   ),
   zValidator(
     "query",
-    z.object({ limit: z.coerce.number().int().min(1).max(MAX_LIMIT).default(50) }),
+    z.object({
+      cursor: z.string().optional(),
+      limit: z.coerce.number().int().min(1).max(MAX_LIMIT).default(DEFAULT_LIMIT),
+    }),
   ),
   async (c) => {
     const { targetType, targetId } = c.req.valid("param");
-    const { limit } = c.req.valid("query");
+    const { cursor, limit } = c.req.valid("query");
+
+    const where: Record<string, unknown> = { targetType, targetId };
+    if (cursor) {
+      const keyset = keysetFromCursor(cursor);
+      if (!keyset) return c.json({ error: "invalid_cursor" }, 400);
+      where.OR = keyset;
+    }
+
     const rows = await db.auditLog.findMany({
-      where: { targetType, targetId },
+      where,
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: limit,
+      take: limit + 1,
     });
-    return c.json({ items: rows.map(serializeAuditLog), nextCursor: null });
+    const items = rows.slice(0, limit).map(serializeAuditLog);
+    const last = items[items.length - 1];
+    const nextCursor =
+      rows.length > limit && last ? encodeCursor({ timestamp: last.createdAt, id: last.id }) : null;
+    return c.json({ items, nextCursor });
   },
 );

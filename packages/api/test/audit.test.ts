@@ -50,6 +50,12 @@ const setup = (): void => {
 
 const auditFor = (action: string) => store.auditLogs.filter((row) => row.action === action);
 
+// `app.request(url, init, env)` passes `env` straight through to the Node
+// conninfo helper, which is how the API learns the TCP peer address.
+const fromPeer = (remoteAddress: string) => ({
+  incoming: { socket: { remoteAddress, remotePort: 51234, remoteFamily: "IPv4" } },
+});
+
 describe("audit log middleware", () => {
   beforeEach(setup);
 
@@ -60,16 +66,20 @@ describe("audit log middleware", () => {
     const cookie = operatorCookie();
     process.env.TRUSTED_PROXIES = "10.0.0.1";
 
-    const response = await app.request(`/v1/messages/${message.id}/decision`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        cookie,
-        "x-forwarded-for": "203.0.113.7, 10.0.0.1",
-        "user-agent": "booth-operator-tests/1.0",
+    const response = await app.request(
+      `/v1/messages/${message.id}/decision`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie,
+          "x-forwarded-for": "203.0.113.7, 10.0.0.1",
+          "user-agent": "booth-operator-tests/1.0",
+        },
+        body: JSON.stringify({ decision: "approve", notes: "sounds good" }),
       },
-      body: JSON.stringify({ decision: "approve", notes: "sounds good" }),
-    });
+      fromPeer("10.0.0.1"),
+    );
     expect(response.status, await response.clone().text()).toBe(200);
 
     const entries = auditFor("message.approve");
@@ -86,6 +96,56 @@ describe("audit log middleware", () => {
     expect(entry.statusCode).toBe(200);
     expect(entry.metadata).toMatchObject({ decision: "approve", previousStatus: "pending" });
     expect(entry.createdAt).toBeInstanceOf(Date);
+  });
+
+  it("ignores a forwarded address from an untrusted peer", async () => {
+    const app = createApp();
+    const file = seedFile();
+    const message = seedMessage({ audioId: file.id, status: "pending" });
+    // The proxy we trust is 10.0.0.1; this request came straight from the
+    // internet and merely claims to have been forwarded.
+    process.env.TRUSTED_PROXIES = "10.0.0.1";
+
+    await app.request(
+      `/v1/messages/${message.id}/decision`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: operatorCookie(),
+          "x-forwarded-for": "198.51.100.9",
+        },
+        body: JSON.stringify({ decision: "approve" }),
+      },
+      fromPeer("203.0.113.200"),
+    );
+
+    const entry = auditFor("message.approve")[0]!;
+    expect(entry.ip).toBe("203.0.113.200");
+  });
+
+  it("accepts a forwarded address from a proxy inside a trusted CIDR", async () => {
+    const app = createApp();
+    const file = seedFile();
+    const message = seedMessage({ audioId: file.id, status: "pending" });
+    process.env.TRUSTED_PROXIES = "10.0.0.0/8";
+
+    await app.request(
+      `/v1/messages/${message.id}/decision`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: operatorCookie(),
+          "x-forwarded-for": "198.51.100.9, 10.4.2.1",
+        },
+        body: JSON.stringify({ decision: "approve" }),
+      },
+      fromPeer("::ffff:10.4.2.1"),
+    );
+
+    const entry = auditFor("message.approve")[0]!;
+    expect(entry.ip).toBe("198.51.100.9");
   });
 
   it("names rejections separately and records the failed attempt too", async () => {
@@ -268,6 +328,85 @@ describe("GET /v1/audit-logs", () => {
     expect(body.items).toHaveLength(1);
     expect(body.items[0].action).toBe("message.reject");
     expect(body.items[0].targetId).toBe(message.id);
+  });
+
+  // Seed rows directly so several share a timestamp: that collision is exactly
+  // what the (createdAt, id) tuple in the cursor exists to survive.
+  const seedAtSameInstant = (count: number, targetId: string): void => {
+    const createdAt = new Date("2026-07-20T12:00:00.000Z");
+    for (let index = 0; index < count; index += 1) {
+      store.auditLogs.push({
+        id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+        action: "message.approve",
+        targetType: "message",
+        targetId,
+        actorType: "operator",
+        actorUserId: null,
+        actorTokenId: null,
+        actorLabel: "operator@example.com",
+        ip: null,
+        userAgent: null,
+        method: "POST",
+        path: `/v1/messages/${targetId}/decision`,
+        statusCode: 200,
+        metadata: null,
+        createdAt,
+      });
+    }
+  };
+
+  const drain = async (app: ReturnType<typeof createApp>, path: string): Promise<string[]> => {
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < 10; page += 1) {
+      const url: string = cursor ? `${path}&cursor=${encodeURIComponent(cursor)}` : path;
+      const response = await app.request(url, {
+        headers: { cookie: operatorCookie({ isAdmin: true }) },
+      });
+      expect(response.status, await response.clone().text()).toBe(200);
+      const body = await response.json();
+      seen.push(...body.items.map((item: { id: string }) => item.id));
+      cursor = body.nextCursor;
+      if (!cursor) return seen;
+    }
+    throw new Error("cursor never terminated");
+  };
+
+  it("pages over rows sharing a timestamp without duplicates or gaps", async () => {
+    const app = createApp();
+    seedAtSameInstant(5, "22222222-2222-4222-8222-222222222222");
+
+    const seen = await drain(app, "/v1/audit-logs?limit=2");
+
+    expect(seen).toHaveLength(5);
+    expect(new Set(seen).size).toBe(5);
+    expect(seen).toEqual([...seen].sort().reverse());
+  });
+
+  it("pages the per-target trail the same way", async () => {
+    const app = createApp();
+    const targetId = "33333333-3333-4333-8333-333333333333";
+    seedAtSameInstant(5, targetId);
+
+    const seen = await drain(app, `/v1/audit-logs/targets/message/${targetId}?limit=2`);
+
+    expect(seen).toHaveLength(5);
+    expect(new Set(seen).size).toBe(5);
+  });
+
+  it("rejects a forged cursor rather than passing it to the database", async () => {
+    const app = createApp();
+    const forged = Buffer.from("2026-07-20T12:00:00.000Z\tnot-a-uuid", "utf8").toString(
+      "base64url",
+    );
+
+    for (const path of ["/v1/audit-logs", "/v1/audit-logs/targets/message/x"]) {
+      const response = await app.request(`${path}?cursor=${forged}`, {
+        headers: { cookie: operatorCookie({ isAdmin: true }) },
+      });
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe("invalid_cursor");
+    }
   });
 });
 

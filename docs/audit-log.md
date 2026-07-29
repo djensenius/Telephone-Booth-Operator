@@ -55,8 +55,10 @@ OIDC nonces, or `code_verifier` values.
 
 ### Client IP
 
-The IP comes from the socket unless the request arrives from a proxy listed in
-`TRUSTED_PROXIES`, in which case the first `X-Forwarded-For` entry is used.
+The IP is the TCP peer address unless that peer matches one of the reverse
+proxies in `TRUSTED_PROXIES` (bare addresses or CIDR, IPv4 or IPv6), in which
+case the first `X-Forwarded-For` entry is used instead. A client that can reach
+the API directly therefore cannot forge its own address by sending the header.
 IPv4-mapped IPv6 addresses (`::ffff:203.0.113.7`) are normalized. The same
 helper backs `OperatorSession.ip`, so sessions and audit rows always agree.
 
@@ -77,8 +79,9 @@ GET /v1/audit-logs/targets/message/<id>
 ```
 
 `action` is a prefix match, so `message.` returns the whole family and
-`message.approve` returns just approvals. Results are newest-first with
-`(createdAt, id)` keyset pagination via `nextCursor`.
+`message.approve` returns just approvals. Both endpoints are newest-first with
+`(createdAt, id)` keyset pagination via `nextCursor`, which stays correct when
+several entries share a timestamp.
 
 In the console, the trail is at **Observability → Audit log** (`/audit`), with
 filters for action family and actor type.
@@ -105,7 +108,9 @@ Audit writes never fail a request. If the insert throws, the API logs
 The pruner deletes entries older than `AUDIT_LOG_RETENTION_DAYS` on the
 configured interval. Audit rows are included in the admin data export/import
 (`docs/runbook.md`), which is why `EXPORT_VERSION` is now `3`; archives written
-by older versions still import, they just carry no audit history.
+by older versions still import, they just carry no audit history. Restore is
+insert-only for audit rows: an archive may add history that is missing locally,
+but it can never rewrite an entry that already exists.
 
 ## Related
 

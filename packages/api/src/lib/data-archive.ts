@@ -253,7 +253,13 @@ export const restoreImportArchive = async (archive: Buffer): Promise<ImportSumma
         const client = modelClientOf(tx, name);
         let count = 0;
         for (const row of dump[name]) {
-          await client.upsert({ where: { id: row.id }, create: row, update: row });
+          // The audit trail is append-only: an archive may add history that is
+          // missing locally, but it must never rewrite an entry that exists.
+          if (name === "auditLog") {
+            await client.upsert({ where: { id: row.id }, create: row, update: {} });
+          } else {
+            await client.upsert({ where: { id: row.id }, create: row, update: row });
+          }
           count += 1;
         }
         rows[name] = count;

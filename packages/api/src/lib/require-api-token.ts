@@ -29,11 +29,13 @@ export const requireApiToken =
     const token = await verifyToken(plaintext);
     if (!token) return c.json({ error: "invalid_token" }, 401);
 
+    // Set before the scope check so the audit trail attributes a denied write
+    // to the token that actually presented it rather than to "anonymous".
+    c.set("apiToken", token);
+    c.set("apiTokenId", token.id);
+
     if (token.scope !== requiredScope) {
       return c.json({ error: "insufficient_scope" }, 403);
     }
-
-    c.set("apiToken", token);
-    c.set("apiTokenId", token.id);
     await next();
   };

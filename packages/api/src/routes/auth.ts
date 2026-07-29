@@ -77,6 +77,18 @@ const auditAuthEvent = async (
   });
 };
 
+// Every way a callback can fail is still a sign-in attempt, and an attacker
+// probing the endpoint is exactly what the trail should show. `reason` is a
+// fixed classification, never provider text.
+const auditLoginFailed = async (c: Context, reason: string): Promise<void> => {
+  await auditAuthEvent(c, {
+    action: "auth.login.failed",
+    statusCode: 400,
+    actorLabel: "unknown",
+    metadata: { reason },
+  });
+};
+
 const callbackQuerySchema = z.object({
   code: z.string().optional(),
   state: z.string().optional(),
@@ -312,10 +324,12 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
   const query = c.req.valid("query");
   if (query.error) {
     clearLoginTxCookie(c);
+    await auditLoginFailed(c, "provider_error");
     return htmlResponse(c, "OIDC login failed", query.error_description ?? query.error, 400);
   }
   if (!query.code || !query.state) {
     clearLoginTxCookie(c);
+    await auditLoginFailed(c, "missing_code_or_state");
     return htmlResponse(c, "OIDC login failed", "Missing code or state.", 400);
   }
 
@@ -324,6 +338,7 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
   const txState = readLoginTxCookie(c.req.header("cookie"));
   clearLoginTxCookie(c);
   if (!txState || txState !== query.state) {
+    await auditLoginFailed(c, "login_tx_mismatch");
     return htmlResponse(
       c,
       "OIDC login failed",
@@ -336,6 +351,7 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
   const pending = pendingLogins.get(query.state);
   pendingLogins.delete(query.state);
   if (!pending) {
+    await auditLoginFailed(c, "login_state_expired");
     return htmlResponse(c, "OIDC login failed", "Login state expired or was not recognized.", 400);
   }
 
@@ -390,6 +406,7 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
     return c.redirect(webRedirectUrl(pending.returnTo), 302);
   } catch (error) {
     logAuthCallbackError(error);
+    await auditLoginFailed(c, "code_exchange_failed");
     return htmlResponse(c, "OIDC login failed", "The login response could not be validated.", 400);
   }
 });

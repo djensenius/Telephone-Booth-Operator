@@ -31,7 +31,9 @@ const ACTOR_TYPES: readonly { readonly value: string; readonly label: string }[]
 ];
 
 function outcomeLabel(statusCode: number): string {
-  if (statusCode < 300) return "ok";
+  // A successful sign-in ends in a 302 back to the console, so redirects are
+  // successes, not refusals.
+  if (statusCode < 400) return "ok";
   if (statusCode === 401 || statusCode === 403) return "denied";
   if (statusCode < 500) return "rejected";
   return "error";

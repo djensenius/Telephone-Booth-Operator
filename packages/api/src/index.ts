@@ -58,7 +58,7 @@ export const createApp = (): Hono<{ Variables: AuthVariables & AuditVariables }>
     }),
   );
   // Mounted before every auth guard so rejected writes are audited too.
-  app.use("*", auditWrites());
+  app.use("/v1/*", auditWrites());
 
   app.get("/healthz", (c) =>
     c.json({
