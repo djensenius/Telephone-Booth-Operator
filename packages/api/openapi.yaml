@@ -459,6 +459,47 @@ paths:
               schema: { $ref: "#/components/schemas/Transcription" }
         "404": { description: message not found }
 
+  /v1/messages/{id}/transcription:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Submit an operator-authored transcript for a message.
+      description: |
+        Lets a logged-in operator record transcript text directly — for
+        example the iOS Transcriber app doing on-device transcription — rather
+        than triggering the server-side pipeline via `/transcribe`. Mirrors the
+        worker push-back callback semantics: a pending transcription row is
+        finalized, otherwise a new succeeded row is recorded (a redelivery of
+        the latest succeeded transcript — same `text`, `language`, `model` and
+        submitter — is a no-op, while a correction records a new row). The row is
+        attributed to the submitting operator (`requestedById`). Like all
+        pushed transcripts the text is still translated and moderated
+        server-side before it can be acted on. `text` may be empty for a silent
+        recording. The resulting `Transcription` row is returned and broadcast
+        on `/v1/ws/status` as a `{kind:"message"}` envelope.
+      tags: [transcriptions]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string, maxLength: 20000 }
+                language: { type: [string, "null"], minLength: 1, maxLength: 64 }
+                model: { type: [string, "null"], minLength: 1, maxLength: 128 }
+      responses:
+        "202":
+          description: transcription recorded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Transcription" }
+        "404": { description: message not found }
+
   /v1/messages/{id}/moderate:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
