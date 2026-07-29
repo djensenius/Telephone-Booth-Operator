@@ -95,14 +95,16 @@ export function mergeLiveStatus(
 /** Whether `status` is the newest report the console has seen. */
 export function isNewerThan(status: BoothStatus, current: BoothStatus | null): boolean {
   if (!current) return true;
-  // Row ids increase with insertion order, which is exactly how the API breaks
-  // ties between reports sharing a booth timestamp.
-  if (status.id !== undefined && current.id !== undefined) {
-    return status.id === current.id ? !isStaleFrame(current, status) : status.id > current.id;
-  }
-  if (!isSameStatus(current, status)) {
-    return Date.parse(status.updatedAt) >= Date.parse(current.updatedAt);
-  }
+  // Another view of the row on display: only its own progress can move it on.
+  if (status.id !== undefined && status.id === current.id) return !isStaleFrame(current, status);
+  const delta = Date.parse(status.updatedAt) - Date.parse(current.updatedAt);
+  if (delta !== 0) return delta > 0;
+  // The same instant, two different rows. Ids record insertion order, which is
+  // how the API itself breaks that tie — but only that tie: an id is assigned
+  // when the report is processed, so a delayed report gets a high id and an
+  // old `updatedAt`.
+  if (status.id !== undefined && current.id !== undefined) return status.id > current.id;
+  if (!isSameStatus(current, status)) return true;
   return !isStaleFrame(current, status);
 }
 

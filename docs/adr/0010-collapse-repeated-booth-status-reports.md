@@ -76,6 +76,13 @@ The operator console renders the count instead of the repeats
   a retried or duplicated request to happen at all, and the blast radius is a
   display window and a counter. The render-time collapse hides a duplicate row,
   and the next heartbeat corrects the window.
+- A run's window is only as accurate as the order its reports arrive in. A
+  _different_ status reported late enough to land inside an already-collapsed
+  window is stored as its own row, but the enclosing run keeps its window, so
+  the history briefly shows a run that spans a transition. Splitting the run
+  would need per-report rows — exactly what the collapse exists to avoid — and
+  the booth reports sequentially over one connection, so this needs a retried
+  or reordered request to happen at all.
 - Charts that plot one point per snapshot (the mobile status chart) now get one
   point per status rather than one per heartbeat. Consumers that need beat-level
   resolution should use booth events, which remain append-only.

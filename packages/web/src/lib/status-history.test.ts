@@ -332,6 +332,25 @@ describe("isNewerThan", () => {
     expect(isNewerThan(late, current)).toBe(false);
   });
 
+  it("rejects a delayed frame that was inserted after the current row", () => {
+    const current = status({
+      id: 2,
+      state: "recording",
+      updatedAt: "2026-07-28T12:00:30.000Z",
+      firstSeenAt: "2026-07-28T12:00:30.000Z",
+    });
+    // Processed late, so its id is higher even though the booth reported it
+    // earlier. The booth timestamp decides.
+    const delayed = status({
+      id: 3,
+      state: "uploading",
+      updatedAt: "2026-07-28T12:00:15.000Z",
+      firstSeenAt: "2026-07-28T12:00:15.000Z",
+    });
+
+    expect(isNewerThan(delayed, current)).toBe(false);
+  });
+
   it("prefers the higher row id when reports share a timestamp", () => {
     const at = "2026-07-28T12:00:00.000Z";
     const current = status({ id: 3, updatedAt: at, firstSeenAt: at, repeatCount: 1 });
