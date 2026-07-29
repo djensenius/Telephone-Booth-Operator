@@ -395,12 +395,18 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       summary: Phone client notifies that the direct blob upload finished.
+      description: |
+        Verifies the uploaded blob and moves the message from `uploading`
+        straight to `pending`, i.e. into the operator review queue.
+        Transcription is optional enrichment pushed in later by the external
+        Transcription app, so it never gates whether a landed recording is
+        reviewable.
       tags: [messages]
       security:
         - apiToken: []
       responses:
         "200":
-          description: received
+          description: upload accepted; message queued for review
           content:
             application/json:
               schema: { $ref: "#/components/schemas/MessageComplete" }
@@ -903,15 +909,18 @@ paths:
     post:
       summary: Push-mode transcription result callback.
       description: |
-        The Transcription app (macOS + iOS) subscribes to `/v1/ws/status`,
-        reacts to `{kind:"work", needs:["transcription"]}` envelopes by
-        transcribing the message audio locally, then POSTs the text back here.
-        This replaced the removed `/v1/jobs/*` pull queue. Authenticated with a
-        static operator-issued API token (same scheme as phone clients).
-        Callbacks are claim-free (no leases); the server guards every write so a
-        stale/duplicate callback cannot downgrade a finalized row. On success
-        the server creates the pending moderation row and broadcasts the next
-        `work` step (`translation` for non-English audio, else `moderation`).
+        The Transcription app (macOS + iOS) transcribes booth audio and POSTs
+        the text back here. Transcription is optional: a completed message is
+        already `pending` in the operator review queue, so the app decides on
+        its own when (or whether) to transcribe and the server never solicits
+        the work. Unsolicited results are accepted — if no pending
+        transcription row exists the server records a new succeeded one.
+        Authenticated with a static operator-issued API token (same scheme as
+        phone clients). Callbacks are claim-free (no leases); the server guards
+        every write so a stale/duplicate callback cannot downgrade a finalized
+        row. On success the server creates the pending moderation row and
+        broadcasts the next `work` step (`translation` for non-English audio,
+        else `moderation`).
       tags: [worker]
       security:
         - apiToken: []
@@ -1533,7 +1542,13 @@ components:
       required: [id, status, receivedAt]
       properties:
         id: { type: string, format: uuid }
-        status: { type: string, enum: [received] }
+        status:
+          type: string
+          enum: [uploading, received, pending, approved, rejected]
+          description: >
+            Status after the transition. A newly completed upload is
+            `pending`; other values only occur on an idempotent replay of a
+            message that already advanced.
         receivedAt: { type: string, format: date-time }
     MessageList:
       type: object

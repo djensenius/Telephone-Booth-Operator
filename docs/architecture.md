@@ -43,8 +43,11 @@ spec change.
 3. Phone client `PUT`s the FLAC to `uploadUrl` directly — Azure
    terminates the upload, the API never sees the bytes.
 4. Phone client `POST /v1/messages/{id}/complete`. The API stat's the
-   blob, checks the content-addressed SHA-256, marks the message
-   `received`, and returns `{id, status, receivedAt}`.
+   blob, checks the content-addressed SHA-256, moves the message straight to
+   `pending` (the operator review queue), and returns
+   `{id, status, receivedAt}`. Transcription is optional enrichment pushed in
+   later by the external Transcription app, so it never gates review — see
+   [`operator-push.md`](operator-push.md).
 5. Phone status updates sent to `PUT /v1/status` are recorded in
    `BoothStatusSnapshot` — a report identical to the run that was current at
    its own timestamp is collapsed into that run rather than appended — and

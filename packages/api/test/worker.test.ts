@@ -27,7 +27,7 @@ import { createApp } from "../src/index.js";
 import { wsBroadcaster, type WsEnvelope } from "../src/lib/broadcaster.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { resetFakeAzure } from "./support/fake-azure.js";
-import { fakeDb, resetFakeDb, seedMessage, store } from "./support/fake-db.js";
+import { fakeDb, resetFakeDb, seedFile, seedMessage, store } from "./support/fake-db.js";
 import { phoneHeaders } from "./support/http.js";
 
 const setup = () => {
@@ -156,22 +156,69 @@ describe("worker push-back callbacks", () => {
     expect(cap.events.some((e) => e.kind === "work")).toBe(false);
   });
 
-  it("does not create stale transcription rows for duplicate callbacks", async () => {
+  it("records an unsolicited transcription when no pending row was requested", async () => {
+    // Transcription is push-only and optional: the app decides when to
+    // transcribe, so the API never pre-creates a pending row. The result must
+    // still land instead of being dropped.
     process.env.MODERATION_PROVIDER = "push";
     const app = createApp();
-    const message = seedMessage({ status: "received" });
+    const audio = seedFile({ sha256: "9".repeat(64), durationMs: 7777 });
+    const message = seedMessage({ status: "pending", audioId: audio.id });
     const res = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
-      text: "late duplicate",
+      text: "unsolicited transcript",
       language: "en",
+      model: "parakeet",
     });
 
     expect(res.status).toBe(200);
+    const rows = [...store.transcriptions.values()].filter((t) => t.messageId === message.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      provider: "push",
+      model: "parakeet",
+      status: "succeeded",
+      text: "unsolicited transcript",
+      language: "en",
+      // Copied from the message audio so the row carries the same metadata a
+      // solicited (pre-created) row would have.
+      durationMs: 7777,
+    });
+    // English text still flows on to the push moderation step.
+    expect([...store.moderations.values()].filter((m) => m.messageId === message.id)).toHaveLength(
+      1,
+    );
+  });
+
+  it("is idempotent when an unsolicited transcription is redelivered", async () => {
+    process.env.MODERATION_PROVIDER = "push";
+    const app = createApp();
+    const message = seedMessage({ status: "pending" });
+    const body = { text: "retried transcript", language: "en" };
+
+    const first = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, body);
+    const second = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, body);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    // A redelivery must not duplicate history or re-run downstream work.
     expect(
       [...store.transcriptions.values()].filter((t) => t.messageId === message.id),
-    ).toHaveLength(0);
+    ).toHaveLength(1);
     expect([...store.moderations.values()].filter((m) => m.messageId === message.id)).toHaveLength(
-      0,
+      1,
     );
+  });
+
+  it("records a genuinely different unsolicited transcript as a new attempt", async () => {
+    const app = createApp();
+    const message = seedMessage({ status: "pending" });
+
+    await postJson(app, `/v1/worker/messages/${message.id}/transcription`, { text: "first pass" });
+    await postJson(app, `/v1/worker/messages/${message.id}/transcription`, { text: "second pass" });
+
+    const rows = [...store.transcriptions.values()].filter((t) => t.messageId === message.id);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.text)).toEqual(expect.arrayContaining(["first pass", "second pass"]));
   });
 
   it("uses provider-aware routing after transcription instead of always pushing work", async () => {

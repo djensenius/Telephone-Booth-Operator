@@ -3,11 +3,12 @@
 //
 // A message is "awaiting moderation" once it has landed in the booth but has
 // not yet been approved or rejected. That spans two internal states:
-//   - "received": uploaded, AI pipeline still running
-//   - "pending":  pipeline done, sitting in the operator moderation queue
-// Counting both means the badge is already correct at the moment a message
-// is received (the push fan-out point), rather than lagging until the async
-// pipeline promotes it to "pending".
+//   - "pending":  in the operator moderation queue. A completed upload lands
+//                 here directly — transcription is optional enrichment and
+//                 never gates review.
+//   - "received": legacy state for messages recorded before that change, when
+//                 the AI pipeline had to finish first. Counted so historical
+//                 rows are not silently dropped from the badge.
 
 import { db } from "./db.js";
 

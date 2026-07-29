@@ -71,8 +71,8 @@ describe("messages AI routes", () => {
   it("returns an empty transcription history for a fresh message", async () => {
     const app = createApp();
     const id = await seedReceivedMessage(app);
-    // Drain pending microtasks so the auto-kicked pipeline finishes writing
-    // its "disabled" failure row.
+    // Drain pending microtasks: /complete must not auto-kick the pipeline for
+    // the push / disabled providers, so no row should appear.
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
 
@@ -80,10 +80,7 @@ describe("messages AI routes", () => {
     const res = await app.request(`/v1/messages/${id}/transcriptions`, { headers: { cookie } });
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(Array.isArray(body.items)).toBe(true);
-    // Auto-kick fired on /complete; we should see one failed row.
-    expect(body.items.length).toBeGreaterThanOrEqual(1);
-    expect(body.items[0]).toMatchObject({ status: "failed" });
+    expect(body.items).toEqual([]);
   });
 
   it("requires an operator session for transcription history", async () => {
@@ -173,6 +170,17 @@ describe("messages AI routes", () => {
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
     const cookie = operatorCookie();
+
+    // A landed recording is reviewable before any transcription exists.
+    const fresh = await app.request(`/v1/messages/${id}`, { headers: { cookie } });
+    expect(fresh.status).toBe(200);
+    await expect(fresh.json()).resolves.toMatchObject({
+      status: "pending",
+      latestTranscription: null,
+    });
+
+    await app.request(`/v1/messages/${id}/transcribe`, { method: "POST", headers: { cookie } });
+
     const detail = await app.request(`/v1/messages/${id}`, { headers: { cookie } });
     expect(detail.status).toBe(200);
     const detailBody = await detail.json();
@@ -181,7 +189,7 @@ describe("messages AI routes", () => {
       provider: "disabled",
     });
 
-    const list = await app.request(`/v1/messages?status=received&limit=10`, {
+    const list = await app.request(`/v1/messages?status=pending&limit=10`, {
       headers: { cookie },
     });
     expect(list.status).toBe(200);

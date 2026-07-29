@@ -149,9 +149,10 @@ using the same threshold logic as the OpenAI moderation provider.
 
 ## Moderation is advisory — humans always decide
 
-The pipeline runs after both steps succeed. Once moderation finishes, the
-pipeline advances the message from `received` to `pending` so it shows up in the
-operator review queue. It **never** auto-approves or auto-rejects: the AI
+A message is already `pending` — in the operator review queue — from the moment
+its upload completes, so moderation never decides whether an operator sees it.
+When moderation finishes it attaches an advisory verdict to that message. It
+**never** auto-approves or auto-rejects: the AI
 moderation result (`flagged`, `recommendation`, `maxScore`, category scores) is
 stored purely as an advisory suggestion.
 
@@ -193,9 +194,9 @@ history of attempts.
 - Transcripts may contain personal information. The API logs only an
   80-character preview at info level — the full text never appears in
   logs.
-- Every `received` message hits the configured provider once. The
+- Every landed message hits the configured in-process provider once. The
   `disabled` default protects non-production environments from accidental
-  spend.
+  spend, and `push` never spends anything server-side.
 - SAS URLs scoped to a single blob are used for the OpenAI fetch; their
   default 15-minute TTL is comfortable even for slow transcription
   paths.

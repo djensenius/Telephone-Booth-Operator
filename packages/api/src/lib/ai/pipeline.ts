@@ -1,11 +1,17 @@
 // AI orchestration: transcription → moderation → optional auto-decision.
 //
+// Transcription is *optional enrichment*: `POST /v1/messages/:id/complete`
+// puts a landed recording straight into the operator queue (`pending`), and
+// nothing here ever gates that. The steps below only attach transcript,
+// translation and moderation data to a message that is already reviewable.
+//
 // The pipeline is in-process and fire-and-forget:
 //   - `POST /v1/messages/:id/complete` calls `kickPipelineForMessage(id)` via
-//     `setImmediate`. Errors are caught here so they never reject the request.
+//     `setImmediate`, which is a no-op for the `push` / `disabled` providers.
+//     Errors are caught here so they never reject the request.
 //   - A separate recovery sweeper (see `start-ai-sweeper.ts`) reprocesses
-//     `received` messages that have no successful transcription, which covers
-//     server restarts mid-flight.
+//     legacy `received` messages that have no successful transcription, which
+//     covers server restarts mid-flight.
 
 import { generateSasUrl } from "../azure-blob.js";
 import { broadcastWork, wsBroadcaster } from "../broadcaster.js";
@@ -644,7 +650,18 @@ export const runModeration = async (opts: RunModerationOptions): Promise<string 
 
 // Public fire-and-forget entrypoint used by `POST /v1/messages/:id/complete`
 // and the recovery sweeper. Errors are caught and logged; callers never await.
+//
+// Transcription is optional enrichment, not a gate: a completed message is
+// already `pending` in the operator queue. In `push` mode the external
+// Transcription app decides when to transcribe and POSTs the result to
+// `/v1/worker/messages/:id/transcription`, so the API never solicits the work;
+// in `disabled` mode there is nothing to run at all. Both are skipped here so
+// we don't litter messages with unsolicited pending / failed transcription
+// rows. Operators can still request one explicitly via
+// `POST /v1/messages/:id/transcribe`.
 export const kickPipelineForMessage = (messageId: string): void => {
+  const provider = resolveAiConfig().transcriptionProvider;
+  if (provider === "push" || provider === "disabled") return;
   setImmediate(() => {
     void runTranscription({ messageId }).catch((error: unknown) => {
       const reason = sanitizeError(error);

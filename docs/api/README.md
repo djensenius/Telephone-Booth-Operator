@@ -83,7 +83,7 @@ curl -X POST "$PUBLIC_API_URL/v1/messages/<id>/complete" \
   -H "Authorization: Bearer $PHONE_API_TOKEN"
 
 # Operator: list recent messages using the browser session cookie
-curl "$PUBLIC_API_URL/v1/messages?status=received&limit=25" \
+curl "$PUBLIC_API_URL/v1/messages?status=pending&limit=25" \
   -H 'Cookie: __Host-booth_session=<signed-session>'
 
 # Operator: approve or reject a message (human moderation decision)

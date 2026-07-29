@@ -16,10 +16,10 @@ an **advisory suggestion**. A human operator always decides a message via
 ## Overview
 
 ```text
-Booth uploads message ──► Operator persists (status: received)
-        │  broadcast WS {kind:"work", messageId, needs:["transcription"]}
+Booth uploads message ──► Operator persists (status: pending — reviewable now)
+        │  (no work is broadcast for transcription)
         ▼
-Transcription app (WS subscriber, API-token auth; macOS + iOS)
+Transcription app (API-token auth; macOS + iOS), on its own schedule
         │  GET  /v1/worker/messages/:id/work      (fetch audio SAS / transcript)
         │  …runs transcription locally…
         ▼  POST /v1/worker/messages/:id/transcription
@@ -27,9 +27,26 @@ Operator stores it; broadcasts needs:["translation"] (non-English) or
                                     needs:["moderation"] (English)
         ▼  …translation pushed back… then…
         ▼  POST /v1/worker/messages/:id/moderation   (ADVISORY suggestion)
-Operator records the suggestion, advances received → pending. A human
+Operator records the suggestion against the already-pending message. A human
 operator (web / mobile / CLI) reviews and calls POST /v1/messages/:id/decision.
 ```
+
+### Transcription is optional
+
+A message goes straight to `pending` — the operator review queue — the moment
+its upload completes. Transcription, translation and moderation only _enrich_
+a message that is already reviewable; they never gate it. An operator can
+listen to and decide any recording whether or not a transcript ever arrives.
+
+Consequently the Operator does **not** solicit transcription work: it neither
+pre-creates a pending transcription row nor broadcasts
+`{kind:"work", needs:["transcription"]}` when a message lands. The
+Transcription app decides when (or whether) to transcribe and posts the result
+whenever it has one. Unsolicited results are accepted — if no pending
+transcription row exists, the Operator records a new succeeded one.
+
+Translation and moderation are still solicited via `work` events, because they
+are downstream of a transcript the Operator has just received.
 
 ## Authentication
 
@@ -93,7 +110,7 @@ audio through itself.
 ```json
 {
   "id": "…",
-  "status": "received",
+  "status": "pending",
   "audio": {
     "url": "https://…?sp=r&se=…",
     "sha256": "…",
@@ -168,8 +185,8 @@ content; moderation runs against it. On success the Operator broadcasts
 ```
 
 `recommendation` is `approve` | `review` | `reject`. This is **advisory only**:
-the Operator records the suggestion and advances `received` → `pending`, but
-**never** auto-approves or auto-rejects. It then broadcasts a `kind:"message"`
+the Operator records the suggestion against a message that is already in the
+review queue, and **never** auto-approves or auto-rejects. It then broadcasts a `kind:"message"`
 envelope so live operator UIs update instantly, and a human decides via
 `POST /v1/messages/:id/decision`.
 
