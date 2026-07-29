@@ -469,8 +469,9 @@ paths:
         example the iOS Transcriber app doing on-device transcription — rather
         than triggering the server-side pipeline via `/transcribe`. Mirrors the
         worker push-back callback semantics: a pending transcription row is
-        finalized, otherwise a new succeeded row is recorded (an identical
-        redelivery of the latest succeeded transcript is a no-op). The row is
+        finalized, otherwise a new succeeded row is recorded (a redelivery of
+        the latest succeeded transcript — same `text`, `language`, `model` and
+        submitter — is a no-op, while a correction records a new row). The row is
         attributed to the submitting operator (`requestedById`). Like all
         pushed transcripts the text is still translated and moderated
         server-side before it can be acted on. `text` may be empty for a silent

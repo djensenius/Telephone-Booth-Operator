@@ -553,7 +553,18 @@ export const recordTranscriptionResult = async (
       where: { messageId: opts.messageId },
       orderBy: { createdAt: "desc" },
     });
-    if (latest?.status === "succeeded" && (latest.text ?? "").trim() === opts.text.trim()) {
+    // A retry resends the exact same payload from the same caller, so the
+    // no-op check compares the whole submission — not just the text. Language
+    // in particular decides whether translation runs, so a resubmission that
+    // only corrects it must record a new attempt rather than be swallowed.
+    if (
+      latest &&
+      latest.status === "succeeded" &&
+      (latest.text ?? "").trim() === opts.text.trim() &&
+      (latest.language ?? null) === (opts.language ?? null) &&
+      (latest.model ?? null) === (opts.model ?? null) &&
+      (latest.requestedById ?? null) === (opts.requestedByUserId ?? null)
+    ) {
       return { outcome: "unchanged", transcriptionId: latest.id };
     }
     // The client owns the latency here, so we do not invent one.
