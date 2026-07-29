@@ -46,6 +46,10 @@ renders as a dimmed hatched bar with a "no recent samples" note — deliberately
 not as an empty bar, so a dropped connection is never mistaken for a silent
 booth.
 
+The polled snapshot carries both channels and one shared timestamp, so a
+channel is only treated as a new sample when its own level and peak change.
+Otherwise an active output would keep a stopped input looking fresh.
+
 Peaks are held for 1s and then decay at 12 dB/s. The ballistics are a client
 concern and live in `packages/web/src/features/debug/audio-meters.ts`; the
 booth reports raw levels only.

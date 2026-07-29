@@ -7,8 +7,12 @@ import {
   PEAK_DECAY_DB_PER_SECOND,
   PEAK_HOLD_MS,
   dbfsFromLinear,
+  NO_POLLED_IDENTITIES,
+  changedPolledChannels,
   meterPercent,
   nextMeterUpdateDelay,
+  polledIdentities,
+  recordPolledSnapshot,
   recordSample,
   resolveMeter,
 } from "./audio-meters.js";
@@ -186,6 +190,57 @@ describe("audio meter ballistics", () => {
       });
       expect(nextMeterUpdateDelay(state, 0)).toBe(PEAK_HOLD_MS);
       expect(nextMeterUpdateDelay(state, PEAK_HOLD_MS + 10)).toBe(METER_TICK_MS);
+    });
+  });
+  describe("polled snapshots", () => {
+    const snapshot = {
+      inputLevelDbfs: -50,
+      outputLevelDbfs: -12,
+      inputPeakDbfs: -48,
+      outputPeakDbfs: -6,
+    };
+
+    it("records both channels from the first snapshot", () => {
+      const identities = polledIdentities(snapshot);
+      const changed = changedPolledChannels(NO_POLLED_IDENTITIES, identities);
+      expect(changed).toEqual(["input", "output"]);
+      const meters = recordPolledSnapshot(EMPTY_AUDIO_METERS, snapshot, changed, 0);
+      expect(resolveMeter(meters, "input", 0).stale).toBe(false);
+      expect(resolveMeter(meters, "output", 0).stale).toBe(false);
+    });
+
+    it("does not refresh a stopped channel when only the other one moves", () => {
+      const first = polledIdentities(snapshot);
+      let meters = recordPolledSnapshot(
+        EMPTY_AUDIO_METERS,
+        snapshot,
+        changedPolledChannels(NO_POLLED_IDENTITIES, first),
+        0,
+      );
+
+      // The booth keeps playing, so every later snapshot differs -- but only in
+      // the output channel. The stopped input must still age out.
+      let identities = first;
+      for (let poll = 1; poll <= 3; poll += 1) {
+        const later = {
+          ...snapshot,
+          outputLevelDbfs: -12 - poll,
+          outputPeakDbfs: -6 - poll,
+        };
+        const next = polledIdentities(later);
+        const changed = changedPolledChannels(identities, next);
+        expect(changed).toEqual(["output"]);
+        meters = recordPolledSnapshot(meters, later, changed, poll * 1_000);
+        identities = next;
+      }
+
+      expect(resolveMeter(meters, "input", 3_000).stale).toBe(true);
+      expect(resolveMeter(meters, "output", 3_000).stale).toBe(false);
+    });
+
+    it("treats an unchanged snapshot as no new samples", () => {
+      const identities = polledIdentities(snapshot);
+      expect(changedPolledChannels(identities, polledIdentities({ ...snapshot }))).toEqual([]);
     });
   });
 });

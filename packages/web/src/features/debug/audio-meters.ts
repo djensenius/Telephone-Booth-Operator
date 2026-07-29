@@ -23,6 +23,8 @@ export const METER_TICK_MS = 100;
 
 export type AudioChannel = "input" | "output";
 
+export const AUDIO_CHANNELS: readonly AudioChannel[] = ["input", "output"];
+
 export interface ChannelSample {
   readonly levelDbfs: number;
   readonly peakDbfs: number;
@@ -111,6 +113,77 @@ export function recordSample(
   return { ...state, [channel]: sample };
 }
 
+export type PolledMeterIdentities = {
+  readonly [channel in AudioChannel]: string | null;
+};
+
+export const NO_POLLED_IDENTITIES: PolledMeterIdentities = {
+  input: null,
+  output: null,
+};
+
+export interface PolledAudioSnapshot {
+  readonly inputLevelDbfs: number;
+  readonly outputLevelDbfs: number;
+  readonly inputPeakDbfs: number;
+  readonly outputPeakDbfs: number;
+}
+
+function channelLevel(snapshot: PolledAudioSnapshot, channel: AudioChannel): number {
+  return channel === "input" ? snapshot.inputLevelDbfs : snapshot.outputLevelDbfs;
+}
+
+function channelPeak(snapshot: PolledAudioSnapshot, channel: AudioChannel): number {
+  return channel === "input" ? snapshot.inputPeakDbfs : snapshot.outputPeakDbfs;
+}
+
+/**
+ * Per-channel sample identity for a polled `/v1/audio` snapshot.
+ *
+ * The snapshot carries both channels and a single shared timestamp, so it
+ * changes whenever *either* channel moves. Recording both channels from it
+ * would let an active output keep a stopped input looking fresh forever, so a
+ * channel counts as a new sample only when its own values changed. The shared
+ * timestamp is deliberately excluded for the same reason.
+ *
+ * A channel repeating an identical level and peak therefore reads as stale.
+ * That is the conservative direction: over REST a repeated value genuinely is
+ * indistinguishable from a stopped feed, and the booth reporting silence
+ * explicitly is what djensenius/Telephone-Booth#133 addresses.
+ */
+export function polledIdentities(snapshot: PolledAudioSnapshot): PolledMeterIdentities {
+  return {
+    input: `${snapshot.inputLevelDbfs}|${snapshot.inputPeakDbfs}`,
+    output: `${snapshot.outputLevelDbfs}|${snapshot.outputPeakDbfs}`,
+  };
+}
+
+/** Channels whose sample identity differs from the last recorded snapshot. */
+export function changedPolledChannels(
+  previous: PolledMeterIdentities,
+  next: PolledMeterIdentities,
+): readonly AudioChannel[] {
+  return AUDIO_CHANNELS.filter((channel) => previous[channel] !== next[channel]);
+}
+
+export function recordPolledSnapshot(
+  state: AudioMeterState,
+  snapshot: PolledAudioSnapshot,
+  channels: readonly AudioChannel[],
+  receivedAt: number,
+): AudioMeterState {
+  return channels.reduce(
+    (meters, channel) =>
+      recordSample(meters, channel, {
+        levelDbfs: channelLevel(snapshot, channel),
+        peakDbfs: channelPeak(snapshot, channel),
+        receivedAt,
+        staleAfterMs: POLLED_SAMPLE_STALE_AFTER_MS,
+      }),
+    state,
+  );
+}
+
 export function resolveMeter(
   state: AudioMeterState,
   channel: AudioChannel,
@@ -141,7 +214,7 @@ export function meterPercent(dbfs: number | undefined): number {
  */
 export function nextMeterUpdateDelay(state: AudioMeterState, now: number): number | null {
   let next: number | null = null;
-  for (const channel of ["input", "output"] as const) {
+  for (const channel of AUDIO_CHANNELS) {
     const sample = state[channel];
     if (sample === undefined) {
       continue;

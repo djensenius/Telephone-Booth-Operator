@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { GlassPanel } from "../../components/booth/index.js";
 import { useCurrentUser } from "../auth/useCurrentUser.js";
@@ -17,15 +17,18 @@ import type {
 import { AudioPanel } from "./AudioPanel.js";
 import type { AudioDeviceInfo } from "./AudioPanel.js";
 import {
+  changedPolledChannels,
   EMPTY_AUDIO_METERS,
   LIVE_SAMPLE_STALE_AFTER_MS,
+  NO_POLLED_IDENTITIES,
   nextMeterUpdateDelay,
-  POLLED_SAMPLE_STALE_AFTER_MS,
+  polledIdentities,
   dbfsFromLinear,
+  recordPolledSnapshot,
   recordSample,
   resolveMeter,
 } from "./audio-meters.js";
-import type { AudioChannel, AudioMeterState } from "./audio-meters.js";
+import type { AudioChannel, AudioMeterState, PolledMeterIdentities } from "./audio-meters.js";
 import { CertFingerprintCard } from "./CertFingerprintCard.js";
 import { ConfigPanel } from "./ConfigPanel.js";
 import { ConnectionStatusBar } from "./ConnectionStatusBar.js";
@@ -161,6 +164,7 @@ export function DebugScreen(): JSX.Element {
   const [liveAudio, setLiveAudio] = useState<AudioDeviceInfo | undefined>();
   const [audioMeters, setAudioMeters] = useState<AudioMeterState>(EMPTY_AUDIO_METERS);
   const [meterNow, setMeterNow] = useState<number>(() => Date.now());
+  const polledIdentitiesRef = useRef<PolledMeterIdentities>(NO_POLLED_IDENTITIES);
   const [liveLogs, setLiveLogs] = useState<readonly LogEntry[]>([]);
   const [transitions, setTransitions] = useState<readonly StateTransitionRow[]>([]);
   const [pulseAccumulator, setPulseAccumulator] = useState<PulseAccumulator>({
@@ -230,23 +234,17 @@ export function DebugScreen(): JSX.Element {
     }
     // The polled snapshot is replayed from the booth's telemetry ring buffer,
     // so it can repeat an old sample. Age it from the local receive time and
-    // allow one missed poll before the meter is treated as stale.
+    // allow one missed poll before the meter is treated as stale. Channels
+    // whose values did not change are left to age out on their own.
     const receivedAt = Date.now();
     setMeterNow(receivedAt);
-    setAudioMeters((current) => {
-      const withInput = recordSample(current, "input", {
-        levelDbfs: snapshot.inputLevelDbfs,
-        peakDbfs: snapshot.inputPeakDbfs,
-        receivedAt,
-        staleAfterMs: POLLED_SAMPLE_STALE_AFTER_MS,
-      });
-      return recordSample(withInput, "output", {
-        levelDbfs: snapshot.outputLevelDbfs,
-        peakDbfs: snapshot.outputPeakDbfs,
-        receivedAt,
-        staleAfterMs: POLLED_SAMPLE_STALE_AFTER_MS,
-      });
-    });
+    const identities = polledIdentities(snapshot);
+    const changed = changedPolledChannels(polledIdentitiesRef.current, identities);
+    polledIdentitiesRef.current = identities;
+    if (changed.length === 0) {
+      return;
+    }
+    setAudioMeters((current) => recordPolledSnapshot(current, snapshot, changed, receivedAt));
   }, [audioQuery.data]);
   useEffect(() => setLiveLogs(logsQuery.data ?? []), [logsQuery.data]);
   useEffect(() => {
