@@ -2,6 +2,8 @@ import type { BoothSystemSnapshot, Message } from "@telephone-booth-operator/sha
 import { log } from "./logger.js";
 
 export type BoothStatusEvent = {
+  // Snapshot row id; absent only for the synthetic default status.
+  id?: number;
   state:
     | "idle"
     | "dialTone"

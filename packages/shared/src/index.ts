@@ -121,6 +121,11 @@ export const BoothStatusSchema = z.object({
   // optional so older API builds still validate.
   firstSeenAt: z.string().datetime().optional(),
   repeatCount: z.number().int().min(1).optional(),
+  // The snapshot's row id. Two runs of the same status can share a booth
+  // timestamp, so clients need it to tell one row from another; it increases
+  // with insertion order, which is also the operator's tie-break for equal
+  // timestamps.
+  id: z.number().int().optional(),
 });
 export type BoothStatus = z.infer<typeof BoothStatusSchema>;
 
@@ -130,6 +135,7 @@ export const StatusUpdateSchema = BoothStatusSchema.omit({
   updatedAt: true,
   firstSeenAt: true,
   repeatCount: true,
+  id: true,
 }).extend({
   updatedAt: z.string().datetime().optional(),
 });

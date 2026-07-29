@@ -38,8 +38,13 @@ new row (`packages/api/src/routes/status.ts`):
   change — still creates a new row, so the history reads as one row per booth
   status.
 
-`firstSeenAt` and `repeatCount` are added to the `BoothStatus` wire shape as
-optional fields, so existing clients (mobile, CLI) keep working unchanged.
+`firstSeenAt`, `repeatCount`, and the snapshot's row `id` are added to the
+`BoothStatus` wire shape as optional fields, so existing clients (mobile, CLI)
+keep working unchanged. The id is what lets a client tell two runs apart when
+they share a booth timestamp — the booth supplies `updatedAt`, so `idle`, a
+blip of `recording`, and `idle` again can all report the same millisecond, and
+the two idle runs are otherwise indistinguishable. Ids increase with insertion
+order, which is also how the API breaks those ties.
 
 The operator console renders the count instead of the repeats
 (`packages/web/src/lib/status-history.ts`):

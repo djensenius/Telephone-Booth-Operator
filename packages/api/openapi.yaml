@@ -1366,6 +1366,12 @@ components:
       type: object
       required: [state, updatedAt]
       properties:
+        id:
+          type: integer
+          description: >-
+            Snapshot row id. Two runs of the same status can share a booth
+            timestamp, so clients use this to tell rows apart; it increases with
+            insertion order.
         state: { $ref: "#/components/schemas/BoothState" }
         updatedAt: { type: string, format: date-time }
         firstSeenAt:

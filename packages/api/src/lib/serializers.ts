@@ -128,6 +128,7 @@ export const serializeMessage = (message: WithAudio<WithAi<Message>>): MessagePa
 };
 
 export const serializeStatus = (snapshot: BoothStatusSnapshot): BoothStatusEvent => ({
+  id: snapshot.id,
   state: snapshot.state,
   updatedAt: iso(snapshot.updatedAt),
   firstSeenAt: iso(snapshot.firstSeenAt),

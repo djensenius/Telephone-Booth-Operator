@@ -68,12 +68,15 @@ export function mergeLiveStatus(
     (item) => Date.parse(item.updatedAt) <= Date.parse(status.updatedAt),
   );
   const index = at === -1 ? history.length : at;
-  // Only the entries either side of that position can be the same row. Matching
-  // by value across the whole history would drop a genuine transition: the
-  // booth supplies `updatedAt`, so `idle`, a blip of `recording`, and `idle`
-  // again can share one millisecond, leaving two indistinguishable idle runs
-  // that only their position tells apart.
-  const cached = [index - 1, index].find((candidate) => {
+  // The API sends the snapshot's row id, so a frame can be matched to its
+  // cached copy wherever it sits. Without one (a legacy API), only the entries
+  // either side of the frame's position can be the same row: matching by value
+  // across the whole history would drop a genuine transition, since the booth
+  // supplies `updatedAt` and `idle`, a blip of `recording`, and `idle` again
+  // can share one millisecond.
+  const candidates =
+    status.id === undefined ? [index - 1, index] : history.map((_, position) => position);
+  const cached = candidates.find((candidate) => {
     const entry = history[candidate];
     return entry !== undefined && isSameRun(entry, status);
   });
@@ -92,6 +95,11 @@ export function mergeLiveStatus(
 /** Whether `status` is the newest report the console has seen. */
 export function isNewerThan(status: BoothStatus, current: BoothStatus | null): boolean {
   if (!current) return true;
+  // Row ids increase with insertion order, which is exactly how the API breaks
+  // ties between reports sharing a booth timestamp.
+  if (status.id !== undefined && current.id !== undefined) {
+    return status.id === current.id ? !isStaleFrame(current, status) : status.id > current.id;
+  }
   if (!isSameStatus(current, status)) {
     return Date.parse(status.updatedAt) >= Date.parse(current.updatedAt);
   }
@@ -115,10 +123,13 @@ function isStaleFrame(head: BoothStatus, status: BoothStatus): boolean {
 // timestamp: `idle [a, t]`, `recording [t, t]`, `idle [t, b]` leaves two idle
 // windows touching at `t`, and they are separate runs.
 //
-// A legacy API sends no window at all, so both sides collapse to their
+// Rows carry an id, so this window rule only applies to a legacy API that sends
+// neither. A legacy API sends no window at all, so both sides collapse to their
 // `updatedAt` instant and only an identical instant could match — which the
 // caller has already handled as a duplicate frame.
 function isSameRun(a: BoothStatus, b: BoothStatus): boolean {
+  // Ids are exact: two views of one row, or two rows that merely look alike.
+  if (a.id !== undefined && b.id !== undefined) return a.id === b.id;
   if (!isSameStatus(a, b)) return false;
   const aStart = Date.parse(firstSeenAtOf(a));
   const bStart = Date.parse(firstSeenAtOf(b));

@@ -219,6 +219,45 @@ describe("mergeLiveStatus", () => {
     expect(merged.map((entry) => entry.state)).toEqual(["idle", "recording", "idle"]);
   });
 
+  it("matches a delayed frame to its cached row by id", () => {
+    const history = [
+      status({
+        id: 2,
+        state: "recording",
+        updatedAt: "2026-07-28T12:00:40.000Z",
+        firstSeenAt: "2026-07-28T12:00:40.000Z",
+      }),
+      status({
+        id: 1,
+        updatedAt: "2026-07-28T12:00:20.000Z",
+        firstSeenAt: "2026-07-28T12:00:00.000Z",
+        repeatCount: 2,
+      }),
+    ];
+    const late = status({
+      id: 1,
+      updatedAt: "2026-07-28T12:00:30.000Z",
+      firstSeenAt: "2026-07-28T12:00:00.000Z",
+      repeatCount: 3,
+    });
+
+    const merged = mergeLiveStatus(history, late);
+
+    expect(merged).toHaveLength(2);
+    expect(merged[1]).toMatchObject({ id: 1, repeatCount: 3 });
+  });
+
+  it("keeps rows that share a timestamp but not an id", () => {
+    const at = "2026-07-28T12:00:00.000Z";
+    const merged = [
+      status({ id: 1, updatedAt: at, firstSeenAt: at }),
+      status({ id: 2, state: "recording", updatedAt: at, firstSeenAt: at }),
+      status({ id: 3, updatedAt: at, firstSeenAt: at }),
+    ].reduce<readonly BoothStatus[]>((history, frame) => mergeLiveStatus(history, frame), []);
+
+    expect(merged.map((entry) => entry.id)).toHaveLength(3);
+  });
+
   it("caps the history at the requested limit", () => {
     const history = Array.from({ length: STATUS_HISTORY_LIMIT }, (_, index) =>
       status({
@@ -291,6 +330,17 @@ describe("isNewerThan", () => {
     const late = status({ updatedAt: "2026-07-28T12:00:10.000Z" });
 
     expect(isNewerThan(late, current)).toBe(false);
+  });
+
+  it("prefers the higher row id when reports share a timestamp", () => {
+    const at = "2026-07-28T12:00:00.000Z";
+    const current = status({ id: 3, updatedAt: at, firstSeenAt: at, repeatCount: 1 });
+    // A delayed frame for an earlier run with a larger count must not take over
+    // the displayed status just because the timestamps match.
+    const earlier = status({ id: 1, updatedAt: at, firstSeenAt: at, repeatCount: 9 });
+
+    expect(isNewerThan(earlier, current)).toBe(false);
+    expect(isNewerThan(current, earlier)).toBe(true);
   });
 
   it("accepts a repeat that only widens the window", () => {
