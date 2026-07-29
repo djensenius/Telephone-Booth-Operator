@@ -59,7 +59,9 @@ const computeStatsSummary = async (): Promise<StatsSummary> => {
     callsToday,
     callsInProgress,
   ] = await Promise.all([
-    db.boothStatusSnapshot.findFirst({ orderBy: { updatedAt: "desc" } }),
+    // Same tie-break as `/v1/status` so both report the same current row when
+    // two booth-supplied timestamps collide.
+    db.boothStatusSnapshot.findFirst({ orderBy: [{ updatedAt: "desc" }, { id: "desc" }] }),
     db.message.count({ where: { status: "pending" } }),
     countMessagesAwaitingModeration(),
     db.message.count({ where: { createdAt: { gte: startOfDay } } }),

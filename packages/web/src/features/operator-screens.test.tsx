@@ -427,6 +427,41 @@ describe("Status feature", () => {
     expect(await screen.findByText("On hook")).toBeTruthy();
   });
 
+  it("counts collapsed heartbeats and shows when the run started", async () => {
+    server.use(
+      http.get("http://localhost/v1/status/history", () =>
+        HttpResponse.json({
+          items: [
+            {
+              state: "idle",
+              updatedAt: "2026-01-05T00:10:00.000Z",
+              firstSeenAt: "2026-01-05T00:00:00.000Z",
+              repeatCount: 120,
+              currentQuestionId: null,
+              currentMessageId: null,
+              lastError: null,
+            },
+            {
+              state: "recording",
+              updatedAt: "2026-01-04T23:59:00.000Z",
+              firstSeenAt: "2026-01-04T23:59:00.000Z",
+              repeatCount: 1,
+              currentQuestionId: null,
+              currentMessageId: null,
+              lastError: null,
+            },
+          ],
+        }),
+      ),
+    );
+    renderPath("/status");
+
+    expect(await screen.findByText("×120")).toBeTruthy();
+    // The single recording report is counted but gets no "since" sub-line.
+    expect(screen.getByText("×1")).toBeTruthy();
+    expect(screen.getAllByText(/^since /u)).toHaveLength(1);
+  });
+
   it("shows a busy placard on status errors", async () => {
     server.use(
       http.get("http://localhost/v1/status", () =>

@@ -60,6 +60,7 @@ import type {
   UploadSasRequest,
   UploadSlot,
 } from "@telephone-booth-operator/shared";
+import { STATUS_HISTORY_LIMIT } from "./status-history.js";
 
 export class ApiError extends Error {
   constructor(
@@ -569,7 +570,7 @@ export function useStatusCurrent(options?: { paused?: boolean }) {
 export function useStatusHistory(options?: { paused?: boolean }) {
   return useQuery({
     queryKey: apiQueryKeys.statusHistory,
-    queryFn: () => status.history({ limit: 50 }),
+    queryFn: () => status.history({ limit: STATUS_HISTORY_LIMIT }),
     refetchInterval: options?.paused ? false : 5_000,
   });
 }

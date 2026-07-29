@@ -48,6 +48,8 @@ export type FakeStatus = {
   currentMessageId: string | null;
   lastError: string | null;
   runtimeMode: "real" | "mock" | "simulator" | null;
+  firstSeenAt: Date;
+  repeatCount: number;
   updatedAt: Date;
 };
 
@@ -197,6 +199,36 @@ const cloneDate = (date: Date): Date => new Date(date.getTime());
 
 const byCreatedDesc = <T extends { createdAt: Date; id: string }>(a: T, b: T): number =>
   b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id);
+
+type StatusOrder = {
+  updatedAt?: "asc" | "desc";
+  firstSeenAt?: "asc" | "desc";
+  id?: "asc" | "desc";
+};
+
+// Sorts by the requested fields in clause order, like Prisma. Callers that pass
+// no `orderBy` get the default the routes rely on: newest row first.
+const sortStatuses = <T extends { updatedAt: Date; firstSeenAt: Date; id: number }>(
+  rows: T[],
+  orderBy: StatusOrder | StatusOrder[] | undefined,
+): T[] => {
+  const requested = Array.isArray(orderBy) ? orderBy : orderBy ? [orderBy] : [];
+  const clauses: StatusOrder[] = requested.length
+    ? requested
+    : [{ updatedAt: "desc" }, { id: "desc" }];
+  const valueOf = (row: T, field: keyof StatusOrder) =>
+    field === "id" ? row.id : row[field].getTime();
+  return [...rows].sort((a, b) => {
+    for (const clause of clauses) {
+      for (const field of Object.keys(clause) as (keyof StatusOrder)[]) {
+        const direction = clause[field] === "asc" ? 1 : -1;
+        const delta = direction * (valueOf(a, field) - valueOf(b, field));
+        if (delta !== 0) return delta;
+      }
+    }
+    return 0;
+  });
+};
 
 type CreatedIdOrder =
   | { createdAt?: "asc" | "desc" }
@@ -430,6 +462,8 @@ export const seedStatus = (overrides: Partial<FakeStatus> = {}): FakeStatus => {
     currentMessageId: overrides.currentMessageId ?? null,
     lastError: overrides.lastError ?? null,
     runtimeMode: overrides.runtimeMode ?? null,
+    firstSeenAt: overrides.firstSeenAt ?? overrides.updatedAt ?? new Date(),
+    repeatCount: overrides.repeatCount ?? 1,
     updatedAt: overrides.updatedAt ?? new Date(),
   };
   store.statuses.push(status);
@@ -1243,19 +1277,69 @@ export const fakeDb = {
     },
   },
   boothStatusSnapshot: {
-    create: async ({ data }: { data: Omit<FakeStatus, "id"> }) => {
+    create: async ({ data }: { data: Omit<FakeStatus, "id" | "repeatCount"> }) => {
       const snapshot: FakeStatus = {
         id: store.statuses.length + 1,
+        repeatCount: 1,
         ...data,
+        firstSeenAt: cloneDate(data.firstSeenAt ?? data.updatedAt),
         updatedAt: cloneDate(data.updatedAt),
       };
       store.statuses.push(snapshot);
       return snapshot;
     },
-    findFirst: async () =>
-      [...store.statuses].sort(
-        (a, b) => b.updatedAt.getTime() - a.updatedAt.getTime() || b.id - a.id,
-      )[0] ?? null,
+    upsert: async ({
+      where,
+      create,
+    }: {
+      where: { id: number };
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => {
+      // Archive rows carry ISO strings; Prisma coerces them to Date columns.
+      const row = create as FakeStatus & { firstSeenAt?: Date | string; updatedAt: Date | string };
+      const snapshot: FakeStatus = {
+        ...row,
+        id: where.id,
+        repeatCount: row.repeatCount ?? 1,
+        firstSeenAt: new Date(row.firstSeenAt ?? row.updatedAt),
+        updatedAt: new Date(row.updatedAt),
+      };
+      const index = store.statuses.findIndex((status) => status.id === where.id);
+      if (index === -1) store.statuses.push(snapshot);
+      else store.statuses[index] = snapshot;
+      return snapshot;
+    },
+    update: async ({
+      where,
+      data,
+    }: {
+      where: { id: number };
+      data: {
+        firstSeenAt?: Date;
+        updatedAt?: Date;
+        repeatCount?: { increment: number };
+      };
+    }) => {
+      const snapshot = store.statuses.find((status) => status.id === where.id);
+      if (!snapshot) throw new Error(`no BoothStatusSnapshot ${where.id}`);
+      if (data.firstSeenAt) snapshot.firstSeenAt = cloneDate(data.firstSeenAt);
+      if (data.updatedAt) snapshot.updatedAt = cloneDate(data.updatedAt);
+      if (data.repeatCount) snapshot.repeatCount += data.repeatCount.increment;
+      return snapshot;
+    },
+    findFirst: async (
+      args: {
+        where?: { firstSeenAt?: { lte?: Date; gt?: Date } };
+        orderBy?: StatusOrder | StatusOrder[];
+      } = {},
+    ) => {
+      const { lte, gt } = args.where?.firstSeenAt ?? {};
+      let statuses = [...store.statuses];
+      if (lte) statuses = statuses.filter((status) => status.firstSeenAt <= lte);
+      if (gt) statuses = statuses.filter((status) => status.firstSeenAt > gt);
+      return sortStatuses(statuses, args.orderBy)[0] ?? null;
+    },
     findMany: async ({
       where = {},
       take,
@@ -1266,7 +1350,7 @@ export const fakeDb = {
       where?: { updatedAt?: { gte?: Date; lt?: Date }; id?: { lt?: number } };
       take?: number;
       skip?: number;
-      orderBy?: { updatedAt?: "asc" | "desc" };
+      orderBy?: StatusOrder | StatusOrder[];
       select?: { id?: boolean; updatedAt?: boolean };
     }) => {
       let statuses = [...store.statuses];
@@ -1275,8 +1359,7 @@ export const fakeDb = {
       if (where.updatedAt?.lt)
         statuses = statuses.filter((status) => status.updatedAt < where.updatedAt!.lt!);
       if (where.id?.lt) statuses = statuses.filter((status) => status.id < where.id!.lt!);
-      const dir = orderBy?.updatedAt === "asc" ? 1 : -1;
-      statuses = statuses.sort((a, b) => dir * (a.updatedAt.getTime() - b.updatedAt.getTime()));
+      statuses = sortStatuses(statuses, orderBy);
       statuses = statuses.slice(skip, take !== undefined ? skip + take : undefined);
       if (select) {
         return statuses.map((s) => {

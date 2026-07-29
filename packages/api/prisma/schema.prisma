@@ -128,9 +128,17 @@ model BoothStatusSnapshot {
   currentMessageId  String?      @db.Uuid
   lastError         String?
   runtimeMode       RuntimeMode?
+  // `firstSeenAt` is the first report of this status, `updatedAt` the most
+  // recent one, and `repeatCount` how many identical booth reports (heartbeats)
+  // have been folded into this row. See `routes/status.ts`.
+  firstSeenAt       DateTime     @default(now())
+  repeatCount       Int          @default(1)
   updatedAt         DateTime     @default(now())
 
   @@index([updatedAt])
+  // Every heartbeat looks up the run enclosing its own timestamp:
+  // `WHERE firstSeenAt <= ? ORDER BY firstSeenAt DESC, id DESC LIMIT 1`.
+  @@index([firstSeenAt, id])
 }
 
 // Persistent log of every observable event emitted by a booth (pickup,

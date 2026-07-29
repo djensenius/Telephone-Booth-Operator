@@ -27,6 +27,16 @@ Deliberately **excluded**:
 API-token rows are included so tokens keep working after a restore, but
 only their Argon2id **hash** is stored — never a plaintext token.
 
+### Archive versions
+
+`manifest.json` carries a numeric `version`. A server restores its own version
+and anything older, and rejects anything newer than it understands.
+
+| Version | Change                                                                                                                               |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| 1       | Original shape.                                                                                                                      |
+| 2       | Booth status snapshots carry `firstSeenAt`/`repeatCount`. Version 1 snapshots restore with their window starting at the report time. |
+
 ## Endpoints
 
 ```text

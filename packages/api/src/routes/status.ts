@@ -1,5 +1,6 @@
 import { zValidator } from "@hono/zod-validator";
 import { StatusUpdateSchema } from "@telephone-booth-operator/shared";
+import type { StatusUpdate } from "@telephone-booth-operator/shared";
 import { Hono } from "hono";
 import { z } from "zod";
 import { wsBroadcaster } from "../lib/broadcaster.js";
@@ -44,25 +45,96 @@ async function reconcileStaleSessionsOnIdle(idleTime: Date): Promise<void> {
 
 export const statusRouter = new Hono<{ Variables: AuthVariables & ApiTokenVariables }>();
 
+// Two reports describe the same booth status when every observable field
+// matches. `updatedAt` is deliberately excluded — it is what changes on every
+// heartbeat, and collapsing is exactly the act of folding a newer timestamp
+// into an unchanged status.
+function isRepeatOf(
+  snapshot: {
+    readonly state: string;
+    readonly currentQuestionId: string | null;
+    readonly currentMessageId: string | null;
+    readonly lastError: string | null;
+    readonly runtimeMode: string | null;
+  },
+  update: StatusUpdate,
+): boolean {
+  return (
+    snapshot.state === update.state &&
+    snapshot.currentQuestionId === (update.currentQuestionId ?? null) &&
+    snapshot.currentMessageId === (update.currentMessageId ?? null) &&
+    snapshot.lastError === (update.lastError ?? null) &&
+    snapshot.runtimeMode === (update.runtimeMode ?? null)
+  );
+}
+
 statusRouter.get("/", requireOperatorOrApiToken(), async (c) => {
   // Authenticated read of the latest booth snapshot. Operator clients use a
   // session cookie or operator bearer; the booth/phone client uses its API token.
-  const latest = await db.boothStatusSnapshot.findFirst({ orderBy: { updatedAt: "desc" } });
+  const latest = await db.boothStatusSnapshot.findFirst({
+    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+  });
   return c.json(latest ? serializeStatus(latest) : defaultStatus());
 });
 
 statusRouter.put("/", requireApiToken(), zValidator("json", StatusUpdateSchema), async (c) => {
   const update = c.req.valid("json");
-  const snapshot = await db.boothStatusSnapshot.create({
-    data: {
-      state: update.state,
-      currentQuestionId: update.currentQuestionId ?? null,
-      currentMessageId: update.currentMessageId ?? null,
-      lastError: update.lastError ?? null,
-      runtimeMode: update.runtimeMode ?? null,
-      updatedAt: update.updatedAt ? new Date(update.updatedAt) : new Date(),
-    },
-  });
+  const reportedAt = update.updatedAt ? new Date(update.updatedAt) : new Date();
+  // The run the report belongs to. That is normally the newest row, but a
+  // delayed report belongs to the run that was current at its own timestamp —
+  // the booth supplies `updatedAt`, so `id` breaks ties and keeps the choice
+  // deterministic when two rows share a millisecond.
+  const [enclosing, successor] = await Promise.all([
+    db.boothStatusSnapshot.findFirst({
+      where: { firstSeenAt: { lte: reportedAt } },
+      orderBy: [{ firstSeenAt: "desc" }, { id: "desc" }],
+    }),
+    // The run that started next. A report can fall in the gap between the run
+    // it belongs to and the row that recorded it — the booth reports a status
+    // change before its next heartbeat — so a delayed repeat of the following
+    // run widens that run backwards instead of filing a duplicate row between
+    // two identical ones. This is also the fallback for a report that predates
+    // every stored snapshot.
+    db.boothStatusSnapshot.findFirst({
+      where: { firstSeenAt: { gt: reportedAt } },
+      orderBy: [{ firstSeenAt: "asc" }, { id: "asc" }],
+    }),
+  ]);
+  const run = [enclosing, successor].find(
+    (candidate) => candidate && isRepeatOf(candidate, update),
+  );
+  // Collapse heartbeats. The booth re-pushes its current status every few
+  // seconds so the operator never shows stale state, which meant an idle booth
+  // wrote one snapshot row per beat and buried the genuine transitions under a
+  // page of identical `idle` rows. When the report is identical to its own
+  // run we fold it into that row instead: widen the [firstSeenAt,
+  // updatedAt] window and count the beat. Distinct fields (a real transition,
+  // a new error, a runtime-mode change) still create a new row, so the history
+  // reads as one row per booth state.
+  //
+  // Concurrent PUTs can interleave between the read and the write; the worst
+  // case is a lost increment or a duplicate row, both harmless for a display
+  // counter on a single-line booth.
+  const snapshot = run
+    ? await db.boothStatusSnapshot.update({
+        where: { id: run.id },
+        data: {
+          firstSeenAt: reportedAt < run.firstSeenAt ? reportedAt : run.firstSeenAt,
+          updatedAt: reportedAt > run.updatedAt ? reportedAt : run.updatedAt,
+          repeatCount: { increment: 1 },
+        },
+      })
+    : await db.boothStatusSnapshot.create({
+        data: {
+          state: update.state,
+          currentQuestionId: update.currentQuestionId ?? null,
+          currentMessageId: update.currentMessageId ?? null,
+          lastError: update.lastError ?? null,
+          runtimeMode: update.runtimeMode ?? null,
+          firstSeenAt: reportedAt,
+          updatedAt: reportedAt,
+        },
+      });
   if (update.state === "idle") {
     await reconcileStaleSessionsOnIdle(snapshot.updatedAt);
   }
@@ -74,7 +146,7 @@ statusRouter.get("/history", zValidator("query", historyQuerySchema), async (c) 
   const { since, limit } = c.req.valid("query");
   const snapshots = await db.boothStatusSnapshot.findMany({
     where: since ? { updatedAt: { gte: new Date(since) } } : {},
-    orderBy: { updatedAt: "desc" },
+    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
     take: limit,
   });
   return c.json({ items: snapshots.map(serializeStatus) });

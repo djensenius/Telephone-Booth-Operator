@@ -128,22 +128,30 @@ export const serializeMessage = (message: WithAudio<WithAi<Message>>): MessagePa
 };
 
 export const serializeStatus = (snapshot: BoothStatusSnapshot): BoothStatusEvent => ({
+  id: snapshot.id,
   state: snapshot.state,
   updatedAt: iso(snapshot.updatedAt),
+  firstSeenAt: iso(snapshot.firstSeenAt),
+  repeatCount: snapshot.repeatCount,
   currentQuestionId: snapshot.currentQuestionId,
   currentMessageId: snapshot.currentMessageId,
   lastError: snapshot.lastError,
   runtimeMode: snapshot.runtimeMode,
 });
 
-export const defaultStatus = (): BoothStatusEvent => ({
-  state: "idle",
-  updatedAt: new Date().toISOString(),
-  currentQuestionId: null,
-  currentMessageId: null,
-  lastError: null,
-  runtimeMode: null,
-});
+export const defaultStatus = (): BoothStatusEvent => {
+  const now = new Date().toISOString();
+  return {
+    state: "idle",
+    updatedAt: now,
+    firstSeenAt: now,
+    repeatCount: 1,
+    currentQuestionId: null,
+    currentMessageId: null,
+    lastError: null,
+    runtimeMode: null,
+  };
+};
 
 export const serializeBoothEvent = (event: PrismaBoothEvent): BoothEventRecord => ({
   id: event.id,

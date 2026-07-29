@@ -15,6 +15,22 @@ import {
   useStatusHistory,
 } from "../../lib/api-client.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
+import {
+  STATUS_HISTORY_DISPLAY_LIMIT,
+  collapseStatusHistory,
+  firstSeenAtOf,
+  isNewerThan,
+  mergeLiveStatus,
+  repeatCountOf,
+} from "../../lib/status-history.js";
+
+function sinceLabel(firstSeenAt: string, updatedAt: string): string {
+  const start = new Date(firstSeenAt);
+  const end = new Date(updatedAt);
+  return start.toDateString() === end.toDateString()
+    ? start.toLocaleTimeString()
+    : start.toLocaleString();
+}
 
 function displayState(state: BoothState): string {
   if (state === "callUnavailable") return "Call unavailable";
@@ -78,13 +94,18 @@ export function StatusScreen(): JSX.Element {
       if (envelope.success) {
         if (envelope.data.kind === "status") {
           const status = envelope.data.status;
-          setLiveStatus(status);
-          setLastStatusAt(new Date(status.updatedAt));
-          queryClient.setQueryData(apiQueryKeys.status, status);
+          // Frames can arrive out of order, so an older one is recorded in the
+          // history but never becomes the displayed current status.
+          const cached = queryClient.getQueryData<BoothStatus>(apiQueryKeys.status) ?? null;
+          if (isNewerThan(status, cached)) {
+            setLiveStatus(status);
+            setLastStatusAt(new Date(status.updatedAt));
+            queryClient.setQueryData(apiQueryKeys.status, status);
+          }
           queryClient.setQueryData(
             apiQueryKeys.statusHistory,
             (current: { readonly items: readonly BoothStatus[] } | undefined) => ({
-              items: [status, ...(current?.items ?? [])].slice(0, 50),
+              items: mergeLiveStatus(current?.items ?? [], status),
             }),
           );
         } else if (envelope.data.kind === "system") {
@@ -133,7 +154,11 @@ export function StatusScreen(): JSX.Element {
     setRuntimeMode(liveStatus?.runtimeMode ?? null);
   }, [liveStatus, setRuntimeMode]);
 
-  const history = useMemo(() => historyQuery.data?.items ?? [], [historyQuery.data]);
+  const history = useMemo(
+    () =>
+      collapseStatusHistory(historyQuery.data?.items ?? []).slice(0, STATUS_HISTORY_DISPLAY_LIMIT),
+    [historyQuery.data],
+  );
   const current = liveStatus ?? history[0] ?? null;
 
   return (
@@ -159,7 +184,7 @@ export function StatusScreen(): JSX.Element {
             <div>
               <p className="screen-kicker">Receiver</p>
               <strong>{hookLabel(current.state)}</strong>
-              <span>{`${displayState(current.state)} · updated ${new Date(current.updatedAt).toLocaleString()}`}</span>
+              <span>{`${displayState(current.state)} · since ${new Date(firstSeenAtOf(current)).toLocaleString()} · updated ${new Date(current.updatedAt).toLocaleString()}`}</span>
             </div>
           </section>
           <details className="feature-help">
@@ -185,24 +210,46 @@ export function StatusScreen(): JSX.Element {
           </dl>
           <div className="feature-table-wrap">
             <table className="feature-table">
-              <caption>Last 50 status snapshots</caption>
+              <caption>
+                Last 50 booth statuses. The booth repeats its status on a heartbeat, so identical
+                reports are counted rather than listed.
+              </caption>
               <thead>
                 <tr>
                   <th>Time</th>
                   <th>State</th>
+                  <th>Reports</th>
                   <th>Question</th>
                   <th>Message</th>
                 </tr>
               </thead>
               <tbody>
-                {history.map((item) => (
-                  <tr key={`${item.updatedAt}-${item.state}`}>
-                    <td>{new Date(item.updatedAt).toLocaleString()}</td>
-                    <td>{displayState(item.state)}</td>
-                    <td>{item.currentQuestionId ?? "—"}</td>
-                    <td>{item.currentMessageId ?? "—"}</td>
-                  </tr>
-                ))}
+                {history.map((item, index) => {
+                  const repeats = repeatCountOf(item);
+                  const firstSeenAt = firstSeenAtOf(item);
+                  return (
+                    // Snapshot ids aren't on the wire and timestamps can tie,
+                    // so position in the collapsed list is the row identity.
+                    <tr key={`${index}-${firstSeenAt}-${item.state}`}>
+                      <td>
+                        <time dateTime={item.updatedAt}>
+                          {new Date(item.updatedAt).toLocaleString()}
+                        </time>
+                        {repeats > 1 ? (
+                          <span className="status-screen__since">
+                            {`since ${sinceLabel(firstSeenAt, item.updatedAt)}`}
+                          </span>
+                        ) : null}
+                      </td>
+                      <td>{displayState(item.state)}</td>
+                      <td
+                        title={`${repeats} report${repeats === 1 ? "" : "s"}`}
+                      >{`×${repeats}`}</td>
+                      <td>{item.currentQuestionId ?? "—"}</td>
+                      <td>{item.currentMessageId ?? "—"}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
