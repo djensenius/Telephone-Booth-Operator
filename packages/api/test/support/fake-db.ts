@@ -503,6 +503,32 @@ export const resetFakeDb = (): void => {
   store.metricFilters.clear();
 };
 
+// Supports the `transcriptions: { none: {} } | { some: {...} }` relation
+// filters used by the AI recovery sweeper.
+type MessageRelationFilter = {
+  transcriptions?: {
+    none?: Record<string, never>;
+    some?: { status?: string; createdAt?: { lt?: Date } };
+  };
+};
+
+const matchesTranscriptionFilter = (
+  message: FakeMessage,
+  clause: MessageRelationFilter,
+): boolean => {
+  const filter = clause.transcriptions;
+  if (!filter) return false;
+  const rows = [...store.transcriptions.values()].filter((row) => row.messageId === message.id);
+  if (filter.none) return rows.length === 0;
+  const some = filter.some;
+  if (!some) return false;
+  return rows.some((row) => {
+    if (some.status !== undefined && row.status !== some.status) return false;
+    if (some.createdAt?.lt !== undefined && !(row.createdAt < some.createdAt.lt)) return false;
+    return true;
+  });
+};
+
 const attachAi = (
   message: FakeMessage,
   include?: { audio?: boolean; transcriptions?: unknown; moderations?: unknown },
@@ -807,7 +833,11 @@ export const fakeDb = {
     }: {
       where: { id?: string; audioId?: string };
       include?: { audio?: boolean; transcriptions?: unknown; moderations?: unknown };
-      select?: { id?: boolean; status?: boolean };
+      select?: {
+        id?: boolean;
+        status?: boolean;
+        audio?: boolean | { select?: Record<string, boolean> };
+      };
     }) => {
       const message = where.id
         ? store.messages.get(where.id)
@@ -817,6 +847,21 @@ export const fakeDb = {
         const out: Record<string, unknown> = {};
         if (select.id) out.id = message.id;
         if (select.status) out.status = message.status;
+        if (select.audio) {
+          const audio = store.files.get(message.audioId) ?? null;
+          if (audio === null) {
+            out.audio = null;
+          } else if (select.audio === true) {
+            out.audio = audio;
+          } else {
+            const nested = select.audio.select ?? {};
+            const projected: Record<string, unknown> = {};
+            for (const [key, wanted] of Object.entries(nested)) {
+              if (wanted) projected[key] = (audio as unknown as Record<string, unknown>)[key];
+            }
+            out.audio = projected;
+          }
+        }
         return out;
       }
       if (include) return attachAi(message, include);
@@ -828,7 +873,11 @@ export const fakeDb = {
       take,
       orderBy,
     }: {
-      where?: { status?: string | { in: readonly string[] }; createdAt?: { gte: Date } };
+      where?: {
+        status?: string | { in: readonly string[] };
+        createdAt?: { gte: Date };
+        OR?: readonly MessageRelationFilter[];
+      };
       include?: { audio?: boolean; transcriptions?: unknown; moderations?: unknown };
       take: number;
       orderBy?: unknown;
@@ -843,6 +892,12 @@ export const fakeDb = {
       }
       if (where.createdAt?.gte)
         messages = messages.filter((message) => message.createdAt >= where.createdAt.gte);
+      if (where.OR) {
+        const clauses = where.OR;
+        messages = messages.filter((message) =>
+          clauses.some((clause) => matchesTranscriptionFilter(message, clause)),
+        );
+      }
       messages = messages.sort(byCreatedDesc).slice(0, take);
       if (include) return messages.map((message) => attachAi(message, include));
       return messages;

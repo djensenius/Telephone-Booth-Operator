@@ -18,8 +18,19 @@ export const findStrandedMessages = async (
   limit: number,
   staleThresholdMs: number,
 ): Promise<readonly string[]> => {
+  const staleBefore = new Date(Date.now() - staleThresholdMs);
+  // Narrow to recovery candidates *before* applying the limit. `pending` is now
+  // the steady state for every undecided message, so filtering afterwards would
+  // let a page of healthy recent messages permanently hide an older stranded
+  // one from every sweep.
   const messages = await db.message.findMany({
-    where: { status: { in: [...UNDECIDED_STATUSES] } },
+    where: {
+      status: { in: [...UNDECIDED_STATUSES] },
+      OR: [
+        { transcriptions: { none: {} } },
+        { transcriptions: { some: { status: "pending", createdAt: { lt: staleBefore } } } },
+      ],
+    },
     orderBy: { createdAt: "desc" },
     take: limit,
     include: {
@@ -30,6 +41,10 @@ export const findStrandedMessages = async (
       },
     },
   });
+  // The `some` clause above matches on *any* stale pending row, so re-check
+  // against the latest one: a message that has since been re-transcribed
+  // successfully is not stranded.
+  //
   // Only *interrupted* attempts are recovered: no row at all (the fire-and-
   // forget kick was lost to a restart), or a row that has been pending longer
   // than the stale threshold (the API crashed after writing it but before the
@@ -39,7 +54,6 @@ export const findStrandedMessages = async (
   // message is already visible in the operator queue, so retrying it every
   // interval forever would just burn provider spend; an operator re-runs it
   // explicitly via `POST /v1/messages/:id/transcribe`.
-  const pendingStaleAfter = Date.now() - staleThresholdMs;
   const stranded: string[] = [];
   for (const message of messages) {
     const latest = (
@@ -47,7 +61,7 @@ export const findStrandedMessages = async (
     ).transcriptions[0];
     if (!latest) {
       stranded.push(message.id);
-    } else if (latest.status === "pending" && latest.createdAt.getTime() < pendingStaleAfter) {
+    } else if (latest.status === "pending" && latest.createdAt < staleBefore) {
       stranded.push(message.id);
     }
   }

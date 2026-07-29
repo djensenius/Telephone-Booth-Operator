@@ -27,7 +27,7 @@ import { createApp } from "../src/index.js";
 import { wsBroadcaster, type WsEnvelope } from "../src/lib/broadcaster.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { resetFakeAzure } from "./support/fake-azure.js";
-import { fakeDb, resetFakeDb, seedMessage, store } from "./support/fake-db.js";
+import { fakeDb, resetFakeDb, seedFile, seedMessage, store } from "./support/fake-db.js";
 import { phoneHeaders } from "./support/http.js";
 
 const setup = () => {
@@ -162,7 +162,8 @@ describe("worker push-back callbacks", () => {
     // still land instead of being dropped.
     process.env.MODERATION_PROVIDER = "push";
     const app = createApp();
-    const message = seedMessage({ status: "pending" });
+    const audio = seedFile({ sha256: "9".repeat(64), durationMs: 7777 });
+    const message = seedMessage({ status: "pending", audioId: audio.id });
     const res = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
       text: "unsolicited transcript",
       language: "en",
@@ -178,6 +179,9 @@ describe("worker push-back callbacks", () => {
       status: "succeeded",
       text: "unsolicited transcript",
       language: "en",
+      // Copied from the message audio so the row carries the same metadata a
+      // solicited (pre-created) row would have.
+      durationMs: 7777,
     });
     // English text still flows on to the push moderation step.
     expect([...store.moderations.values()].filter((m) => m.messageId === message.id)).toHaveLength(

@@ -70,6 +70,23 @@ describe("ai sweeper recovery scan", () => {
     expect(stranded).not.toContain(message.id);
   });
 
+  it("finds an old stranded message behind a page of healthy recent ones", async () => {
+    // `pending` is the steady state now, so recovery candidates must be
+    // selected in the query rather than filtered out of a page of newest
+    // messages — otherwise a busy queue hides the stranded one forever.
+    const old = seedMessage({ status: "pending", createdAt: new Date(Date.now() - 86_400_000) });
+    for (let i = 0; i < 30; i += 1) {
+      const healthy = seedMessage({
+        status: "pending",
+        createdAt: new Date(Date.now() - i * 1000),
+      });
+      await seedTranscription(healthy.id, "succeeded");
+    }
+
+    const stranded = await findStrandedMessages(20, STALE_MS);
+    expect(stranded).toContain(old.id);
+  });
+
   it("ignores messages an operator already decided", async () => {
     const approved = seedMessage({ status: "approved" });
     const rejected = seedMessage({ status: "rejected" });
