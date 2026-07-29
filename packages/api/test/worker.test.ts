@@ -185,6 +185,38 @@ describe("worker push-back callbacks", () => {
     );
   });
 
+  it("is idempotent when an unsolicited transcription is redelivered", async () => {
+    process.env.MODERATION_PROVIDER = "push";
+    const app = createApp();
+    const message = seedMessage({ status: "pending" });
+    const body = { text: "retried transcript", language: "en" };
+
+    const first = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, body);
+    const second = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, body);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    // A redelivery must not duplicate history or re-run downstream work.
+    expect(
+      [...store.transcriptions.values()].filter((t) => t.messageId === message.id),
+    ).toHaveLength(1);
+    expect([...store.moderations.values()].filter((m) => m.messageId === message.id)).toHaveLength(
+      1,
+    );
+  });
+
+  it("records a genuinely different unsolicited transcript as a new attempt", async () => {
+    const app = createApp();
+    const message = seedMessage({ status: "pending" });
+
+    await postJson(app, `/v1/worker/messages/${message.id}/transcription`, { text: "first pass" });
+    await postJson(app, `/v1/worker/messages/${message.id}/transcription`, { text: "second pass" });
+
+    const rows = [...store.transcriptions.values()].filter((t) => t.messageId === message.id);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.text)).toEqual(expect.arrayContaining(["first pass", "second pass"]));
+  });
+
   it("uses provider-aware routing after transcription instead of always pushing work", async () => {
     const app = createApp();
     const message = seedMessage({ status: "received" });

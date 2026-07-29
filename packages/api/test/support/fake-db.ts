@@ -828,14 +828,19 @@ export const fakeDb = {
       take,
       orderBy,
     }: {
-      where?: { status?: string; createdAt?: { gte: Date } };
+      where?: { status?: string | { in: readonly string[] }; createdAt?: { gte: Date } };
       include?: { audio?: boolean; transcriptions?: unknown; moderations?: unknown };
       take: number;
       orderBy?: unknown;
     }) => {
       void orderBy;
       let messages = [...store.messages.values()];
-      if (where.status) messages = messages.filter((message) => message.status === where.status);
+      const status = where.status;
+      if (typeof status === "string") {
+        messages = messages.filter((message) => message.status === status);
+      } else if (status?.in) {
+        messages = messages.filter((message) => status.in.includes(message.status));
+      }
       if (where.createdAt?.gte)
         messages = messages.filter((message) => message.createdAt >= where.createdAt.gte);
       messages = messages.sort(byCreatedDesc).slice(0, take);

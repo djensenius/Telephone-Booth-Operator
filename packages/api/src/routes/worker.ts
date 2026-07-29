@@ -184,8 +184,22 @@ workerRouter.post(
       if (updated.count === 0) return c.json({ ok: true });
       transcriptionId = pending.id;
     } else {
-      // Unsolicited push: no row was ever requested for this message. The app
-      // owns the latency, so we do not invent one.
+      // Unsolicited push: no row was ever requested for this message.
+      //
+      // Retries must not duplicate history. Without a pending row to consume,
+      // an identical redelivery (network timeout, app restart mid-POST) would
+      // otherwise create a second succeeded row and re-run translation and
+      // moderation. Treat a repeat of the latest succeeded transcript as the
+      // no-op it is; a genuinely different transcript still records a new
+      // attempt.
+      const latest = await db.transcription.findFirst({
+        where: { messageId: id },
+        orderBy: { createdAt: "desc" },
+      });
+      if (latest?.status === "succeeded" && (latest.text ?? "").trim() === data.text.trim()) {
+        return c.json({ ok: true });
+      }
+      // The app owns the latency here, so we do not invent one.
       const created = await db.transcription.create({
         data: {
           messageId: id,
