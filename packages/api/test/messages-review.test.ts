@@ -252,4 +252,100 @@ describe("message review actions", () => {
       expect(res.status).toBe(401);
     });
   });
+
+  describe("POST /:id/transcription", () => {
+    it("finalizes a pending transcription and attributes it to the operator", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const pending = await fakeDb.transcription.create({
+        data: {
+          messageId: id,
+          provider: "push",
+          model: null,
+          status: "pending",
+          requestedById: null,
+        },
+      });
+      const cookie = operatorCookie();
+      const broadcasts: Array<{ kind: string }> = [];
+      wsBroadcaster.subscribe("test-transcription", (e) => broadcasts.push(e));
+      const res = await app.request(`/v1/messages/${id}/transcription`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ text: "hola mundo", language: "es", model: "apple-speech" }),
+      });
+      wsBroadcaster.unsubscribe("test-transcription");
+      expect(res.status, await res.clone().text()).toBe(202);
+      const body = await res.json();
+      expect(body).toMatchObject({
+        id: pending.id,
+        messageId: id,
+        status: "succeeded",
+        text: "hola mundo",
+        language: "es",
+        model: "apple-speech",
+        requestedById: "operator-1",
+      });
+      expect(broadcasts).toContainEqual(expect.objectContaining({ kind: "message" }));
+    });
+
+    it("records a new succeeded transcription when none is pending", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const cookie = operatorCookie();
+      const res = await app.request(`/v1/messages/${id}/transcription`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ text: "hello there" }),
+      });
+      expect(res.status, await res.clone().text()).toBe(202);
+      const body = await res.json();
+      expect(body).toMatchObject({
+        messageId: id,
+        provider: "push",
+        status: "succeeded",
+        text: "hello there",
+        requestedById: "operator-1",
+      });
+    });
+
+    it("accepts an empty transcript for a silent recording", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const cookie = operatorCookie();
+      const res = await app.request(`/v1/messages/${id}/transcription`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ text: "" }),
+      });
+      expect(res.status, await res.clone().text()).toBe(202);
+      const body = await res.json();
+      expect(body).toMatchObject({ messageId: id, status: "succeeded", text: "" });
+    });
+
+    it("returns 404 for an unknown message", async () => {
+      const app = createApp();
+      const cookie = operatorCookie();
+      const res = await app.request(
+        "/v1/messages/00000000-0000-0000-0000-000000000000/transcription",
+        {
+          method: "POST",
+          headers: { cookie, "content-type": "application/json" },
+          body: JSON.stringify({ text: "hello" }),
+        },
+      );
+      expect(res.status).toBe(404);
+    });
+
+    it("requires an operator session", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const res = await app.request(`/v1/messages/${id}/transcription`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: "hello" }),
+      });
+      expect(res.status).toBe(401);
+    });
+  });
 });

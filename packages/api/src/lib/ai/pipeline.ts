@@ -488,6 +488,109 @@ export const runTranslationThenModeration = async (opts: {
   });
 };
 
+export interface RecordTranscriptionResultOptions {
+  readonly messageId: string;
+  readonly text: string;
+  readonly language?: string | null;
+  readonly model?: string | null;
+  // Operator whose client produced the transcript (e.g. on-device iOS
+  // transcription). Null for the worker push-back callback, which is not tied
+  // to a human user.
+  readonly requestedByUserId?: string | null;
+}
+
+export type RecordTranscriptionResultOutcome =
+  | { outcome: "not_found" }
+  | { outcome: "unchanged"; transcriptionId: string }
+  | { outcome: "recorded"; transcriptionId: string };
+
+// Record a transcript produced outside the in-process pipeline. Shared by the
+// worker push-back callback (`POST /v1/worker/messages/:id/transcription`) and
+// the operator submit route (`POST /v1/messages/:id/transcription`).
+//
+// Transcriptions are unsolicited by design: the message is already `pending` in
+// the operator queue and the client decides on its own when (or whether) to
+// transcribe. When a pending row exists it is finalized; otherwise a new
+// succeeded row is recorded rather than dropping the text on the floor. Retries
+// must not duplicate history, so an identical redelivery of the latest
+// succeeded transcript is treated as the no-op it is. Client-generated text is
+// still translated and moderated server-side before it can be acted on.
+export const recordTranscriptionResult = async (
+  opts: RecordTranscriptionResultOptions,
+): Promise<RecordTranscriptionResultOutcome> => {
+  const message = await db.message.findUnique({
+    where: { id: opts.messageId },
+    select: { id: true, audio: { select: { durationMs: true } } },
+  });
+  if (!message) return { outcome: "not_found" };
+
+  const pending = await db.transcription.findFirst({
+    where: { messageId: opts.messageId, status: "pending" },
+    orderBy: { createdAt: "desc" },
+  });
+  const now = new Date();
+  let transcriptionId: string;
+  if (pending) {
+    const startedAt = pending.createdAt;
+    const updated = await db.transcription.updateMany({
+      where: { id: pending.id, status: "pending" },
+      data: {
+        status: "succeeded",
+        text: opts.text,
+        language: opts.language ?? null,
+        model: opts.model ?? pending.model,
+        latencyMs: now.getTime() - startedAt.getTime(),
+        completedAt: now,
+        // Attribute the finalized row to the submitting operator when known,
+        // without clobbering an existing attribution for the worker callback.
+        ...(opts.requestedByUserId != null ? { requestedById: opts.requestedByUserId } : {}),
+      },
+    });
+    if (updated.count === 0) return { outcome: "unchanged", transcriptionId: pending.id };
+    transcriptionId = pending.id;
+  } else {
+    const latest = await db.transcription.findFirst({
+      where: { messageId: opts.messageId },
+      orderBy: { createdAt: "desc" },
+    });
+    if (latest?.status === "succeeded" && (latest.text ?? "").trim() === opts.text.trim()) {
+      return { outcome: "unchanged", transcriptionId: latest.id };
+    }
+    // The client owns the latency here, so we do not invent one.
+    const created = await db.transcription.create({
+      data: {
+        messageId: opts.messageId,
+        provider: "push",
+        model: opts.model ?? null,
+        status: "succeeded",
+        text: opts.text,
+        language: opts.language ?? null,
+        durationMs: message.audio?.durationMs ?? null,
+        completedAt: now,
+        requestedById: opts.requestedByUserId ?? null,
+      },
+    });
+    transcriptionId = created.id;
+  }
+
+  await broadcastMessage(opts.messageId);
+
+  const hasText = opts.text.trim().length > 0;
+  if (!hasText) {
+    // Silent recording: nothing to translate or moderate. Legacy `received`
+    // messages still need surfacing; anything newer is already `pending`.
+    await advanceMessageAfterModeration(opts.messageId);
+    await broadcastMessage(opts.messageId);
+    return { outcome: "recorded", transcriptionId };
+  }
+
+  await runTranslationThenModeration({
+    messageId: opts.messageId,
+    transcriptionId,
+  });
+  return { outcome: "recorded", transcriptionId };
+};
+
 export interface RunModerationOptions {
   readonly messageId: string;
   readonly transcriptionId?: string;

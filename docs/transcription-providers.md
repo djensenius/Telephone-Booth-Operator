@@ -178,16 +178,22 @@ without polling.
 
 ```http
 POST /v1/messages/{id}/transcribe
+POST /v1/messages/{id}/transcription
 POST /v1/messages/{id}/moderate
 GET  /v1/messages/{id}/transcriptions
 ```
 
 `transcribe` re-runs the full pipeline (transcription + translation +
-moderation). `moderate` only re-runs the moderation step against the
-latest succeeded transcription. Moderation is advisory only — neither
-endpoint decides the message; a human approves/rejects via
-`POST /v1/messages/:id/decision`. `transcriptions` returns the full
-history of attempts.
+moderation). `transcription` instead records operator-authored transcript
+text — for example the iOS Transcriber app doing on-device transcription —
+finalizing a pending row (or recording a new succeeded one), attributing it to
+the submitting operator, and still translating and moderating it server-side.
+It is the operator-authenticated (OIDC) counterpart to the worker push-back
+callback `POST /v1/worker/messages/{id}/transcription`. `moderate` only re-runs
+the moderation step against the latest succeeded transcription. Moderation is
+advisory only — none of these endpoints decides the message; a human
+approves/rejects via `POST /v1/messages/:id/decision`. `transcriptions` returns
+the full history of attempts.
 
 ## Cost and privacy
 

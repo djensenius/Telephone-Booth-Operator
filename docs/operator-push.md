@@ -154,6 +154,15 @@ On success the Operator writes the transcription, then:
 > your provider doesn't emit a language tag, supply an explicit best-guess
 > BCP-47 code so the Operator routes the row through translation correctly.
 
+**Operator-authenticated alternative.** A logged-in operator (OIDC) that holds
+no worker token — such as the iOS Transcriber app doing on-device
+transcription — can push the same result to
+`POST /v1/messages/{id}/transcription` instead. It takes the identical
+`{ text, language?, model? }` body, applies the same finalize-or-record and
+downstream translation/moderation semantics, and additionally attributes the
+row to the submitting operator (`requestedById`). It returns the resulting
+`Transcription` row with `202`.
+
 ### `POST /v1/worker/messages/{id}/translation`
 
 ```json
