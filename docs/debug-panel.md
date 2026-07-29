@@ -31,3 +31,21 @@ logs, redacted config, and optional simulation controls.
    pinned value, then accept the exception once.
 
 Simulation controls only appear when `/v1/config` reports `debug.allowControls: true`.
+
+## Audio meters
+
+The **Handset meters** panel plots input and output RMS with a held peak
+marker. The booth pushes `audio_level` telemetry at roughly 20 Hz over the
+WebSocket; when the socket is closed the operator falls back to polling
+`GET /v1/audio` every 2s.
+
+Sample age is tracked locally rather than trusting the booth's own timestamps,
+so clock skew cannot make a stale reading look fresh. A channel is marked
+stale after 500ms without a live sample, or 3s in polled mode. A stale meter
+renders as a dimmed hatched bar with a "no recent samples" note — deliberately
+not as an empty bar, so a dropped connection is never mistaken for a silent
+booth.
+
+Peaks are held for 1s and then decay at 12 dB/s. The ballistics are a client
+concern and live in `packages/web/src/features/debug/audio-meters.ts`; the
+booth reports raw levels only.

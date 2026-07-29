@@ -1158,6 +1158,7 @@ textarea:focus-visible,
 }
 
 .debug-meter__track {
+  position: relative;
   height: 18px;
   overflow: hidden;
   background: var(--surface-muted);
@@ -1169,6 +1170,36 @@ textarea:focus-visible,
   display: block;
   height: 100%;
   background: var(--accent-green);
+}
+
+.debug-meter__peak {
+  position: absolute;
+  inset-block: 0;
+  inline-size: 2px;
+  background: var(--accent-yellow);
+  transform: translateX(-1px);
+}
+
+/* Stale reads as "no data", never as an empty (silent) bar. */
+.debug-meter__fill--stale {
+  inline-size: 100%;
+  background: repeating-linear-gradient(
+    135deg,
+    var(--surface-muted),
+    var(--surface-muted) 6px,
+    var(--border-subtle) 6px,
+    var(--border-subtle) 12px
+  );
+}
+
+.debug-meter--stale .debug-meter__label {
+  color: var(--text-muted);
+}
+
+.debug-meter__note {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
 }
 
 .debug-filters,

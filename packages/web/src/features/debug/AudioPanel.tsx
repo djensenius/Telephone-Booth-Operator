@@ -1,16 +1,20 @@
 import type { JSX } from "react";
-import type { AudioMeter, BoothStatus } from "../../lib/debug-client.js";
+import type { BoothStatus } from "../../lib/debug-client.js";
+import { METER_FLOOR_DBFS, meterPercent } from "./audio-meters.js";
+import type { ResolvedMeter } from "./audio-meters.js";
 
-export interface AudioPanelProps {
-  readonly audio: AudioMeter | undefined;
-  readonly status: BoothStatus | undefined;
+/** The non-level fields of the booth's audio snapshot. */
+export interface AudioDeviceInfo {
+  readonly currentDevice: string | null;
+  readonly sampleRateHz: number | null;
+  readonly updatedAt: string | null;
 }
 
-function meterPercent(dbfs: number | undefined): number {
-  if (dbfs === undefined || Number.isNaN(dbfs)) {
-    return 0;
-  }
-  return Math.max(0, Math.min(100, ((dbfs + 120) / 120) * 100));
+export interface AudioPanelProps {
+  readonly audio: AudioDeviceInfo | undefined;
+  readonly input: ResolvedMeter;
+  readonly output: ResolvedMeter;
+  readonly status: BoothStatus | undefined;
 }
 
 function recordingDuration(status: BoothStatus | undefined): string {
@@ -27,41 +31,67 @@ function recordingDuration(status: BoothStatus | undefined): string {
 
 function Meter({
   label,
-  value,
+  meter,
 }: {
   readonly label: string;
-  readonly value: number | undefined;
+  readonly meter: ResolvedMeter;
 }): JSX.Element {
-  const display = value === undefined ? "—" : `${value.toFixed(1)} dBFS`;
+  if (meter.stale) {
+    return (
+      <div className="debug-meter debug-meter--stale">
+        <div className="debug-meter__label">
+          <span>{label}</span>
+          <span>— dBFS</span>
+        </div>
+        {/* A stale meter must not render as an empty bar, or a dropped
+            connection would be indistinguishable from a silent booth. */}
+        <div className="debug-meter__track" aria-hidden="true">
+          <span className="debug-meter__fill debug-meter__fill--stale" />
+        </div>
+        <p className="debug-meter__note">{label}: no recent samples</p>
+      </div>
+    );
+  }
+
+  const level = meter.levelDbfs ?? METER_FLOOR_DBFS;
   return (
     <div className="debug-meter">
       <div className="debug-meter__label">
         <span>{label}</span>
-        <span>{display}</span>
+        <span>
+          {level.toFixed(1)} dBFS
+          {meter.peakDbfs === undefined ? null : ` · peak ${meter.peakDbfs.toFixed(1)}`}
+        </span>
       </div>
       <div
         className="debug-meter__track"
         role="meter"
         aria-label={label}
-        aria-valuemin={-120}
+        aria-valuemin={METER_FLOOR_DBFS}
         aria-valuemax={0}
-        aria-valuenow={value ?? -120}
+        aria-valuenow={level}
       >
-        <span className="debug-meter__fill" style={{ inlineSize: `${meterPercent(value)}%` }} />
+        <span className="debug-meter__fill" style={{ inlineSize: `${meterPercent(level)}%` }} />
+        {meter.peakDbfs === undefined ? null : (
+          <span
+            className="debug-meter__peak"
+            style={{ insetInlineStart: `${meterPercent(meter.peakDbfs)}%` }}
+          />
+        )}
       </div>
     </div>
   );
 }
 
-export function AudioPanel({ audio, status }: AudioPanelProps): JSX.Element {
+export function AudioPanel({ audio, input, output, status }: AudioPanelProps): JSX.Element {
   return (
     <section className="debug-panel" aria-labelledby="debug-audio-heading">
       <div className="debug-panel__heading">
         <p className="screen-kicker">Audio</p>
         <h2 id="debug-audio-heading">Handset meters</h2>
       </div>
-      <Meter label="Input RMS" value={audio?.inputLevelDbfs} />
-      <Meter label="Output RMS" value={audio?.outputLevelDbfs} />
+      <Meter label="Input RMS" meter={input} />
+      <Meter label="Output RMS" meter={output} />
       <dl className="debug-kv-grid debug-kv-grid--compact">
         <div>
           <dt>Device</dt>
