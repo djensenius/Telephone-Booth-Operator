@@ -179,6 +179,24 @@ export type FakeMetricFilter = {
   updatedAt: Date;
 };
 
+export type FakeAuditLog = {
+  id: string;
+  action: string;
+  targetType: string | null;
+  targetId: string | null;
+  actorType: string;
+  actorUserId: string | null;
+  actorTokenId: string | null;
+  actorLabel: string;
+  ip: string | null;
+  userAgent: string | null;
+  method: string;
+  path: string;
+  statusCode: number;
+  metadata: Record<string, unknown> | null;
+  createdAt: Date;
+};
+
 export const store = {
   files: new Map<string, FakeFile>(),
   questions: new Map<string, FakeQuestion>(),
@@ -193,6 +211,7 @@ export const store = {
   moderations: new Map<string, FakeModeration>(),
   mobileDevices: new Map<string, FakeMobileDevice>(),
   metricFilters: new Map<string, FakeMetricFilter>(),
+  auditLogs: [] as FakeAuditLog[],
 };
 
 const cloneDate = (date: Date): Date => new Date(date.getTime());
@@ -501,6 +520,7 @@ export const resetFakeDb = (): void => {
   store.moderations.clear();
   store.mobileDevices.clear();
   store.metricFilters.clear();
+  store.auditLogs.length = 0;
 };
 
 // Supports the `transcriptions: { none: {} } | { some: {...} }` relation
@@ -1642,6 +1662,65 @@ export const fakeDb = {
       return filter;
     },
   },
+  auditLog: {
+    create: async ({ data }: { data: Record<string, unknown> }) => {
+      const row: FakeAuditLog = {
+        id: randomUUID(),
+        createdAt: new Date(),
+        targetType: null,
+        targetId: null,
+        actorUserId: null,
+        actorTokenId: null,
+        ip: null,
+        userAgent: null,
+        metadata: null,
+        ...(data as unknown as FakeAuditLog),
+      };
+      store.auditLogs.push(row);
+      return row;
+    },
+    findMany: async ({
+      where = {},
+      take,
+    }: {
+      where?: Record<string, unknown>;
+      orderBy?: unknown;
+      take?: number;
+    } = {}) => {
+      // The route always sorts newest-first by (createdAt, id).
+      const rows = store.auditLogs
+        .filter((row) => matchesWhere(row as unknown as Record<string, unknown>, where))
+        .sort(byCreatedDesc);
+      return take === undefined ? rows : rows.slice(0, take);
+    },
+    count: async ({ where = {} }: { where?: Record<string, unknown> } = {}) =>
+      store.auditLogs.filter((row) =>
+        matchesWhere(row as unknown as Record<string, unknown>, where),
+      ).length,
+    upsert: async ({
+      where,
+      create,
+    }: {
+      where: { id: string };
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => {
+      const row = { ...(create as unknown as FakeAuditLog), id: where.id };
+      const index = store.auditLogs.findIndex((entry) => entry.id === where.id);
+      if (index >= 0) store.auditLogs[index] = row;
+      else store.auditLogs.push(row);
+      return row;
+    },
+    deleteMany: async ({ where = {} }: { where?: Record<string, unknown> } = {}) => {
+      const kept = store.auditLogs.filter(
+        (row) => !matchesWhere(row as unknown as Record<string, unknown>, where),
+      );
+      const removed = store.auditLogs.length - kept.length;
+      store.auditLogs.length = 0;
+      store.auditLogs.push(...kept);
+      return { count: removed };
+    },
+  },
   apiToken: {
     findMany: async () => [] as Record<string, unknown>[],
     upsert: async ({
@@ -1659,6 +1738,11 @@ const matchesWhere = (record: Record<string, unknown>, where: Record<string, unk
   for (const [key, raw] of Object.entries(where)) {
     if (key === "OR" && Array.isArray(raw)) {
       const ok = raw.some((branch) => matchesWhere(record, branch as Record<string, unknown>));
+      if (!ok) return false;
+      continue;
+    }
+    if (key === "AND" && Array.isArray(raw)) {
+      const ok = raw.every((branch) => matchesWhere(record, branch as Record<string, unknown>));
       if (!ok) return false;
       continue;
     }
@@ -1694,6 +1778,9 @@ const matchesWhere = (record: Record<string, unknown>, where: Record<string, unk
       if ("gt" in filter) {
         if (value === undefined || value === null) return false;
         if (compareValues(value, filter.gt) <= 0) return false;
+      }
+      if ("startsWith" in filter) {
+        if (typeof value !== "string" || !value.startsWith(String(filter.startsWith))) return false;
       }
     } else {
       if (value !== raw) return false;

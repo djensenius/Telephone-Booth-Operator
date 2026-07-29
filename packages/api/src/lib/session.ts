@@ -8,6 +8,7 @@ import {
 import type { OperatorSession, OperatorUser } from "../generated/prisma/client.js";
 import type { Context, MiddlewareHandler } from "hono";
 import { verifyOperatorBearer } from "./bearer-auth.js";
+import { clientIp } from "./client-ip.js";
 import { getAuthConfig } from "./config.js";
 import { db } from "./db.js";
 import {
@@ -170,22 +171,6 @@ export const decryptSessionSecret = (encrypted: string | null | undefined): stri
   ]).toString("utf8");
 };
 
-const csv = (input: string | undefined): string[] =>
-  (input ?? "")
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-
-const trustsForwardedHeaders = (): boolean => csv(process.env.TRUSTED_PROXIES).length > 0;
-
-const forwardedFirst = (headers: Headers, name: string): string | null => {
-  if (!trustsForwardedHeaders()) return null;
-  return headers.get(name)?.split(",")[0]?.trim() ?? null;
-};
-
-const requestIp = (request: Request): string | null =>
-  forwardedFirst(request.headers, "x-forwarded-for");
-
 const appendCookie = (c: Context, parts: string[]): void => {
   c.header("Set-Cookie", parts.join("; "), { append: true });
 };
@@ -249,7 +234,7 @@ const accessTokenExpiresAt = (tokens: TokenInput): Date | null => {
 export const createSession = async (
   user: OperatorUser,
   tokens: TokenInput,
-  request: Request,
+  c: Context,
 ): Promise<OperatorSession> => {
   const id = randomBytes(32).toString("base64url");
   return db.operatorSession.create({
@@ -262,8 +247,8 @@ export const createSession = async (
       accessTokenExpiresAt: accessTokenExpiresAt(tokens),
       expiresAt: sessionExpiresAt(),
       lastValidatedAt: new Date(),
-      ip: requestIp(request),
-      userAgent: request.headers.get("user-agent"),
+      ip: clientIp(c),
+      userAgent: c.req.header("user-agent") ?? null,
     },
   });
 };

@@ -2,6 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import { QuestionCreateSchema, QuestionStatusSchema } from "@telephone-booth-operator/shared";
 import { Hono } from "hono";
 import { z } from "zod";
+import { recordAudit } from "../lib/audit.js";
 import { db } from "../lib/db.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 import { serializeQuestion } from "../lib/serializers.js";
@@ -36,6 +37,11 @@ questionsRouter.get("/", zValidator("query", listQuerySchema), async (c) => {
 
 questionsRouter.post("/", requireAdmin(), zValidator("json", QuestionCreateSchema), async (c) => {
   const body = c.req.valid("json");
+  recordAudit(c, {
+    action: "question.create",
+    targetType: "question",
+    metadata: { prompt: body.prompt, status: body.status ?? "draft" },
+  });
   const audio = await db.file.findUnique({ where: { id: body.audioFileId } });
   if (!audio) return c.json({ error: "audio_file_not_found" }, 404);
 
@@ -48,6 +54,7 @@ questionsRouter.post("/", requireAdmin(), zValidator("json", QuestionCreateSchem
       },
       include: { audio: true },
     });
+    recordAudit(c, { targetId: question.id });
     return c.json(serializeQuestion(question), 201);
   } catch {
     return c.json({ error: "question_conflict" }, 409);
@@ -60,6 +67,7 @@ questionsRouter.post(
   zValidator("param", idParamSchema),
   async (c) => {
     const { id } = c.req.valid("param");
+    recordAudit(c, { action: "question.activate", targetType: "question", targetId: id });
     const question = await db.question.findUnique({ where: { id } });
     if (!question) return c.json({ error: "not_found" }, 404);
 
@@ -78,6 +86,7 @@ questionsRouter.post(
   zValidator("param", idParamSchema),
   async (c) => {
     const { id } = c.req.valid("param");
+    recordAudit(c, { action: "question.deactivate", targetType: "question", targetId: id });
     const question = await db.question.findUnique({ where: { id } });
     if (!question) return c.json({ error: "not_found" }, 404);
 
@@ -92,6 +101,7 @@ questionsRouter.post(
 
 questionsRouter.delete("/:id", requireAdmin(), zValidator("param", idParamSchema), async (c) => {
   const { id } = c.req.valid("param");
+  recordAudit(c, { action: "question.archive", targetType: "question", targetId: id });
   const question = await db.question.findUnique({ where: { id } });
   if (!question || question.status === "archived") return c.json({ error: "not_found" }, 404);
 

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import {
   ApiTokenCreatedSchema,
+  AuditLogPageSchema,
   ApiTokenSchema,
   ApiTokenUsageBucketSchema,
   BoothEventListSchema,
@@ -32,6 +33,7 @@ import {
 import type {
   ApiToken,
   ApiTokenCreated,
+  AuditLogPage,
   ApiTokenUsageBucket,
   BoothEventList,
   BoothEventType,
@@ -386,6 +388,43 @@ export const sessions = {
     apiFetch<CallSessionDetail>(`/v1/sessions/${id}`, { schema: CallSessionDetailSchema }),
 };
 
+export type AuditLogListParams = {
+  readonly action?: string;
+  readonly actorType?: string;
+  readonly actorUserId?: string;
+  readonly targetType?: string;
+  readonly targetId?: string;
+  readonly ip?: string;
+  readonly since?: string;
+  readonly until?: string;
+  readonly cursor?: string;
+  readonly limit?: number;
+};
+
+export const auditLogs = {
+  list: (params: AuditLogListParams = {}) =>
+    apiFetch<AuditLogPage>(
+      `/v1/audit-logs${query({
+        action: params.action,
+        actorType: params.actorType,
+        actorUserId: params.actorUserId,
+        targetType: params.targetType,
+        targetId: params.targetId,
+        ip: params.ip,
+        since: params.since,
+        until: params.until,
+        cursor: params.cursor,
+        limit: params.limit ?? 50,
+      })}`,
+      { schema: AuditLogPageSchema },
+    ),
+  forTarget: (targetType: string, targetId: string, limit = 50) =>
+    apiFetch<AuditLogPage>(
+      `/v1/audit-logs/targets/${encodeURIComponent(targetType)}/${encodeURIComponent(targetId)}${query({ limit })}`,
+      { schema: AuditLogPageSchema },
+    ),
+};
+
 export const system = {
   current: (boothId: string) =>
     apiFetch<BoothSystemSnapshotEnvelope>(`/v1/system/current${query({ boothId })}`, {
@@ -479,7 +518,32 @@ export const apiQueryKeys = {
   system: (boothId: string) => ["system", boothId] as const,
   statsOverview: (selection: StatsRangeSelection) => ["stats", "overview", selection] as const,
   metricFilters: ["stats", "filters"] as const,
+  auditLogs: (params: AuditLogListParams) => ["audit-logs", "list", params] as const,
+  auditLogTarget: (targetType: string, targetId: string) =>
+    ["audit-logs", "target", targetType, targetId] as const,
 };
+
+export function useAuditLogs(params: AuditLogListParams = {}) {
+  return useQuery({
+    queryKey: apiQueryKeys.auditLogs(params),
+    queryFn: () => auditLogs.list(params),
+    refetchInterval: 30_000,
+  });
+}
+
+// Trail for one resource. Admin-only server-side, so callers should gate the
+// query on `isAdmin` rather than rendering a 403.
+export function useAuditLogsForTarget(
+  targetType: string,
+  targetId: string | undefined,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: apiQueryKeys.auditLogTarget(targetType, targetId ?? ""),
+    queryFn: () => auditLogs.forTarget(targetType, targetId ?? ""),
+    enabled: enabled && typeof targetId === "string" && targetId.length > 0,
+  });
+}
 
 export function useEventsList(params: EventsListParams = {}) {
   return useQuery({

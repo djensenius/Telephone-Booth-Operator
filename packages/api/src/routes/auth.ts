@@ -1,10 +1,13 @@
 import { randomNonce, randomPKCECodeVerifier, randomState } from "openid-client";
 import { Hono } from "hono";
+import type { Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { zValidator } from "@hono/zod-validator";
 import { OperatorMeSchema } from "@telephone-booth-operator/shared";
 import { z } from "zod";
 import { getAuthConfig } from "../lib/config.js";
+import { auditEnabled, recordAudit, writeAuditEntry, type AuditActorType } from "../lib/audit.js";
+import { clientIp } from "../lib/client-ip.js";
 import { verifyOperatorBearer } from "../lib/bearer-auth.js";
 import { buildAuthorizationUrl, endSessionUrl, exchangeCode, getOidcClient } from "../lib/oidc.js";
 import {
@@ -32,6 +35,47 @@ export const validateAuthorization = _validateAuthorization;
 const loginQuerySchema = z.object({
   return_to: z.string().optional(),
 });
+
+// Best-effort identity for a login attempt that never produced an operator
+// row. Claims are provider-supplied JSON, so narrow before use.
+const claimLabel = (claims: { email?: unknown; sub?: unknown }): string => {
+  if (typeof claims.email === "string" && claims.email) return claims.email;
+  if (typeof claims.sub === "string" && claims.sub) return claims.sub;
+  return "unknown";
+};
+
+// The OIDC callback is a GET, so `auditWrites()` (which only wraps mutating
+// methods) never sees it — yet establishing or denying a session is exactly
+// the kind of action the trail must contain. Record it by hand.
+const auditAuthEvent = async (
+  c: Context,
+  entry: {
+    action: string;
+    statusCode: number;
+    actorType?: AuditActorType;
+    actorUserId?: string | null;
+    actorLabel: string;
+    targetType?: string;
+    targetId?: string | null;
+    metadata?: Record<string, unknown>;
+  },
+): Promise<void> => {
+  if (!auditEnabled()) return;
+  await writeAuditEntry({
+    action: entry.action,
+    targetType: entry.targetType ?? null,
+    targetId: entry.targetId ?? null,
+    actorType: entry.actorType ?? "anonymous",
+    actorUserId: entry.actorUserId ?? null,
+    actorLabel: entry.actorLabel,
+    ip: clientIp(c),
+    userAgent: c.req.header("user-agent") ?? null,
+    method: c.req.method.toUpperCase(),
+    path: new URL(c.req.url).pathname,
+    statusCode: entry.statusCode,
+    metadata: entry.metadata ?? null,
+  });
+};
 
 const callbackQuerySchema = z.object({
   code: z.string().optional(),
@@ -306,8 +350,20 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
     const result = await authorizeAndUpsertOperator(claims, { markLogin: true });
     if (!result.ok) {
       if (result.status === 403) {
+        await auditAuthEvent(c, {
+          action: "auth.login.denied",
+          statusCode: 403,
+          actorLabel: claimLabel(claims),
+          metadata: { reason: result.reason },
+        });
         return htmlResponse(c, "Operator credentials required", result.reason, 403);
       }
+      await auditAuthEvent(c, {
+        action: "auth.login.failed",
+        statusCode: 400,
+        actorLabel: claimLabel(claims),
+        metadata: { reason: result.reason },
+      });
       return htmlResponse(
         c,
         "OIDC login failed",
@@ -318,8 +374,19 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
       );
     }
 
-    const session = await createSession(result.user, tokenSet, c.req.raw);
+    const session = await createSession(result.user, tokenSet, c);
     setSessionCookie(c, session.id, session.expiresAt);
+    // Login creates a session — a write action in its own right. The callback
+    // is a GET, so it is recorded explicitly rather than by `auditWrites()`.
+    await auditAuthEvent(c, {
+      action: "auth.login",
+      statusCode: 302,
+      actorType: "operator",
+      actorUserId: result.user.id,
+      actorLabel: result.user.email,
+      targetType: "session",
+      targetId: session.id,
+    });
     return c.redirect(webRedirectUrl(pending.returnTo), 302);
   } catch (error) {
     logAuthCallbackError(error);
@@ -329,6 +396,18 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
 
 authRoutes.post("/logout", async (c) => {
   const session = await destroySession(c);
+  recordAudit(c, {
+    action: "auth.logout",
+    targetType: "session",
+    targetId: session?.id ?? null,
+    ...(session
+      ? {
+          actorType: "operator" as const,
+          actorUserId: session.userId,
+          actorLabel: session.user.email,
+        }
+      : {}),
+  });
   let redirectTo = webRedirectUrl("/login");
   const idToken = decryptSessionSecret(session?.idToken);
   if (idToken && !getAuthConfig().disabled) {

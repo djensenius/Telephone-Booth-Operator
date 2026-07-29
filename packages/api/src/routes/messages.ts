@@ -9,6 +9,7 @@ import {
 import { Hono } from "hono";
 import { z } from "zod";
 import { resolveAiConfig } from "../lib/ai/config.js";
+import { recordAudit } from "../lib/audit.js";
 import { kickPipelineForMessage, runModeration, runTranscription } from "../lib/ai/pipeline.js";
 import { fanOutNotification } from "../lib/apns.js";
 import { generateSasUrl, headBlob } from "../lib/azure-blob.js";
@@ -85,17 +86,25 @@ messagesRouter.get("/:id", zValidator("param", idParamSchema), async (c) => {
 
 messagesRouter.delete("/:id", zValidator("param", idParamSchema), async (c) => {
   const { id } = c.req.valid("param");
+  recordAudit(c, { action: "message.delete", targetType: "message", targetId: id });
   const existing = await db.message.findUnique({ where: { id } });
   if (!existing) return c.json({ error: "not_found" }, 404);
   await db.message.delete({ where: { id } });
+  recordAudit(c, { metadata: { previousStatus: existing.status } });
   return c.body(null, 204);
 });
 
 messagesRouter.post("/", requireApiToken(), zValidator("json", MessageCreateSchema), async (c) => {
   const body = c.req.valid("json");
   const blobName = messageBlobName(body.sha256);
+  recordAudit(c, {
+    action: "message.create",
+    targetType: "message",
+    metadata: { sha256: body.sha256, questionId: body.questionId ?? null },
+  });
   const requestedQuestionId = body.questionId ?? null;
   const uploadSlot = (id: string) => {
+    recordAudit(c, { targetId: id });
     const sas = generateSasUrl(blobName, { permissions: "cw", contentType: "audio/flac" });
     return c.json({ id, uploadUrl: sas.url, blobName }, 201);
   };
@@ -179,6 +188,7 @@ messagesRouter.post(
   zValidator("param", idParamSchema),
   async (c) => {
     const { id } = c.req.valid("param");
+    recordAudit(c, { action: "message.complete", targetType: "message", targetId: id });
     const message = await db.message.findUnique({ where: { id }, include: { audio: true } });
     if (!message) return c.json({ error: "not_found" }, 404);
 
@@ -258,6 +268,7 @@ messagesRouter.get("/:id/transcriptions", zValidator("param", idParamSchema), as
 
 messagesRouter.post("/:id/transcribe", zValidator("param", idParamSchema), async (c) => {
   const { id } = c.req.valid("param");
+  recordAudit(c, { action: "message.transcribe.request", targetType: "message", targetId: id });
   const message = await db.message.findUnique({ where: { id }, select: { id: true } });
   if (!message) return c.json({ error: "not_found" }, 404);
   const user = c.get("user") as { id: string } | undefined;
@@ -278,11 +289,13 @@ messagesRouter.post("/:id/transcribe", zValidator("param", idParamSchema), async
     where: { id: transcriptionResult.transcriptionId },
   });
   if (!row) return c.json({ error: "not_found" }, 404);
+  recordAudit(c, { metadata: { transcriptionId: row.id, provider: row.provider } });
   return c.json(serializeTranscription(row), 202);
 });
 
 messagesRouter.post("/:id/moderate", zValidator("param", idParamSchema), async (c) => {
   const { id } = c.req.valid("param");
+  recordAudit(c, { action: "message.moderate.request", targetType: "message", targetId: id });
   const message = await db.message.findUnique({ where: { id }, select: { id: true } });
   if (!message) return c.json({ error: "not_found" }, 404);
   const user = c.get("user") as { id: string } | undefined;
@@ -293,6 +306,7 @@ messagesRouter.post("/:id/moderate", zValidator("param", idParamSchema), async (
   if (!moderationId) return c.json({ error: "no_succeeded_transcription" }, 409);
   const row = await db.moderation.findUnique({ where: { id: moderationId } });
   if (!row) return c.json({ error: "not_found" }, 404);
+  recordAudit(c, { metadata: { moderationId: row.id, provider: row.provider } });
   return c.json(serializeModeration(row), 202);
 });
 
@@ -321,6 +335,13 @@ messagesRouter.post(
   async (c) => {
     const { id } = c.req.valid("param");
     const { decision, notes } = c.req.valid("json");
+    // Named per outcome so the trail can be filtered by "who approved what".
+    recordAudit(c, {
+      action: decision === "approve" ? "message.approve" : "message.reject",
+      targetType: "message",
+      targetId: id,
+      metadata: { decision, hasNotes: notes !== undefined },
+    });
     const existing = await db.message.findUnique({
       where: { id },
       select: { id: true, status: true },
@@ -329,6 +350,7 @@ messagesRouter.post(
     if (existing.status === "uploading") {
       return c.json({ error: "message_not_decidable" }, 409);
     }
+    recordAudit(c, { metadata: { previousStatus: existing.status } });
     const user = c.get("user") as { id: string } | undefined;
     await db.message.update({
       where: { id },
@@ -356,6 +378,15 @@ messagesRouter.post(
   async (c) => {
     const { id } = c.req.valid("param");
     const { translatedText, translatedLanguage } = c.req.valid("json");
+    recordAudit(c, {
+      action: "message.translation.submit",
+      targetType: "message",
+      targetId: id,
+      metadata: {
+        translatedLanguage: translatedLanguage ?? null,
+        translatedTextLength: translatedText.length,
+      },
+    });
     const message = await db.message.findUnique({ where: { id }, select: { id: true } });
     if (!message) return c.json({ error: "not_found" }, 404);
     const latest = await db.transcription.findFirst({
@@ -363,6 +394,7 @@ messagesRouter.post(
       orderBy: { createdAt: "desc" },
     });
     if (!latest) return c.json({ error: "no_succeeded_transcription" }, 409);
+    recordAudit(c, { metadata: { transcriptionId: latest.id } });
     const updated = await db.transcription.update({
       where: { id: latest.id },
       data: {

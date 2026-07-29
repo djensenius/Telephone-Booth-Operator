@@ -18,10 +18,11 @@ import { db } from "./db.js";
 
 export const EXPORT_FORMAT = "telephone-booth-export";
 // 1: original shape. 2: BoothStatusSnapshot carries `firstSeenAt`/`repeatCount`.
-// Bumped so a server that predates the collapse rejects the archive as newer
-// than supported instead of failing on unknown columns mid-restore. Version 1
-// archives still import — `withStatusWindow` fills the missing window.
-export const EXPORT_VERSION = 2;
+// 3: adds the AuditLog trail. Bumped so a server that predates a change
+// rejects the archive as newer than supported instead of failing on unknown
+// columns mid-restore. Older archives still import — `withStatusWindow` fills
+// the missing status window, and absent tables restore as empty.
+export const EXPORT_VERSION = 3;
 
 // Import order matters — parents before children so foreign keys resolve.
 const IMPORT_ORDER = [
@@ -38,6 +39,9 @@ const IMPORT_ORDER = [
   "moderation",
   "metricFilter",
   "mobileDevice",
+  // Last: rows reference OperatorUser and ApiToken. A backup that dropped the
+  // audit trail would lose the record of who did what (issue #123).
+  "auditLog",
 ] as const;
 
 type ModelName = (typeof IMPORT_ORDER)[number];

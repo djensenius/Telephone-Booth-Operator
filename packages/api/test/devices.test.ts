@@ -40,6 +40,9 @@ const { fakeDb, store } = vi.hoisted(() => {
   return {
     store: { users, sessions, devices },
     fakeDb: {
+      // Audit rows are written by middleware on every write; these suites do
+      // not assert on them, they just need the delegate to exist.
+      auditLog: { create: vi.fn(async ({ data }: { data: unknown }) => data) },
       operatorSession: {
         findUnique: vi.fn(async ({ where, include }) => {
           const session = sessions.get(where.id);

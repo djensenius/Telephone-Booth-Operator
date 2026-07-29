@@ -22,6 +22,7 @@ rebuilds it from the filesystem; CI fails if it drifts.
 - [Transcription providers](transcription-providers.md) — AI transcription + moderation pipeline
 - [Push-mode worker](operator-push.md) — WebSocket/REST contract for app-run transcription, translation, and moderation
 - [Push notifications](push-notifications.md) — APNs setup, badge pipeline, sandbox vs production
+- [Audit log](audit-log.md) — who did what, from where, and when
 - [UI routing](ui-routing.md) — digit shortcuts, keyboard nav, reduced motion
 
 ## Running it
@@ -45,3 +46,4 @@ rebuilds it from the filesystem; CI fails if it drifts.
 - [0006 — Reconcile stale call sessions on booth idle](adr/0006-reconcile-stale-call-sessions-on-idle.md)
 - [0009 — Human-only moderation and push-based transcription worker](adr/0009-human-moderation-and-push-worker.md)
 - [0010 — Collapse repeated booth status reports](adr/0010-collapse-repeated-booth-status-reports.md)
+- [0011 — Audit trail for write actions](adr/0011-audit-trail-for-write-actions.md)

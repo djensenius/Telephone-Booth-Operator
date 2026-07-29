@@ -8,6 +8,7 @@ import {
 import { Hono } from "hono";
 import { z } from "zod";
 import { generateToken, invalidateApiTokenCache } from "../lib/api-tokens.js";
+import { recordAudit } from "../lib/audit.js";
 import { db } from "../lib/db.js";
 import { requireOperator, type AuthVariables } from "../lib/session.js";
 
@@ -84,6 +85,12 @@ apiTokensRouter.get("/", async (c) => {
 apiTokensRouter.post("/", zValidator("json", CreateApiTokenRequestSchema), async (c) => {
   const user = c.get("user");
   const body = c.req.valid("json");
+  // The plaintext is shown to the operator once and never recorded here.
+  recordAudit(c, {
+    action: "apiToken.create",
+    targetType: "apiToken",
+    metadata: { name: body.name, scope: body.scope, expiresInDays: body.expiresInDays ?? null },
+  });
   const generated = await generateToken();
   const token = await db.apiToken.create({
     data: {
@@ -97,6 +104,7 @@ apiTokensRouter.post("/", zValidator("json", CreateApiTokenRequestSchema), async
     },
     select: selectedTokenFields,
   });
+  recordAudit(c, { targetId: token.id, metadata: { last4: token.last4 } });
 
   return c.json(
     ApiTokenCreatedSchema.parse({
@@ -110,6 +118,7 @@ apiTokensRouter.post("/", zValidator("json", CreateApiTokenRequestSchema), async
 apiTokensRouter.delete("/:id", zValidator("param", idParamSchema), async (c) => {
   const user = c.get("user");
   const { id } = c.req.valid("param");
+  recordAudit(c, { action: "apiToken.revoke", targetType: "apiToken", targetId: id });
   const existing = await db.apiToken.findFirst({
     where: { id, createdByUserId: user.id },
     select: { id: true },
@@ -121,6 +130,7 @@ apiTokensRouter.delete("/:id", zValidator("param", idParamSchema), async (c) => 
     });
     invalidateApiTokenCache(id);
   }
+  recordAudit(c, { metadata: { found: Boolean(existing) } });
   return c.body(null, 204);
 });
 
