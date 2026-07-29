@@ -1,11 +1,10 @@
 import type { JSX } from "react";
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { GlassPanel } from "../../components/booth/index.js";
 import { useCurrentUser } from "../auth/useCurrentUser.js";
 import { createDebugClient, readDebugConnectionPrefs } from "../../lib/debug-client.js";
 import type {
-  AudioMeter,
   BoothStatus,
   DebugClient,
   DebugConnectionChange,
@@ -16,6 +15,20 @@ import type {
   TelemetryRecord,
 } from "../../lib/debug-client.js";
 import { AudioPanel } from "./AudioPanel.js";
+import type { AudioDeviceInfo } from "./AudioPanel.js";
+import {
+  changedPolledChannels,
+  EMPTY_AUDIO_METERS,
+  LIVE_SAMPLE_STALE_AFTER_MS,
+  NO_POLLED_IDENTITIES,
+  nextMeterUpdateDelay,
+  polledIdentities,
+  dbfsFromLinear,
+  recordPolledSnapshot,
+  recordSample,
+  resolveMeter,
+} from "./audio-meters.js";
+import type { AudioChannel, AudioMeterState, PolledMeterIdentities } from "./audio-meters.js";
 import { CertFingerprintCard } from "./CertFingerprintCard.js";
 import { ConfigPanel } from "./ConfigPanel.js";
 import { ConnectionStatusBar } from "./ConnectionStatusBar.js";
@@ -31,10 +44,6 @@ const INITIAL_CONNECTION: DebugConnectionChange = {
   latencyMs: null,
   wsState: "idle",
 };
-
-function dbfsFromLinear(value: number): number {
-  return Math.max(-120, 20 * Math.log10(Math.max(value, 0.000001)));
-}
 
 function upsertGpioEdge(
   snapshot: GpioSnapshot | undefined,
@@ -57,47 +66,16 @@ function upsertGpioEdge(
   return { pins, updatedAt: record.ts };
 }
 
-function applyAudioEvent(
-  audio: AudioMeter | undefined,
+function audioMetadata(
+  audio: AudioDeviceInfo | undefined,
   record: TelemetryRecord,
-): AudioMeter | undefined {
+): AudioDeviceInfo | undefined {
+  const current = audio ?? { currentDevice: null, sampleRateHz: null, updatedAt: null };
   if (record.kind === "audio_level") {
-    const next = audio ?? {
-      inputLevelDbfs: -120,
-      outputLevelDbfs: -120,
-      inputPeakDbfs: -120,
-      outputPeakDbfs: -120,
-      currentDevice: null,
-      sampleRateHz: null,
-      updatedAt: null,
-    };
-    if (record.channel === "input") {
-      return {
-        ...next,
-        inputLevelDbfs: dbfsFromLinear(record.rms),
-        inputPeakDbfs: dbfsFromLinear(record.peak),
-        updatedAt: record.ts,
-      };
-    }
-    return {
-      ...next,
-      outputLevelDbfs: dbfsFromLinear(record.rms),
-      outputPeakDbfs: dbfsFromLinear(record.peak),
-      updatedAt: record.ts,
-    };
+    return { ...current, updatedAt: record.ts };
   }
   if (record.kind === "audio_device_change") {
-    return {
-      ...(audio ?? {
-        inputLevelDbfs: -120,
-        outputLevelDbfs: -120,
-        inputPeakDbfs: -120,
-        outputPeakDbfs: -120,
-        sampleRateHz: null,
-        updatedAt: null,
-      }),
-      currentDevice: record.name,
-    };
+    return { ...current, currentDevice: record.name };
   }
   return audio;
 }
@@ -183,7 +161,10 @@ export function DebugScreen(): JSX.Element {
   const [level, setLevel] = useState("info");
   const [liveStatus, setLiveStatus] = useState<BoothStatus | undefined>();
   const [liveGpio, setLiveGpio] = useState<GpioSnapshot | undefined>();
-  const [liveAudio, setLiveAudio] = useState<AudioMeter | undefined>();
+  const [liveAudio, setLiveAudio] = useState<AudioDeviceInfo | undefined>();
+  const [audioMeters, setAudioMeters] = useState<AudioMeterState>(EMPTY_AUDIO_METERS);
+  const [meterNow, setMeterNow] = useState<number>(() => Date.now());
+  const polledIdentitiesRef = useRef<PolledMeterIdentities>(NO_POLLED_IDENTITIES);
   const [liveLogs, setLiveLogs] = useState<readonly LogEntry[]>([]);
   const [transitions, setTransitions] = useState<readonly StateTransitionRow[]>([]);
   const [pulseAccumulator, setPulseAccumulator] = useState<PulseAccumulator>({
@@ -245,7 +226,26 @@ export function DebugScreen(): JSX.Element {
 
   useEffect(() => setLiveStatus(stateQuery.data), [stateQuery.data]);
   useEffect(() => setLiveGpio(gpioQuery.data), [gpioQuery.data]);
-  useEffect(() => setLiveAudio(audioQuery.data), [audioQuery.data]);
+  useEffect(() => {
+    const snapshot = audioQuery.data;
+    setLiveAudio(snapshot);
+    if (snapshot === undefined) {
+      return;
+    }
+    // The polled snapshot is replayed from the booth's telemetry ring buffer,
+    // so it can repeat an old sample. Age it from the local receive time and
+    // allow one missed poll before the meter is treated as stale. Channels
+    // whose values did not change are left to age out on their own.
+    const receivedAt = Date.now();
+    setMeterNow(receivedAt);
+    const identities = polledIdentities(snapshot);
+    const changed = changedPolledChannels(polledIdentitiesRef.current, identities);
+    polledIdentitiesRef.current = identities;
+    if (changed.length === 0) {
+      return;
+    }
+    setAudioMeters((current) => recordPolledSnapshot(current, snapshot, changed, receivedAt));
+  }, [audioQuery.data]);
   useEffect(() => setLiveLogs(logsQuery.data ?? []), [logsQuery.data]);
   useEffect(() => {
     const rows = (eventsQuery.data ?? [])
@@ -284,8 +284,21 @@ export function DebugScreen(): JSX.Element {
           lastPulseCount: record.pulses,
         });
       }
+      if (record.kind === "audio_level") {
+        const channel: AudioChannel = record.channel === "input" ? "input" : "output";
+        const receivedAt = Date.now();
+        setMeterNow(receivedAt);
+        setAudioMeters((current) =>
+          recordSample(current, channel, {
+            levelDbfs: dbfsFromLinear(record.rms),
+            peakDbfs: dbfsFromLinear(record.peak),
+            receivedAt,
+            staleAfterMs: LIVE_SAMPLE_STALE_AFTER_MS,
+          }),
+        );
+      }
       if (record.kind === "audio_level" || record.kind === "audio_device_change") {
-        setLiveAudio((current) => applyAudioEvent(current, record));
+        setLiveAudio((current) => audioMetadata(current, record));
       }
       if (record.kind === "log") {
         setLiveLogs((current) =>
@@ -309,6 +322,41 @@ export function DebugScreen(): JSX.Element {
   const config = configQuery.data;
   const pinLabels = useMemo(() => buildPinLabels(config), [config]);
 
+  const hasMeterSamples = audioMeters.input !== undefined || audioMeters.output !== undefined;
+  useEffect(() => {
+    if (!hasMeterSamples) {
+      return undefined;
+    }
+    // Staleness and peak decay are functions of wall-clock time, not of
+    // incoming events, so the panel schedules its own wake-ups to fall back.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const schedule = (): void => {
+      const delay = nextMeterUpdateDelay(audioMeters, Date.now());
+      if (delay === null) {
+        return;
+      }
+      timer = setTimeout(() => {
+        setMeterNow(Date.now());
+        schedule();
+      }, delay);
+    };
+    schedule();
+    return () => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+    };
+  }, [audioMeters, hasMeterSamples]);
+
+  const inputMeter = useMemo(
+    () => resolveMeter(audioMeters, "input", meterNow),
+    [audioMeters, meterNow],
+  );
+  const outputMeter = useMemo(
+    () => resolveMeter(audioMeters, "output", meterNow),
+    [audioMeters, meterNow],
+  );
+
   return (
     <GlassPanel title="Phone-booth debug surface" className="debug-screen">
       <p className="screen-kicker">Digit 9</p>
@@ -326,7 +374,7 @@ export function DebugScreen(): JSX.Element {
       <div className="debug-grid">
         <StateMachinePanel status={liveStatus} transitions={transitions} />
         <GpioPanel snapshot={liveGpio} pulseAccumulator={pulseAccumulator} pinLabels={pinLabels} />
-        <AudioPanel audio={liveAudio} status={liveStatus} />
+        <AudioPanel audio={liveAudio} input={inputMeter} output={outputMeter} status={liveStatus} />
         <LogsPanel logs={liveLogs} level={level} onLevelChange={setLevel} />
         <ConfigPanel config={config} />
         <CertFingerprintCard fingerprint={prefs.pinnedFingerprint} />
