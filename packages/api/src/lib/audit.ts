@@ -226,23 +226,78 @@ export type AuditEntryInput = {
 
 // Persist one audit row. Never throws: a broken audit sink must not take the
 // API down with it, but it must be loud in the logs.
+const MAX_TARGET_TYPE_LENGTH = 64;
+const MAX_TARGET_ID_LENGTH = 255;
+const MAX_METHOD_LENGTH = 10;
+const MAX_IP_LENGTH = 45;
+
+const boundString = (value: unknown, max: number): string | null =>
+  typeof value === "string" && value ? truncate(value, max) : null;
+
+/**
+ * The size limits an audit row must satisfy, in one place: live writes and
+ * rows coming back through a restore are both operator-visible history, so
+ * neither may exceed what the list endpoint and console can render.
+ */
+export type BoundedAuditRow = {
+  action: string;
+  targetType: string | null;
+  targetId: string | null;
+  actorLabel: string;
+  ip: string | null;
+  userAgent: string | null;
+  method: string;
+  path: string;
+  metadata: Record<string, unknown> | null;
+};
+
+export const boundAuditFields = <T extends Record<string, unknown>>(
+  row: T,
+): T & BoundedAuditRow => ({
+  ...row,
+  action: boundString(row.action, MAX_ACTION_LENGTH) ?? "unknown",
+  targetType: boundString(row.targetType, MAX_TARGET_TYPE_LENGTH),
+  targetId: boundString(row.targetId, MAX_TARGET_ID_LENGTH),
+  actorLabel: boundString(row.actorLabel, MAX_LABEL_LENGTH) ?? "unknown",
+  ip: boundString(row.ip, MAX_IP_LENGTH),
+  userAgent: boundString(row.userAgent, MAX_USER_AGENT_LENGTH),
+  method: boundString(row.method, MAX_METHOD_LENGTH) ?? "UNKNOWN",
+  path: boundString(row.path, MAX_PATH_LENGTH) ?? "/",
+  metadata: sanitizeMetadata(
+    row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+      ? (row.metadata as Record<string, unknown>)
+      : undefined,
+  ),
+});
+
 export const writeAuditEntry = async (entry: AuditEntryInput): Promise<void> => {
   try {
+    const bounded = boundAuditFields({
+      action: entry.action,
+      targetType: entry.targetType ?? null,
+      targetId: entry.targetId ?? null,
+      actorLabel: entry.actorLabel,
+      ip: entry.ip ?? null,
+      userAgent: entry.userAgent ?? null,
+      method: entry.method,
+      path: entry.path,
+      metadata: entry.metadata ?? null,
+    });
     await db.auditLog.create({
       data: {
-        action: truncate(entry.action, MAX_ACTION_LENGTH),
-        targetType: entry.targetType ?? null,
-        targetId: entry.targetId ?? null,
+        action: bounded.action,
+        targetType: bounded.targetType,
+        targetId: bounded.targetId,
         actorType: entry.actorType,
         actorUserId: entry.actorUserId ?? null,
         actorTokenId: entry.actorTokenId ?? null,
-        actorLabel: truncate(entry.actorLabel, MAX_LABEL_LENGTH),
-        ip: entry.ip ?? null,
-        userAgent: entry.userAgent ? truncate(entry.userAgent, MAX_USER_AGENT_LENGTH) : null,
-        method: entry.method,
-        path: truncate(entry.path, MAX_PATH_LENGTH),
+        actorLabel: bounded.actorLabel,
+        ip: bounded.ip,
+        userAgent: bounded.userAgent,
+        method: bounded.method,
+        path: bounded.path,
         statusCode: entry.statusCode,
-        ...(entry.metadata ? { metadata: entry.metadata as Prisma.InputJsonValue } : {}),
+        ...(bounded.metadata ? { metadata: bounded.metadata as Prisma.InputJsonValue } : {}),
       },
     });
   } catch (error) {

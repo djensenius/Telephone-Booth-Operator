@@ -33,7 +33,7 @@ import { pruneAuditLogs } from "../src/lib/audit-pruner.js";
 import { resetAuditThrottleForTests, sanitizeMetadata } from "../src/lib/audit.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { fakeBlobs, resetFakeAzure } from "./support/fake-azure.js";
-import { resetFakeDb, seedFile, seedMessage, store } from "./support/fake-db.js";
+import { fakeDb, resetFakeDb, seedFile, seedMessage, store } from "./support/fake-db.js";
 import { operatorCookie, phoneHeaders } from "./support/http.js";
 
 const setup = (): void => {
@@ -242,6 +242,28 @@ describe("audit log middleware", () => {
       body: "{}",
     });
     expect(response.status).toBe(401);
+    expect(store.auditLogs).toHaveLength(0);
+  });
+
+  it("still answers the request when the audit insert fails", async () => {
+    const app = createApp();
+    const file = seedFile();
+    const message = seedMessage({ audioId: file.id, status: "pending" });
+    const create = fakeDb.auditLog.create;
+    fakeDb.auditLog.create = async () => {
+      throw new Error("audit sink is down");
+    };
+    try {
+      const response = await app.request(`/v1/messages/${message.id}/decision`, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: operatorCookie() },
+        body: JSON.stringify({ decision: "approve" }),
+      });
+      // A broken trail must never take a write endpoint down with it.
+      expect(response.status).toBe(200);
+    } finally {
+      fakeDb.auditLog.create = create;
+    }
     expect(store.auditLogs).toHaveLength(0);
   });
 

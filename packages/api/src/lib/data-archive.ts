@@ -14,7 +14,7 @@ import { createHash } from "node:crypto";
 import { Prisma } from "../generated/prisma/client.js";
 import { downloadBlob, headBlob, uploadBlob } from "./azure-blob.js";
 import { createTar, readTar } from "./archive.js";
-import { sanitizeMetadata } from "./audit.js";
+import { boundAuditFields } from "./audit.js";
 import { db } from "./db.js";
 
 export const EXPORT_FORMAT = "telephone-booth-export";
@@ -26,14 +26,6 @@ export const EXPORT_FORMAT = "telephone-booth-export";
 export const EXPORT_VERSION = 3;
 
 // Import order matters — parents before children so foreign keys resolve.
-// Prisma accepts any JSON for a `Json` column, but the audit trail's own
-// schema is an object or nothing.
-const auditMetadataOf = (row: Record<string, unknown>): Record<string, unknown> | undefined => {
-  const metadata = row.metadata;
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return undefined;
-  return metadata as Record<string, unknown>;
-};
-
 const IMPORT_ORDER = [
   "operatorUser",
   "file",
@@ -265,10 +257,10 @@ export const restoreImportArchive = async (archive: Buffer): Promise<ImportSumma
           // The audit trail is append-only: an archive may add history that is
           // missing locally, but it must never rewrite an entry that exists.
           if (name === "auditLog") {
-            // An archive is operator-supplied data: bound its metadata the
-            // same way a live write is bounded, so a crafted file cannot
-            // smuggle an oversized or malformed payload into the trail.
-            const create = { ...row, metadata: sanitizeMetadata(auditMetadataOf(row)) };
+            // An archive is operator-supplied data: bound it exactly as a
+            // live write is bounded, so a crafted file cannot smuggle an
+            // oversized or malformed row into the trail.
+            const create = boundAuditFields(row);
             await client.upsert({ where: { id: row.id }, create, update: {} });
           } else {
             await client.upsert({ where: { id: row.id }, create: row, update: row });

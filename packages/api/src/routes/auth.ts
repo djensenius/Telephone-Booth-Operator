@@ -86,11 +86,11 @@ const auditAuthEvent = async (
 // Every way a callback can fail is still a sign-in attempt, and an attacker
 // probing the endpoint is exactly what the trail should show. `reason` is a
 // fixed classification, never provider text.
-const auditLoginFailed = async (c: Context, reason: string): Promise<void> => {
+const auditLoginFailed = async (c: Context, reason: string, label?: string): Promise<void> => {
   await auditAuthEvent(c, {
     action: "auth.login.failed",
     statusCode: 400,
-    actorLabel: "unknown",
+    actorLabel: label ?? "unknown",
     metadata: { reason },
   });
 };
@@ -361,14 +361,24 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
     return htmlResponse(c, "OIDC login failed", "Login state expired or was not recognized.", 400);
   }
 
+  // The exchange and everything after it fail for different reasons and with
+  // different amounts known about the caller, so they are not audited alike.
+  let exchanged: Awaited<ReturnType<typeof exchangeCode>>;
   try {
-    const { tokenSet, claims } = await exchangeCode(
+    exchanged = await exchangeCode(
       new URL(c.req.url),
       pending.codeVerifier,
       query.state,
       pending.nonce,
     );
+  } catch (error) {
+    logAuthCallbackError(error);
+    await auditLoginFailed(c, "code_exchange_failed");
+    return htmlResponse(c, "OIDC login failed", "The login response could not be validated.", 400);
+  }
 
+  const { tokenSet, claims } = exchanged;
+  try {
     const result = await authorizeAndUpsertOperator(claims, { markLogin: true });
     if (!result.ok) {
       if (result.status === 403) {
@@ -411,9 +421,12 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
     });
     return c.redirect(webRedirectUrl(pending.returnTo), 302);
   } catch (error) {
+    // The claims were valid, so the trail keeps the caller's name and says
+    // that the session could not be established rather than blaming the
+    // exchange.
     logAuthCallbackError(error);
-    await auditLoginFailed(c, "code_exchange_failed");
-    return htmlResponse(c, "OIDC login failed", "The login response could not be validated.", 400);
+    await auditLoginFailed(c, "session_setup_failed", claimLabel(claims));
+    return htmlResponse(c, "OIDC login failed", "The login could not be completed.", 500);
   }
 });
 

@@ -270,9 +270,71 @@ describe("admin data export/import", () => {
 
     const rows = store.auditLogs.filter((row) => row.id === id);
     expect(rows).toHaveLength(1);
+    expect(rows[0]?.ip).toBe("203.0.113.7");
     expect(rows[0]?.action).toBe("message.approve");
     expect(rows[0]?.actorLabel).toBe("operator@example.com");
     expect(rows[0]?.statusCode).toBe(200);
+  });
+
+  it("bounds an oversized audit row coming back through a restore", async () => {
+    const app = createApp();
+    const cookie = operatorCookie();
+    const createdAt = new Date("2026-07-28T12:00:00.000Z");
+    const id = "7a2c1e8d-3b4f-4a2c-8e1d-9f0a1b2c3d4e";
+    const archive = createTar([
+      {
+        name: "manifest.json",
+        data: Buffer.from(
+          JSON.stringify({
+            format: EXPORT_FORMAT,
+            version: 3,
+            generatedAt: createdAt.toISOString(),
+            container: "audio",
+            counts: {},
+            blobCount: 0,
+            missingBlobs: [],
+          }),
+          "utf8",
+        ),
+      },
+      {
+        name: "data.json",
+        data: Buffer.from(
+          JSON.stringify({
+            auditLog: [
+              {
+                id,
+                action: "a".repeat(500),
+                actorType: "operator",
+                actorLabel: "b".repeat(1000),
+                userAgent: "c".repeat(2000),
+                method: "POST",
+                path: `/v1/${"d".repeat(2000)}`,
+                statusCode: 200,
+                metadata: ["not", "an", "object"],
+                createdAt: createdAt.toISOString(),
+              },
+            ],
+          }),
+          "utf8",
+        ),
+      },
+    ]);
+
+    const res = await app.request("/v1/admin/data/import", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/x-tar" },
+      body: archive,
+    });
+    expect(res.status).toBe(200);
+
+    const restored = store.auditLogs.find((row) => row.id === id);
+    expect(restored?.action.length).toBe(128);
+    expect(restored?.actorLabel.length).toBe(320);
+    expect(restored?.userAgent?.length).toBe(512);
+    expect(restored?.path.length).toBe(512);
+    // An array is not a metadata object; the trail's own schema wins.
+    expect(restored?.metadata).toBeNull();
   });
 
   it("rejects a non-archive import body", async () => {
