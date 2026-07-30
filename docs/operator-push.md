@@ -199,6 +199,18 @@ review queue, and **never** auto-approves or auto-rejects. It then broadcasts a 
 envelope so live operator UIs update instantly, and a human decides via
 `POST /v1/messages/:id/decision`.
 
+**Operator-authenticated alternative.** A logged-in operator (OIDC) that holds
+no worker token — such as the iOS review app computing a verdict with Apple
+Intelligence — can submit the same verdict to
+`POST /v1/messages/{id}/moderation` instead. It takes the same body, is equally
+advisory, and additionally attributes the row to the submitting operator
+(`requestedById`) and stamps it with provider `on_device` so clients can label
+it as locally computed. Unlike the worker callback — whose work is solicited,
+so a result with nothing pending is stale and is dropped — an operator verdict
+arrives out of band and records a new succeeded row when no pending row exists.
+An exact redelivery of the latest verdict from the same submitter is a no-op.
+It returns the resulting `Moderation` row with `202`.
+
 ## Failure handling
 
 - `404 not_found` — the message or transcription was deleted (e.g. purged).

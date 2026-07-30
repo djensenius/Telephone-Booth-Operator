@@ -15,9 +15,10 @@
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
+import { recordAudit } from "../lib/audit.js";
 import { db } from "../lib/db.js";
 import {
-  advanceMessageAfterModeration,
+  recordModerationResult,
   recordTranscriptionResult,
   runModeration,
 } from "../lib/ai/pipeline.js";
@@ -147,6 +148,18 @@ workerRouter.post(
   async (c) => {
     const { id } = c.req.valid("param");
     const data = c.req.valid("json");
+    // Transcript text stays in the Transcription row; the trail records that a
+    // transcription landed, by whom, and from where — not the content itself.
+    recordAudit(c, {
+      action: "message.transcription.push",
+      targetType: "message",
+      targetId: id,
+      metadata: {
+        model: data.model ?? null,
+        language: data.language ?? null,
+        textLength: data.text.length,
+      },
+    });
     const result = await recordTranscriptionResult({
       messageId: id,
       text: data.text,
@@ -167,6 +180,17 @@ workerRouter.post(
   async (c) => {
     const { id } = c.req.valid("param");
     const data = c.req.valid("json");
+    recordAudit(c, {
+      action: "message.translation.push",
+      targetType: "message",
+      targetId: id,
+      metadata: {
+        transcriptionId: data.transcriptionId,
+        model: data.model ?? null,
+        targetLanguage: data.targetLanguage ?? "en",
+        translatedTextLength: data.translatedText.length,
+      },
+    });
     const existing = await db.transcription.findUnique({
       where: { id: data.transcriptionId },
     });
@@ -212,43 +236,35 @@ workerRouter.post(
   async (c) => {
     const { id } = c.req.valid("param");
     const data = c.req.valid("json");
-    const message = await db.message.findUnique({ where: { id }, select: { id: true } });
-    if (!message) return c.json({ error: "not_found" }, 404);
-
-    const pending = data.transcriptionId
-      ? await db.moderation.findFirst({
-          where: { messageId: id, transcriptionId: data.transcriptionId, status: "pending" },
-          orderBy: { createdAt: "desc" },
-        })
-      : await db.moderation.findFirst({
-          where: { messageId: id, status: "pending" },
-          orderBy: { createdAt: "desc" },
-        });
-    const now = new Date();
-    if (pending) {
-      const startedAt = pending.createdAt;
-      const updated = await db.moderation.updateMany({
-        where: { id: pending.id, status: "pending" },
-        data: {
-          status: "succeeded",
-          flagged: data.flagged,
-          recommendation: data.recommendation,
-          maxScore: data.maxScore,
-          categories: data.categories ?? {},
-          reasonSummary: data.reasonSummary ?? null,
-          model: data.model ?? pending.model,
-          latencyMs: now.getTime() - startedAt.getTime(),
-          completedAt: now,
-        },
-      });
-      if (updated.count === 0) return c.json({ ok: true });
-    } else {
-      return c.json({ ok: true });
+    recordAudit(c, {
+      action: "message.moderation.push",
+      targetType: "message",
+      targetId: id,
+      metadata: {
+        transcriptionId: data.transcriptionId ?? null,
+        model: data.model ?? null,
+        flagged: data.flagged,
+        recommendation: data.recommendation,
+        maxScore: data.maxScore,
+      },
+    });
+    const result = await recordModerationResult({
+      messageId: id,
+      transcriptionId: data.transcriptionId ?? null,
+      flagged: data.flagged,
+      recommendation: data.recommendation,
+      maxScore: data.maxScore,
+      categories: data.categories ?? null,
+      reasonSummary: data.reasonSummary ?? null,
+      model: data.model ?? null,
+      // Worker moderation is solicited: `runModeration` creates the pending
+      // row before emitting the `work` event, so a callback with nothing
+      // pending is stale and is dropped rather than resurrected.
+      createWhenMissing: false,
+    });
+    if (result.outcome === "not_found" || result.outcome === "transcription_not_found") {
+      return c.json({ error: "not_found" }, 404);
     }
-    // Advisory only: record the suggestion and surface the message for a human
-    // decision. Never auto-approve / auto-reject.
-    await advanceMessageAfterModeration(id);
-    await broadcastMessageById(id);
     return c.json({ ok: true });
   },
 );

@@ -202,6 +202,24 @@ export type FakeInstallation = {
 // Stable id so tests can assert on scoping without reading it back first.
 export const DEFAULT_INSTALLATION_ID = "00000000-0000-4000-8000-0000000000ff";
 
+export type FakeAuditLog = {
+  id: string;
+  action: string;
+  targetType: string | null;
+  targetId: string | null;
+  actorType: string;
+  actorUserId: string | null;
+  actorTokenId: string | null;
+  actorLabel: string;
+  ip: string | null;
+  userAgent: string | null;
+  method: string;
+  path: string;
+  statusCode: number;
+  metadata: Record<string, unknown> | null;
+  createdAt: Date;
+};
+
 export const store = {
   files: new Map<string, FakeFile>(),
   questions: new Map<string, FakeQuestion>(),
@@ -217,6 +235,7 @@ export const store = {
   mobileDevices: new Map<string, FakeMobileDevice>(),
   metricFilters: new Map<string, FakeMetricFilter>(),
   installations: new Map<string, FakeInstallation>(),
+  auditLogs: [] as FakeAuditLog[],
 };
 
 const cloneDate = (date: Date): Date => new Date(date.getTime());
@@ -638,6 +657,7 @@ export const resetFakeDb = (): void => {
     summary: null,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
   });
+  store.auditLogs.length = 0;
 };
 
 // Supports the `transcriptions: { none: {} } | { some: {...} }` relation
@@ -2047,6 +2067,71 @@ export const fakeDb = {
       return row;
     },
   },
+  auditLog: {
+    create: async ({ data }: { data: Record<string, unknown> }) => {
+      const row: FakeAuditLog = {
+        id: randomUUID(),
+        createdAt: new Date(),
+        targetType: null,
+        targetId: null,
+        actorUserId: null,
+        actorTokenId: null,
+        ip: null,
+        userAgent: null,
+        metadata: null,
+        ...(data as unknown as FakeAuditLog),
+      };
+      store.auditLogs.push(row);
+      return row;
+    },
+    findMany: async ({
+      where = {},
+      take,
+    }: {
+      where?: Record<string, unknown>;
+      orderBy?: unknown;
+      take?: number;
+    } = {}) => {
+      // The route always sorts newest-first by (createdAt, id).
+      const rows = store.auditLogs
+        .filter((row) => matchesWhere(row as unknown as Record<string, unknown>, where))
+        .sort(byCreatedDesc);
+      return take === undefined ? rows : rows.slice(0, take);
+    },
+    count: async ({ where = {} }: { where?: Record<string, unknown> } = {}) =>
+      store.auditLogs.filter((row) =>
+        matchesWhere(row as unknown as Record<string, unknown>, where),
+      ).length,
+    upsert: async ({
+      where,
+      create,
+      update,
+    }: {
+      where: { id: string };
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => {
+      const index = store.auditLogs.findIndex((entry) => entry.id === where.id);
+      if (index >= 0) {
+        const existing = store.auditLogs[index] as unknown as Record<string, unknown>;
+        const merged = { ...existing, ...update, id: where.id } as unknown as FakeAuditLog;
+        store.auditLogs[index] = merged;
+        return merged;
+      }
+      const row = { ...(create as unknown as FakeAuditLog), id: where.id };
+      store.auditLogs.push(row);
+      return row;
+    },
+    deleteMany: async ({ where = {} }: { where?: Record<string, unknown> } = {}) => {
+      const kept = store.auditLogs.filter(
+        (row) => !matchesWhere(row as unknown as Record<string, unknown>, where),
+      );
+      const removed = store.auditLogs.length - kept.length;
+      store.auditLogs.length = 0;
+      store.auditLogs.push(...kept);
+      return { count: removed };
+    },
+  },
   apiToken: {
     findMany: async () => [] as Record<string, unknown>[],
     upsert: async ({
@@ -2261,6 +2346,9 @@ const matchesWhere = (record: Record<string, unknown>, where: Record<string, unk
       if ("gt" in filter) {
         if (value === undefined || value === null) return false;
         if (compareValues(value, filter.gt) <= 0) return false;
+      }
+      if ("startsWith" in filter) {
+        if (typeof value !== "string" || !value.startsWith(String(filter.startsWith))) return false;
       }
     } else {
       if (value !== raw) return false;

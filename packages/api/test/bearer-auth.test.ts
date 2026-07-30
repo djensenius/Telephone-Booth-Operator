@@ -5,6 +5,9 @@ const { fakeDb, store } = vi.hoisted(() => {
   return {
     store: { users },
     fakeDb: {
+      // Audit rows are written by middleware on every write; these suites do
+      // not assert on them, they just need the delegate to exist.
+      auditLog: { create: vi.fn(async ({ data }: { data: unknown }) => data) },
       operatorUser: {
         upsert: vi.fn(async ({ where, create, update }) => {
           const existing = users.get(where.oidcSub);
@@ -202,6 +205,8 @@ describe("verifyOperatorBearer", () => {
     if (!result.ok) {
       expect(result.status).toBe(403);
       expect(result.reason).toMatch(/group/);
+      // The signature was valid, so the denied write stays attributable.
+      expect(result.subject).toBe(FRESH_CLAIMS.email);
     }
   });
 

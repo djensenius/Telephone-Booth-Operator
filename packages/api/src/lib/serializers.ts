@@ -1,4 +1,5 @@
 import type {
+  AuditLog as PrismaAuditLog,
   BoothEvent as PrismaBoothEvent,
   BoothStatusSnapshot,
   CallSession as PrismaCallSession,
@@ -11,6 +12,7 @@ import type {
 } from "../generated/prisma/client.js";
 import type {
   AiProvider,
+  AuditLogEntry as AuditLogEntryPayload,
   BoothEventRecord,
   CallOutcome,
   CallSession as CallSessionPayload,
@@ -179,4 +181,22 @@ export const serializeCallSession = (session: PrismaCallSession): CallSessionPay
   recordingId: session.recordingId,
   durationMs: session.durationMs,
   version: session.version,
+});
+
+export const serializeAuditLog = (entry: PrismaAuditLog): AuditLogEntryPayload => ({
+  id: entry.id,
+  action: entry.action,
+  targetType: entry.targetType,
+  targetId: entry.targetId,
+  actorType: entry.actorType,
+  actorUserId: entry.actorUserId,
+  actorTokenId: entry.actorTokenId,
+  actorLabel: entry.actorLabel,
+  ip: entry.ip,
+  userAgent: entry.userAgent,
+  method: entry.method,
+  path: entry.path,
+  statusCode: entry.statusCode,
+  metadata: (entry.metadata as Record<string, unknown> | null) ?? null,
+  createdAt: iso(entry.createdAt),
 });

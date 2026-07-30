@@ -64,6 +64,20 @@ enum RuntimeMode {
   simulator
 }
 
+// Who performed an audited action.
+//   operator — a human authenticated via OIDC (cookie session or bearer JWT)
+//   apiToken — a machine client presenting a static API token (booth, worker,
+//              native operator clients)
+//   anonymous — the request carried no usable credential (rejected writes are
+//              still recorded so failed attempts leave a trail)
+//   system   — an internal, non-request-scoped actor (schedulers, sweepers)
+enum AuditActorType {
+  operator
+  apiToken
+  anonymous
+  system
+}
+
 // A named era of the booth — one run of the installation. At most one row has
 // `endedAt IS NULL` at a time (enforced by a partial unique index); that is the
 // "active" installation and every new booth write is tagged with it. There is
@@ -279,6 +293,7 @@ model OperatorUser {
   mobileDevices           MobileDevice[]
   metricFilters           MetricFilter[]
   endedInstallations      Installation[]    @relation("InstallationEnder")
+  auditLogs               AuditLog[]
 }
 
 // Per-operator saved metrics filter. Captures a named time selection that can
@@ -337,6 +352,7 @@ model ApiToken {
   expiresAt       DateTime?
   lastUsedAt      DateTime?
   revokedAt       DateTime?
+  auditLogs       AuditLog[]
 
   @@index([lookupId])
   @@index([revokedAt, expiresAt])
@@ -433,4 +449,53 @@ model MobileDevice {
 
   @@unique([apnsToken, platform])
   @@index([userId, revokedAt])
+}
+
+// Append-only trail of every write action taken against the operator API.
+//
+// One row per mutating (`POST`/`PUT`/`PATCH`/`DELETE`) `/v1` request, written
+// by the `auditWrites()` middleware in `src/lib/audit.ts` after the handler
+// runs. Rejected attempts are recorded too — a 403 on a decision endpoint is
+// exactly the kind of thing an audit trail exists to capture — so always read
+// `statusCode` alongside `action`.
+//
+// Actor columns are deliberately redundant: `actorUserId` / `actorTokenId` are
+// nullable FKs for joins, while `actorLabel` is a denormalized human-readable
+// snapshot (operator email, or `token:<name>`) that survives the referenced
+// row being deleted or revoked.
+//
+// Rows are never updated. Retention is enforced by the pruner in
+// `src/lib/audit-pruner.ts` (`AUDIT_LOG_RETENTION_DAYS`).
+model AuditLog {
+  id           String         @id @default(uuid()) @db.Uuid
+  // Dotted, stable action name, e.g. `message.approve`, `question.create`,
+  // `auth.login`. Falls back to `http.<method> <route pattern>` for writes a
+  // handler did not name explicitly.
+  action       String
+  // What the action operated on, e.g. `message` + the message id.
+  targetType   String?
+  targetId     String?
+  actorType    AuditActorType
+  actorUserId  String?
+  actorUser    OperatorUser?  @relation(fields: [actorUserId], references: [id])
+  actorTokenId String?        @db.Uuid
+  actorToken   ApiToken?      @relation(fields: [actorTokenId], references: [id])
+  actorLabel   String
+  // Client address. Proxy headers are only trusted when `TRUSTED_PROXIES` is
+  // configured; otherwise this is the socket peer address.
+  ip           String?
+  userAgent    String?
+  method       String
+  path         String
+  statusCode   Int
+  // Action-specific detail (decision notes, prior status, counts, …). Never
+  // contains secrets, tokens, or SAS URLs.
+  metadata     Json?
+  createdAt    DateTime       @default(now())
+
+  @@index([createdAt(sort: Desc), id(sort: Desc)])
+  @@index([actorUserId, createdAt(sort: Desc)])
+  @@index([targetType, targetId, createdAt(sort: Desc)])
+  @@index([action, createdAt(sort: Desc)])
+  @@index([ip, createdAt(sort: Desc)])
 }

@@ -180,6 +180,7 @@ without polling.
 POST /v1/messages/{id}/transcribe
 POST /v1/messages/{id}/transcription
 POST /v1/messages/{id}/moderate
+POST /v1/messages/{id}/moderation
 GET  /v1/messages/{id}/transcriptions
 ```
 
@@ -190,7 +191,9 @@ finalizing a pending row (or recording a new succeeded one), attributing it to
 the submitting operator, and still translating and moderating it server-side.
 It is the operator-authenticated (OIDC) counterpart to the worker push-back
 callback `POST /v1/worker/messages/{id}/transcription`. `moderate` only re-runs
-the moderation step against the latest succeeded transcription. Moderation is
+the moderation step against the latest succeeded transcription. `moderation`
+records a verdict the operator's own device already computed (provider
+`on_device`) rather than asking an upstream to produce one. Moderation is
 advisory only — none of these endpoints decides the message; a human
 approves/rejects via `POST /v1/messages/:id/decision`. `transcriptions` returns
 the full history of attempts.

@@ -50,6 +50,9 @@ const { fakeDb, openidMocks, store } = vi.hoisted(() => {
       ),
     },
     fakeDb: {
+      // Audit rows are written by middleware on every write; these suites do
+      // not assert on them, they just need the delegate to exist.
+      auditLog: { create: vi.fn(async ({ data }: { data: unknown }) => data) },
       operatorUser: {
         upsert: vi.fn(async ({ where, create, update }) => {
           const existing = users.get(where.oidcSub);
@@ -231,6 +234,61 @@ describe("auth flow", () => {
     expect(logout.status).toBe(302);
     expect(logout.headers.get("location")).toContain("https://idp.example/logout");
     expect(store.sessions.size).toBe(0);
+  });
+
+  it("records a successful sign-in with the operator, session and address", async () => {
+    const login = await app.request("/v1/auth/login");
+    const callback = await app.request(
+      "http://127.0.0.1/v1/auth/callback?code=code-1&state=state-1",
+      { headers: { cookie: loginTxCookieFrom(login) } },
+      { incoming: { socket: { remoteAddress: "203.0.113.9" } } },
+    );
+
+    expect(callback.status).toBe(302);
+    const session = onlySession();
+    const written = fakeDb.auditLog.create.mock.calls.map(
+      ([call]: [{ data: Record<string, unknown> }]) => call.data,
+    );
+    // The callback is a GET, so the write middleware never sees it — this row
+    // exists only because the route writes it by hand.
+    expect(written).toContainEqual(
+      expect.objectContaining({
+        action: "auth.login",
+        actorType: "operator",
+        actorLabel: "operator@example.com",
+        targetType: "session",
+        targetId: session.id,
+        ip: "203.0.113.9",
+        statusCode: 302,
+      }),
+    );
+  });
+
+  it("names the operator when the session cannot be created", async () => {
+    const login = await app.request("/v1/auth/login");
+    fakeDb.operatorSession.create.mockRejectedValueOnce(new Error("db down"));
+
+    const callback = await app.request(
+      "http://127.0.0.1/v1/auth/callback?code=code-1&state=state-1",
+      { headers: { cookie: loginTxCookieFrom(login) } },
+    );
+
+    expect(callback.status).toBe(500);
+    const written = fakeDb.auditLog.create.mock.calls.map(
+      ([call]: [{ data: Record<string, unknown> }]) => call.data,
+    );
+    // The operator was persisted before session setup failed, so the row is
+    // attributable rather than a nameless 500.
+    expect(written).toContainEqual(
+      expect.objectContaining({
+        action: "auth.login.failed",
+        actorType: "operator",
+        actorLabel: "operator@example.com",
+        actorUserId: expect.any(String),
+        statusCode: 500,
+        metadata: expect.objectContaining({ reason: "session_setup_failed" }),
+      }),
+    );
   });
 
   it("sends logged-out operators back to the web login screen", async () => {

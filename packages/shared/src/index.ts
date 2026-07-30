@@ -46,7 +46,11 @@ export type TranscriptionStatus = z.infer<typeof TranscriptionStatusSchema>;
 export const ModerationRecommendationSchema = z.enum(["approve", "review", "reject"]);
 export type ModerationRecommendation = z.infer<typeof ModerationRecommendationSchema>;
 
-export const AiProviderSchema = z.enum(["openai", "mac_app", "push", "disabled"]);
+// Provider label recorded on a transcription / moderation row. `openai`,
+// `mac_app`, `push` and `disabled` are the configurable server-side providers;
+// `on_device` is not configurable — it marks a result an operator's own device
+// computed locally and submitted, so the UI can label it as such.
+export const AiProviderSchema = z.enum(["openai", "mac_app", "push", "on_device", "disabled"]);
 export type AiProvider = z.infer<typeof AiProviderSchema>;
 
 export const TranscriptionSchema = z.object({
@@ -220,6 +224,23 @@ export const TranscriptionSubmitSchema = z.object({
   model: z.string().trim().min(1).max(128).nullable().optional(),
 });
 export type TranscriptionSubmit = z.infer<typeof TranscriptionSubmitSchema>;
+
+// Operator-supplied moderation verdict computed on the operator's own device
+// (e.g. the iOS review app running Apple Intelligence). Mirrors the worker
+// push-back callback payload; the verdict is advisory and never decides the
+// message. `provider` is deliberately absent — the server stamps `on_device`
+// so the UI can tell a locally computed verdict from an upstream one, and
+// `model` carries the specific model that produced it.
+export const ModerationSubmitSchema = z.object({
+  transcriptionId: z.guid().nullable().optional(),
+  flagged: z.boolean(),
+  recommendation: ModerationRecommendationSchema,
+  maxScore: z.number().min(0).max(1),
+  categories: z.record(z.string(), z.number()).optional(),
+  reasonSummary: z.string().max(2000).nullable().optional(),
+  model: z.string().trim().min(1).max(128).nullable().optional(),
+});
+export type ModerationSubmit = z.infer<typeof ModerationSubmitSchema>;
 
 // 5 minutes — generous upper bound for booth recordings.
 export const MAX_AUDIO_DURATION_MS = 300_000;
@@ -946,3 +967,39 @@ export type MetricFilterCreate = z.infer<typeof MetricFilterCreateSchema>;
 
 export const MetricFilterUpdateSchema = MetricFilterCreateSchema;
 export type MetricFilterUpdate = z.infer<typeof MetricFilterUpdateSchema>;
+
+// ---------------------------------------------------------------------------
+// Audit log
+// ---------------------------------------------------------------------------
+// Every write action against the operator API is recorded with the actor, the
+// client IP, and a timestamp. See docs/audit-log.md.
+
+export const AuditActorTypeSchema = z.enum(["operator", "apiToken", "anonymous", "system"]);
+export type AuditActorType = z.infer<typeof AuditActorTypeSchema>;
+
+export const AuditLogEntrySchema = z.object({
+  id: z.guid(),
+  action: z.string(),
+  targetType: z.string().nullable(),
+  targetId: z.string().nullable(),
+  actorType: AuditActorTypeSchema,
+  actorUserId: z.string().nullable(),
+  actorTokenId: z.string().nullable(),
+  // Human-readable snapshot of the actor taken at write time (operator email,
+  // or `token:<name>`). Survives the referenced row being deleted or revoked.
+  actorLabel: z.string(),
+  ip: z.string().nullable(),
+  userAgent: z.string().nullable(),
+  method: z.string(),
+  path: z.string(),
+  statusCode: z.number().int(),
+  metadata: z.record(z.string(), z.unknown()).nullable(),
+  createdAt: z.string().datetime(),
+});
+export type AuditLogEntry = z.infer<typeof AuditLogEntrySchema>;
+
+export const AuditLogPageSchema = z.object({
+  items: z.array(AuditLogEntrySchema),
+  nextCursor: z.string().nullable(),
+});
+export type AuditLogPage = z.infer<typeof AuditLogPageSchema>;

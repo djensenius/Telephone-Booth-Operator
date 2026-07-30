@@ -15,6 +15,7 @@ import {
   type StatsOverview,
   type StatsWindow,
 } from "@telephone-booth-operator/shared";
+import { recordAudit } from "../lib/audit.js";
 import { wsBroadcaster } from "../lib/broadcaster.js";
 import { db } from "../lib/db.js";
 import { countMessagesAwaitingModeration } from "../lib/moderation-badge.js";
@@ -659,6 +660,11 @@ statsRouter.post(
   async (c) => {
     const user = c.get("user");
     const body = c.req.valid("json");
+    recordAudit(c, {
+      action: "metricFilter.create",
+      targetType: "metricFilter",
+      metadata: { name: body.name, window: body.window ?? null },
+    });
     const row = (await db.metricFilter.create({
       data: {
         userId: user.id,
@@ -668,6 +674,7 @@ statsRouter.post(
         rangeEnd: body.end ? new Date(body.end) : null,
       },
     })) as unknown as MetricFilterRow;
+    recordAudit(c, { targetId: row.id });
     return c.json(serializeMetricFilter(row), 201);
   },
 );
@@ -696,6 +703,12 @@ statsRouter.put(
     const user = c.get("user");
     const { id } = c.req.valid("param");
     const body = c.req.valid("json");
+    recordAudit(c, {
+      action: "metricFilter.update",
+      targetType: "metricFilter",
+      targetId: id,
+      metadata: { name: body.name, window: body.window ?? null },
+    });
     const existing = (await db.metricFilter.findUnique({
       where: { id },
     })) as unknown as MetricFilterRow & { userId: string };
@@ -720,6 +733,7 @@ statsRouter.delete(
   async (c) => {
     const user = c.get("user");
     const { id } = c.req.valid("param");
+    recordAudit(c, { action: "metricFilter.delete", targetType: "metricFilter", targetId: id });
     const existing = (await db.metricFilter.findUnique({
       where: { id },
     })) as unknown as { userId: string } | null;

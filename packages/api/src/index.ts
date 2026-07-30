@@ -13,6 +13,8 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { pathToFileURL } from "node:url";
 import { startAiSweeper } from "./lib/ai/sweeper.js";
+import { auditWrites, type AuditVariables } from "./lib/audit.js";
+import { startAuditPruner } from "./lib/audit-pruner.js";
 import { startSnapshotPruner } from "./lib/snapshot-pruner.js";
 import {
   AuthConfigurationError,
@@ -23,6 +25,7 @@ import {
 import { requireOperator, type AuthVariables } from "./lib/session.js";
 import apiTokensRouter from "./routes/api-tokens.js";
 import { adminDataRouter } from "./routes/admin-data.js";
+import { auditRouter } from "./routes/audit.js";
 import { authRoutes } from "./routes/auth.js";
 import { devicesRouter } from "./routes/devices.js";
 import { eventsRouter } from "./routes/events.js";
@@ -44,8 +47,8 @@ const webOrigins = (): string[] =>
     .map((origin) => origin.trim())
     .filter(Boolean);
 
-export const createApp = (): Hono<{ Variables: AuthVariables }> => {
-  const app = new Hono<{ Variables: AuthVariables }>();
+export const createApp = (): Hono<{ Variables: AuthVariables & AuditVariables }> => {
+  const app = new Hono<{ Variables: AuthVariables & AuditVariables }>();
 
   app.use("*", logger());
   app.use(
@@ -55,6 +58,8 @@ export const createApp = (): Hono<{ Variables: AuthVariables }> => {
       origin: (origin) => (webOrigins().includes(origin) ? origin : ""),
     }),
   );
+  // Mounted before every auth guard so rejected writes are audited too.
+  app.use("/v1/*", auditWrites());
 
   app.get("/healthz", (c) =>
     c.json({
@@ -88,6 +93,7 @@ export const createApp = (): Hono<{ Variables: AuthVariables }> => {
   app.route("/v1/uploads", uploadsRouter);
   app.route("/v1/devices", devicesRouter);
   app.route("/v1/admin/data", adminDataRouter);
+  app.route("/v1/audit-logs", auditRouter);
   app.route("/v1/ws", wsRouter);
 
   return app;
@@ -114,6 +120,7 @@ const start = (): void => {
   attachStatusWebSocket(server);
   startAiSweeper();
   startSnapshotPruner();
+  startAuditPruner();
 };
 
 const app = createApp();

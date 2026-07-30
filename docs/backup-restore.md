@@ -36,7 +36,8 @@ and anything older, and rejects anything newer than it understands.
 | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1       | Original shape.                                                                                                                                                                                                        |
 | 2       | Booth status snapshots carry `firstSeenAt`/`repeatCount`. Version 1 snapshots restore with their window starting at the report time.                                                                                   |
-| 3       | Installations are exported, and scoped rows carry `installationId`. Older archives restore untagged rows into an ended `Restored <generatedAt>` installation so they remain browsable without becoming the active era. |
+| 3       | Includes the [audit log](audit-log.md). Older archives restore with no audit history.                                                                                                                                  |
+| 4       | Installations are exported, and scoped rows carry `installationId`. Older archives restore untagged rows into an ended `Restored <generatedAt>` installation so they remain browsable without becoming the active era. |
 
 ## Endpoints
 

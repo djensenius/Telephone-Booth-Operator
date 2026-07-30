@@ -11,6 +11,7 @@ import {
   TelephoneBanner,
 } from "../components/booth/index.js";
 import { AboutScreen } from "../features/about/AboutScreen.js";
+import { AuditScreen } from "../features/audit/AuditScreen.js";
 import { LoginScreen } from "../features/auth/LoginScreen.js";
 import { LogoutButton } from "../features/auth/LogoutButton.js";
 import { RequireAuth } from "../features/auth/RequireAuth.js";
@@ -149,9 +150,14 @@ function AppLayout(): JSX.Element {
                     <Link to="/sessions">Sessions</Link>
                   </li>
                   {isAdmin ? (
-                    <li>
-                      <Link to="/installations">Installations</Link>
-                    </li>
+                    <>
+                      <li>
+                        <Link to="/installations">Installations</Link>
+                      </li>
+                      <li>
+                        <Link to="/audit">Audit log</Link>
+                      </li>
+                    </>
                   ) : null}
                 </ul>
               </nav>
@@ -276,6 +282,12 @@ const sessionsRoute = createRoute({
   component: () => protectedScreen(<SessionsScreen />),
 });
 
+const auditRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/audit",
+  component: () => adminScreen(<AuditScreen />),
+});
+
 const statsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/stats",
@@ -330,6 +342,7 @@ const routeTree = rootRoute.addChildren([
   sessionsRoute,
   statsRoute,
   installationsRoute,
+  auditRoute,
   sessionDetailRoute,
   loginRoute,
   aboutRoute,

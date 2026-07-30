@@ -14,18 +14,20 @@ import { createHash } from "node:crypto";
 import { Prisma } from "../generated/prisma/client.js";
 import { downloadBlob, headBlob, uploadBlob } from "./azure-blob.js";
 import { createTar, readTar } from "./archive.js";
+import { boundAuditFields } from "./audit.js";
 import { db } from "./db.js";
 import { closeOutInstallation, invalidateActiveInstallationCache } from "./installation.js";
 
 export const EXPORT_FORMAT = "telephone-booth-export";
 // 1: original shape. 2: BoothStatusSnapshot carries `firstSeenAt`/`repeatCount`.
-// 3: rows carry `installationId` and the archive may be scoped to one
-// installation. Bumped so a server that predates the collapse rejects the
-// archive as newer than supported instead of failing on unknown columns
-// mid-restore. Older archives still import — `withStatusWindow` fills the
-// missing window, and legacy untagged rows are adopted into a deterministic
-// ended "Restored …" installation after the archived rows are upserted.
-export const EXPORT_VERSION = 3;
+// 3: adds the AuditLog trail. 4: rows carry `installationId` and the archive
+// may be scoped to one installation. Each bump makes a server that predates the
+// change reject the archive as newer than supported instead of failing on
+// unknown columns mid-restore. Older archives still import — `withStatusWindow`
+// fills the missing status window, absent tables restore as empty, and legacy
+// untagged rows are adopted into a deterministic ended "Restored …"
+// installation after the archived rows are upserted.
+export const EXPORT_VERSION = 4;
 // Manifest models added after v1. Nothing to migrate; listed for the record.
 const INSTALLATION_MODEL = "installation" as const;
 
@@ -45,6 +47,9 @@ const IMPORT_ORDER = [
   "moderation",
   "metricFilter",
   "mobileDevice",
+  // Last: rows reference OperatorUser and ApiToken. A backup that dropped the
+  // audit trail would lose the record of who did what (issue #123).
+  "auditLog",
 ] as const;
 
 type ModelName = (typeof IMPORT_ORDER)[number];
@@ -226,6 +231,10 @@ const EXCLUDED_FROM_SCOPED_EXPORT = new Set<ModelName>([
   "apiToken",
   "mobileDevice",
   "metricFilter",
+  // The trail spans every era and carries operator identities and addresses.
+  // A scoped archive is a per-era artifact that gets handed around, so it must
+  // not carry the whole history of who did what with it.
+  "auditLog",
 ]);
 
 // The era being exported, plus any era a carried-over question still belongs
@@ -419,7 +428,7 @@ const adoptLegacyRows = async (
   manifest: ExportManifest,
   dump: DataDump,
 ): Promise<void> => {
-  if (manifest.version >= 3) return;
+  if (manifest.version >= 4) return;
 
   const installationId = restoredInstallationId(manifest);
   const generatedAt = dateFromManifest(manifest);
@@ -549,13 +558,29 @@ export const restoreImportArchive = async (archive: Buffer): Promise<ImportSumma
         const client = modelClientOf(tx, name);
         let count = 0;
         for (const row of dump[name]) {
-          // A partial parent era carries no counters of its own (see the
-          // export side), so applying it over a real row would erase that
-          // row's frozen summary. Create it on a target that lacks it, leave
-          // it alone on a target that already knows the real thing.
-          const update =
-            name === INSTALLATION_MODEL && partialInstallations.has(String(row.id)) ? {} : row;
-          await client.upsert({ where: { id: row.id }, create: row, update });
+          // The audit trail is append-only: an archive may add history that is
+          // missing locally, but it must never rewrite an entry that exists.
+          if (name === "auditLog") {
+            // An archive is operator-supplied data: bound it exactly as a
+            // live write is bounded, so a crafted file cannot smuggle an
+            // oversized or malformed row into the trail.
+            const { metadata, ...bounded } = boundAuditFields(row);
+            // Prisma rejects a plain `null` for a nullable Json column, so an
+            // exported row without metadata has to omit the field entirely.
+            const create = {
+              ...bounded,
+              ...(metadata ? { metadata: metadata as Prisma.InputJsonValue } : {}),
+            };
+            await client.upsert({ where: { id: row.id }, create, update: {} });
+          } else {
+            // A partial parent era carries no counters of its own (see the
+            // export side), so applying it over a real row would erase that
+            // row's frozen summary. Create it on a target that lacks it, leave
+            // it alone on a target that already knows the real thing.
+            const update =
+              name === INSTALLATION_MODEL && partialInstallations.has(String(row.id)) ? {} : row;
+            await client.upsert({ where: { id: row.id }, create: row, update });
+          }
           count += 1;
         }
         rows[name] = count;

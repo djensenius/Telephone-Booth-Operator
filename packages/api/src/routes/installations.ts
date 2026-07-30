@@ -17,6 +17,7 @@ import {
   InstallationUpdateSchema,
   type InstallationPurgeResult,
 } from "@telephone-booth-operator/shared";
+import { recordAudit } from "../lib/audit.js";
 import { deleteBlob } from "../lib/azure-blob.js";
 import { wsBroadcaster } from "../lib/broadcaster.js";
 import { buildExportArchive } from "../lib/data-archive.js";
@@ -219,6 +220,12 @@ installationsRouter.post(
       { installationId: created.id, copyQuestions: body.copyQuestions },
       "installation started",
     );
+    recordAudit(c, {
+      action: "installation.start",
+      targetType: "installation",
+      targetId: created.id,
+      metadata: { name: created.name, copyQuestions: body.copyQuestions === true },
+    });
     return c.json(dto, 201);
   },
 );
@@ -241,6 +248,12 @@ installationsRouter.patch(
         ...(body.notes !== undefined ? { notes: body.notes } : {}),
         ...(body.location !== undefined ? { location: body.location } : {}),
       },
+    });
+    recordAudit(c, {
+      action: "installation.update",
+      targetType: "installation",
+      targetId: id,
+      metadata: { fields: Object.keys(body) },
     });
     return c.json(serializeInstallation(updated));
   },
@@ -298,6 +311,12 @@ installationsRouter.post(
     const dto = serializeInstallation(ended);
     wsBroadcaster.broadcast({ kind: "installation", installation: dto });
     log.info({ installationId: id }, "installation ended");
+    recordAudit(c, {
+      action: "installation.end",
+      targetType: "installation",
+      targetId: id,
+      metadata: { name: ended.name },
+    });
     return c.json(dto);
   },
 );
@@ -394,6 +413,14 @@ installationsRouter.delete(
 
     log.warn({ installationId: id, rows, ...result }, "installation purged");
     const body: InstallationPurgeResult = { installationId: id, rows, ...result };
+    // The rows this destroyed are gone for good, so the trail is the only
+    // record left that it happened at all.
+    recordAudit(c, {
+      action: "installation.purge",
+      targetType: "installation",
+      targetId: id,
+      metadata: { name: existing.name, rows, blobsDeleted: result.blobsDeleted },
+    });
     return c.json(body);
   },
 );

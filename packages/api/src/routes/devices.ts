@@ -13,6 +13,7 @@ import {
 } from "@telephone-booth-operator/shared";
 import { Hono } from "hono";
 import { z } from "zod";
+import { recordAudit } from "../lib/audit.js";
 import { db } from "../lib/db.js";
 import { type AuthVariables } from "../lib/session.js";
 
@@ -73,6 +74,12 @@ export const devicesRouter = new Hono<{ Variables: AuthVariables }>()
   .post("/", zValidator("json", RegisterMobileDeviceRequestSchema), async (c) => {
     const user = c.get("user");
     const body = c.req.valid("json");
+    // The APNs token is a device credential; only the platform is recorded.
+    recordAudit(c, {
+      action: "device.register",
+      targetType: "device",
+      metadata: { platform: body.platform },
+    });
     const preferences = mergePreferences(undefined, body.preferences);
     const row = await db.mobileDevice.upsert({
       where: { apnsToken_platform: { apnsToken: body.apnsToken, platform: body.platform } },
@@ -94,6 +101,7 @@ export const devicesRouter = new Hono<{ Variables: AuthVariables }>()
         revokedAt: null,
       },
     });
+    recordAudit(c, { targetId: row.id });
     return c.json(toSummary(row), 201);
   })
   .patch(
@@ -104,6 +112,7 @@ export const devicesRouter = new Hono<{ Variables: AuthVariables }>()
       const user = c.get("user");
       const { id } = c.req.valid("param");
       const body = c.req.valid("json");
+      recordAudit(c, { action: "device.update", targetType: "device", targetId: id });
       const existing = await db.mobileDevice.findFirst({
         where: { id, userId: user.id, revokedAt: null },
       });
@@ -124,6 +133,7 @@ export const devicesRouter = new Hono<{ Variables: AuthVariables }>()
   .delete("/:id", zValidator("param", idParam), async (c) => {
     const user = c.get("user");
     const { id } = c.req.valid("param");
+    recordAudit(c, { action: "device.revoke", targetType: "device", targetId: id });
     const result = await db.mobileDevice.updateMany({
       where: { id, userId: user.id, revokedAt: null },
       data: { revokedAt: new Date() },

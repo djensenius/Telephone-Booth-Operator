@@ -2,6 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import { InstructionCreateSchema, InstructionStatusSchema } from "@telephone-booth-operator/shared";
 import { Hono } from "hono";
 import { z } from "zod";
+import { recordAudit } from "../lib/audit.js";
 import { db } from "../lib/db.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 import { serializeInstruction } from "../lib/serializers.js";
@@ -48,6 +49,11 @@ instructionsRouter.post(
   zValidator("json", InstructionCreateSchema),
   async (c) => {
     const body = c.req.valid("json");
+    recordAudit(c, {
+      action: "instruction.create",
+      targetType: "instruction",
+      metadata: { status: body.status ?? "active" },
+    });
     const audio = await db.file.findUnique({ where: { id: body.audioFileId } });
     if (!audio) return c.json({ error: "audio_file_not_found" }, 404);
 
@@ -60,6 +66,7 @@ instructionsRouter.post(
         },
         include: { audio: true },
       });
+      recordAudit(c, { targetId: instruction.id });
       return c.json(serializeInstruction(instruction), 201);
     } catch {
       return c.json({ error: "instruction_conflict" }, 409);
@@ -73,6 +80,7 @@ instructionsRouter.post(
   zValidator("param", idParamSchema),
   async (c) => {
     const { id } = c.req.valid("param");
+    recordAudit(c, { action: "instruction.activate", targetType: "instruction", targetId: id });
     const instruction = await db.instruction.findUnique({ where: { id } });
     if (!instruction) return c.json({ error: "not_found" }, 404);
 
@@ -91,6 +99,7 @@ instructionsRouter.post(
   zValidator("param", idParamSchema),
   async (c) => {
     const { id } = c.req.valid("param");
+    recordAudit(c, { action: "instruction.deactivate", targetType: "instruction", targetId: id });
     const instruction = await db.instruction.findUnique({ where: { id } });
     if (!instruction) return c.json({ error: "not_found" }, 404);
 
@@ -105,6 +114,7 @@ instructionsRouter.post(
 
 instructionsRouter.delete("/:id", requireAdmin(), zValidator("param", idParamSchema), async (c) => {
   const { id } = c.req.valid("param");
+  recordAudit(c, { action: "instruction.delete", targetType: "instruction", targetId: id });
   const instruction = await db.instruction.findUnique({ where: { id } });
   if (!instruction) return c.json({ error: "not_found" }, 404);
 

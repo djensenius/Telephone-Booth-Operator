@@ -126,6 +126,14 @@ server {
 }
 ```
 
+Set `TRUSTED_PROXIES` to the address nginx connects from (its address on the
+compose network, or a CIDR covering it). The API ignores `X-Forwarded-For`
+from any peer that is not listed, and reads the chain right to left, so the
+`$proxy_add_x_forwarded_for` above is safe even though it preserves whatever
+the caller sent. Without `TRUSTED_PROXIES`, sessions and audit rows record
+nginx's own address instead of the operator's. See
+[`audit-log.md`](audit-log.md).
+
 ## Database migrations on deploy
 
 The API container does not run Prisma migrations automatically. Run migrations

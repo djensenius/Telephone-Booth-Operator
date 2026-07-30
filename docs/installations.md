@@ -10,7 +10,7 @@ none between ending an era and the booth's next write, which is normal rather
 than a fault; see [Reading history](#reading-history).
 
 > Why it works this way, and what was rejected:
-> [ADR 0011](adr/0011-installations-as-data-scope.md).
+> [ADR 0013](adr/0013-installations-as-data-scope.md).
 
 ## What is and isn't scoped
 
@@ -194,6 +194,14 @@ Guardrails:
   rather than deleted, so the booth's completion call still lands. If no era is
   open to move it to, the purge is refused with `409 uploads_in_flight`; make a
   call, or wait for the booth to, and try again.
+- The purge is recorded in the [audit log](audit-log.md) as
+  `installation.purge`. That entry is global rather than era-scoped, so it
+  outlives the rows it describes — after a purge it is the only record that the
+  era existed. Starting, ending, and renaming an era are recorded too.
+
+The scoped archive offered before a purge carries no audit rows: the trail spans
+every era and names operators and their addresses, and this file is meant to be
+handed around.
 
 The response reports what happened:
 

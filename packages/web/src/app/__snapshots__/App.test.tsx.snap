@@ -304,6 +304,13 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
               Installations
             </a>
           </li>
+          <li>
+            <a
+              href="/audit"
+            >
+              Audit log
+            </a>
+          </li>
         </ul>
       </nav>
     </aside>

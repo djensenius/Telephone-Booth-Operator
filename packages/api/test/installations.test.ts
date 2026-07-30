@@ -856,6 +856,26 @@ describe("installations", () => {
       expect(store.installations.get(DEFAULT_INSTALLATION_ID)).toBeDefined();
     });
 
+    // A purge is the one operation whose evidence destroys itself. The trail is
+    // global rather than era-scoped, so it survives — and it is all that is
+    // left to say the era ever existed.
+    it("records the purge in the audit trail", async () => {
+      const app = createApp();
+      expect((await endDefault(app)).status).toBe(200);
+
+      const res = await app.request(`/v1/installations/${DEFAULT_INSTALLATION_ID}`, {
+        method: "DELETE",
+        headers: jsonHeaders(adminHeaders()),
+        body: JSON.stringify({ confirmName: "Installation 1" }),
+      });
+      expect(res.status, await res.clone().text()).toBe(200);
+
+      const entry = store.auditLogs.find((row) => row.action === "installation.purge");
+      expect(entry).toBeDefined();
+      expect(entry?.targetId).toBe(DEFAULT_INSTALLATION_ID);
+      expect(entry?.metadata).toMatchObject({ name: "Installation 1" });
+    });
+
     it("deletes the era's rows and its unreferenced blobs", async () => {
       const file = seedFile({ blobKey: "messages/aa/aaa.flac", sha256: "sha-purge" });
       seedBlobData(file.blobKey, Buffer.from("audio"), file.sha256);
@@ -1312,6 +1332,41 @@ describe("installations", () => {
       ) as { file?: { id: string }[]; question?: { id: string }[] };
       expect(dump.file?.map((row) => row.id)).toEqual([mine.id]);
       expect(dump.question?.map((row) => row.id)).toEqual(["cccccccc-0000-4000-8000-0000000000a1"]);
+    });
+
+    // The trail spans every era and names operators and their addresses. A
+    // scoped archive is a per-era artifact the operator hands around — it must
+    // not carry the whole history of who did what with it.
+    it("leaves the audit trail out of a scoped archive", async () => {
+      const app = createApp();
+      store.auditLogs.push({
+        id: "dddddddd-0000-4000-8000-0000000000d1",
+        action: "message.approve",
+        targetType: "message",
+        targetId: null,
+        actorType: "operator",
+        actorUserId: null,
+        actorTokenId: null,
+        actorLabel: "operator@example.com",
+        ip: "203.0.113.7",
+        userAgent: null,
+        method: "POST",
+        path: "/v1/messages/x/decision",
+        statusCode: 200,
+        metadata: null,
+        createdAt: new Date("2026-05-01T00:00:00.000Z"),
+      });
+
+      const res = await app.request(`/v1/installations/${DEFAULT_INSTALLATION_ID}/export`, {
+        headers: adminHeaders(),
+      });
+      expect(res.status, await res.clone().text()).toBe(200);
+
+      const entries = readTar(Buffer.from(await res.arrayBuffer()));
+      const dump = JSON.parse(
+        entries.find((entry) => entry.name === "data.json")?.data.toString("utf8") ?? "{}",
+      ) as { auditLog?: unknown[] };
+      expect(dump.auditLog).toEqual([]);
     });
 
     // A straggler message is filed in the open era while its question stays
