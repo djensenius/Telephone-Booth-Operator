@@ -66,6 +66,28 @@ Starting an installation therefore adopts an active era with no activity in it
 instead of returning `409`. Only an era the booth has actually recorded into is
 treated as a genuine conflict.
 
+### Accepted: writes are not serialised against the rollover
+
+Ending an era is not locked against booth writes. A write that resolves the
+active era microseconds before the rollover commits will insert afterwards, and
+that row lands in the era that genuinely was current when the booth recorded
+it. Attributing it to an era that had not started yet would be worse, and
+taking a shared lock on every booth write — the path that must never drop a
+recording — is too high a price for a sub-second window on a counter.
+
+What is *not* accepted is a straggler mutating an era after it was frozen. A
+`call_ended` for a session the rollover already closed does not take the update
+arm, and booth events are tagged with the era of the session they belong to
+rather than whichever era is open. An ended era therefore always agrees with
+its own drill-down.
+
+### Reads never open an era
+
+Only a booth write lazily creates an installation. Between an era ending and
+the booth's next write, scoped reads match nothing rather than resolving
+through the write path — loading a screen must not change what the booth is
+recording into.
+
 ### Why `installationId` is nullable
 
 The column is nullable but always populated at write time. Nullable avoids a
