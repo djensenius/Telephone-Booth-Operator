@@ -27,6 +27,16 @@ function optionLabel(installation: Installation): string {
   return `${installation.name} — started ${stamp} (${installation.id.slice(0, 8)})`;
 }
 
+// Whether the selected scope is an era whose counters are frozen. "All" spans
+// open and closed eras, so it is not treated as frozen; the API is the thing
+// that actually refuses a write against a closed one.
+export function useScopeIsFrozen(scope: InstallationScope | undefined): boolean {
+  const listQuery = useInstallationsList();
+  if (scope === undefined || scope === INSTALLATION_SCOPE_ALL) return false;
+  const match = (listQuery.data?.items ?? []).find((item) => item.id === scope);
+  return match !== undefined && !match.isActive;
+}
+
 // Shared installation-scope selector used by the observability screens
 // (messages, sessions, events) and the stats screen. Rendering "Active
 // installation" as the default matches the API's own default (no scope =

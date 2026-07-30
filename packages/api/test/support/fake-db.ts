@@ -1031,6 +1031,7 @@ export const fakeDb = {
       select?: {
         id?: boolean;
         status?: boolean;
+        installationId?: boolean;
         audio?: boolean | { select?: Record<string, boolean> };
       };
     }) => {
@@ -1042,6 +1043,7 @@ export const fakeDb = {
         const out: Record<string, unknown> = {};
         if (select.id) out.id = message.id;
         if (select.status) out.status = message.status;
+        if (select.installationId) out.installationId = message.installationId ?? null;
         if (select.audio) {
           const audio = store.files.get(message.audioId) ?? null;
           if (audio === null) {

@@ -336,6 +336,24 @@ installationsRouter.delete(
     if (!existing.endedAt) return c.json({ error: "installation_active" }, 409);
     if (confirmName !== existing.name) return c.json({ error: "name_mismatch" }, 400);
 
+    // The rollover deliberately leaves `uploading` rows behind: the recording
+    // is still in flight, and `/messages/:id/complete` files the finished
+    // audio into whichever era is open by then. Deleting one here would make
+    // that completion call 404 and lose the recording, so re-home them first.
+    // With nothing open there is nowhere to put them, and the purge waits.
+    const inFlight = await db.message.findMany({
+      where: { installationId: id, status: "uploading" },
+      select: { id: true },
+    });
+    if (inFlight.length > 0) {
+      const open = await findActiveInstallation();
+      if (!open) return c.json({ error: "uploads_in_flight" }, 409);
+      await db.message.updateMany({
+        where: { id: { in: inFlight.map((row) => row.id) } },
+        data: { installationId: open.id },
+      });
+    }
+
     // Candidate blobs are resolved before the delete so we still know which
     // files belonged to this era once the rows are gone.
     const ownedFiles = await filesOwnedByInstallation(id);

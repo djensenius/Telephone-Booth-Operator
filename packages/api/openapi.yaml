@@ -421,6 +421,10 @@ paths:
         "404": { description: not found }
     delete:
       summary: Delete a message row.
+      description: >-
+        Refuses a message belonging to an ended installation: that era's
+        counters were frozen at close-out and deleting a row would leave the
+        summary disagreeing with its own drill-down.
       tags: [messages]
       security:
         - operatorSession: []
@@ -428,6 +432,7 @@ paths:
       responses:
         "204": { description: deleted }
         "404": { description: not found }
+        "409": { description: the message's installation has ended }
 
   /v1/messages/{id}/complete:
     parameters:
@@ -572,7 +577,8 @@ paths:
         pipeline by approving or rejecting a message. Sets the message
         `status`, `decidedAt`, and `decidedById`, and optionally replaces
         `notes`. Only valid once the recording has landed — a message that
-        is still `uploading` returns `409`.
+        is still `uploading` returns `409`, as does one belonging to an
+        installation that has ended — those counters are frozen.
       tags: [messages]
       security:
         - operatorSession: []
@@ -594,7 +600,10 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Message" }
         "404": { description: message not found }
-        "409": { description: message is still uploading and cannot be decided }
+        "409":
+          description: >-
+            the message is still uploading, or its installation has ended and
+            its counters are frozen
 
   /v1/messages/{id}/translation:
     parameters:
@@ -825,8 +834,9 @@ paths:
       summary: List installations, newest first.
       description: |
         An installation is a named era of the booth — one run of the art
-        piece. Exactly one is active (`endedAt: null`) at a time. Ending an
-        installation does not delete anything; time-series data keeps its
+        piece. At most one is active (`endedAt: null`) at a time, and there
+        is none between an era ending and the next booth write, which opens
+        one. Ending an installation does not delete anything; data keeps its
         `installationId` and stays readable under that scope.
       tags: [installations]
       security:
@@ -931,6 +941,10 @@ paths:
         Refuses the active installation. The caller must echo the exact
         installation name in `confirmName` as a deliberate speed bump.
         Take an archive first — this cannot be undone.
+
+        A recording still uploading into this era is moved to the era that is
+        open rather than deleted, so the booth's completion call still lands.
+        With no open era to move it to, the purge is refused.
       tags: [installations]
       security:
         - operatorSession: []
@@ -950,7 +964,10 @@ paths:
         "401": { description: missing or invalid credentials }
         "403": { description: operator is not an admin }
         "404": { description: not found }
-        "409": { description: installation is still active }
+        "409":
+          description: >-
+            the installation is still active, or a recording is still uploading
+            into it and no other era is open to receive it
 
   /v1/installations/{id}/end:
     parameters:

@@ -31,6 +31,10 @@ export interface MessageCardProps {
   readonly onDecide: (id: string, decision: "approve" | "reject") => void;
   readonly onRetranscribe: (id: string) => void;
   readonly onDelete: (id: string, trigger: HTMLButtonElement) => void;
+  // An ended era's counters are frozen, so its recordings are read-only: the
+  // API refuses a decision or a delete against them and the card should not
+  // offer either.
+  readonly frozen?: boolean;
 }
 
 export function MessageCard({
@@ -41,6 +45,7 @@ export function MessageCard({
   onDecide,
   onRetranscribe,
   onDelete,
+  frozen = false,
 }: MessageCardProps): JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const receivedAt = message.receivedAt ?? message.createdAt;
@@ -116,26 +121,30 @@ export function MessageCard({
       </div>
 
       <div className="message-card__actions">
-        <button
-          type="button"
-          className="feature-button feature-button--approve"
-          disabled={!decidable}
-          onClick={() => onDecide(message.id, "approve")}
-        >
-          Approve
-        </button>
-        <button
-          type="button"
-          className="feature-button feature-button--reject"
-          disabled={!decidable}
-          onClick={() => onDecide(message.id, "reject")}
-        >
-          Reject
-        </button>
+        {frozen ? null : (
+          <>
+            <button
+              type="button"
+              className="feature-button feature-button--approve"
+              disabled={!decidable}
+              onClick={() => onDecide(message.id, "approve")}
+            >
+              Approve
+            </button>
+            <button
+              type="button"
+              className="feature-button feature-button--reject"
+              disabled={!decidable}
+              onClick={() => onDecide(message.id, "reject")}
+            >
+              Reject
+            </button>
+          </>
+        )}
         <Link to="/messages/$id" params={{ id: message.id }}>
           Open
         </Link>
-        {status.canRetry && !uploading ? (
+        {status.canRetry && !uploading && !frozen ? (
           <button type="button" disabled={busy} onClick={() => onRetranscribe(message.id)}>
             Re-run transcription
           </button>
@@ -145,13 +154,17 @@ export function MessageCard({
             Download
           </a>
         )}
-        <button
-          type="button"
-          disabled={busy}
-          onClick={(event) => onDelete(message.id, event.currentTarget)}
-        >
-          Delete
-        </button>
+        {frozen ? (
+          <span className="message-card__frozen">Archived era — read-only</span>
+        ) : (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={(event) => onDelete(message.id, event.currentTarget)}
+          >
+            Delete
+          </button>
+        )}
       </div>
     </article>
   );

@@ -120,6 +120,11 @@ installation. Reads in that window return an empty result rather than opening
 a new era: only a booth write does that, so loading a screen never changes what
 the booth is recording into.
 
+An ended era is **read-only** for anything its frozen counters describe: the
+API refuses a moderation decision or a delete on one of its recordings
+(`409 installation_ended`), and the queue hides those actions when you are
+browsing history. Playback, transcripts and exports are unaffected.
+
 > **This changed the default.** Before installations existed, these endpoints
 > meant "everything ever". They now mean "this run". Pass `installationId=all`
 > for the old behaviour.
@@ -169,6 +174,10 @@ Guardrails:
   message, or instruction — for instance a question copied forward into the
   current era — is **retained**, along with its blob. Without this, purging an
   old era would silently mute a live booth.
+- A recording still uploading into the era is moved to the era that is open
+  rather than deleted, so the booth's completion call still lands. If no era is
+  open to move it to, the purge is refused with `409 uploads_in_flight`; make a
+  call, or wait for the booth to, and try again.
 
 The response reports what happened:
 

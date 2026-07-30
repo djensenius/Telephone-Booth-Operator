@@ -130,10 +130,26 @@ messagesRouter.get("/:id", zValidator("param", idParamSchema), async (c) => {
   return c.json(serializeMessage(message as never));
 });
 
+// An ended era's counters are frozen at close-out, so anything that would
+// change what they counted — a moderation decision, a deletion — is refused
+// once the era is closed. Transcribing or translating an old recording is
+// still allowed: it adds text without contradicting a frozen number.
+const eraIsEnded = async (installationId: string | null): Promise<boolean> => {
+  if (installationId === null) return false;
+  const era = await db.installation.findUnique({
+    where: { id: installationId },
+    select: { endedAt: true },
+  });
+  return era?.endedAt != null;
+};
+
 messagesRouter.delete("/:id", zValidator("param", idParamSchema), async (c) => {
   const { id } = c.req.valid("param");
   const existing = await db.message.findUnique({ where: { id } });
   if (!existing) return c.json({ error: "not_found" }, 404);
+  if (await eraIsEnded(existing.installationId)) {
+    return c.json({ error: "installation_ended" }, 409);
+  }
   await db.message.delete({ where: { id } });
   return c.body(null, 204);
 });
@@ -444,11 +460,14 @@ messagesRouter.post(
     const { decision, notes } = c.req.valid("json");
     const existing = await db.message.findUnique({
       where: { id },
-      select: { id: true, status: true },
+      select: { id: true, status: true, installationId: true },
     });
     if (!existing) return c.json({ error: "not_found" }, 404);
     if (existing.status === "uploading") {
       return c.json({ error: "message_not_decidable" }, 409);
+    }
+    if (await eraIsEnded(existing.installationId)) {
+      return c.json({ error: "installation_ended" }, 409);
     }
     const user = c.get("user") as { id: string } | undefined;
     await db.message.update({

@@ -70,9 +70,10 @@ uploaded only when the target storage does not already hold it (dedupe by
 archived `sha256` before upload, so a corrupted archive is rejected.
 
 Only one installation may be open at a time. If the archive carries an active
-era and the target already has one, the target's yields: an era with nothing
-recorded against it is removed, and one holding data is closed out so nothing
-becomes unreachable. That close-out is the same operation `POST /:id/end`
+era and the target already has one, the target's yields: it is closed out, so
+nothing becomes unreachable and no replica is left holding a deleted era as its
+active one. An era with nothing recorded against it is closed too, and shows up
+in the history list as an empty run. That close-out is the same operation `POST /:id/end`
 performs — open sessions are ended, the moderation queue is emptied, live
 questions are retired and the summary is frozen — so a restored instance never
 inherits an era that is ended in name only while its pending messages keep

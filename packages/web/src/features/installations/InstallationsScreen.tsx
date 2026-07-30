@@ -533,8 +533,9 @@ export function InstallationsScreen(): JSX.Element {
       <p className="screen-kicker">Operator console · Admin</p>
       <h1>Installations</h1>
       <p>
-        An installation is one run of the booth. Exactly one era is active at a time; ending it
-        freezes its counters and archives its questions without deleting anything.
+        An installation is one run of the booth. At most one era is active at a time — none between
+        ending one and the booth&rsquo;s next call, which starts the next. Ending an era freezes its
+        counters and archives its questions without deleting anything.
       </p>
       {hasActive ? null : <StartInstallationForm />}
       {listQuery.isError ? (

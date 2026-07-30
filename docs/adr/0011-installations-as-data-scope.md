@@ -120,6 +120,18 @@ What the lock does _not_ do is change which era a write belongs to. A recording
 that commits before the close-out is drained by it, exactly as it should be;
 one that arrives afterwards lands in the era that is open.
 
+### Accepted: a purge can strand a replica's cached era id
+
+A restore closes the era it displaces rather than deleting it, because another
+replica may still hold that id as its cached active installation and would fail
+its next booth write's foreign key. A purge does delete, and takes the same
+risk in theory.
+
+In practice it cannot happen the same way. The cache lives for five seconds,
+and a purge only accepts an era that is already ended — which means a separate,
+earlier request ended it, an archive was downloaded, and the era's exact name
+was typed back. No replica is still calling that era active by then.
+
 ### Accepted: a purged blob key can be reused mid-purge
 
 A hard purge deletes the `File` rows an era owned that nothing else references,

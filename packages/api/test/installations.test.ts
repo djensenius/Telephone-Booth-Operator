@@ -1064,6 +1064,76 @@ describe("installations", () => {
       expect(landed?.status).toBe("pending");
       expect(landed?.installationId).toBe(nextEra);
     });
+
+    // Purging an era the booth is still uploading into would make the booth's
+    // completion call 404 and lose the recording. The row moves to the era
+    // that is open instead, and its audio is not counted as orphaned.
+    it("re-homes an in-flight upload instead of purging it", async () => {
+      const app = createApp();
+      const sha256 = "1a".repeat(32);
+      const initiated = await app.request("/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ durationMs: 3000, sha256 }),
+      });
+      const slot = (await initiated.json()) as { id: string; blobName: string };
+      fakeBlobs.set(slot.blobName, {
+        exists: true,
+        sizeBytes: 4242,
+        contentType: "audio/flac",
+        sha256,
+      });
+
+      expect((await endDefault(app)).status).toBe(200);
+      const started = await app.request("/v1/installations", {
+        method: "POST",
+        headers: jsonHeaders(adminHeaders()),
+        body: JSON.stringify({ name: "Second era" }),
+      });
+      const currentEra = ((await started.json()) as { id: string }).id;
+
+      const purged = await app.request(`/v1/installations/${DEFAULT_INSTALLATION_ID}`, {
+        method: "DELETE",
+        headers: jsonHeaders(adminHeaders()),
+        body: JSON.stringify({ confirmName: "Installation 1" }),
+      });
+      expect(purged.status, await purged.clone().text()).toBe(200);
+
+      const survivor = store.messages.get(slot.id);
+      expect(survivor?.status).toBe("uploading");
+      expect(survivor?.installationId).toBe(currentEra);
+
+      const completed = await app.request(`/v1/messages/${slot.id}/complete`, {
+        method: "POST",
+        headers: phoneHeaders,
+      });
+      expect(completed.status, await completed.clone().text()).toBe(200);
+    });
+  });
+
+  describe("frozen eras are read-only", () => {
+    // An ended era's counters were frozen at close-out. A decision or a delete
+    // afterwards would leave the summary disagreeing with its own drill-down.
+    it("refuses a decision and a delete on an ended era's recording", async () => {
+      const message = seedMessage({ status: "approved" });
+      const app = createApp();
+      expect((await endDefault(app)).status).toBe(200);
+
+      const decided = await app.request(`/v1/messages/${message.id}/decision`, {
+        method: "POST",
+        headers: jsonHeaders(operatorHeaders()),
+        body: JSON.stringify({ decision: "reject" }),
+      });
+      expect(decided.status).toBe(409);
+      expect(await decided.json()).toEqual({ error: "installation_ended" });
+
+      const deleted = await app.request(`/v1/messages/${message.id}`, {
+        method: "DELETE",
+        headers: operatorHeaders(),
+      });
+      expect(deleted.status).toBe(409);
+      expect(store.messages.get(message.id)?.status).toBe("approved");
+    });
   });
 
   describe("scoped export", () => {

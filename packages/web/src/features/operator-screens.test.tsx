@@ -651,6 +651,18 @@ describe("Messages feature", () => {
     expect(lastDecision).toBeNull();
   });
 
+  // A past era's counters were frozen when it ended, so the API refuses a
+  // decision or a delete against it. The queue should not offer either.
+  it("offers no moderation actions while browsing an ended era", async () => {
+    renderPath("/messages?installationId=ee111111-1111-4111-8111-111111111111");
+    expect(await screen.findByText("Archived era — read-only")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+    // Reading the recording is still fine.
+    expect(screen.getByRole("link", { name: "Download" })).toBeTruthy();
+  });
+
   it("deletes a message from the queue only after confirmation", async () => {
     renderPath("/messages");
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));

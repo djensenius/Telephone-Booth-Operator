@@ -1323,6 +1323,15 @@ textarea:focus-visible,
 .feature-toolbar button:disabled,
 .feature-table button:disabled,
 .feature-dialog button:disabled,
+/* Stands in for the actions an ended era does not offer, so the row does not
+   silently lose its buttons with nothing said. */
+.message-card__frozen {
+  align-self: center;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-style: italic;
+}
+
 /* The shared action-row rule above is more specific than the variant classes,
    so restate them here to keep Approve green and Reject red. */
 .message-card__actions button.feature-button--approve {

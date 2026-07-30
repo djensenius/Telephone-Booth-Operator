@@ -574,8 +574,9 @@ export type BoothSystemSnapshotEnvelope = z.infer<typeof BoothSystemSnapshotEnve
 
 // -----------------------------------------------------------------------------
 // Installations. An installation is a named era of the booth — one run of the
-// art piece. Exactly one is "active" (`endedAt === null`) at a time, and every
-// booth write is tagged with it. Ending an installation freezes a `summary` so
+// art piece. At most one is "active" (`endedAt === null`) at a time — none
+// between an era ending and the next booth write — and every booth write is
+// tagged with it. Ending an installation freezes a `summary` so
 // the history list renders without re-aggregating the event table per row.
 //
 // Read endpoints accept an `installationId` scope: omitted means the active

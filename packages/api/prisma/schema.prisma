@@ -64,9 +64,10 @@ enum RuntimeMode {
   simulator
 }
 
-// A named era of the booth — one run of the installation. Exactly one row has
+// A named era of the booth — one run of the installation. At most one row has
 // `endedAt IS NULL` at a time (enforced by a partial unique index); that is the
-// "active" installation and every new booth write is tagged with it. Ending an
+// "active" installation and every new booth write is tagged with it. There is
+// none between an era ending and the next booth write, which lazily opens one. Ending an
 // installation freezes `summary` so the history list renders without
 // re-aggregating the event table per row. See lib/installation.ts.
 model Installation {
