@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { z } from "zod";
 import {
   ApiTokenCreatedSchema,
@@ -265,6 +266,10 @@ export const questions = {
       `/v1/questions${query({ cursor: params.cursor, limit: params.limit ?? 50, status: params.status, installationId: params.installationId })}`,
       { schema: QuestionListSchema },
     ),
+  listByIds: (ids: readonly string[]) =>
+    apiFetch<QuestionList>(`/v1/questions${query({ ids: ids.join(",") })}`, {
+      schema: QuestionListSchema,
+    }),
   create: (input: QuestionCreate) =>
     apiFetch<Question>("/v1/questions", {
       method: "POST",
@@ -703,6 +708,32 @@ export function useQuestionsList(
         ...(options.installationId ? { installationId: options.installationId } : {}),
         limit: 100,
       }),
+  });
+}
+
+const QUESTIONS_BY_IDS_BATCH = 200;
+
+// Resolve a specific set of question ids regardless of installation scope or
+// status. `GET /v1/questions?ids=…` is the documented lookup for
+// cross-era/archived questions; without it, historical prompts render as raw
+// UUIDs because `list` hides archived rows and is scoped to the active era.
+export function useQuestionsByIds(ids: readonly string[]) {
+  const sortedIds = useMemo(
+    () => Array.from(new Set(ids.filter((id) => id.length > 0))).sort(),
+    [ids],
+  );
+  return useQuery({
+    queryKey: ["questions", "by-ids", sortedIds] as const,
+    queryFn: async () => {
+      if (sortedIds.length === 0) return [] as Question[];
+      const batches: string[][] = [];
+      for (let i = 0; i < sortedIds.length; i += QUESTIONS_BY_IDS_BATCH) {
+        batches.push(sortedIds.slice(i, i + QUESTIONS_BY_IDS_BATCH));
+      }
+      const responses = await Promise.all(batches.map((batch) => questions.listByIds(batch)));
+      return responses.flatMap((response) => response.items);
+    },
+    enabled: sortedIds.length > 0,
   });
 }
 

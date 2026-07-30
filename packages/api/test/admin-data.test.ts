@@ -264,7 +264,7 @@ describe("admin data export/import", () => {
             message: [
               {
                 id: messageId,
-                status: "approved",
+                status: "pending",
                 notes: null,
                 questionId,
                 audioId: messageAudioId,
@@ -320,6 +320,21 @@ describe("admin data export/import", () => {
     const restoredInstallation = store.installations.get(restoredId as string);
     expect(restoredInstallation?.name).toBe(`Restored ${generatedAt}`);
     expect(restoredInstallation?.endedAt?.toISOString()).toBe(generatedAt);
+
+    // The adopted era is ended, so it must also be closed out: no message left
+    // in the moderation queue, no session left open, no question left live, and
+    // counters frozen to match.
+    expect(store.messages.get(messageId)?.status).toBe("rejected");
+    expect(store.callSessions.get(sessionId)?.endedAt?.toISOString()).toBe(generatedAt);
+    expect(store.callSessions.get(sessionId)?.outcome).toBe("installation_ended");
+    expect(store.questions.get(questionId)?.status).toBe("archived");
+    expect(restoredInstallation?.summary).toMatchObject({
+      calls: 1,
+      messages: 1,
+      messagesRejected: 1,
+      events: 1,
+      firstActivityAt: generatedAt,
+    });
 
     const installationCount = store.installations.size;
     const second = await importOnce();

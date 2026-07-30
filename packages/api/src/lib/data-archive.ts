@@ -318,11 +318,6 @@ const withStatusWindow = (row: Row): Row =>
     ? { ...row, firstSeenAt: row.updatedAt, repeatCount: row.repeatCount ?? 1 }
     : row;
 
-type LegacyAdoptionClient = Pick<
-  Prisma.TransactionClient,
-  "installation" | "question" | "message" | "callSession" | "boothEvent" | "boothStatusSnapshot"
->;
-
 const dateFromManifest = (manifest: ExportManifest): Date => {
   const generated = new Date(manifest.generatedAt);
   return Number.isNaN(generated.getTime()) ? new Date(0) : generated;
@@ -346,8 +341,9 @@ const restoredInstallationId = (manifest: ExportManifest): string => {
 };
 
 const adoptLegacyRows = async (
-  tx: LegacyAdoptionClient,
+  tx: Prisma.TransactionClient,
   manifest: ExportManifest,
+  dump: DataDump,
 ): Promise<void> => {
   if (manifest.version >= 3) return;
 
@@ -367,16 +363,31 @@ const adoptLegacyRows = async (
     update: {},
   });
 
+  // Adopt by id, not by "still untagged". Restoring a legacy archive in place
+  // hits rows the migration already backfilled into the current era; those
+  // carry a non-null id and would otherwise be left polluting it.
+  const idsOf = (name: ModelName): string[] =>
+    dump[name].map((row) => String(row.id)).filter((id) => id.length > 0);
+  const adopt = (name: ModelName): { id: { in: string[] } } => ({ id: { in: idsOf(name) } });
+
   await Promise.all([
-    tx.question.updateMany({ where: { installationId: null }, data: { installationId } }),
-    tx.message.updateMany({ where: { installationId: null }, data: { installationId } }),
-    tx.callSession.updateMany({ where: { installationId: null }, data: { installationId } }),
-    tx.boothEvent.updateMany({ where: { installationId: null }, data: { installationId } }),
+    tx.question.updateMany({ where: adopt("question"), data: { installationId } }),
+    tx.message.updateMany({ where: adopt("message"), data: { installationId } }),
+    tx.callSession.updateMany({ where: adopt("callSession"), data: { installationId } }),
+    tx.boothEvent.updateMany({ where: adopt("boothEvent"), data: { installationId } }),
+    // Snapshots key on an integer id.
     tx.boothStatusSnapshot.updateMany({
-      where: { installationId: null },
+      where: { id: { in: dump.boothStatusSnapshot.map((row) => Number(row.id)) } },
       data: { installationId },
     }),
   ]);
+
+  // The era is created already ended, so it has to satisfy the same invariants
+  // a rollover leaves behind: nothing open, nothing queued, nothing live, and
+  // counters frozen. Otherwise a legacy archive's pending messages keep
+  // feeding the moderation badge from an era nobody can reopen.
+  const summary = await closeOutInstallation(tx, installationId, generatedAt);
+  await tx.installation.update({ where: { id: installationId }, data: { summary } });
 };
 
 // Only one installation may be open at a time, enforced by a partial unique
@@ -479,7 +490,7 @@ export const restoreImportArchive = async (archive: Buffer): Promise<ImportSumma
         }
         rows[name] = count;
       }
-      await adoptLegacyRows(tx, manifest);
+      await adoptLegacyRows(tx, manifest, dump);
     },
     // A full restore can touch many rows; allow well beyond the 5s default so
     // the whole database is applied atomically.

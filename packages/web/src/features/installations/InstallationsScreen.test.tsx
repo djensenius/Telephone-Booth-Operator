@@ -189,10 +189,10 @@ describe("InstallationsScreen", () => {
     await waitFor(() => expect(endCalledId).toBe(activeId));
   });
 
-  it("reports when the end-installation safety archive fails", async () => {
+  it("reports when the end-installation endpoint returns 503", async () => {
     server.use(
       http.post("http://localhost/v1/installations/:id/end", () =>
-        HttpResponse.json({ error: "archive_failed" }, { status: 503 }),
+        HttpResponse.json({ error: "unavailable" }, { status: 503 }),
       ),
     );
     renderScreen([activeInstallation]);
@@ -200,7 +200,9 @@ describe("InstallationsScreen", () => {
     fireEvent.click(await screen.findByRole("button", { name: "End installation" }));
     fireEvent.click(await screen.findByRole("button", { name: "Confirm end" }));
 
-    expect(await screen.findByText(/safety-net archive could not be written/)).toBeTruthy();
+    expect(
+      await screen.findByText(/installations service is temporarily unavailable/i),
+    ).toBeTruthy();
   });
 
   it("renames the active installation via the edit form", async () => {

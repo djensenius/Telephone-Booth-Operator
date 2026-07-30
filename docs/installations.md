@@ -87,8 +87,11 @@ wrote before naming it.
 
 Because the rollover archives an era's questions, resolving the prompts of a
 historical message needs `GET /v1/questions?status=any` — the bare list hides
-archived rows. The console does this for you on the messages list and the
-message detail view.
+archived rows. Better still, pass the ids you already have:
+`GET /v1/questions?ids=<comma-separated>` (up to 200) returns exactly those
+questions whatever their era or status, which also covers a straggler message
+filed against a newer era than the question that prompted it. The console does
+this for you on the messages list and the message detail view.
 
 ## Reading history
 

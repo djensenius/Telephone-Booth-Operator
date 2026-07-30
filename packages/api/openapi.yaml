@@ -117,6 +117,14 @@ paths:
               - $ref: "#/components/schemas/QuestionStatus"
               - type: string
                 enum: [any]
+        - name: ids
+          in: query
+          description: |
+            Comma-separated question ids (max 200). When present this is the
+            whole filter: the named questions are returned regardless of
+            installation scope or status, so a caller can resolve the prompts
+            of messages it is already showing.
+          schema: { type: string }
         - name: installationId
           in: query
           description: |

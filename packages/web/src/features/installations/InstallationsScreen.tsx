@@ -38,7 +38,7 @@ function errorMessage(error: unknown, fallback: string): string {
       return error.message || "That action conflicts with the current state.";
     }
     if (error.status === 503) {
-      return "The safety-net archive could not be written, so the installation was not ended. Try again once storage is reachable.";
+      return "The installations service is temporarily unavailable, so the action didn't complete. Try again in a moment.";
     }
     return error.message || fallback;
   }

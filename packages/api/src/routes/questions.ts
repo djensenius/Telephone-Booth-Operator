@@ -22,6 +22,14 @@ const listQuerySchema = z.object({
   // `any` includes archived questions; the bare default hides them.
   status: z.union([QuestionStatusSchema, z.literal("any")]).optional(),
   installationId: InstallationScopeSchema.optional(),
+  // Comma-separated ids. Resolves exactly the questions a caller already knows
+  // about — the prompts on a page of messages, say — regardless of era or
+  // status, which neither the scope nor a page of results can guarantee.
+  ids: z
+    .string()
+    .optional()
+    .transform((raw) => (raw ? raw.split(",").filter((id) => id.length > 0) : undefined))
+    .pipe(z.array(z.guid()).max(200).optional()),
 });
 
 const idParamSchema = z.object({ id: z.guid() });
@@ -29,14 +37,18 @@ const idParamSchema = z.object({ id: z.guid() });
 export const questionsRouter = new Hono<{ Variables: AuthVariables & ApiTokenVariables }>();
 
 questionsRouter.get("/", zValidator("query", listQuerySchema), async (c) => {
-  const { cursor, limit, status, installationId } = c.req.valid("query");
+  const { cursor, limit, status, installationId, ids } = c.req.valid("query");
   // Default management view hides archived questions but shows drafts; an
   // explicit status filter overrides this, and `any` drops the filter so a
   // caller resolving prompts for historical messages can still find them.
-  const where = {
-    ...scopeWhere(await resolveInstallationScope(installationId)),
-    ...(status === "any" ? {} : status ? { status } : { status: { not: "archived" as const } }),
-  };
+  // An explicit id list is the whole filter: it already names the rows, and
+  // narrowing it by era or status would defeat the point of asking.
+  const where = ids
+    ? { id: { in: ids } }
+    : {
+        ...scopeWhere(await resolveInstallationScope(installationId)),
+        ...(status === "any" ? {} : status ? { status } : { status: { not: "archived" as const } }),
+      };
   const questions = await db.question.findMany({
     where,
     include: { audio: true },

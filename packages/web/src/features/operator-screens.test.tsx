@@ -735,19 +735,17 @@ describe("Messages feature", () => {
     );
   });
 
-  it("resolves prompts for a historical era's messages by scoping questions the same way", async () => {
+  it("resolves prompts for a historical era's messages by looking up the exact question ids", async () => {
     const eraId = "ee111111-1111-4111-8111-111111111111";
     server.use(
       http.get("http://localhost/v1/questions", ({ request }) => {
         questionsUrls.push(request.url);
         const url = new URL(request.url);
-        // The historical era's questions are archived at rollover, so the
-        // list handler mimics the real API: only return the question when
-        // BOTH the era scope AND status=any are supplied.
-        if (
-          url.searchParams.get("installationId") === eraId &&
-          url.searchParams.get("status") === "any"
-        ) {
+        // Mimic the API: `ids` is the whole filter, ignoring installation
+        // scope and status entirely. Only return the archived historical
+        // question when the request is asking for it by id.
+        const ids = url.searchParams.get("ids")?.split(",").filter(Boolean) ?? [];
+        if (ids.includes(question.id)) {
           return HttpResponse.json({ items: [question], nextCursor: null });
         }
         return HttpResponse.json({ items: [], nextCursor: null });
@@ -756,21 +754,20 @@ describe("Messages feature", () => {
     renderPath(`/messages?installationId=${eraId}`);
     expect(await screen.findByText("What did the city sound like today?")).toBeTruthy();
     expect(
-      questionsUrls.some(
-        (url) => url.includes(`installationId=${eraId}`) && url.includes("status=any"),
-      ),
+      questionsUrls.some((url) => {
+        const params = new URL(url).searchParams;
+        return params.get("ids")?.split(",").includes(question.id) ?? false;
+      }),
     ).toBe(true);
   });
 
-  it("looks up the historical question with installationId=all and status=any on the detail view", async () => {
+  it("looks up the message detail's question by id so archived prompts still resolve", async () => {
     server.use(
       http.get("http://localhost/v1/questions", ({ request }) => {
         questionsUrls.push(request.url);
         const url = new URL(request.url);
-        if (
-          url.searchParams.get("installationId") === "all" &&
-          url.searchParams.get("status") === "any"
-        ) {
+        const ids = url.searchParams.get("ids")?.split(",").filter(Boolean) ?? [];
+        if (ids.includes(question.id)) {
           return HttpResponse.json({ items: [question], nextCursor: null });
         }
         return HttpResponse.json({ items: [], nextCursor: null });
@@ -779,7 +776,14 @@ describe("Messages feature", () => {
     renderPath(`/messages/${messageId}`);
     expect(await screen.findByText("What did the city sound like today?")).toBeTruthy();
     expect(
-      questionsUrls.some((url) => url.includes("installationId=all") && url.includes("status=any")),
+      questionsUrls.some((url) => {
+        const params = new URL(url).searchParams;
+        return (
+          params.get("ids")?.split(",").includes(question.id) === true &&
+          params.get("installationId") === null &&
+          params.get("status") === null
+        );
+      }),
     ).toBe(true);
   });
 

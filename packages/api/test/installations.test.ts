@@ -361,6 +361,74 @@ describe("installations", () => {
       expect(items.map((row) => row.prompt)).toEqual(["What did you lose?"]);
     });
 
+    // An idle heartbeat reconciles sessions the booth left open. It must only
+    // touch the era that is currently open: rewriting a session in a closed era
+    // would make that era's frozen summary disagree with its own drill-down.
+    it("leaves a closed era's open session alone when the booth goes idle", async () => {
+      const app = createApp();
+      expect((await endDefault(app)).status).toBe(200);
+      const started = await app.request("/v1/installations", {
+        method: "POST",
+        headers: jsonHeaders(adminHeaders()),
+        body: JSON.stringify({ name: "Second era" }),
+      });
+      expect(started.status, await started.clone().text()).toBe(201);
+
+      // A straggler that lands after the rollover, filed against the old era.
+      const stale = seedCallSession({
+        endedAt: null,
+        outcome: null,
+        startedAt: new Date("2026-07-28T11:00:00.000Z"),
+        installationId: DEFAULT_INSTALLATION_ID,
+      });
+
+      const beat = await app.request("/v1/status", {
+        method: "PUT",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ state: "idle", updatedAt: "2026-07-28T12:00:00.000Z" }),
+      });
+      expect(beat.status).toBe(204);
+
+      expect(store.callSessions.get(stale.id)?.endedAt).toBeNull();
+      expect(store.callSessions.get(stale.id)?.outcome).toBeNull();
+    });
+
+    // Resolving the prompts of a page of messages cannot rely on the era scope
+    // or on a page of questions: a straggler names a previous era's question,
+    // and the rollover archived it. An explicit id list answers regardless.
+    it("resolves questions by id across eras and statuses", async () => {
+      const app = createApp();
+      const archived = seedQuestion({ status: "active", prompt: "Old era prompt" });
+      expect((await endDefault(app)).status).toBe(200);
+
+      const started = await app.request("/v1/installations", {
+        method: "POST",
+        headers: jsonHeaders(adminHeaders()),
+        body: JSON.stringify({ name: "Second era" }),
+      });
+      expect(started.status, await started.clone().text()).toBe(201);
+      const currentEra = ((await started.json()) as { id: string }).id;
+      const current = seedQuestion({
+        status: "active",
+        prompt: "New era prompt",
+        installationId: currentEra,
+      });
+
+      const res = await app.request(`/v1/questions?ids=${archived.id},${current.id}`, {
+        headers: operatorHeaders(),
+      });
+      expect(res.status, await res.clone().text()).toBe(200);
+      const items = ((await res.json()) as { items: { id: string; prompt: string }[] }).items;
+      expect(items.map((row) => row.prompt).sort()).toEqual(["New era prompt", "Old era prompt"]);
+    });
+
+    it("rejects an id list that is not a list of uuids", async () => {
+      const res = await createApp().request("/v1/questions?ids=not-a-uuid", {
+        headers: operatorHeaders(),
+      });
+      expect(res.status).toBe(400);
+    });
+
     // A straggler recording sits in the era that was open when it landed while
     // its question stays with the era that issued it. Top questions must still
     // name the prompt rather than calling it deleted.

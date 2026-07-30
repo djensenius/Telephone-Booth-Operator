@@ -1742,7 +1742,7 @@ export const fakeDb = {
         store.boothEvents.push({
           id: randomUUID(),
           receivedAt: new Date(),
-          ...row,
+          ...reviveDates(row),
         });
         count += 1;
       }
@@ -1800,11 +1800,11 @@ export const fakeDb = {
     }) => {
       const index = store.boothEvents.findIndex((event) => event.id === where.id);
       if (index === -1) {
-        const created: FakeBoothEvent = { ...create, id: where.id };
+        const created: FakeBoothEvent = { ...reviveDates(create), id: where.id };
         store.boothEvents.push(created);
         return created;
       }
-      const merged: FakeBoothEvent = { ...store.boothEvents[index]!, ...update };
+      const merged: FakeBoothEvent = { ...store.boothEvents[index]!, ...reviveDates(update) };
       store.boothEvents[index] = merged;
       return merged;
     },
@@ -1848,7 +1848,7 @@ export const fakeDb = {
     }) => {
       const existing = store.callSessions.get(where.id);
       if (!existing) {
-        const created: FakeCallSession = { ...create };
+        const created: FakeCallSession = { ...reviveDates(create) };
         store.callSessions.set(where.id, created);
         return created;
       }
@@ -2090,6 +2090,20 @@ const matchesFileWhere = (file: FakeFile, where: Record<string, unknown>): boole
     scalar[key] = raw;
   }
   return matchesWhere(file, scalar);
+};
+
+// Prisma coerces the ISO strings a restored archive carries into `Date`s. The
+// fake stores whatever it is handed, so it has to do the same or the restore
+// path hands `string`s to code that calls `toISOString()`.
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
+
+const reviveDates = <T>(row: T): T => {
+  if (row === null || typeof row !== "object") return row;
+  const out: Record<string, unknown> = { ...(row as Record<string, unknown>) };
+  for (const [key, value] of Object.entries(out)) {
+    if (typeof value === "string" && ISO_DATE.test(value)) out[key] = new Date(value);
+  }
+  return out as T;
 };
 
 const matchesWhere = (record: Record<string, unknown>, where: Record<string, unknown>): boolean => {

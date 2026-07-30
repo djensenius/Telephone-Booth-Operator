@@ -57,7 +57,8 @@ VALUES (
             (SELECT MIN("createdAt") FROM "Message"),
             (SELECT MIN("startedAt") FROM "CallSession"),
             (SELECT MIN("occurredAt") FROM "BoothEvent"),
-            (SELECT MIN("createdAt") FROM "Question")
+            (SELECT MIN("createdAt") FROM "Question"),
+            (SELECT MIN("firstSeenAt") FROM "BoothStatusSnapshot")
         ),
         CURRENT_TIMESTAMP
     ),

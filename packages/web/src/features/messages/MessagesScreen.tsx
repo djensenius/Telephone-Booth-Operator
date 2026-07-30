@@ -8,7 +8,7 @@ import {
   useDecideMessage,
   useDeleteMessage,
   useMessagesList,
-  useQuestionsList,
+  useQuestionsByIds,
   useRetranscribeMessage,
 } from "../../lib/api-client.js";
 import {
@@ -99,7 +99,19 @@ export function MessagesScreen(): JSX.Element {
     enabled: needsReview,
     ...(scope === undefined ? {} : { installationId: scope }),
   });
-  const questions = useQuestionsList("any", scope === undefined ? {} : { installationId: scope });
+  const questionIds = useMemo(() => {
+    const rowsForIds = needsReview
+      ? [...(received.data?.items ?? []), ...(pending.data?.items ?? [])]
+      : (listed.data?.items ?? []);
+    const ids = new Set<string>();
+    for (const item of rowsForIds) {
+      if (typeof item.questionId === "string" && item.questionId.length > 0) {
+        ids.add(item.questionId);
+      }
+    }
+    return Array.from(ids);
+  }, [needsReview, listed.data?.items, received.data?.items, pending.data?.items]);
+  const questions = useQuestionsByIds(questionIds);
   const deleteMessage = useDeleteMessage();
   const decideMessage = useDecideMessage();
   const retranscribe = useRetranscribeMessage();
@@ -120,8 +132,8 @@ export function MessagesScreen(): JSX.Element {
   }, [needsReview, listed.data?.items, received.data?.items, pending.data?.items]);
 
   const promptById = useMemo(
-    () => new Map((questions.data?.items ?? []).map((question) => [question.id, question.prompt])),
-    [questions.data?.items],
+    () => new Map((questions.data ?? []).map((question) => [question.id, question.prompt])),
+    [questions.data],
   );
 
   const closeConfirm = useCallback(() => {

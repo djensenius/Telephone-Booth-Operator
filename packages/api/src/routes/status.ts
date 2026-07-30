@@ -33,9 +33,13 @@ const historyQuerySchema = z.object({
 // authoritative `call_ended` persisted concurrently wins the race and is not
 // overwritten by an `aborted` reconciliation. The `startedAt <= idleTime` guard
 // avoids closing a newer session started after a delayed idle report.
-async function reconcileStaleSessionsOnIdle(idleTime: Date): Promise<void> {
+// The era is part of the predicate as well: a session left open in an era that
+// has since been closed belongs to a frozen summary, and rewriting it to
+// `aborted` afterwards would make that summary disagree with its own
+// drill-down.
+async function reconcileStaleSessionsOnIdle(idleTime: Date, installationId: string): Promise<void> {
   await db.callSession.updateMany({
-    where: { endedAt: null, startedAt: { lte: idleTime } },
+    where: { endedAt: null, startedAt: { lte: idleTime }, installationId },
     data: {
       endedAt: idleTime,
       outcome: "aborted",
@@ -139,7 +143,7 @@ statusRouter.put("/", requireApiToken(), zValidator("json", StatusUpdateSchema),
         },
       });
   if (update.state === "idle") {
-    await reconcileStaleSessionsOnIdle(snapshot.updatedAt);
+    await reconcileStaleSessionsOnIdle(snapshot.updatedAt, installationId);
   }
   wsBroadcaster.broadcast({ kind: "status", status: serializeStatus(snapshot) });
   return c.body(null, 204);
