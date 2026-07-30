@@ -6,7 +6,6 @@ vi.mock(
   async () => (await import("./support/fake-azure.js")).fakeAzureModule,
 );
 
-import { randomUUID } from "node:crypto";
 import { createApp } from "../src/index.js";
 import { resetStatsCacheForTests } from "../src/routes/stats.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";

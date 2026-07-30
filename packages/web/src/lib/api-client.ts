@@ -902,7 +902,9 @@ export function useInstallationsList() {
 // After a rollover (start/end) every era-scoped read is stale: the active
 // installation moved, frozen summaries changed, and live stats now belong to a
 // different era. Invalidate broadly so the whole console re-scopes.
-function invalidateInstallationScopedQueries(queryClient: ReturnType<typeof useQueryClient>): void {
+export function invalidateInstallationScopedQueries(
+  queryClient: ReturnType<typeof useQueryClient>,
+): void {
   void queryClient.invalidateQueries({ queryKey: ["installations"] });
   void queryClient.invalidateQueries({ queryKey: ["stats"] });
   void queryClient.invalidateQueries({ queryKey: ["messages", "list"] });
@@ -925,6 +927,22 @@ export function useEndInstallation() {
     mutationFn: ({ id, input }: { readonly id: string; readonly input: InstallationEnd }) =>
       installations.end(id, input),
     onSuccess: () => invalidateInstallationScopedQueries(queryClient),
+  });
+}
+
+// Renaming (or re-noting/re-locating) the active installation. Only the
+// installation row itself changes — no scoped counts move — so this
+// invalidates just the installations list and the touched detail.
+export function useUpdateInstallation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { readonly id: string; readonly input: InstallationUpdate }) =>
+      installations.update(id, input),
+    onSuccess: (_data, { id }) => {
+      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.installations });
+      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.installation(id) });
+      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.installationCurrent });
+    },
   });
 }
 

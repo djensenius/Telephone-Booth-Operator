@@ -108,6 +108,8 @@ let revokedToken = false;
 let lastCreatedTokenScope: string | undefined;
 let lastMessageUrl = "";
 let messageUrls: string[] = [];
+let sessionsUrls: string[] = [];
+let eventsUrls: string[] = [];
 let lastDecision: { decision: string; notes?: string } | null = null;
 let writeTextMock: ReturnType<typeof vi.fn>;
 
@@ -226,6 +228,44 @@ const server = setupServer(
     HttpResponse.json([{ date: "2026-01-04", count: 1 }]),
   ),
   http.get("http://localhost/v1/fail", () => HttpResponse.json({ error: "busy" }, { status: 503 })),
+  http.get("http://localhost/v1/installations", () =>
+    HttpResponse.json({
+      items: [
+        {
+          id: "ee111111-1111-4111-8111-111111111111",
+          name: "Spring 2026 residency",
+          notes: null,
+          location: null,
+          startedAt: "2026-01-01T00:00:00.000Z",
+          endedAt: "2026-04-01T00:00:00.000Z",
+          endedById: null,
+          summary: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          isActive: false,
+        },
+        {
+          id: "ee222222-2222-4222-8222-222222222222",
+          name: "Summer 2026 tour",
+          notes: null,
+          location: null,
+          startedAt: "2026-06-01T00:00:00.000Z",
+          endedAt: null,
+          endedById: null,
+          summary: null,
+          createdAt: "2026-06-01T00:00:00.000Z",
+          isActive: true,
+        },
+      ],
+    }),
+  ),
+  http.get("http://localhost/v1/sessions", ({ request }) => {
+    sessionsUrls.push(request.url);
+    return HttpResponse.json({ items: [] });
+  }),
+  http.get("http://localhost/v1/events", ({ request }) => {
+    eventsUrls.push(request.url);
+    return HttpResponse.json({ items: [], nextCursor: null });
+  }),
 );
 
 class MemoryStorage implements Storage {
@@ -309,6 +349,8 @@ beforeEach(() => {
   lastCreatedTokenScope = undefined;
   lastMessageUrl = "";
   messageUrls = [];
+  sessionsUrls = [];
+  eventsUrls = [];
   lastDecision = null;
   installBrowserStubs();
   window.localStorage.clear();
@@ -679,6 +721,17 @@ describe("Messages feature", () => {
     expect(window.localStorage.getItem(`booth.message.listened.${messageId}`)).toBe("true");
   });
 
+  it("passes an installation scope through to the messages fetch", async () => {
+    renderPath(`/messages?installationId=ee111111-1111-4111-8111-111111111111`);
+    await waitFor(() =>
+      expect(
+        messageUrls.some((url) =>
+          url.includes("installationId=ee111111-1111-4111-8111-111111111111"),
+        ),
+      ).toBe(true),
+    );
+  });
+
   it("has no critical axe violations", async () => {
     const { container } = renderPath("/messages");
     await screen.findByRole("list", { name: "Message queue" });
@@ -796,6 +849,17 @@ describe("Tokens feature", () => {
 });
 
 describe("Events feature", () => {
+  it("passes an installation scope through to the events fetch", async () => {
+    renderPath(`/events?installationId=ee111111-1111-4111-8111-111111111111`);
+    await waitFor(() =>
+      expect(
+        eventsUrls.some((url) =>
+          url.includes("installationId=ee111111-1111-4111-8111-111111111111"),
+        ),
+      ).toBe(true),
+    );
+  });
+
   it("surfaces the payload detail for error events", async () => {
     server.use(
       http.get("http://localhost/v1/events", () =>
@@ -830,6 +894,19 @@ describe("Events feature", () => {
     fireEvent(details as HTMLDetailsElement, new Event("toggle"));
     await waitFor(() =>
       expect(details?.querySelector("pre")?.textContent).toContain("gpio read timed out"),
+    );
+  });
+});
+
+describe("Sessions feature", () => {
+  it("passes an installation scope through to the sessions fetch", async () => {
+    renderPath(`/sessions?installationId=ee111111-1111-4111-8111-111111111111`);
+    await waitFor(() =>
+      expect(
+        sessionsUrls.some((url) =>
+          url.includes("installationId=ee111111-1111-4111-8111-111111111111"),
+        ),
+      ).toBe(true),
     );
   });
 });

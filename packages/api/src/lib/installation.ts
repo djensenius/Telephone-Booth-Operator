@@ -20,15 +20,33 @@ import { log } from "./logger.js";
 const DEFAULT_INSTALLATION_NAME = "Installation 1";
 
 // The active installation is read on essentially every write, but changes only
-// when an admin starts or ends one. Cache the id and invalidate explicitly.
+// when an admin starts or ends one. Cache the id to keep that off the hot path.
+//
+// The cache is invalidated explicitly on start/end, but that only reaches the
+// replica that served the admin request — the documented Azure deployment runs
+// several (see docs/azure-deployment.md). A short TTL therefore bounds how long
+// any other replica can keep stamping rows with an ended era, without putting a
+// query back on every booth write.
+const ACTIVE_CACHE_TTL_MS = 5_000;
 let activeIdCache: string | null = null;
+let activeIdCacheExpiresAt = 0;
+
+const readActiveIdCache = (): string | null =>
+  activeIdCache && Date.now() < activeIdCacheExpiresAt ? activeIdCache : null;
+
+const writeActiveIdCache = (id: string): string => {
+  activeIdCache = id;
+  activeIdCacheExpiresAt = Date.now() + ACTIVE_CACHE_TTL_MS;
+  return id;
+};
 
 export const invalidateActiveInstallationCache = (): void => {
   activeIdCache = null;
+  activeIdCacheExpiresAt = 0;
 };
 
 export const resetInstallationCacheForTests = (): void => {
-  activeIdCache = null;
+  invalidateActiveInstallationCache();
 };
 
 type InstallationRow = {
@@ -70,27 +88,36 @@ export const findActiveInstallation = async (): Promise<InstallationRow | null> 
 // one rather than throwing. The unique index makes the create racy-safe: if a
 // concurrent request wins, we re-read and use theirs.
 export const requireActiveInstallation = async (): Promise<string> => {
-  if (activeIdCache) return activeIdCache;
+  const cached = readActiveIdCache();
+  if (cached) return cached;
 
   const existing = await findActiveInstallation();
-  if (existing) {
-    activeIdCache = existing.id;
-    return existing.id;
-  }
+  if (existing) return writeActiveIdCache(existing.id);
 
   try {
     const created = await db.installation.create({
       data: { name: await nextDefaultName() },
     });
     log.info({ installationId: created.id }, "created default installation");
-    activeIdCache = created.id;
-    return created.id;
+    return writeActiveIdCache(created.id);
   } catch {
     const raced = await findActiveInstallation();
     if (!raced) throw new Error("Unable to resolve an active installation.");
-    activeIdCache = raced.id;
-    return raced.id;
+    return writeActiveIdCache(raced.id);
   }
+};
+
+// Whether an era has any booth activity recorded against it. An era with none
+// is bookkeeping only: it can be adopted and renamed, or discarded outright.
+export const installationHasActivity = async (installationId: string): Promise<boolean> => {
+  const where = { installationId };
+  const [calls, messages, events, snapshots] = await Promise.all([
+    db.callSession.count({ where }),
+    db.message.count({ where }),
+    db.boothEvent.count({ where }),
+    db.boothStatusSnapshot.count({ where }),
+  ]);
+  return calls + messages + events + snapshots > 0;
 };
 
 // "Installation 1", "Installation 2", … based on how many eras exist already.
@@ -105,9 +132,14 @@ export const nextInstallationName = nextDefaultName;
 // Read scoping
 // -----------------------------------------------------------------------------
 
-// A resolved read scope. `null` means "span every installation" (the caller
-// passed `installationId=all`); otherwise reads are filtered to one era.
-export type InstallationScopeFilter = { installationId: string } | null;
+// A resolved read scope:
+//   { kind: "one" }  → one era
+//   { kind: "all" }  → span every installation (`installationId=all`)
+//   { kind: "none" } → no era is open, so there is nothing in the default scope
+export type InstallationScopeFilter =
+  | { kind: "one"; installationId: string }
+  | { kind: "all" }
+  | { kind: "none" };
 
 // Turn the raw `installationId` query param into a Prisma `where` fragment.
 //
@@ -115,21 +147,37 @@ export type InstallationScopeFilter = { installationId: string } | null;
 //                     stats read "fresh" immediately after a rollover)
 //   "all"           → no filter, i.e. the pre-installations behaviour
 //   <uuid>          → that specific installation
+//
+// Reads never *create* an installation. Between an admin ending an era and the
+// next booth write there is no active one, and the honest answer is an empty
+// result rather than a new era conjured up by someone loading a stats page.
 export const resolveInstallationScope = async (
   raw: string | undefined,
 ): Promise<InstallationScopeFilter> => {
-  if (raw === INSTALLATION_SCOPE_ALL) return null;
-  if (raw && raw.length > 0) return { installationId: raw };
-  return { installationId: await requireActiveInstallation() };
+  if (raw === INSTALLATION_SCOPE_ALL) return { kind: "all" };
+  if (raw && raw.length > 0) return { kind: "one", installationId: raw };
+  const active = await findActiveInstallation();
+  return active ? { kind: "one", installationId: active.id } : { kind: "none" };
 };
 
+// A `where` fragment produced by `scopeWhere`, ready to spread into a Prisma
+// filter. `{ in: [] }` is how "match nothing" is expressed without inventing a
+// sentinel id.
+export type InstallationScopeWhere = { installationId?: string | { in: string[] } };
+
 // Convenience for spreading into a Prisma `where` object.
-export const scopeWhere = (scope: InstallationScopeFilter): { installationId?: string } =>
-  scope ? { installationId: scope.installationId } : {};
+export const scopeWhere = (scope: InstallationScopeFilter): InstallationScopeWhere => {
+  if (scope.kind === "all") return {};
+  if (scope.kind === "none") return { installationId: { in: [] } };
+  return { installationId: scope.installationId };
+};
 
 // Cache-key fragment so scoped stats responses don't bleed across eras.
-export const scopeCacheKey = (scope: InstallationScopeFilter): string =>
-  scope ? scope.installationId : INSTALLATION_SCOPE_ALL;
+export const scopeCacheKey = (scope: InstallationScopeFilter): string => {
+  if (scope.kind === "all") return INSTALLATION_SCOPE_ALL;
+  if (scope.kind === "none") return "none";
+  return scope.installationId;
+};
 
 // -----------------------------------------------------------------------------
 // Summary counters, frozen when an installation ends

@@ -328,6 +328,123 @@ describe("admin data export/import", () => {
     expect(store.messages.get(messageId)?.installationId).toBe(restoredId);
   });
 
+  // Only one era may be open at a time, enforced by a partial unique index. A
+  // v3 archive carrying its own active era therefore collides with the one the
+  // target was seeded with, unless the restore reconciles first.
+  it("reconciles the target's active installation when the archive has one", async () => {
+    const app = createApp();
+    const cookie = operatorCookie();
+    const incomingId = "44444444-4444-4444-8444-444444444444";
+    const archive = createTar([
+      {
+        name: "manifest.json",
+        data: Buffer.from(
+          JSON.stringify({
+            format: EXPORT_FORMAT,
+            version: 3,
+            generatedAt: "2026-07-29T12:34:56.000Z",
+            container: "audio",
+            counts: {},
+            blobCount: 0,
+            missingBlobs: [],
+          }),
+          "utf8",
+        ),
+      },
+      {
+        name: "data.json",
+        data: Buffer.from(
+          JSON.stringify({
+            installation: [
+              {
+                id: incomingId,
+                name: "Imported era",
+                notes: null,
+                location: null,
+                startedAt: "2026-07-01T00:00:00.000Z",
+                endedAt: null,
+                endedById: null,
+                summary: null,
+                createdAt: "2026-07-01T00:00:00.000Z",
+              },
+            ],
+          }),
+          "utf8",
+        ),
+      },
+    ]);
+
+    const res = await app.request("/v1/admin/data/import", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/x-tar" },
+      body: archive,
+    });
+
+    expect(res.status, await res.clone().text()).toBe(200);
+    // The seeded era had nothing recorded against it, so it is discarded
+    // rather than left behind as a second, empty era.
+    expect(store.installations.has(DEFAULT_INSTALLATION_ID)).toBe(false);
+    const open = [...store.installations.values()].filter((row) => row.endedAt === null);
+    expect(open.map((row) => row.id)).toEqual([incomingId]);
+  });
+
+  it("closes an active installation that has data instead of discarding it", async () => {
+    const app = createApp();
+    const cookie = operatorCookie();
+    seedMessage({ id: "50000000-0000-4000-8000-000000000001", status: "approved" });
+    const incomingId = "55555555-5555-4555-8555-555555555555";
+    const archive = createTar([
+      {
+        name: "manifest.json",
+        data: Buffer.from(
+          JSON.stringify({
+            format: EXPORT_FORMAT,
+            version: 3,
+            generatedAt: "2026-07-29T12:34:56.000Z",
+            container: "audio",
+            counts: {},
+            blobCount: 0,
+            missingBlobs: [],
+          }),
+          "utf8",
+        ),
+      },
+      {
+        name: "data.json",
+        data: Buffer.from(
+          JSON.stringify({
+            installation: [
+              {
+                id: incomingId,
+                name: "Imported era",
+                notes: null,
+                location: null,
+                startedAt: "2026-07-01T00:00:00.000Z",
+                endedAt: null,
+                endedById: null,
+                summary: null,
+                createdAt: "2026-07-01T00:00:00.000Z",
+              },
+            ],
+          }),
+          "utf8",
+        ),
+      },
+    ]);
+
+    const res = await app.request("/v1/admin/data/import", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/x-tar" },
+      body: archive,
+    });
+
+    expect(res.status, await res.clone().text()).toBe(200);
+    // Nothing is orphaned: the era that held data is closed, not deleted.
+    expect(store.installations.get(DEFAULT_INSTALLATION_ID)?.endedAt).toBeInstanceOf(Date);
+    const open = [...store.installations.values()].filter((row) => row.endedAt === null);
+    expect(open.map((row) => row.id)).toEqual([incomingId]);
+  });
+
   it("rejects an empty import body", async () => {
     const app = createApp();
     const cookie = operatorCookie();

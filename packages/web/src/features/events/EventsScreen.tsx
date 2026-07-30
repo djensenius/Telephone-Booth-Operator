@@ -1,10 +1,14 @@
 import type { JSX } from "react";
 import { useMemo, useState } from "react";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import type { BoothEventType } from "@telephone-booth-operator/shared";
 import { GlassPanel } from "../../components/booth/index.js";
 import { useEventsList } from "../../lib/api-client.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
+import {
+  InstallationScopePicker,
+  parseInstallationScopeParam,
+} from "../installations/InstallationScopePicker.js";
 
 // Pull a short, human-readable summary out of an arbitrary event payload so
 // `error`/`log` events are diagnosable from the table instead of showing an
@@ -74,11 +78,15 @@ const EVENT_TYPES: readonly BoothEventType[] = [
 ];
 
 export function EventsScreen(): JSX.Element {
+  const search = useSearch({ strict: false });
+  const navigate = useNavigate();
+  const scope = parseInstallationScopeParam(search.installationId);
   const [type, setType] = useState<BoothEventType | "">("");
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const query = useEventsList({
     ...(type ? { type: [type] as readonly BoothEventType[] } : {}),
     ...(cursor ? { cursor } : {}),
+    ...(scope ? { installationId: scope } : {}),
     limit: 100,
   });
 
@@ -89,6 +97,18 @@ export function EventsScreen(): JSX.Element {
       <p className="screen-kicker">Observability</p>
       <h1>Events</h1>
       <p>Append-only log of everything the booth has done since you started watching.</p>
+
+      <InstallationScopePicker
+        scope={scope}
+        onChange={(next) => {
+          setCursor(undefined);
+          void navigate({
+            to: "/events",
+            search: next === undefined ? {} : { installationId: next },
+            replace: true,
+          });
+        }}
+      />
 
       <div className="events-screen__filters" role="group" aria-label="Event filters">
         <label>

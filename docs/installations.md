@@ -74,14 +74,31 @@ Every list and aggregate endpoint takes an optional `installationId`:
 | a uuid  | that historical installation              |
 | `all`   | every installation                        |
 
-This applies to `/v1/stats/*`, `/v1/messages`, `/v1/sessions`, and `/v1/events`.
+This applies to `/v1/stats/*`, `/v1/messages`, `/v1/sessions`, `/v1/events`,
+and `/v1/questions`.
+
+Between ending an era and the booth's next write there is no active
+installation. Reads in that window return an empty result rather than opening
+a new era: only a booth write does that, so loading a screen never changes what
+the booth is recording into.
 
 > **This changed the default.** Before installations existed, these endpoints
 > meant "everything ever". They now mean "this run". Pass `installationId=all`
 > for the old behaviour.
 
 The `/installations` screen lists every era with its frozen summary and drills
-into scoped stats for any of them.
+into scoped stats for any of them. Messages, Sessions, Events and Stats each
+carry a scope picker that round-trips through the URL, so a scoped view can be
+linked and reloaded.
+
+Late-arriving booth events are tagged with the era of the call session they
+belong to, not with whatever era happens to be open. A `call_ended` that lands
+after the rollover already closed its session leaves that session untouched: a
+frozen era's summary always agrees with its own drill-down.
+
+The active era's id is cached for a few seconds on each API replica. A start or
+end invalidates the replica that served it immediately; other replicas pick up
+the change when the cache lapses.
 
 ## Endpoints
 
@@ -91,6 +108,8 @@ GET    /v1/installations/current     → the active era (404 if none)
 GET    /v1/installations/:id
 POST   /v1/installations             ← start a new era               (admin)
 PATCH  /v1/installations/:id         ← edit name/notes/location      (admin)
+                                       (also how you rename the era the
+                                        booth opened by itself)
 POST   /v1/installations/:id/end     ← close out the active era      (admin)
 GET    /v1/installations/:id/export  → scoped tar archive            (admin)
 DELETE /v1/installations/:id         ← irreversible hard purge       (admin)

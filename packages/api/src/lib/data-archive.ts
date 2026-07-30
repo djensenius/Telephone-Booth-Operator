@@ -15,6 +15,7 @@ import { Prisma } from "../generated/prisma/client.js";
 import { downloadBlob, headBlob, uploadBlob } from "./azure-blob.js";
 import { createTar, readTar } from "./archive.js";
 import { db } from "./db.js";
+import { invalidateActiveInstallationCache } from "./installation.js";
 
 export const EXPORT_FORMAT = "telephone-booth-export";
 // 1: original shape. 2: BoothStatusSnapshot carries `firstSeenAt`/`repeatCount`.
@@ -108,32 +109,45 @@ const SCOPED_MODELS = new Set<ModelName>([
 // filtered through the relation so a scoped archive stays self-consistent.
 // Everything else (operators, tokens, devices) is global and exported whole,
 // because those carry over between installations.
+// The relation filters are annotated so the compiler checks them. The dump
+// walks models generically, so `findMany` is otherwise reached through an
+// untyped client and a wrong relation name would only surface as a Prisma
+// validation error at runtime, on the export path, in production.
+const fileScopeArgs = (installationId: string): Prisma.FileFindManyArgs => ({
+  where: {
+    OR: [
+      // A file can back several questions once an era copies them forward,
+      // so this is a list filter, not a to-one one.
+      { questions: { some: { installationId } } },
+      { message: { installationId } },
+      // Instructions are global, but their audio must travel with any
+      // archive or a restore would leave dangling references.
+      { instruction: { isNot: null } },
+    ],
+  },
+});
+
+const transcriptionScopeArgs = (installationId: string): Prisma.TranscriptionFindManyArgs => ({
+  where: { message: { installationId } },
+});
+
+const moderationScopeArgs = (installationId: string): Prisma.ModerationFindManyArgs => ({
+  where: { message: { installationId } },
+});
+
 const scopedFindArgs = (name: ModelName, installationId: string): unknown => {
   if (name === INSTALLATION_MODEL) return { where: { id: installationId } };
   if (SCOPED_MODELS.has(name)) return { where: { installationId } };
-  if (name === "transcription" || name === "moderation") {
-    return { where: { message: { installationId } } };
-  }
-  if (name === "file") {
-    return {
-      where: {
-        OR: [
-          { question: { installationId } },
-          { message: { installationId } },
-          // Instructions are global, but their audio must travel with any
-          // archive or a restore would leave dangling references.
-          { instruction: { isNot: null } },
-        ],
-      },
-    };
-  }
+  if (name === "transcription") return transcriptionScopeArgs(installationId);
+  if (name === "moderation") return moderationScopeArgs(installationId);
+  if (name === "file") return fileScopeArgs(installationId);
   return {};
 };
 
 // Build an export archive: `manifest.json`, `data.json`, and one
 // `blobs/<sha256>` entry per unique audio file that still exists in storage.
 // Passing `installationId` narrows the dump to a single installation (used for
-// the safety-net archive taken when an era is closed out); omitting it exports
+// the per-era download offered before a purge); omitting it exports
 // the whole instance.
 export const buildExportArchive = async (
   options: { installationId?: string } = {},
@@ -314,6 +328,49 @@ const adoptLegacyRows = async (
   ]);
 };
 
+// Only one installation may be open at a time, enforced by a partial unique
+// index. A restore therefore cannot blindly upsert an archive whose active era
+// differs from the target's: the target was seeded with its own active row by
+// the migration (or lazily by a booth write) and the insert would collide.
+//
+// The archive is authoritative for a restore, so the target's era yields. An
+// era with nothing recorded against it is bookkeeping noise and is removed; one
+// with real data is closed out instead, so nothing becomes unreachable.
+const reconcileActiveInstallation = async (
+  tx: Prisma.TransactionClient,
+  dump: Record<string, Row[]>,
+): Promise<void> => {
+  const incoming = (dump[INSTALLATION_MODEL] ?? []).find((row) => row.endedAt == null);
+  if (!incoming) return;
+
+  const existing = await tx.installation.findFirst({ where: { endedAt: null } });
+  if (!existing || existing.id === incoming.id) return;
+
+  const where = { installationId: existing.id };
+  const [calls, messages, events, snapshots, questions] = await Promise.all([
+    tx.callSession.count({ where }),
+    tx.message.count({ where }),
+    tx.boothEvent.count({ where }),
+    tx.boothStatusSnapshot.count({ where }),
+    tx.question.count({ where }),
+  ]);
+
+  if (calls + messages + events + snapshots + questions === 0) {
+    await tx.installation.delete({ where: { id: existing.id } });
+    return;
+  }
+
+  await tx.installation.update({
+    where: { id: existing.id },
+    data: {
+      endedAt: new Date(),
+      notes: [existing.notes, "Closed automatically to restore an archive."]
+        .filter((part) => part != null && part !== "")
+        .join("\n"),
+    },
+  });
+};
+
 // Restore an export archive into the current instance. Rows are upserted by id
 // (idempotent) inside a single transaction, so a mid-restore failure never
 // leaves a partially populated database. Each referenced audio blob is uploaded
@@ -355,6 +412,7 @@ export const restoreImportArchive = async (archive: Buffer): Promise<ImportSumma
   const rows: Record<string, number> = {};
   await db.$transaction(
     async (tx) => {
+      await reconcileActiveInstallation(tx, dump);
       for (const name of IMPORT_ORDER) {
         const client = modelClientOf(tx, name);
         let count = 0;
@@ -370,6 +428,9 @@ export const restoreImportArchive = async (archive: Buffer): Promise<ImportSumma
     // the whole database is applied atomically.
     { timeout: 120_000, maxWait: 10_000 },
   );
+
+  // A restore can replace which era is open, so the cached id is now suspect.
+  invalidateActiveInstallationCache();
 
   return { rows, blobsUploaded, blobsSkipped };
 };

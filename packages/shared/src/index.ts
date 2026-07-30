@@ -631,8 +631,9 @@ export const InstallationUpdateSchema = z.object(installationMetadataFields).par
 export type InstallationUpdate = z.infer<typeof InstallationUpdateSchema>;
 
 export const InstallationEndSchema = z.object({
-  // Optional metadata edits applied as part of closing the books, so the
-  // operator can name the era retroactively in one request.
+  // Optional annotation edits applied as part of closing the books, so the
+  // operator can record where the booth stood and how it went without a
+  // second request. Renaming is not part of this contract — use PATCH.
   notes: z.string().trim().max(2000).nullable().optional(),
   location: z.string().trim().max(200).nullable().optional(),
 });

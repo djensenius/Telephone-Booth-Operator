@@ -73,12 +73,25 @@ const summary = {
 
 let createBody: unknown = null;
 let endCalledId: string | null = null;
+let updateBody: unknown = null;
+let updateCalledId: string | null = null;
 
 const server = setupServer(
   http.get("http://localhost/v1/stats/summary", () => HttpResponse.json(summary)),
   http.post("http://localhost/v1/installations", async ({ request }) => {
     createBody = await request.json();
     return HttpResponse.json(activeInstallation, { status: 201 });
+  }),
+  http.patch("http://localhost/v1/installations/:id", async ({ params, request }) => {
+    updateCalledId = String(params.id);
+    updateBody = await request.json();
+    const patch = updateBody as { name?: string; notes?: string | null; location?: string | null };
+    return HttpResponse.json({
+      ...activeInstallation,
+      name: patch.name ?? activeInstallation.name,
+      notes: patch.notes ?? activeInstallation.notes,
+      location: patch.location ?? activeInstallation.location,
+    });
   }),
   http.post("http://localhost/v1/installations/:id/end", ({ params }) => {
     endCalledId = String(params.id);
@@ -105,6 +118,8 @@ afterAll(() => server.close());
 beforeEach(() => {
   createBody = null;
   endCalledId = null;
+  updateBody = null;
+  updateCalledId = null;
   navigateMock.mockReset();
 });
 afterEach(() => {
@@ -186,5 +201,50 @@ describe("InstallationsScreen", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Confirm end" }));
 
     expect(await screen.findByText(/safety-net archive could not be written/)).toBeTruthy();
+  });
+
+  it("renames the active installation via the edit form", async () => {
+    renderScreen([activeInstallation]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit details" }));
+    const nameInput = await screen.findByDisplayValue("Summer 2026 tour");
+    fireEvent.change(nameInput, { target: { value: "Autumn 2026 tour" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(updateCalledId).toBe(activeId));
+    expect(updateBody).toMatchObject({ name: "Autumn 2026 tour" });
+  });
+
+  it("cancelling the edit form restores the original values without saving", async () => {
+    renderScreen([activeInstallation]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit details" }));
+    fireEvent.change(await screen.findByDisplayValue("Summer 2026 tour"), {
+      target: { value: "Discarded" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(updateCalledId).toBeNull();
+    // Re-opening should show the original name again, not the discarded one.
+    fireEvent.click(await screen.findByRole("button", { name: "Edit details" }));
+    expect(await screen.findByDisplayValue("Summer 2026 tour")).toBeTruthy();
+  });
+
+  it("nudges the operator to rename when a Start hits 409 installation_already_active", async () => {
+    server.use(
+      http.post("http://localhost/v1/installations", () =>
+        HttpResponse.json({ error: "installation_already_active" }, { status: 409 }),
+      ),
+    );
+    renderScreen([endedInstallation]);
+
+    fireEvent.change(await screen.findByPlaceholderText("Summer 2027 residency"), {
+      target: { value: "Autumn 2026" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start installation" }));
+
+    expect(
+      await screen.findByText(/booth has recorded into it, so it can't be renamed automatically/i),
+    ).toBeTruthy();
   });
 });

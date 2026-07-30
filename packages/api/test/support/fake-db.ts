@@ -398,6 +398,18 @@ const projectAudio = (
 // The real schema enforces unique indexes that this store otherwise ignores,
 // which lets a query that Postgres would reject pass in tests. Mirror the ones
 // the app actually relies on.
+// Scope filters arrive either as a plain id or, when no installation is open,
+// as `{ in: [] }` — Prisma's way of saying "match nothing". The bespoke
+// filters below have to honour both, or a test would see the whole store where
+// production sees an empty list.
+type ScopeFilter = string | { in: string[] };
+
+const matchesScope = (value: string | null, filter: ScopeFilter | undefined): boolean => {
+  if (filter === undefined) return true;
+  if (typeof filter === "string") return value === filter;
+  return value !== null && filter.in.includes(value);
+};
+
 const uniqueViolation = (fields: string[]): Prisma.PrismaClientKnownRequestError =>
   new Prisma.PrismaClientKnownRequestError(
     `Unique constraint failed on the fields: (\`${fields.join("`,`")}\`)`,
@@ -509,6 +521,22 @@ export const seedMessage = (overrides: Partial<FakeMessage> = {}): FakeMessage =
   };
   store.messages.set(message.id, message);
   return message;
+};
+
+export const seedInstallation = (overrides: Partial<FakeInstallation> = {}): FakeInstallation => {
+  const installation: FakeInstallation = {
+    id: overrides.id ?? randomUUID(),
+    name: overrides.name ?? "Seeded installation",
+    notes: overrides.notes ?? null,
+    location: overrides.location ?? null,
+    startedAt: overrides.startedAt ?? new Date(),
+    endedAt: overrides.endedAt ?? null,
+    endedById: overrides.endedById ?? null,
+    summary: overrides.summary ?? null,
+    createdAt: overrides.createdAt ?? new Date(),
+  };
+  store.installations.set(installation.id, installation);
+  return installation;
 };
 
 export const seedMobileDevice = (overrides: Partial<FakeMobileDevice> = {}): FakeMobileDevice => {
@@ -724,7 +752,7 @@ export const fakeDb = {
       return { count };
     },
     findMany: async ({ where = {} }: { where?: Predicate; select?: unknown } = {}) =>
-      [...store.files.values()].filter((file) => matchesWhere(file, where ?? {})),
+      [...store.files.values()].filter((file) => matchesFileWhere(file, where ?? {})),
     findUnique: async ({
       where,
     }: {
@@ -1036,7 +1064,7 @@ export const fakeDb = {
       where?: {
         status?: string | { in: readonly string[] };
         createdAt?: { gte: Date };
-        installationId?: string;
+        installationId?: ScopeFilter;
         OR?: readonly MessageRelationFilter[];
       };
       include?: { audio?: boolean; transcriptions?: unknown; moderations?: unknown };
@@ -1047,7 +1075,9 @@ export const fakeDb = {
       void orderBy;
       let messages = [...store.messages.values()];
       if (where.installationId !== undefined) {
-        messages = messages.filter((message) => message.installationId === where.installationId);
+        messages = messages.filter((message) =>
+          matchesScope(message.installationId, where.installationId),
+        );
       }
       const status = where.status;
       if (typeof status === "string") {
@@ -1172,9 +1202,18 @@ export const fakeDb = {
     count: async ({
       where = {},
     }: {
-      where?: { status?: string | { in: string[] }; createdAt?: { gte: Date } };
+      where?: {
+        status?: string | { in: string[] };
+        createdAt?: { gte: Date };
+        installationId?: ScopeFilter;
+      };
     } = {}) => {
       let messages = [...store.messages.values()];
+      if (where.installationId !== undefined) {
+        messages = messages.filter((message) =>
+          matchesScope(message.installationId, where.installationId),
+        );
+      }
       if (where.status) {
         const status = where.status;
         if (typeof status === "object" && Array.isArray(status.in)) {
@@ -1567,15 +1606,15 @@ export const fakeDb = {
     },
     findFirst: async (
       args: {
-        where?: { firstSeenAt?: { lte?: Date; gt?: Date }; installationId?: string };
+        where?: { firstSeenAt?: { lte?: Date; gt?: Date }; installationId?: ScopeFilter };
         orderBy?: StatusOrder | StatusOrder[];
       } = {},
     ) => {
       const { lte, gt } = args.where?.firstSeenAt ?? {};
       let statuses = [...store.statuses];
       if (args.where?.installationId !== undefined) {
-        statuses = statuses.filter(
-          (status) => status.installationId === args.where?.installationId,
+        statuses = statuses.filter((status) =>
+          matchesScope(status.installationId, args.where?.installationId),
         );
       }
       if (lte) statuses = statuses.filter((status) => status.firstSeenAt <= lte);
@@ -1979,6 +2018,54 @@ export const fakeDb = {
     }) => create,
   },
   $transaction: async <T>(fn: (tx: typeof fakeDb) => Promise<T>): Promise<T> => fn(fakeDb),
+};
+
+// A scoped export filters files through their owning rows. Those are relation
+// filters, which the generic matcher does not understand, so resolve them
+// against the store here — otherwise a scoped export looks correct in tests
+// while Prisma rejects the query outright.
+const matchesFileRelation = (file: FakeFile, key: string, filter: unknown): boolean => {
+  const cond = (filter ?? {}) as Record<string, unknown>;
+  if (key === "questions") {
+    const some = (cond.some ?? {}) as { installationId?: string };
+    return [...store.questions.values()].some(
+      (question) =>
+        question.audioId === file.id &&
+        (some.installationId === undefined || question.installationId === some.installationId),
+    );
+  }
+  if (key === "message") {
+    const where = cond as { installationId?: string; isNot?: unknown };
+    if ("isNot" in cond) return [...store.messages.values()].some((m) => m.audioId === file.id);
+    return [...store.messages.values()].some(
+      (message) =>
+        message.audioId === file.id &&
+        (where.installationId === undefined || message.installationId === where.installationId),
+    );
+  }
+  if (key === "instruction") {
+    return [...store.instructions.values()].some((row) => row.audioId === file.id);
+  }
+  return false;
+};
+
+const FILE_RELATIONS = new Set(["questions", "message", "instruction"]);
+
+const matchesFileWhere = (file: FakeFile, where: Record<string, unknown>): boolean => {
+  const scalar: Record<string, unknown> = {};
+  for (const [key, raw] of Object.entries(where)) {
+    if (key === "OR" && Array.isArray(raw)) {
+      const ok = raw.some((branch) => matchesFileWhere(file, branch as Record<string, unknown>));
+      if (!ok) return false;
+      continue;
+    }
+    if (FILE_RELATIONS.has(key)) {
+      if (!matchesFileRelation(file, key, raw)) return false;
+      continue;
+    }
+    scalar[key] = raw;
+  }
+  return matchesWhere(file, scalar);
 };
 
 const matchesWhere = (record: Record<string, unknown>, where: Record<string, unknown>): boolean => {

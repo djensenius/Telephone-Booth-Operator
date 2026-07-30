@@ -9,6 +9,7 @@ import {
   useEndInstallation,
   useInstallationsList,
   useStatsSummary,
+  useUpdateInstallation,
   installations as installationsApi,
 } from "../../lib/api-client.js";
 import { absoluteTime } from "../../lib/time-format.js";
@@ -42,6 +43,26 @@ function errorMessage(error: unknown, fallback: string): string {
     return error.message || fallback;
   }
   return error instanceof Error ? error.message : fallback;
+}
+
+// The Start endpoint returns 409 when an active era already has activity and
+// therefore can't be adopted (renamed). The Start form can't fix that on its
+// own, but the operator now can — the active card exposes a rename control —
+// so surface a message that points them at it instead of the raw API code.
+function startInstallationErrorMessage(error: unknown): string {
+  if (error instanceof ApiError && error.status === 409) {
+    const details = error.details;
+    const rawCode =
+      typeof details === "object" && details !== null && "error" in details
+        ? (details as { readonly error?: unknown }).error
+        : undefined;
+    const code = typeof rawCode === "string" ? rawCode : "";
+    if (code === "installation_already_active") {
+      return "An installation is already running and the booth has recorded into it, so it can't be renamed automatically. Rename the active installation below instead, or end it before starting a new one.";
+    }
+    return error.message || "That action conflicts with the current state.";
+  }
+  return errorMessage(error, "Could not start the installation.");
 }
 
 interface SummaryTileProps {
@@ -231,6 +252,113 @@ function EndInstallationForm({
   );
 }
 
+function EditActiveInstallationForm({
+  installation,
+}: {
+  readonly installation: Installation;
+}): JSX.Element {
+  const updateInstallation = useUpdateInstallation();
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(installation.name);
+  const [notes, setNotes] = useState(installation.notes ?? "");
+  const [location, setLocation] = useState(installation.location ?? "");
+
+  const reset = (): void => {
+    setName(installation.name);
+    setNotes(installation.notes ?? "");
+    setLocation(installation.location ?? "");
+  };
+
+  const cancel = (): void => {
+    reset();
+    updateInstallation.reset();
+    setEditing(false);
+  };
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    const trimmed = name.trim();
+    if (trimmed.length === 0 || updateInstallation.isPending) return;
+    updateInstallation.mutate(
+      {
+        id: installation.id,
+        input: {
+          name: trimmed,
+          notes: notes.trim().length === 0 ? null : notes.trim(),
+          location: location.trim().length === 0 ? null : location.trim(),
+        },
+      },
+      { onSuccess: () => setEditing(false) },
+    );
+  };
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          reset();
+          updateInstallation.reset();
+          setEditing(true);
+        }}
+      >
+        Edit details
+      </button>
+    );
+  }
+
+  return (
+    <form className="settings-list installations-edit-form" onSubmit={handleSubmit}>
+      <p>
+        A powered-on booth opens an unnamed era automatically. Rename the active installation here
+        to give this run a memorable name — this is the only way to relabel it once the booth has
+        recorded into it.
+      </p>
+      <label>
+        Name
+        <input
+          type="text"
+          value={name}
+          required
+          maxLength={120}
+          onChange={(event) => setName(event.currentTarget.value)}
+        />
+      </label>
+      <label>
+        Notes (optional)
+        <textarea
+          value={notes}
+          rows={2}
+          maxLength={2000}
+          onChange={(event) => setNotes(event.currentTarget.value)}
+        />
+      </label>
+      <label>
+        Location (optional)
+        <input
+          type="text"
+          value={location}
+          maxLength={200}
+          onChange={(event) => setLocation(event.currentTarget.value)}
+        />
+      </label>
+      {updateInstallation.isError ? (
+        <p className="settings-status settings-status--error" role="status">
+          {errorMessage(updateInstallation.error, "Could not update the installation.")}
+        </p>
+      ) : null}
+      <div className="debug-button-row">
+        <button type="submit" disabled={name.trim().length === 0 || updateInstallation.isPending}>
+          {updateInstallation.isPending ? "Saving…" : "Save changes"}
+        </button>
+        <button type="button" onClick={cancel} disabled={updateInstallation.isPending}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function StartInstallationForm(): JSX.Element {
   const createInstallation = useCreateInstallation();
   const [name, setName] = useState("");
@@ -258,7 +386,6 @@ function StartInstallationForm(): JSX.Element {
       },
     );
   };
-
   return (
     <section className="feature-card">
       <h2>Start a new installation</h2>
@@ -310,7 +437,7 @@ function StartInstallationForm(): JSX.Element {
         </p>
         {createInstallation.isError ? (
           <p className="settings-status settings-status--error" role="status">
-            {errorMessage(createInstallation.error, "Could not start the installation.")}
+            {startInstallationErrorMessage(createInstallation.error)}
           </p>
         ) : null}
         <div className="debug-button-row">
@@ -359,7 +486,10 @@ function InstallationCard({ installation }: { readonly installation: Installatio
       <div className="debug-button-row">
         <DownloadArchiveButton installation={installation} />
         {installation.isActive ? (
-          <EndInstallationForm installation={installation} />
+          <>
+            <EditActiveInstallationForm installation={installation} />
+            <EndInstallationForm installation={installation} />
+          </>
         ) : (
           <button
             type="button"

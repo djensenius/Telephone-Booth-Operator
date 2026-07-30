@@ -25,9 +25,16 @@ vi.mock("../src/lib/require-api-token.js", () => ({
 
 import { randomUUID } from "node:crypto";
 import { createApp } from "../src/index.js";
+import { resetInstallationCacheForTests } from "../src/lib/installation.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { resetFakeAzure } from "./support/fake-azure.js";
-import { resetFakeDb, store } from "./support/fake-db.js";
+import {
+  DEFAULT_INSTALLATION_ID,
+  resetFakeDb,
+  seedCallSession,
+  seedInstallation,
+  store,
+} from "./support/fake-db.js";
 import { operatorCookie, phoneHeaders } from "./support/http.js";
 
 const setup = () => {
@@ -36,6 +43,7 @@ const setup = () => {
   resetSessionCryptoForTests();
   resetFakeDb();
   resetFakeAzure();
+  resetInstallationCacheForTests();
 };
 
 const sampleEvent = (overrides: Record<string, unknown> = {}) => ({
@@ -199,5 +207,49 @@ describe("GET /v1/events", () => {
       nextCursor: string | null;
     };
     expect(secondJson.items).toHaveLength(1);
+  });
+
+  // A booth can report a `call_ended` after an admin has already closed the
+  // era. The rollover's close-out is terminal: the straggler must not rewrite
+  // the frozen session, or the ended era's summary stops matching its own
+  // drill-down.
+  it("does not let a late call_ended rewrite a session frozen by a rollover", async () => {
+    const nextEra = "22222222-2222-4222-8222-222222222222";
+    seedInstallation({ id: nextEra });
+    store.installations.get(DEFAULT_INSTALLATION_ID)!.endedAt = new Date("2026-01-01T00:00:00Z");
+    const frozen = seedCallSession({
+      id: "11111111-1111-4111-8111-111111111111",
+      bootId: "33333333-3333-4333-8333-333333333333",
+      endedAt: new Date("2026-01-01T00:00:00Z"),
+      outcome: "installation_ended",
+      installationId: DEFAULT_INSTALLATION_ID,
+    });
+
+    const res = await createApp().request("/v1/events", {
+      method: "POST",
+      headers: { ...phoneHeaders, "content-type": "application/json" },
+      body: JSON.stringify({
+        events: [
+          {
+            eventId: "late-1",
+            boothId: "booth-1",
+            bootId: "33333333-3333-4333-8333-333333333333",
+            type: "call_ended",
+            occurredAt: new Date("2026-02-01T00:00:00Z").toISOString(),
+            sessionId: frozen.id,
+            payload: { outcome: "completed", duration_ms: 4242 },
+          },
+        ],
+      }),
+    });
+
+    expect(res.status, await res.clone().text()).toBe(200);
+    const after = store.callSessions.get(frozen.id)!;
+    expect(after.outcome).toBe("installation_ended");
+    expect(after.durationMs).toBeNull();
+    expect(after.installationId).toBe(DEFAULT_INSTALLATION_ID);
+    // The event travels with its session rather than with whatever era is open.
+    const event = store.boothEvents.find((row) => row.eventId === "late-1");
+    expect(event?.installationId).toBe(DEFAULT_INSTALLATION_ID);
   });
 });

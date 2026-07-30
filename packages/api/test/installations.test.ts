@@ -6,11 +6,13 @@ vi.mock(
   async () => (await import("./support/fake-azure.js")).fakeAzureModule,
 );
 
+import { readTar } from "../src/lib/archive.js";
 import { createApp } from "../src/index.js";
 import {
   requireActiveInstallation,
   resetInstallationCacheForTests,
 } from "../src/lib/installation.js";
+import { resetStatsCacheForTests } from "../src/routes/stats.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { fakeBlobs, resetFakeAzure, seedBlobData } from "./support/fake-azure.js";
 import {
@@ -32,6 +34,7 @@ const setup = (): void => {
   resetFakeDb();
   resetFakeAzure();
   resetInstallationCacheForTests();
+  resetStatsCacheForTests();
 };
 
 const adminHeaders = (): { cookie: string } => ({ cookie: operatorCookie({ isAdmin: true }) });
@@ -266,7 +269,7 @@ describe("installations", () => {
   });
 
   describe("scoped reads", () => {
-    it("defaults stats to the active installation and excludes the previous era", async () => {
+    it("defaults the message queue to the active installation", async () => {
       // Data belonging to the first era.
       seedMessage({ status: "pending" });
       seedCallSession({ id: "old-session" });
@@ -430,6 +433,191 @@ describe("installations", () => {
         },
       );
       expect(res.status).toBe(404);
+    });
+  });
+
+  // The default-scope change is the riskiest part of installations, so cover
+  // all three scopes against the aggregates rather than only the list routes.
+  describe("scoped stats", () => {
+    const startFresh = async (app: ReturnType<typeof createApp>): Promise<string> => {
+      expect((await endDefault(app)).status).toBe(200);
+      const res = await app.request("/v1/installations", {
+        method: "POST",
+        headers: jsonHeaders(adminHeaders()),
+        body: JSON.stringify({ name: "Fresh" }),
+      });
+      expect(res.status, await res.clone().text()).toBe(201);
+      return ((await res.json()) as { id: string }).id;
+    };
+
+    // `receivedToday` counts by timestamp rather than status, so it survives
+    // the rollover emptying the moderation queue and measures scoping alone.
+    const summaryFor = async (
+      app: ReturnType<typeof createApp>,
+      scope?: string,
+    ): Promise<{ receivedToday: number; callsToday: number }> => {
+      const qs = scope === undefined ? "" : `?installationId=${scope}`;
+      const res = await app.request(`/v1/stats/summary${qs}`, { headers: operatorHeaders() });
+      expect(res.status, await res.clone().text()).toBe(200);
+      const body = (await res.json()) as {
+        messages: { receivedToday: number };
+        calls: { today: number };
+      };
+      return { receivedToday: body.messages.receivedToday, callsToday: body.calls.today };
+    };
+
+    it("isolates active, historical, and all-era aggregates", async () => {
+      seedMessage({ id: "aaaaaaaa-0000-4000-8000-0000000000c1", status: "approved" });
+      seedCallSession({ id: "old-session", startedAt: new Date() });
+
+      const app = createApp();
+      const freshId = await startFresh(app);
+
+      seedMessage({
+        id: "aaaaaaaa-0000-4000-8000-0000000000c2",
+        status: "approved",
+        installationId: freshId,
+      });
+
+      // Omitted scope is the active era only.
+      expect(await summaryFor(app)).toEqual({ receivedToday: 1, callsToday: 0 });
+      // The era we just closed still reads back exactly as it was.
+      expect(await summaryFor(app, DEFAULT_INSTALLATION_ID)).toEqual({
+        receivedToday: 1,
+        callsToday: 1,
+      });
+      // `all` is the documented escape hatch: the pre-installations behaviour.
+      expect(await summaryFor(app, "all")).toEqual({ receivedToday: 2, callsToday: 1 });
+    });
+
+    // The summary is cached; keying that cache by era is what stops a rollover
+    // from serving the previous era's numbers for the whole TTL.
+    it("does not serve one era's cached summary to another", async () => {
+      seedMessage({ id: "aaaaaaaa-0000-4000-8000-0000000000c3", status: "approved" });
+      const app = createApp();
+
+      expect(await summaryFor(app)).toEqual({ receivedToday: 1, callsToday: 0 });
+      const freshId = await startFresh(app);
+
+      expect(await summaryFor(app)).toEqual({ receivedToday: 0, callsToday: 0 });
+      expect(await summaryFor(app, freshId)).toEqual({ receivedToday: 0, callsToday: 0 });
+      expect(await summaryFor(app, DEFAULT_INSTALLATION_ID)).toEqual({
+        receivedToday: 1,
+        callsToday: 0,
+      });
+    });
+
+    it("scopes the overview the same way", async () => {
+      seedMessage({ id: "aaaaaaaa-0000-4000-8000-0000000000c4", status: "approved" });
+      const app = createApp();
+      await startFresh(app);
+
+      const active = await app.request("/v1/stats/overview", { headers: operatorHeaders() });
+      expect(active.status, await active.clone().text()).toBe(200);
+      const activeBody = (await active.json()) as { messages: { total: number } };
+      expect(activeBody.messages.total).toBe(0);
+
+      const all = await app.request("/v1/stats/overview?installationId=all", {
+        headers: operatorHeaders(),
+      });
+      expect(all.status).toBe(200);
+      const allBody = (await all.json()) as { messages: { total: number } };
+      expect(allBody.messages.total).toBe(1);
+    });
+  });
+
+  describe("review regressions", () => {
+    // A read must never open an era. Between ending one and the booth's next
+    // write there is no active installation, and loading a screen used to
+    // conjure an unnamed one into existence.
+    it("does not create an installation when a scoped read finds none active", async () => {
+      const app = createApp();
+      expect((await endDefault(app)).status).toBe(200);
+      const before = store.installations.size;
+
+      const res = await app.request("/v1/messages", { headers: adminHeaders() });
+
+      expect(res.status).toBe(200);
+      expect(store.installations.size).toBe(before);
+      const body = (await res.json()) as { items: unknown[] };
+      expect(body.items).toEqual([]);
+    });
+
+    it("reports 200 with no rows for stats when no era is open", async () => {
+      const app = createApp();
+      seedMessage({ id: "aaaaaaaa-0000-4000-8000-00000000000a", status: "pending" });
+      expect((await endDefault(app)).status).toBe(200);
+
+      const res = await app.request("/v1/stats/summary", { headers: adminHeaders() });
+
+      expect(res.status, await res.clone().text()).toBe(200);
+      const body = (await res.json()) as { messages: { pending: number } };
+      expect(body.messages.pending).toBe(0);
+    });
+
+    // The blob may already be gone; reporting it as deleted overstates what
+    // the purge actually removed.
+    it("counts only blobs the purge actually deleted", async () => {
+      const app = createApp();
+      const file = seedFile({ id: "ffffffff-0000-4000-8000-00000000000f" });
+      seedMessage({
+        id: "aaaaaaaa-0000-4000-8000-00000000000b",
+        audioId: file.id,
+        status: "approved",
+      });
+      // Deliberately do NOT seed the blob bytes: the row exists, the blob does not.
+      expect((await endDefault(app)).status).toBe(200);
+
+      const res = await app.request(`/v1/installations/${DEFAULT_INSTALLATION_ID}`, {
+        method: "DELETE",
+        headers: jsonHeaders(adminHeaders()),
+        body: JSON.stringify({ confirmName: "Installation 1" }),
+      });
+
+      expect(res.status, await res.clone().text()).toBe(200);
+      const body = (await res.json()) as { blobsDeleted: number; blobFailures: string[] };
+      expect(body.blobsDeleted).toBe(0);
+      expect(body.blobFailures).toEqual([]);
+    });
+  });
+
+  describe("scoped export", () => {
+    // A file can back several questions once an era copies them forward, so the
+    // export filters files through the to-many `questions` relation. Getting
+    // that relation name wrong is invisible to a mock that ignores relation
+    // filters, but Prisma rejects the query outright.
+    it("includes files owned by the era and excludes another era's", async () => {
+      const app = createApp();
+      const mine = seedFile({ id: "ffffffff-0000-4000-8000-0000000000a1", sha256: "a".repeat(64) });
+      const theirs = seedFile({
+        id: "ffffffff-0000-4000-8000-0000000000a2",
+        sha256: "b".repeat(64),
+      });
+      seedQuestion({
+        id: "cccccccc-0000-4000-8000-0000000000a1",
+        prompt: "Mine",
+        audioId: mine.id,
+      });
+      seedQuestion({
+        id: "cccccccc-0000-4000-8000-0000000000a2",
+        prompt: "Theirs",
+        audioId: theirs.id,
+        installationId: "22222222-2222-4222-8222-222222222222",
+      });
+      seedBlobData(mine.blobKey, Buffer.from("mine"));
+      seedBlobData(theirs.blobKey, Buffer.from("theirs"));
+
+      const res = await app.request(`/v1/installations/${DEFAULT_INSTALLATION_ID}/export`, {
+        headers: adminHeaders(),
+      });
+
+      expect(res.status, await res.clone().text()).toBe(200);
+      const entries = readTar(Buffer.from(await res.arrayBuffer()));
+      const dump = JSON.parse(
+        entries.find((entry) => entry.name === "data.json")?.data.toString("utf8") ?? "{}",
+      ) as { file?: { id: string }[]; question?: { id: string }[] };
+      expect(dump.file?.map((row) => row.id)).toEqual([mine.id]);
+      expect(dump.question?.map((row) => row.id)).toEqual(["cccccccc-0000-4000-8000-0000000000a1"]);
     });
   });
 

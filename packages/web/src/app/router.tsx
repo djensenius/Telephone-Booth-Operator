@@ -33,9 +33,18 @@ import { DIGIT_ROUTES, isMessageFilter } from "../lib/navigation.js";
 
 const messagesSearchSchema = z.object({
   status: z.enum(["all", "needs-review", "approved", "rejected", "uploading"]).optional(),
+  installationId: z.string().optional(),
 });
 
 const statsSearchSchema = z.object({
+  installationId: z.string().optional(),
+});
+
+const sessionsSearchSchema = z.object({
+  installationId: z.string().optional(),
+});
+
+const eventsSearchSchema = z.object({
   installationId: z.string().optional(),
 });
 
@@ -167,7 +176,9 @@ const messagesRoute = createRoute({
   validateSearch: (search: Record<string, unknown>) => {
     const parsed = messagesSearchSchema.safeParse(search);
     if (parsed.success) return parsed.data;
-    return isMessageFilter(search.status) ? { status: search.status } : {};
+    const fallback: { status?: "all" | "needs-review" | "approved" | "rejected" | "uploading" } =
+      isMessageFilter(search.status) ? { status: search.status } : {};
+    return fallback;
   },
   component: () => protectedScreen(<MessagesScreen />),
 });
@@ -223,12 +234,20 @@ const systemRoute = createRoute({
 const eventsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/events",
+  validateSearch: (search: Record<string, unknown>) => {
+    const parsed = eventsSearchSchema.safeParse(search);
+    return parsed.success ? parsed.data : {};
+  },
   component: () => protectedScreen(<EventsScreen />),
 });
 
 const sessionsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/sessions",
+  validateSearch: (search: Record<string, unknown>) => {
+    const parsed = sessionsSearchSchema.safeParse(search);
+    return parsed.success ? parsed.data : {};
+  },
   component: () => protectedScreen(<SessionsScreen />),
 });
 

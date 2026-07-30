@@ -11,6 +11,7 @@ import { GlassPanel, useBoothStatus } from "../../components/booth/index.js";
 import {
   apiQueryKeys,
   apiWebSocketUrlFor,
+  invalidateInstallationScopedQueries,
   useStatusCurrent,
   useStatusHistory,
 } from "../../lib/api-client.js";
@@ -125,6 +126,11 @@ export function StatusScreen(): JSX.Element {
           queryClient.setQueryData(apiQueryKeys.message(message.id), message);
           void queryClient.invalidateQueries({ queryKey: ["messages", "list"] });
           void queryClient.invalidateQueries({ queryKey: apiQueryKeys.transcriptions(message.id) });
+        } else if (envelope.data.kind === "installation") {
+          // Rollover on another console: the active era changed, so every
+          // scoped read is stale. Mirror what a local start/end mutation
+          // invalidates so this browser re-scopes without a reload.
+          invalidateInstallationScopedQueries(queryClient);
         }
         return;
       }

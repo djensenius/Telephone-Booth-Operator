@@ -12,6 +12,10 @@ import {
   useRetranscribeMessage,
 } from "../../lib/api-client.js";
 import {
+  InstallationScopePicker,
+  parseInstallationScopeParam,
+} from "../installations/InstallationScopePicker.js";
+import {
   MESSAGE_ROUTE_FILTERS,
   isMessageFilter,
   messageFilterLabel,
@@ -81,10 +85,20 @@ export function MessagesScreen(): JSX.Element {
   const navigate = useNavigate();
   const now = useNow();
   const filter: MessageRouteFilter = isMessageFilter(search.status) ? search.status : "all";
+  const scope = parseInstallationScopeParam(search.installationId);
   const needsReview = filter === "needs-review";
-  const listed = useMessagesList(backendFilter(filter), { enabled: !needsReview });
-  const received = useMessagesList("received", { enabled: needsReview });
-  const pending = useMessagesList("pending", { enabled: needsReview });
+  const listed = useMessagesList(backendFilter(filter), {
+    enabled: !needsReview,
+    ...(scope === undefined ? {} : { installationId: scope }),
+  });
+  const received = useMessagesList("received", {
+    enabled: needsReview,
+    ...(scope === undefined ? {} : { installationId: scope }),
+  });
+  const pending = useMessagesList("pending", {
+    enabled: needsReview,
+    ...(scope === undefined ? {} : { installationId: scope }),
+  });
   const questions = useQuestionsList();
   const deleteMessage = useDeleteMessage();
   const decideMessage = useDecideMessage();
@@ -153,7 +167,10 @@ export function MessagesScreen(): JSX.Element {
             onClick={() =>
               void navigate({
                 to: "/messages",
-                search: option === "all" ? {} : { status: option },
+                search: {
+                  ...(option === "all" ? {} : { status: option }),
+                  ...(scope === undefined ? {} : { installationId: scope }),
+                },
               })
             }
           >
@@ -161,6 +178,19 @@ export function MessagesScreen(): JSX.Element {
           </button>
         ))}
       </div>
+      <InstallationScopePicker
+        scope={scope}
+        onChange={(next) =>
+          void navigate({
+            to: "/messages",
+            search: {
+              ...(filter === "all" ? {} : { status: filter }),
+              ...(next === undefined ? {} : { installationId: next }),
+            },
+            replace: true,
+          })
+        }
+      />
       {actionError ? (
         <p className="feature-error" role="alert">
           {actionMessage(actionError)}

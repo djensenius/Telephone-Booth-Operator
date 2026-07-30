@@ -21,9 +21,11 @@ import { deleteBlob } from "../lib/azure-blob.js";
 import { wsBroadcaster } from "../lib/broadcaster.js";
 import { buildExportArchive } from "../lib/data-archive.js";
 import { db } from "../lib/db.js";
+import { Prisma } from "../generated/prisma/client.js";
 import {
   computeInstallationSummary,
   findActiveInstallation,
+  installationHasActivity,
   invalidateActiveInstallationCache,
   nextInstallationName,
   serializeInstallation,
@@ -34,6 +36,9 @@ import { requireAdmin, requireOperator, type AuthVariables } from "../lib/sessio
 export const installationsRouter = new Hono<{ Variables: AuthVariables }>();
 
 const idParamSchema = z.object({ id: z.guid() });
+
+const isUniqueViolation = (err: unknown): boolean =>
+  err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
 
 // Outcome stamped on call sessions still open when the era is closed, so they
 // are distinguishable from sessions the booth ended itself.
@@ -81,7 +86,7 @@ installationsRouter.post(
   async (c) => {
     const body = c.req.valid("json");
     const active = await findActiveInstallation();
-    if (active && (await hasActivity(active.id))) {
+    if (active && (await installationHasActivity(active.id))) {
       return c.json({ error: "installation_already_active", installationId: active.id }, 409);
     }
 
@@ -92,57 +97,73 @@ installationsRouter.post(
       orderBy: [{ endedAt: "desc" }],
     });
 
-    const created = await db.$transaction(async (tx) => {
-      const data = {
-        name: body.name.length > 0 ? body.name : await nextInstallationName(),
-        notes: body.notes ?? null,
-        location: body.location ?? null,
-      };
-      const installation = active
-        ? await tx.installation.update({
-            where: { id: active.id },
-            data: { ...data, startedAt: new Date() },
-          })
-        : await tx.installation.create({ data });
+    const created = await db
+      .$transaction(async (tx) => {
+        const data = {
+          name: body.name.length > 0 ? body.name : await nextInstallationName(),
+          notes: body.notes ?? null,
+          location: body.location ?? null,
+        };
+        const installation = active
+          ? await tx.installation.update({
+              where: { id: active.id },
+              data: { ...data, startedAt: new Date() },
+            })
+          : await tx.installation.create({ data });
 
-      // Copied questions point at the *same* `File` row as the original, so
-      // the audio is shared rather than re-uploaded and SHA-256 dedupe is
-      // preserved. This is why `Question.audioId` is not unique, and why the
-      // purge below refcounts `File` rows before deleting any blob.
-      //
-      // Ending an installation archives the questions that were live at the
-      // time, stamping `retiredAt` with the era's `endedAt`. That stamp is
-      // what lets us tell "was live when the era ended" apart from "the
-      // operator retired this months ago", so both it and any remaining
-      // drafts are what carry forward.
-      if (body.copyQuestions && previous) {
-        const source = await tx.question.findMany({
-          where: {
-            installationId: previous.id,
-            OR: [
-              { status: { in: ["active", "draft"] } },
-              ...(previous.endedAt
-                ? [{ status: "archived", retiredAt: previous.endedAt } as const]
-                : []),
-            ],
-          },
-        });
-        for (const question of source) {
-          await tx.question.create({
-            data: {
-              prompt: question.prompt,
-              // Drafts stay drafts; anything that was live (or was archived by
-              // the rollover) comes back live in the new era.
-              status: question.status === "draft" ? "draft" : "active",
-              audioId: question.audioId,
-              installationId: installation.id,
+        // Copied questions point at the *same* `File` row as the original, so
+        // the audio is shared rather than re-uploaded and SHA-256 dedupe is
+        // preserved. This is why `Question.audioId` is not unique, and why the
+        // purge below refcounts `File` rows before deleting any blob.
+        //
+        // Ending an installation archives the questions that were live at the
+        // time, stamping `retiredAt` with the era's `endedAt`. That stamp is
+        // what lets us tell "was live when the era ended" apart from "the
+        // operator retired this months ago", so both it and any remaining
+        // drafts are what carry forward.
+        if (body.copyQuestions && previous) {
+          const source = await tx.question.findMany({
+            where: {
+              installationId: previous.id,
+              OR: [
+                { status: { in: ["active", "draft"] } },
+                ...(previous.endedAt
+                  ? [{ status: "archived", retiredAt: previous.endedAt } as const]
+                  : []),
+              ],
             },
           });
+          for (const question of source) {
+            await tx.question.create({
+              data: {
+                prompt: question.prompt,
+                // Drafts stay drafts; anything that was live (or was archived by
+                // the rollover) comes back live in the new era.
+                status: question.status === "draft" ? "draft" : "active",
+                audioId: question.audioId,
+                installationId: installation.id,
+              },
+            });
+          }
         }
-      }
 
-      return installation;
-    });
+        return installation;
+      })
+      .catch((err: unknown) => {
+        // Two admins starting an era at once: the loser trips the partial unique
+        // index that keeps exactly one era open. That is the same situation the
+        // precheck reports, so report it the same way rather than as a 500.
+        if (isUniqueViolation(err)) return null;
+        throw err;
+      });
+
+    if (!created) {
+      const winner = await findActiveInstallation();
+      return c.json(
+        { error: "installation_already_active", ...(winner ? { installationId: winner.id } : {}) },
+        409,
+      );
+    }
 
     invalidateActiveInstallationCache();
     const dto = serializeInstallation(created);
@@ -325,17 +346,6 @@ installationsRouter.delete(
 // Whether an installation has recorded anything yet. Used to tell a freshly
 // auto-created era (which the operator can safely adopt and name) apart from
 // one the booth has actually been running in.
-const hasActivity = async (installationId: string): Promise<boolean> => {
-  const where = { installationId };
-  const [calls, messages, events, snapshots] = await Promise.all([
-    db.callSession.count({ where }),
-    db.message.count({ where }),
-    db.boothEvent.count({ where }),
-    db.boothStatusSnapshot.count({ where }),
-  ]);
-  return calls + messages + events + snapshots > 0;
-};
-
 type OwnedFile = { id: string; blobKey: string };
 
 const filesOwnedByInstallation = async (installationId: string): Promise<OwnedFile[]> => {
@@ -392,8 +402,9 @@ const purgeOrphanFiles = async (
   // report it rather than rolling back a delete that already succeeded.
   for (const { blobKey } of orphans) {
     try {
-      await deleteBlob(blobKey);
-      blobsDeleted += 1;
+      // `deleteBlob` reports false when the blob was already gone. Counting
+      // that as a deletion would overstate what the purge actually removed.
+      if (await deleteBlob(blobKey)) blobsDeleted += 1;
     } catch (error) {
       log.error({ err: error, blobKey }, "failed to delete blob during purge");
       blobFailures.push(blobKey);

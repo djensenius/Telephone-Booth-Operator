@@ -109,6 +109,16 @@ paths:
           in: query
           description: Filter to a single lifecycle state. Omit to list every non-archived question.
           schema: { $ref: "#/components/schemas/QuestionStatus" }
+        - name: installationId
+          in: query
+          description: |
+            Installation scope. Omit for the currently active installation
+            (the default), pass a uuid for a historical one, or `all` to span
+            every installation.
+          schema:
+            oneOf:
+              - { type: string, format: uuid }
+              - { type: string, enum: [all] }
       responses:
         "200":
           description: ok

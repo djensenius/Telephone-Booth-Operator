@@ -47,14 +47,18 @@ POST /v1/admin/data/import        ← raw tar body (application/x-tar)
 ```
 
 The scoped export contains only the rows belonging to that installation, plus
-the blobs they reference. It is what the API generates automatically as a
-safety net when an installation is ended — see
-[installations](installations.md).
+the blobs they reference — download one before purging an era if you want a
+copy to keep. See [installations](installations.md).
 
 Import is **idempotent**: rows are upserted by id, and each audio blob is
 uploaded only when the target storage does not already hold it (dedupe by
 `blobKey`). Every blob's bytes are re-hashed and checked against the
 archived `sha256` before upload, so a corrupted archive is rejected.
+
+Only one installation may be open at a time. If the archive carries an active
+era and the target already has one, the target's yields: an era with nothing
+recorded against it is removed, and one holding data is closed out so nothing
+becomes unreachable.
 
 ## CLI wrapper
 

@@ -213,6 +213,36 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
   }
 
   const installationId = await requireActiveInstallation();
+
+  // A late `call_ended` can arrive for a session the rollover already closed
+  // out. Those sessions belong to a frozen era: their outcome and `endedAt`
+  // must not be rewritten, and the events that reference them belong with the
+  // session rather than with whatever era happens to be open now.
+  const referencedSessionIds = [
+    ...new Set(
+      events.map((event) => event.sessionId).filter((id): id is string => typeof id === "string"),
+    ),
+  ];
+  const knownSessions =
+    referencedSessionIds.length > 0
+      ? await db.callSession.findMany({
+          where: { id: { in: referencedSessionIds } },
+          select: { id: true, installationId: true, endedAt: true },
+        })
+      : [];
+  const sessionEra = new Map(knownSessions.map((row) => [row.id, row]));
+  const frozen = (sessionId: string): boolean => {
+    const known = sessionEra.get(sessionId);
+    return (
+      known !== undefined &&
+      known.installationId !== null &&
+      known.installationId !== installationId &&
+      known.endedAt !== null
+    );
+  };
+  const eraFor = (sessionId: string | null | undefined): string =>
+    (sessionId ? sessionEra.get(sessionId)?.installationId : null) ?? installationId;
+
   const rows = events.map((event) => ({
     eventId: event.eventId,
     boothId: event.boothId,
@@ -223,7 +253,7 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
     recordingId: event.recordingId ?? null,
     payload: event.payload ?? {},
     version: event.version ?? null,
-    installationId,
+    installationId: eraFor(event.sessionId),
   }));
 
   // 2. Atomically upsert sessions and insert events in a single transaction.
@@ -232,6 +262,9 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
   const inserted = await db.$transaction(async (tx) => {
     for (const init of sessionInits.values()) {
       if (!init.id || !init.boothId || !init.bootId) continue;
+      // The rollover's close-out is terminal; a straggler event must not undo
+      // it, or the ended era's summary stops matching its own drill-down.
+      if (frozen(init.id)) continue;
       const startedAt = init.startedAt ?? new Date();
       await tx.callSession.upsert({
         where: { id: init.id },
@@ -246,7 +279,7 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
           recordingId: init.recordingId ?? null,
           durationMs: init.durationMs ?? null,
           version: init.version ?? null,
-          installationId,
+          installationId: eraFor(init.id),
         },
         update: {
           // Never overwrite startedAt; never null-out fields that the event
