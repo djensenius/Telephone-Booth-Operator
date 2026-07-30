@@ -31,9 +31,10 @@ export interface MessageCardProps {
   readonly onDecide: (id: string, decision: "approve" | "reject") => void;
   readonly onRetranscribe: (id: string) => void;
   readonly onDelete: (id: string, trigger: HTMLButtonElement) => void;
-  // An ended era's counters are frozen, so its recordings are read-only: the
-  // API refuses a decision or a delete against them and the card should not
-  // offer either.
+  // An ended era's counters are frozen, so the API refuses a decision or a
+  // delete against its recordings and the card should not offer either.
+  // Re-running a transcription is still allowed: it adds text without
+  // contradicting a frozen number.
   readonly frozen?: boolean;
 }
 
@@ -144,7 +145,7 @@ export function MessageCard({
         <Link to="/messages/$id" params={{ id: message.id }}>
           Open
         </Link>
-        {status.canRetry && !uploading && !frozen ? (
+        {status.canRetry && !uploading ? (
           <button type="button" disabled={busy} onClick={() => onRetranscribe(message.id)}>
             Re-run transcription
           </button>

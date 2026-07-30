@@ -1114,6 +1114,34 @@ describe("installations", () => {
   describe("frozen eras are read-only", () => {
     // An ended era's counters were frozen at close-out. A decision or a delete
     // afterwards would leave the summary disagreeing with its own drill-down.
+    // A prompt's `retiredAt` is what identifies it as having been live when
+    // its era ended, and a straggler recording is matched against exactly
+    // that. Re-activating or re-archiving one afterwards would overwrite the
+    // marker or put a live prompt inside a frozen era.
+    it("refuses to change a prompt's lifecycle once its era has ended", async () => {
+      const live = seedQuestion({ status: "active" });
+      const draft = seedQuestion({ status: "draft" });
+      const app = createApp();
+      expect((await endDefault(app)).status).toBe(200);
+      const endedAt = store.installations.get(DEFAULT_INSTALLATION_ID)?.endedAt;
+
+      const reactivated = await app.request(`/v1/questions/${live.id}/activate`, {
+        method: "POST",
+        headers: adminHeaders(),
+      });
+      expect(reactivated.status, await reactivated.clone().text()).toBe(409);
+      // `retiredAt` still equals the era's end, which is what identifies this
+      // prompt as having been live when the era closed.
+      expect(store.questions.get(live.id)?.retiredAt).toEqual(endedAt);
+
+      const archivedDraft = await app.request(`/v1/questions/${draft.id}`, {
+        method: "DELETE",
+        headers: adminHeaders(),
+      });
+      expect(archivedDraft.status).toBe(409);
+      expect(store.questions.get(draft.id)?.status).toBe("draft");
+    });
+
     it("refuses a decision and a delete on an ended era's recording", async () => {
       const message = seedMessage({ status: "approved" });
       const app = createApp();
@@ -1236,7 +1264,7 @@ describe("installations", () => {
       ) as {
         file?: { id: string }[];
         question?: { id: string }[];
-        installation?: { id: string }[];
+        installation?: { id: string; summary: unknown; notes: string | null }[];
       };
       expect(dump.question?.map((row) => row.id)).toContain(question.id);
       // The question's own era travels too, or the archive would reference an
@@ -1244,6 +1272,11 @@ describe("installations", () => {
       expect(dump.installation?.map((row) => row.id).sort()).toEqual(
         [currentEra, DEFAULT_INSTALLATION_ID].sort(),
       );
+      // None of that era's own data travels, so its frozen counters must not
+      // either: restoring them would show a full run with an empty drill-down.
+      const parent = dump.installation?.find((row) => row.id === DEFAULT_INSTALLATION_ID);
+      expect(parent?.summary).toBeNull();
+      expect(parent?.notes).toContain("Partial");
       expect(dump.file?.map((row) => row.id)).toEqual(
         expect.arrayContaining([questionAudio.id, messageAudio.id]),
       );

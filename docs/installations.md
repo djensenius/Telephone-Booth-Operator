@@ -125,6 +125,11 @@ API refuses a moderation decision or a delete on one of its recordings
 (`409 installation_ended`), and the queue hides those actions when you are
 browsing history. Playback, transcripts and exports are unaffected.
 
+The same applies to a closed era's prompts: activating, deactivating or
+archiving one is refused with `409`, because a prompt's `retiredAt` is the
+marker that says it was live when the era ended, and a straggler recording is
+matched against exactly that.
+
 > **This changed the default.** Before installations existed, these endpoints
 > meant "everything ever". They now mean "this run". Pass `installationId=all`
 > for the old behaviour.

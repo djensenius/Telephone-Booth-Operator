@@ -88,7 +88,11 @@ export function BoothWebSocketProvider({
       // open, and acting on it would leave two live connections duplicating
       // every envelope.
       const retire = (): void => {
-        if (socket !== current) return;
+        // `closed` means this effect instance is gone (unmount, StrictMode's
+        // second pass, `enabled` flipping). Its socket's late close must not
+        // drag the shared state back to polling underneath whatever replaced
+        // it.
+        if (closed || socket !== current) return;
         socket = undefined;
         setState("polling");
         reconnect();

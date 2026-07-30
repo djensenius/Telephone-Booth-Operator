@@ -91,6 +91,23 @@ const collectDump = async (installationId?: string): Promise<DataDump> =>
           installationId ? scopedFindArgs(name, installationId) : {},
         );
       }
+      // A carried-over question drags its own era in as a parent row, but none
+      // of that era's data travels. Shipping its frozen summary would restore
+      // an installation claiming a full run's counters with an empty
+      // drill-down, so the parent arrives without counters and says why.
+      if (installationId) {
+        for (const row of dump[INSTALLATION_MODEL]) {
+          if (row.id === installationId) continue;
+          row.summary = null;
+          row.notes = [
+            row.notes,
+            "Partial: included only as the source of a prompt used by another installation.",
+          ]
+            .filter((part) => part != null && part !== "")
+            .join("\n");
+        }
+      }
+
       // Operators are global, but a scoped archive is a per-era artifact that
       // gets handed around (it is what the purge flow offers as a safety
       // copy), so it carries only the accounts its own rows point at rather

@@ -189,6 +189,7 @@ paths:
       responses:
         "204": { description: removed }
         "404": { description: not found }
+        "409": { description: the question's installation has ended }
 
   /v1/questions/{id}/activate:
     parameters:
@@ -206,6 +207,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Question" }
         "404": { description: not found }
+        "409": { description: the question's installation has ended }
 
   /v1/questions/{id}/deactivate:
     parameters:
@@ -223,6 +225,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Question" }
         "404": { description: not found }
+        "409": { description: the question's installation has ended }
 
   /v1/instructions:
     get:

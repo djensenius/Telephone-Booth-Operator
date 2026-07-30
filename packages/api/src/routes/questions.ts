@@ -8,7 +8,12 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { Prisma } from "../generated/prisma/client.js";
 import { db } from "../lib/db.js";
-import { lockOpenInstallation, resolveInstallationScope, scopeWhere } from "../lib/installation.js";
+import {
+  lockInstallationForWrite,
+  lockOpenInstallation,
+  resolveInstallationScope,
+  scopeWhere,
+} from "../lib/installation.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 import { serializeQuestion } from "../lib/serializers.js";
 import { requireAdmin, type AuthVariables } from "../lib/session.js";
@@ -105,6 +110,28 @@ questionsRouter.post("/", requireAdmin(), zValidator("json", QuestionCreateSchem
   }
 });
 
+// A prompt belongs to an era. Once that era has ended its questions were
+// archived with `retiredAt = endedAt`, which is what identifies them as having
+// been live at the end — and what a straggler recording is matched against. So
+// its lifecycle is closed too: activating, deactivating or archiving one would
+// either overwrite that marker or put a live prompt inside a frozen era. The
+// era row is held shared for the write, so a rollover cannot commit between
+// the check and the change.
+class InstallationEndedError extends Error {}
+
+const withOpenEra = async <T>(
+  installationId: string | null,
+  write: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> =>
+  db.$transaction(async (tx) => {
+    if (installationId !== null && !(await lockInstallationForWrite(tx, installationId))) {
+      throw new InstallationEndedError();
+    }
+    return write(tx);
+  });
+
+const endedEraResponse = { error: "installation_ended" } as const;
+
 questionsRouter.post(
   "/:id/activate",
   requireAdmin(),
@@ -114,12 +141,19 @@ questionsRouter.post(
     const question = await db.question.findUnique({ where: { id } });
     if (!question) return c.json({ error: "not_found" }, 404);
 
-    const updated = await db.question.update({
-      where: { id },
-      data: { status: "active", retiredAt: null },
-      include: { audio: true },
-    });
-    return c.json(serializeQuestion(updated));
+    try {
+      const updated = await withOpenEra(question.installationId, (tx) =>
+        tx.question.update({
+          where: { id },
+          data: { status: "active", retiredAt: null },
+          include: { audio: true },
+        }),
+      );
+      return c.json(serializeQuestion(updated));
+    } catch (error) {
+      if (error instanceof InstallationEndedError) return c.json(endedEraResponse, 409);
+      throw error;
+    }
   },
 );
 
@@ -132,12 +166,19 @@ questionsRouter.post(
     const question = await db.question.findUnique({ where: { id } });
     if (!question) return c.json({ error: "not_found" }, 404);
 
-    const updated = await db.question.update({
-      where: { id },
-      data: { status: "draft", retiredAt: null },
-      include: { audio: true },
-    });
-    return c.json(serializeQuestion(updated));
+    try {
+      const updated = await withOpenEra(question.installationId, (tx) =>
+        tx.question.update({
+          where: { id },
+          data: { status: "draft", retiredAt: null },
+          include: { audio: true },
+        }),
+      );
+      return c.json(serializeQuestion(updated));
+    } catch (error) {
+      if (error instanceof InstallationEndedError) return c.json(endedEraResponse, 409);
+      throw error;
+    }
   },
 );
 
@@ -146,10 +187,17 @@ questionsRouter.delete("/:id", requireAdmin(), zValidator("param", idParamSchema
   const question = await db.question.findUnique({ where: { id } });
   if (!question || question.status === "archived") return c.json({ error: "not_found" }, 404);
 
-  await db.question.update({
-    where: { id },
-    data: { status: "archived", retiredAt: new Date() },
-  });
+  try {
+    await withOpenEra(question.installationId, (tx) =>
+      tx.question.update({
+        where: { id },
+        data: { status: "archived", retiredAt: new Date() },
+      }),
+    );
+  } catch (error) {
+    if (error instanceof InstallationEndedError) return c.json(endedEraResponse, 409);
+    throw error;
+  }
   return c.body(null, 204);
 });
 

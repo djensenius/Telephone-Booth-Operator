@@ -22,6 +22,7 @@ import { generateSasUrl, headBlob } from "../lib/azure-blob.js";
 import { wsBroadcaster } from "../lib/broadcaster.js";
 import { db } from "../lib/db.js";
 import {
+  lockInstallationForWrite,
   lockOpenInstallation,
   requireActiveInstallation,
   resolveInstallationScope,
@@ -134,23 +135,35 @@ messagesRouter.get("/:id", zValidator("param", idParamSchema), async (c) => {
 // change what they counted — a moderation decision, a deletion — is refused
 // once the era is closed. Transcribing or translating an old recording is
 // still allowed: it adds text without contradicting a frozen number.
-const eraIsEnded = async (installationId: string | null): Promise<boolean> => {
-  if (installationId === null) return false;
-  const era = await db.installation.findUnique({
-    where: { id: installationId },
-    select: { endedAt: true },
+//
+// The check has to hold for the length of the write, or a rollover committing
+// between the two puts the change on the wrong side of the freeze. Holding the
+// era row shared is what makes the two queue instead of overlapping.
+export class InstallationEndedError extends Error {}
+
+const withOpenEra = async <T>(
+  installationId: string | null,
+  write: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> =>
+  db.$transaction(async (tx) => {
+    if (installationId !== null && !(await lockInstallationForWrite(tx, installationId))) {
+      throw new InstallationEndedError();
+    }
+    return write(tx);
   });
-  return era?.endedAt != null;
-};
 
 messagesRouter.delete("/:id", zValidator("param", idParamSchema), async (c) => {
   const { id } = c.req.valid("param");
   const existing = await db.message.findUnique({ where: { id } });
   if (!existing) return c.json({ error: "not_found" }, 404);
-  if (await eraIsEnded(existing.installationId)) {
-    return c.json({ error: "installation_ended" }, 409);
+  try {
+    await withOpenEra(existing.installationId, (tx) => tx.message.delete({ where: { id } }));
+  } catch (error) {
+    if (error instanceof InstallationEndedError) {
+      return c.json({ error: "installation_ended" }, 409);
+    }
+    throw error;
   }
-  await db.message.delete({ where: { id } });
   return c.body(null, 204);
 });
 
@@ -466,19 +479,25 @@ messagesRouter.post(
     if (existing.status === "uploading") {
       return c.json({ error: "message_not_decidable" }, 409);
     }
-    if (await eraIsEnded(existing.installationId)) {
-      return c.json({ error: "installation_ended" }, 409);
-    }
     const user = c.get("user") as { id: string } | undefined;
-    await db.message.update({
-      where: { id },
-      data: {
-        status: decision === "approve" ? "approved" : "rejected",
-        decidedAt: new Date(),
-        decidedById: user?.id ?? null,
-        ...(notes !== undefined ? { notes } : {}),
-      },
-    });
+    try {
+      await withOpenEra(existing.installationId, (tx) =>
+        tx.message.update({
+          where: { id },
+          data: {
+            status: decision === "approve" ? "approved" : "rejected",
+            decidedAt: new Date(),
+            decidedById: user?.id ?? null,
+            ...(notes !== undefined ? { notes } : {}),
+          },
+        }),
+      );
+    } catch (error) {
+      if (error instanceof InstallationEndedError) {
+        return c.json({ error: "installation_ended" }, 409);
+      }
+      throw error;
+    }
     const message = await db.message.findUnique({ where: { id }, include: messageWithAi });
     if (!message) return c.json({ error: "not_found" }, 404);
     wsBroadcaster.broadcast({ kind: "message", message: serializeMessage(message) });

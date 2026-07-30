@@ -19,6 +19,12 @@ type Status =
 function purgeErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 400) return "The confirmation name did not match.";
+    // The API's own error code says which 409 this is: an era that is still
+    // running, or one holding a recording that is still uploading with no
+    // open era to hand it to.
+    if (error.message === "uploads_in_flight") {
+      return "A recording is still uploading into that installation. Start a new installation so it has somewhere to land, then purge again.";
+    }
     if (error.status === 409) return "That installation is still active and cannot be purged.";
     return error.message || "Purge failed.";
   }

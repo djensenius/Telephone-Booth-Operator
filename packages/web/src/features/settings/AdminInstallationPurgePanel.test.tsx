@@ -225,4 +225,30 @@ describe("AdminInstallationPurgePanel", () => {
 
     expect(await screen.findByText("The confirmation name did not match.")).toBeTruthy();
   });
+
+  // Both refusals are 409s, and "that installation is still active" is
+  // actively misleading for an era that ended weeks ago.
+  it("distinguishes an in-flight upload from an active installation", async () => {
+    server.use(
+      http.delete("http://localhost/v1/installations/:id", () =>
+        HttpResponse.json({ error: "uploads_in_flight" }, { status: 409 }),
+      ),
+    );
+    renderPanel();
+
+    const select = await screen.findByLabelText("Installation");
+    await screen.findByRole("option", { name: /Spring 2026 residency — started .+ \(/ });
+    fireEvent.change(select, { target: { value: endedId } });
+    fireEvent.click(screen.getByRole("button", { name: "Download archive (required)" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Download archive again" })).toBeTruthy(),
+    );
+
+    fireEvent.change(screen.getByLabelText(/to confirm/), {
+      target: { value: "Spring 2026 residency" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Permanently delete installation" }));
+
+    expect(await screen.findByText(/still uploading into that installation/)).toBeTruthy();
+  });
 });
