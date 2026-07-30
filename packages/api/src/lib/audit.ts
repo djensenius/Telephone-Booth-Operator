@@ -433,7 +433,11 @@ export const auditWrites =
       if (draft.skip) return;
       if (!matchedAHandler(c)) return;
       const pattern = routePattern(c);
-      if (!auditTelemetry() && isTelemetryWrite(c.req.method, pattern)) return;
+      // Telemetry is excluded for volume, not for secrecy: a heartbeat that
+      // succeeded is noise, but one that was denied or malformed is exactly
+      // the evidence this trail exists for, so only the quiet ones are
+      // dropped.
+      if (!auditTelemetry() && statusCode < 400 && isTelemetryWrite(c.req.method, pattern)) return;
       const actor = resolveActor(c, draft);
       const ip = clientIp(c);
       let metadata = draft.metadata;

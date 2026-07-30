@@ -386,6 +386,20 @@ describe("audit log middleware", () => {
     expect(store.auditLogs[0]!.action).toBe("http.put /v1/status");
   });
 
+  it("still records a telemetry heartbeat the API refused", async () => {
+    const app = createApp();
+    const denied = await app.request("/v1/status", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ state: "idle" }),
+    });
+
+    expect(denied.status).toBe(401);
+    expect(store.auditLogs).toHaveLength(1);
+    expect(store.auditLogs[0]!.action).toBe("http.put /v1/status");
+    expect(store.auditLogs[0]!.actorType).toBe("anonymous");
+  });
+
   it("can be disabled entirely", async () => {
     process.env.AUDIT_LOG_ENABLED = "false";
     const app = createApp();

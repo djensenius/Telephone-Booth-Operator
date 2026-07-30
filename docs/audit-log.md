@@ -95,8 +95,11 @@ helper backs `OperatorSession.ip`, so sessions and audit rows always agree.
 ## Telemetry
 
 Booth heartbeats (`PUT /v1/status`, `PUT /v1/system`, `POST /v1/events`) are
-writes, but they are machine chatter rather than decisions, so they are skipped
-by default. Set `AUDIT_LOG_TELEMETRY=true` to record them too — expect the table
+writes, but they are machine chatter rather than decisions, so a _successful_
+heartbeat is skipped by default. A rejected or malformed one is always recorded:
+the exclusion exists to control volume, and a booth that suddenly cannot
+authenticate is exactly the kind of thing the trail should show. Set
+`AUDIT_LOG_TELEMETRY=true` to record the successful ones too — expect the table
 to grow quickly.
 
 ## Reading the trail
@@ -129,7 +132,7 @@ Other clients read the same endpoint:
 | Variable                           | Default | Meaning                                                                              |
 | ---------------------------------- | ------- | ------------------------------------------------------------------------------------ |
 | `AUDIT_LOG_ENABLED`                | `true`  | Master switch                                                                        |
-| `AUDIT_LOG_TELEMETRY`              | `false` | Include booth heartbeats                                                             |
+| `AUDIT_LOG_TELEMETRY`              | `false` | Include successful booth heartbeats (failed ones are always recorded)                |
 | `AUDIT_LOG_RETENTION_DAYS`         | `365`   | Age cutoff; `0` keeps entries forever                                                |
 | `AUDIT_LOG_PRUNE_INTERVAL_SECONDS` | `21600` | Pruner cadence, minimum `300`                                                        |
 | `AUDIT_LOG_ANON_LIMIT_PER_MINUTE`  | `20`    | Cap on unrecognized callers' rejected writes per address per minute; `0` disables it |

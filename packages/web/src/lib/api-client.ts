@@ -388,6 +388,11 @@ export const sessions = {
     apiFetch<CallSessionDetail>(`/v1/sessions/${id}`, { schema: CallSessionDetailSchema }),
 };
 
+export type AuditLogTargetParams = {
+  readonly cursor?: string;
+  readonly limit?: number;
+};
+
 export type AuditLogListParams = {
   readonly action?: string;
   readonly actorType?: string;
@@ -418,9 +423,11 @@ export const auditLogs = {
       })}`,
       { schema: AuditLogPageSchema },
     ),
-  forTarget: (targetType: string, targetId: string, limit = 50) =>
+  forTarget: (targetType: string, targetId: string, params: AuditLogTargetParams = {}) =>
     apiFetch<AuditLogPage>(
-      `/v1/audit-logs/targets/${encodeURIComponent(targetType)}/${encodeURIComponent(targetId)}${query({ limit })}`,
+      `/v1/audit-logs/targets/${encodeURIComponent(targetType)}/${encodeURIComponent(targetId)}${query(
+        { cursor: params.cursor, limit: params.limit ?? 50 },
+      )}`,
       { schema: AuditLogPageSchema },
     ),
 };
@@ -519,8 +526,8 @@ export const apiQueryKeys = {
   statsOverview: (selection: StatsRangeSelection) => ["stats", "overview", selection] as const,
   metricFilters: ["stats", "filters"] as const,
   auditLogs: (params: AuditLogListParams) => ["audit-logs", "list", params] as const,
-  auditLogTarget: (targetType: string, targetId: string) =>
-    ["audit-logs", "target", targetType, targetId] as const,
+  auditLogTarget: (targetType: string, targetId: string, params: AuditLogTargetParams = {}) =>
+    ["audit-logs", "target", targetType, targetId, params] as const,
 };
 
 export function useAuditLogs(params: AuditLogListParams = {}) {
@@ -537,10 +544,11 @@ export function useAuditLogsForTarget(
   targetType: string,
   targetId: string | undefined,
   enabled = true,
+  params: AuditLogTargetParams = {},
 ) {
   return useQuery({
-    queryKey: apiQueryKeys.auditLogTarget(targetType, targetId ?? ""),
-    queryFn: () => auditLogs.forTarget(targetType, targetId ?? ""),
+    queryKey: apiQueryKeys.auditLogTarget(targetType, targetId ?? "", params),
+    queryFn: () => auditLogs.forTarget(targetType, targetId ?? "", params),
     enabled: enabled && typeof targetId === "string" && targetId.length > 0,
   });
 }
