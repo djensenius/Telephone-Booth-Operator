@@ -1,9 +1,8 @@
 import type { JSX } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import type { BoothState, BoothStatus } from "@telephone-booth-operator/shared";
 import { GlassPanel, useBoothStatus } from "../../components/booth/index.js";
-import { apiQueryKeys, useStatusCurrent, useStatusHistory } from "../../lib/api-client.js";
+import { useStatusCurrent, useStatusHistory } from "../../lib/api-client.js";
 import { useBoothWebSocket } from "../../lib/booth-websocket.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
 import {
@@ -46,7 +45,6 @@ function boothDisplay(state: BoothState): "idle" | "playing" | "recording" | "er
 
 export function StatusScreen(): JSX.Element {
   const { setLastStatusAt, setRuntimeMode, setStatus } = useBoothStatus();
-  const queryClient = useQueryClient();
   const ws = useBoothWebSocket();
   const [liveStatus, setLiveStatus] = useState<BoothStatus | null>(null);
   const wsState = ws.state;
@@ -86,16 +84,16 @@ export function StatusScreen(): JSX.Element {
       setLastStatusAt(new Date(status.updatedAt));
     });
     const offLegacy = ws.subscribeLegacyStatus((status) => {
+      if (!isNewerThan(status, latestStatusRef.current)) return;
       latestStatusRef.current = status;
       setLiveStatus(status);
       setLastStatusAt(new Date(status.updatedAt));
-      queryClient.setQueryData(apiQueryKeys.status, status);
     });
     return () => {
       offEnvelope();
       offLegacy();
     };
-  }, [ws, queryClient, setLastStatusAt]);
+  }, [ws, setLastStatusAt]);
 
   useEffect(() => {
     if (liveStatus) setStatus(boothDisplay(liveStatus.state));

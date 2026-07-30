@@ -1,6 +1,7 @@
 import type { JSX, ReactNode } from "react";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 import { BoothStatusSchema, WsEnvelopeSchema } from "@telephone-booth-operator/shared";
 import type { BoothStatus, WsEnvelope } from "@telephone-booth-operator/shared";
 import { useBoothStatus } from "../components/booth/BoothStatusContext.js";
@@ -79,7 +80,16 @@ export function BoothWebSocketProvider({
     };
 
     function connect(): void {
-      const current = new WebSocket(apiWebSocketUrlFor("/v1/ws/status"));
+      let current: WebSocket;
+      try {
+        current = new WebSocket(apiWebSocketUrlFor("/v1/ws/status"));
+      } catch {
+        // A malformed URL throws here rather than firing `error`, which would
+        // otherwise strand the provider in `connecting` with no retry armed.
+        setState("polling");
+        reconnect();
+        return;
+      }
       socket = current;
       setState("connecting");
 
@@ -186,9 +196,30 @@ export function useBoothWebSocket(): BoothWebSocketApi {
 // parked on Messages must still see a pushed recording, and one on any route
 // must re-scope when a rollover happens on another console. Screens subscribe
 // only for their own presentation state.
+// Frames can arrive out of order, so an older one joins the history but never
+// becomes the current status.
+function applyStatusToCache(queryClient: QueryClient, status: BoothStatus): void {
+  const cached = queryClient.getQueryData<BoothStatus>(apiQueryKeys.status) ?? null;
+  if (isNewerThan(status, cached)) queryClient.setQueryData(apiQueryKeys.status, status);
+  queryClient.setQueryData(
+    apiQueryKeys.statusHistory,
+    (current: { readonly items: readonly BoothStatus[] } | undefined) => ({
+      items: mergeLiveStatus(current?.items ?? [], status),
+    }),
+  );
+}
+
 export function BoothEnvelopeBridge(): null {
   const ws = useBoothWebSocket();
   const queryClient = useQueryClient();
+  // An older API build still sends the bare status frame. The bridge has to
+  // honour it too, or a console parked anywhere but the status screen stops
+  // updating against that build.
+  useEffect(() => {
+    return ws.subscribeLegacyStatus((status) => {
+      applyStatusToCache(queryClient, status);
+    });
+  }, [ws, queryClient]);
   useEffect(() => {
     return ws.subscribe((envelope) => {
       if (envelope.kind === "installation") {
@@ -196,17 +227,7 @@ export function BoothEnvelopeBridge(): null {
         return;
       }
       if (envelope.kind === "status") {
-        const status = envelope.status;
-        // Frames can arrive out of order, so an older one joins the history but
-        // never becomes the current status.
-        const cached = queryClient.getQueryData<BoothStatus>(apiQueryKeys.status) ?? null;
-        if (isNewerThan(status, cached)) queryClient.setQueryData(apiQueryKeys.status, status);
-        queryClient.setQueryData(
-          apiQueryKeys.statusHistory,
-          (current: { readonly items: readonly BoothStatus[] } | undefined) => ({
-            items: mergeLiveStatus(current?.items ?? [], status),
-          }),
-        );
+        applyStatusToCache(queryClient, envelope.status);
         return;
       }
       if (envelope.kind === "system") {

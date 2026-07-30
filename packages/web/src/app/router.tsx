@@ -3,6 +3,7 @@ import { Link, Outlet, createRootRoute, createRoute, createRouter } from "@tanst
 import type { RouterHistory } from "@tanstack/react-router";
 import { z } from "zod";
 import { InstallationScopeSchema } from "@telephone-booth-operator/shared";
+import type { InstallationScope } from "@telephone-booth-operator/shared";
 import {
   BoothStatusBadge,
   BoothFrame,
@@ -37,6 +38,13 @@ import { DIGIT_ROUTES, isMessageFilter } from "../lib/navigation.js";
 // tampered `?installationId=` never lingers in router state looking like it
 // applies while every screen quietly ignores it.
 const installationScopeSearch = InstallationScopeSchema.optional().catch(undefined);
+
+// The per-field fallback has to validate too, or a rejected sibling field is
+// enough to let an unparseable scope back into the URL.
+const keptScope = (raw: unknown): { installationId?: InstallationScope } => {
+  const parsed = installationScopeSearch.parse(raw);
+  return parsed === undefined ? {} : { installationId: parsed };
+};
 
 // Each field falls back on its own. A stale `status` in a bookmarked URL must
 // not take a valid `installationId` down with it, or the operator silently
@@ -194,9 +202,7 @@ const messagesRoute = createRoute({
     if (parsed.success) return parsed.data;
     return {
       ...(isMessageFilter(search.status) ? { status: search.status } : {}),
-      ...(typeof search.installationId === "string"
-        ? { installationId: search.installationId }
-        : {}),
+      ...keptScope(search.installationId),
     };
   },
   component: () => protectedScreen(<MessagesScreen />),
