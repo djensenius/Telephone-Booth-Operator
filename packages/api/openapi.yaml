@@ -524,6 +524,55 @@ paths:
         "404": { description: message not found }
         "409": { description: no succeeded transcription available to moderate }
 
+  /v1/messages/{id}/moderation:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Submit an operator-computed moderation verdict for a message.
+      description: |
+        Lets a logged-in operator record a moderation verdict their own
+        device computed locally — for example the iOS review app running
+        Apple Intelligence — rather than asking the server to re-run
+        moderation through the configured upstream via `/moderate`. Mirrors
+        the worker push-back callback semantics: a pending moderation row is
+        finalized, otherwise a new succeeded row is recorded (an exact
+        redelivery of the latest succeeded verdict from the same submitter is
+        a no-op). The row is attributed to the submitting operator
+        (`requestedById`) and stamped with provider `on_device` so clients can
+        label it. The verdict is advisory only: it surfaces the message for
+        review but never decides it — `POST /v1/messages/{id}/decision`
+        remains the only thing that does. The resulting `Moderation` row is
+        returned and broadcast on `/v1/ws/status` as a `{kind:"message"}`
+        envelope.
+      tags: [moderations]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [flagged, recommendation, maxScore]
+              properties:
+                transcriptionId: { type: [string, "null"], format: uuid }
+                flagged: { type: boolean }
+                recommendation: { $ref: "#/components/schemas/ModerationRecommendation" }
+                maxScore: { type: number, minimum: 0, maximum: 1 }
+                categories:
+                  type: object
+                  additionalProperties: { type: number }
+                reasonSummary: { type: [string, "null"], maxLength: 2000 }
+                model: { type: [string, "null"], minLength: 1, maxLength: 128 }
+      responses:
+        "202":
+          description: moderation verdict recorded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Moderation" }
+        "404": { description: message or transcription not found }
+
   /v1/messages/{id}/decision:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2025,7 +2074,7 @@ components:
       enum: [approve, review, reject]
     AiProvider:
       type: string
-      enum: [openai, mac_app, push, disabled]
+      enum: [openai, mac_app, push, on_device, disabled]
     Transcription:
       type: object
       required: [id, messageId, provider, status, createdAt]

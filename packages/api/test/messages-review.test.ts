@@ -42,8 +42,10 @@ const setup = () => {
   resetFakeAzure();
 };
 
-const seedReceivedMessage = async (app: ReturnType<typeof createApp>): Promise<string> => {
-  const sha256 = "d".repeat(64);
+const seedReceivedMessage = async (
+  app: ReturnType<typeof createApp>,
+  sha256 = "d".repeat(64),
+): Promise<string> => {
   const initiated = await app.request("/v1/messages", {
     method: "POST",
     headers: { "content-type": "application/json", ...phoneHeaders },
@@ -392,6 +394,271 @@ describe("message review actions", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ text: "hello" }),
+      });
+      expect(res.status).toBe(401);
+    });
+  });
+
+  describe("POST /:id/moderation", () => {
+    const verdict = {
+      flagged: true,
+      recommendation: "reject",
+      maxScore: 0.82,
+      categories: { hate: 0.82 },
+      reasonSummary: "slur",
+      model: "apple-foundation-models",
+    };
+
+    it("finalizes a pending moderation and attributes it to the operator", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const transcription = await fakeDb.transcription.create({
+        data: {
+          messageId: id,
+          provider: "push",
+          status: "succeeded",
+          text: "hello there",
+          completedAt: new Date(),
+        },
+      });
+      const pending = await fakeDb.moderation.create({
+        data: {
+          messageId: id,
+          transcriptionId: transcription.id,
+          provider: "push",
+          model: null,
+          status: "pending",
+          requestedById: null,
+        },
+      });
+      const cookie = operatorCookie();
+      const broadcasts: Array<{ kind: string }> = [];
+      wsBroadcaster.subscribe("test-moderation", (e) => broadcasts.push(e));
+      const res = await app.request(`/v1/messages/${id}/moderation`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ ...verdict, transcriptionId: transcription.id }),
+      });
+      wsBroadcaster.unsubscribe("test-moderation");
+      expect(res.status, await res.clone().text()).toBe(202);
+      expect(await res.json()).toMatchObject({
+        id: pending.id,
+        messageId: id,
+        transcriptionId: transcription.id,
+        provider: "on_device",
+        status: "succeeded",
+        flagged: true,
+        recommendation: "reject",
+        maxScore: 0.82,
+        model: "apple-foundation-models",
+        requestedById: "operator-1",
+      });
+      expect(broadcasts).toContainEqual(expect.objectContaining({ kind: "message" }));
+    });
+
+    it("records a new succeeded moderation when none is pending", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const cookie = operatorCookie();
+      const res = await app.request(`/v1/messages/${id}/moderation`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify(verdict),
+      });
+      expect(res.status, await res.clone().text()).toBe(202);
+      expect(await res.json()).toMatchObject({
+        messageId: id,
+        transcriptionId: null,
+        provider: "on_device",
+        status: "succeeded",
+        recommendation: "reject",
+        requestedById: "operator-1",
+      });
+    });
+
+    it("never decides the message", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const cookie = operatorCookie();
+      const res = await app.request(`/v1/messages/${id}/moderation`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify(verdict),
+      });
+      expect(res.status).toBe(202);
+      expect(store.messages.get(id)?.status).toBe("pending");
+    });
+
+    it("treats an identical resubmission as a no-op", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const cookie = operatorCookie();
+      const headers = { cookie, "content-type": "application/json" };
+      const body = JSON.stringify(verdict);
+
+      const first = await app.request(`/v1/messages/${id}/moderation`, {
+        method: "POST",
+        headers,
+        body,
+      });
+      const second = await app.request(`/v1/messages/${id}/moderation`, {
+        method: "POST",
+        headers,
+        body,
+      });
+
+      expect(first.status).toBe(202);
+      expect(second.status).toBe(202);
+      expect(await first.json()).toMatchObject({ id: (await second.json()).id });
+      const rows = [...store.moderations.values()].filter((m) => m.messageId === id);
+      expect(rows).toHaveLength(1);
+    });
+
+    it("does not inherit the solicited row's model when none is submitted", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      await fakeDb.moderation.create({
+        data: {
+          messageId: id,
+          provider: "push",
+          model: "omni-moderation-latest",
+          status: "pending",
+        },
+      });
+      const cookie = operatorCookie();
+      const { model: _model, ...withoutModel } = verdict;
+      const res = await app.request(`/v1/messages/${id}/moderation`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify(withoutModel),
+      });
+      expect(res.status, await res.clone().text()).toBe(202);
+      // Restamping the provider claims the whole attribution: crediting the
+      // upstream model for an on-device verdict would be a lie.
+      expect(await res.json()).toMatchObject({ provider: "on_device", model: null });
+    });
+
+    it("records a corrected category score as a new attempt", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const cookie = operatorCookie();
+      const headers = { cookie, "content-type": "application/json" };
+
+      await app.request(`/v1/messages/${id}/moderation`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(verdict),
+      });
+      const corrected = await app.request(`/v1/messages/${id}/moderation`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ ...verdict, categories: { hate: 0.91 } }),
+      });
+
+      expect(corrected.status, await corrected.clone().text()).toBe(202);
+      expect(await corrected.json()).toMatchObject({ categories: { hate: 0.91 } });
+      const rows = [...store.moderations.values()].filter((m) => m.messageId === id);
+      expect(rows).toHaveLength(2);
+    });
+
+    it("appends its verdict when another writer finalizes the pending row first", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const pending = await fakeDb.moderation.create({
+        data: { messageId: id, provider: "push", model: null, status: "pending" },
+      });
+      // Simulate losing the compare-and-set: the row is finalized by someone
+      // else between the read and the guarded update.
+      const updateMany = vi.spyOn(fakeDb.moderation, "updateMany").mockResolvedValueOnce({
+        count: 0,
+      } as never);
+      const cookie = operatorCookie();
+      const res = await app.request(`/v1/messages/${id}/moderation`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify(verdict),
+      });
+      updateMany.mockRestore();
+
+      expect(res.status, await res.clone().text()).toBe(202);
+      const body = await res.json();
+      expect(body.id).not.toBe(pending.id);
+      expect(body).toMatchObject({ provider: "on_device", recommendation: "reject" });
+    });
+
+    it("records a changed verdict as a new attempt", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const cookie = operatorCookie();
+      const headers = { cookie, "content-type": "application/json" };
+
+      await app.request(`/v1/messages/${id}/moderation`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(verdict),
+      });
+      const revised = await app.request(`/v1/messages/${id}/moderation`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ ...verdict, flagged: false, recommendation: "approve" }),
+      });
+
+      expect(revised.status, await revised.clone().text()).toBe(202);
+      expect(await revised.json()).toMatchObject({ flagged: false, recommendation: "approve" });
+      const rows = [...store.moderations.values()].filter((m) => m.messageId === id);
+      expect(rows).toHaveLength(2);
+    });
+
+    it("rejects a transcription belonging to another message", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const otherId = await seedReceivedMessage(app, "e".repeat(64));
+      const foreign = await fakeDb.transcription.create({
+        data: { messageId: otherId, provider: "push", status: "succeeded", text: "elsewhere" },
+      });
+      const cookie = operatorCookie();
+      const res = await app.request(`/v1/messages/${id}/moderation`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ ...verdict, transcriptionId: foreign.id }),
+      });
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ error: "transcription_not_found" });
+    });
+
+    it("rejects an out-of-range score", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const cookie = operatorCookie();
+      const res = await app.request(`/v1/messages/${id}/moderation`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ ...verdict, maxScore: 1.5 }),
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 404 for an unknown message", async () => {
+      const app = createApp();
+      const cookie = operatorCookie();
+      const res = await app.request(
+        "/v1/messages/00000000-0000-0000-0000-000000000000/moderation",
+        {
+          method: "POST",
+          headers: { cookie, "content-type": "application/json" },
+          body: JSON.stringify(verdict),
+        },
+      );
+      expect(res.status).toBe(404);
+    });
+
+    it("requires an operator session", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const res = await app.request(`/v1/messages/${id}/moderation`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(verdict),
       });
       expect(res.status).toBe(401);
     });
