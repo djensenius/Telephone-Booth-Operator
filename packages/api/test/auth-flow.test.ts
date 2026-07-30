@@ -264,6 +264,33 @@ describe("auth flow", () => {
     );
   });
 
+  it("names the operator when the session cannot be created", async () => {
+    const login = await app.request("/v1/auth/login");
+    fakeDb.operatorSession.create.mockRejectedValueOnce(new Error("db down"));
+
+    const callback = await app.request(
+      "http://127.0.0.1/v1/auth/callback?code=code-1&state=state-1",
+      { headers: { cookie: loginTxCookieFrom(login) } },
+    );
+
+    expect(callback.status).toBe(500);
+    const written = fakeDb.auditLog.create.mock.calls.map(
+      ([call]: [{ data: Record<string, unknown> }]) => call.data,
+    );
+    // The operator was persisted before session setup failed, so the row is
+    // attributable rather than a nameless 500.
+    expect(written).toContainEqual(
+      expect.objectContaining({
+        action: "auth.login.failed",
+        actorType: "operator",
+        actorLabel: "operator@example.com",
+        actorUserId: expect.any(String),
+        statusCode: 500,
+        metadata: expect.objectContaining({ reason: "session_setup_failed" }),
+      }),
+    );
+  });
+
   it("sends logged-out operators back to the web login screen", async () => {
     const logout = await app.request("/v1/auth/logout", { method: "POST" });
 

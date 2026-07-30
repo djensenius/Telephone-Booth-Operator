@@ -101,12 +101,18 @@ const auditAuthEvent = async (
 const auditLoginFailed = async (
   c: Context,
   reason: string,
-  options: { label?: string; statusCode?: number; actorType?: AuditActorType } = {},
+  options: {
+    label?: string;
+    statusCode?: number;
+    actorType?: AuditActorType;
+    actorUserId?: string;
+  } = {},
 ): Promise<void> => {
   await auditAuthEvent(c, {
     action: "auth.login.failed",
     statusCode: options.statusCode ?? 400,
     ...(options.actorType ? { actorType: options.actorType } : {}),
+    ...(options.actorUserId ? { actorUserId: options.actorUserId } : {}),
     actorLabel: options.label ?? "unknown",
     metadata: { reason },
   });
@@ -395,6 +401,10 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
   }
 
   const { tokenSet, claims } = exchanged;
+  // The operator is persisted before the session exists, so hold on to it: if
+  // session setup then fails, the trail can still name who it was rather than
+  // recording an unattributable 500.
+  let authorized: { id: string; email: string } | null = null;
   try {
     const result = await authorizeAndUpsertOperator(claims, { markLogin: true });
     if (!result.ok) {
@@ -427,6 +437,7 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
       );
     }
 
+    authorized = { id: result.user.id, email: result.user.email };
     const session = await createSession(result.user, tokenSet, c);
     setSessionCookie(c, session.id, session.expiresAt);
     // Login creates a session — a write action in its own right. The callback
@@ -447,10 +458,11 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
     // exchange.
     logAuthCallbackError(error);
     await auditLoginFailed(c, "session_setup_failed", {
-      label: claimLabel(claims),
+      label: authorized?.email ?? claimLabel(claims),
       statusCode: 500,
       // The claims verified, so this is a known operator, not a stranger.
       actorType: "operator",
+      ...(authorized ? { actorUserId: authorized.id } : {}),
     });
     return htmlResponse(c, "OIDC login failed", "The login could not be completed.", 500);
   }

@@ -629,6 +629,11 @@ describe("GET /v1/audit-logs", () => {
     expect((await read("auth.login")).sort()).toEqual(["auth.login", "auth.login.denied"]);
     expect(await read("message.approve")).toEqual(["message.approve"]);
     expect((await read("auth.")).length).toBe(3);
+
+    // `startsWith` compiles to SQL LIKE, so a wildcard must be matched
+    // literally rather than returning the whole trail.
+    expect(await read("%")).toEqual([]);
+    expect(await read("auth_login")).toEqual([]);
   });
 
   it("pages over rows sharing a timestamp without duplicates or gaps", async () => {

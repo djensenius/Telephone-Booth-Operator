@@ -49,6 +49,11 @@ const listQuerySchema = z.object({
 });
 
 export const auditRouter = new Hono<{ Variables: AuthVariables }>();
+// Prisma builds `startsWith` from SQL `LIKE`, where `%` and `_` are wildcards.
+// Action names are literal, so a caller filtering on `auth.log_n` must not
+// silently match everything with that shape. Postgres treats a backslash as
+// the escape character by default, and the value stays a bound parameter.
+const escapeLikePrefix = (value: string): string => value.replace(/[\\%_]/g, "\\$&");
 
 auditRouter.get("/", requireAdmin(), zValidator("query", listQuerySchema), async (c) => {
   const { action, actorType, actorUserId, targetType, targetId, ip, since, until, cursor, limit } =
@@ -59,7 +64,7 @@ auditRouter.get("/", requireAdmin(), zValidator("query", listQuerySchema), async
   // mean: `auth.login` should include `auth.login.denied` without also
   // dragging in `auth.logout`, which an exact match cannot express and a
   // trailing-dot-only rule gets wrong.
-  if (action) where.action = { startsWith: action };
+  if (action) where.action = { startsWith: escapeLikePrefix(action) };
   if (actorType) where.actorType = actorType;
   if (actorUserId) where.actorUserId = actorUserId;
   if (targetType) where.targetType = targetType;
