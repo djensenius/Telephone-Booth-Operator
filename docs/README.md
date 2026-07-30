@@ -47,3 +47,4 @@ rebuilds it from the filesystem; CI fails if it drifts.
 - [0009 — Human-only moderation and push-based transcription worker](adr/0009-human-moderation-and-push-worker.md)
 - [0010 — Collapse repeated booth status reports](adr/0010-collapse-repeated-booth-status-reports.md)
 - [0011 — Audit trail for write actions](adr/0011-audit-trail-for-write-actions.md)
+- [0012 — Refresh-token rotation across API replicas](adr/0012-refresh-token-rotation-race.md)

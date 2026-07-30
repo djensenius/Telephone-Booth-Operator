@@ -419,6 +419,22 @@ export const resetSessionRefreshStateForTests = (): void => {
   pendingRefreshes.clear();
 };
 
+// How long to wait before the single extra reread on a rejected refresh. Long
+// enough to cover the commit of a sibling replica that won the same rotation,
+// short enough that an operator whose token really is dead barely notices on
+// their way to the login screen.
+const REFRESH_RACE_REREAD_DELAY_MS = 250;
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+const readStoredSession = async (sessionId: string) =>
+  db.operatorSession
+    .findUnique({ where: { id: sessionId }, include: { user: true } })
+    .catch(() => null);
+
 const accessTokenIsFresh = (session: Pick<OperatorSession, "accessTokenExpiresAt">): boolean =>
   !session.accessTokenExpiresAt || session.accessTokenExpiresAt.getTime() > Date.now() + 60_000;
 
@@ -445,15 +461,29 @@ const refreshAccessToken = async (
     const rejected = error instanceof TokenRefreshError && error.rejected;
     logRefreshFailure(error, rejected ? "rejected" : "transient");
 
-    // Another request (or another instance) may have rotated the tokens while
+    // Another request (or another replica) may have rotated the tokens while
     // this refresh was in flight; if the stored session now looks healthy,
     // prefer it over our own failure.
-    const current = await db.operatorSession
-      .findUnique({ where: { id: session.id }, include: { user: true } })
-      .catch(() => null);
+    let current = await readStoredSession(session.id);
     if (current && !sessionIsExpired(current) && accessTokenIsFresh(current)) {
       clearRefreshBackoff(session.id);
       return { session: current, accessTokenStale: false };
+    }
+
+    // A refusal is ambiguous under refresh-token rotation across replicas: the
+    // token really may be dead, or a sibling replica may have spent the same
+    // one moments ago and not yet committed the rotated pair. The reread above
+    // only distinguishes the two once the winner has committed, so give it a
+    // beat and look once more before destroying a session that is about to
+    // become healthy. The cost lands entirely on a path that otherwise ends in
+    // a login redirect. See docs/adr/0012-refresh-token-rotation-race.md.
+    if (rejected) {
+      await sleep(REFRESH_RACE_REREAD_DELAY_MS);
+      current = await readStoredSession(session.id);
+      if (current && !sessionIsExpired(current) && accessTokenIsFresh(current)) {
+        clearRefreshBackoff(session.id);
+        return { session: current, accessTokenStale: false };
+      }
     }
 
     // The provider definitively refused the refresh token: it expired, was
