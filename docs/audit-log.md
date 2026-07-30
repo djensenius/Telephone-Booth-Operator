@@ -11,6 +11,11 @@ One `AuditLog` row is written for every `POST`, `PUT`, `PATCH`, or `DELETE`
 request to `/v1`, including requests that were **rejected** — a denied write is
 exactly the sort of thing an audit trail exists to capture.
 
+Requests to paths with no handler are the one exception: they are 404s against
+a name the caller made up, so recording them would let anyone turn arbitrary
+traffic into unbounded rows with attacker-chosen paths. Rejected writes to real
+endpoints are still recorded.
+
 | Field                          | Meaning                                                      |
 | ------------------------------ | ------------------------------------------------------------ |
 | `action`                       | Stable name, e.g. `message.approve`, `question.archive`      |
@@ -88,9 +93,11 @@ GET /v1/audit-logs/targets/message/<id>
 
 `action` is always a prefix match: `message.` returns the whole family,
 `message.approve` just approvals, and `auth.login` logins including the
-`auth.login.denied` and `auth.login.failed` variants but not `auth.logout`. Both endpoints are newest-first with
-`(createdAt, id)` keyset pagination via `nextCursor`, which stays correct when
-several entries share a timestamp.
+`auth.login.denied` and `auth.login.failed` variants but not `auth.logout`.
+Both endpoints are newest-first with `(createdAt, id)` keyset pagination via
+`nextCursor`, which stays correct when several entries share a timestamp.
+Cursors are forward-only, so a client that wants to step back keeps the
+cursors it has already used — the console does exactly that.
 
 In the console, the trail is at **Observability → Audit log** (`/audit`), with
 filters for action family and actor type.

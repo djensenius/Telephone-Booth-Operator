@@ -226,11 +226,14 @@ const resolveActor = (c: Context, draft: AuditDraft): ResolvedActor => {
   };
 };
 
+const isCatchAll = (pattern: string | undefined): boolean =>
+  !pattern || pattern === "/*" || pattern === "*";
+
 const routePattern = (c: Context): string => {
   const pattern = c.req.routePath;
   // Unmatched routes report the catch-all pattern; the real path is more
   // useful there.
-  if (!pattern || pattern === "/*" || pattern === "*") return new URL(c.req.url).pathname;
+  if (isCatchAll(pattern)) return new URL(c.req.url).pathname;
   return pattern;
 };
 

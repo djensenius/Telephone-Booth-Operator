@@ -198,6 +198,83 @@ describe("admin data export/import", () => {
     expect(res.status).toBe(400);
   });
 
+  it("will not let a restore rewrite an existing audit entry", async () => {
+    const app = createApp();
+    const cookie = operatorCookie();
+    const createdAt = new Date("2026-07-28T12:00:00.000Z");
+    const id = "6f1b0f7c-6f0a-4f3e-9f8a-2a4f0b6d1e11";
+    store.auditLogs.push({
+      id,
+      action: "message.approve",
+      targetType: "message",
+      targetId: "m1",
+      actorType: "operator",
+      actorUserId: null,
+      actorTokenId: null,
+      actorLabel: "operator@example.com",
+      ip: "203.0.113.7",
+      userAgent: null,
+      method: "POST",
+      path: "/v1/messages/m1/decision",
+      statusCode: 200,
+      metadata: null,
+      createdAt,
+    });
+
+    // A crafted archive claiming the same ID with a rewritten actor.
+    const archive = createTar([
+      {
+        name: "manifest.json",
+        data: Buffer.from(
+          JSON.stringify({
+            format: EXPORT_FORMAT,
+            version: 3,
+            generatedAt: createdAt.toISOString(),
+            container: "audio",
+            counts: {},
+            blobCount: 0,
+            missingBlobs: [],
+          }),
+          "utf8",
+        ),
+      },
+      {
+        name: "data.json",
+        data: Buffer.from(
+          JSON.stringify({
+            auditLog: [
+              {
+                id,
+                action: "message.reject",
+                actorType: "anonymous",
+                actorLabel: "someone else",
+                ip: "198.51.100.4",
+                method: "POST",
+                path: "/v1/messages/m1/decision",
+                statusCode: 403,
+                createdAt: createdAt.toISOString(),
+              },
+            ],
+          }),
+          "utf8",
+        ),
+      },
+    ]);
+
+    const res = await app.request("/v1/admin/data/import", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/x-tar" },
+      body: archive,
+    });
+    expect(res.status).toBe(200);
+
+    const rows = store.auditLogs.filter((row) => row.id === id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.action).toBe("message.approve");
+    expect(rows[0]?.actorLabel).toBe("operator@example.com");
+    expect(rows[0]?.statusCode).toBe(200);
+  });
+
   it("rejects a non-archive import body", async () => {
     const app = createApp();
     const cookie = operatorCookie();

@@ -787,6 +787,9 @@ paths:
         - operatorSession: []
         - operatorBearer: []
       parameters:
+        - name: cursor
+          in: query
+          schema: { type: string }
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
@@ -796,6 +799,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AuditLogPage" }
+        "400": { description: invalid cursor }
         "401": { description: not authenticated }
         "403": { description: operator admin privileges required }
   /v1/admin/data/export:

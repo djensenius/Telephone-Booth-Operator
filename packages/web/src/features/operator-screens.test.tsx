@@ -876,6 +876,34 @@ describe("Audit log feature", () => {
     );
   });
 
+  it("can walk back to newer entries after paging into history", async () => {
+    const older = {
+      ...auditEntry,
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      actorLabel: "someone.else@example.com",
+    };
+    server.use(
+      http.get("http://localhost/v1/audit-logs", ({ request }) => {
+        const cursor = new URL(request.url).searchParams.get("cursor");
+        return cursor
+          ? HttpResponse.json({ items: [older], nextCursor: null })
+          : HttpResponse.json({ items: [auditEntry], nextCursor: "cursor-1" });
+      }),
+    );
+    renderPath("/audit");
+
+    await screen.findByText("operator@example.com");
+    const newer = screen.getByRole("button", { name: "← Newer entries" });
+    expect((newer as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Older entries →" }));
+    expect(await screen.findByText("someone.else@example.com")).toBeTruthy();
+
+    // The last page must not strand the admin on old rows.
+    fireEvent.click(screen.getByRole("button", { name: "← Newer entries" }));
+    expect(await screen.findByText("operator@example.com")).toBeTruthy();
+  });
+
   it("is admin-only", async () => {
     server.use(
       http.get("http://localhost/v1/auth/me", () =>

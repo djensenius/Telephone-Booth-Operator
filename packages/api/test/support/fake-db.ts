@@ -1700,15 +1700,21 @@ export const fakeDb = {
     upsert: async ({
       where,
       create,
+      update,
     }: {
       where: { id: string };
       create: Record<string, unknown>;
       update: Record<string, unknown>;
     }) => {
-      const row = { ...(create as unknown as FakeAuditLog), id: where.id };
       const index = store.auditLogs.findIndex((entry) => entry.id === where.id);
-      if (index >= 0) store.auditLogs[index] = row;
-      else store.auditLogs.push(row);
+      if (index >= 0) {
+        const existing = store.auditLogs[index] as unknown as Record<string, unknown>;
+        const merged = { ...existing, ...update, id: where.id } as unknown as FakeAuditLog;
+        store.auditLogs[index] = merged;
+        return merged;
+      }
+      const row = { ...(create as unknown as FakeAuditLog), id: where.id };
+      store.auditLogs.push(row);
       return row;
     },
     deleteMany: async ({ where = {} }: { where?: Record<string, unknown> } = {}) => {

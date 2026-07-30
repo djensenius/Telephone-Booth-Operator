@@ -181,6 +181,33 @@ describe("audit log middleware", () => {
     expect(store.auditLogs).toHaveLength(0);
   });
 
+  it("ignores writes to paths that match no route", async () => {
+    const app = createApp();
+    const response = await app.request("/v1/not-a-real-endpoint", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: operatorCookie() },
+      body: "{}",
+    });
+    expect(response.status).toBe(404);
+    // Otherwise any caller could mint rows at will, on paths of their choosing.
+    expect(store.auditLogs).toHaveLength(0);
+  });
+
+  it("still records a write to a real endpoint that authentication rejected", async () => {
+    const app = createApp();
+    const file = seedFile();
+    const message = seedMessage({ audioId: file.id, status: "pending" });
+    const response = await app.request(`/v1/messages/${message.id}/decision`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision: "approve" }),
+    });
+    expect(response.status).toBe(401);
+    expect(store.auditLogs).toHaveLength(1);
+    expect(store.auditLogs[0]!.statusCode).toBe(401);
+    expect(store.auditLogs[0]!.actorType).toBe("anonymous");
+  });
+
   it("attributes booth writes to the API token", async () => {
     const app = createApp();
     const sha256 = "a".repeat(64);

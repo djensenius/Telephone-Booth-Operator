@@ -65,6 +65,14 @@ export function AuditScreen(): JSX.Element {
   const [action, setAction] = useState("");
   const [actorType, setActorType] = useState("");
   const [cursor, setCursor] = useState<string | undefined>(undefined);
+  // Cursors are forward-only, so stepping back means remembering where we
+  // came from rather than asking the server for a previous page.
+  const [history, setHistory] = useState<(string | undefined)[]>([]);
+
+  const resetPaging = (): void => {
+    setCursor(undefined);
+    setHistory([]);
+  };
 
   const query = useAuditLogs({
     ...(action ? { action } : {}),
@@ -89,7 +97,7 @@ export function AuditScreen(): JSX.Element {
           <select
             value={action}
             onChange={(event) => {
-              setCursor(undefined);
+              resetPaging();
               setAction(event.target.value);
             }}
           >
@@ -105,7 +113,7 @@ export function AuditScreen(): JSX.Element {
           <select
             value={actorType}
             onChange={(event) => {
-              setCursor(undefined);
+              resetPaging();
               setActorType(event.target.value);
             }}
           >
@@ -185,14 +193,32 @@ export function AuditScreen(): JSX.Element {
         </div>
       ) : null}
 
-      {query.data?.nextCursor ? (
-        <button
-          type="button"
-          className="audit-screen__more"
-          onClick={() => setCursor(query.data?.nextCursor ?? undefined)}
-        >
-          Older entries →
-        </button>
+      {history.length > 0 || query.data?.nextCursor ? (
+        <div className="audit-screen__paging" role="group" aria-label="Audit log pages">
+          <button
+            type="button"
+            className="audit-screen__more"
+            disabled={history.length === 0}
+            onClick={() => {
+              const previous = history[history.length - 1];
+              setHistory(history.slice(0, -1));
+              setCursor(previous);
+            }}
+          >
+            ← Newer entries
+          </button>
+          <button
+            type="button"
+            className="audit-screen__more"
+            disabled={!query.data?.nextCursor}
+            onClick={() => {
+              setHistory([...history, cursor]);
+              setCursor(query.data?.nextCursor ?? undefined);
+            }}
+          >
+            Older entries →
+          </button>
+        </div>
       ) : null}
     </GlassPanel>
   );

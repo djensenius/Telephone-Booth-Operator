@@ -2049,6 +2049,17 @@ textarea:focus-visible,
   border-color: color-mix(in srgb, var(--accent-red) 44%, var(--border-subtle));
 }
 
+.audit-screen__paging {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.audit-screen__more[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .audit-screen__detail {
   max-width: 30ch;
 }
