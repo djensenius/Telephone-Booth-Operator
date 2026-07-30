@@ -327,6 +327,17 @@ const resolveActor = (c: Context, draft: AuditDraft): ResolvedActor => {
 const isCatchAll = (pattern: string | undefined): boolean =>
   !pattern || pattern === "/*" || pattern === "*";
 
+/**
+ * Did the request reach a real handler, or only the mounted middleware?
+ *
+ * `matchedRoutes` is filled from the router match, so it answers this even
+ * when an auth guard short-circuits the chain. A write to a path nobody
+ * serves is a 404 against a name the caller invented, and recording those
+ * would let anyone mint rows with paths of their choosing.
+ */
+const matchedAHandler = (c: Context): boolean =>
+  c.req.matchedRoutes.some((route) => !route.path.endsWith("*"));
+
 const routePattern = (c: Context): string => {
   const pattern = c.req.routePath;
   // Unmatched routes report the catch-all pattern; the real path is more
@@ -354,6 +365,7 @@ export const auditWrites =
 
     const persist = async (statusCode: number): Promise<void> => {
       if (draft.skip) return;
+      if (!matchedAHandler(c)) return;
       const pattern = routePattern(c);
       if (!auditTelemetry() && isTelemetryWrite(c.req.method, pattern)) return;
       const actor = resolveActor(c, draft);

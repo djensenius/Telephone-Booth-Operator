@@ -6,7 +6,13 @@ import { zValidator } from "@hono/zod-validator";
 import { OperatorMeSchema } from "@telephone-booth-operator/shared";
 import { z } from "zod";
 import { getAuthConfig } from "../lib/config.js";
-import { auditEnabled, recordAudit, writeAuditEntry, type AuditActorType } from "../lib/audit.js";
+import {
+  auditEnabled,
+  recordAudit,
+  skipAudit,
+  writeAuditEntry,
+  type AuditActorType,
+} from "../lib/audit.js";
 import { clientIp } from "../lib/client-ip.js";
 import { verifyOperatorBearer } from "../lib/bearer-auth.js";
 import { buildAuthorizationUrl, endSessionUrl, exchangeCode, getOidcClient } from "../lib/oidc.js";
@@ -413,6 +419,9 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
 
 authRoutes.post("/logout", async (c) => {
   const session = await destroySession(c);
+  // Signing out without a session is a no-op, not an action; recording it
+  // would hand anyone an unauthenticated way to append rows.
+  if (!session) skipAudit(c);
   recordAudit(c, {
     action: "auth.logout",
     targetType: "session",

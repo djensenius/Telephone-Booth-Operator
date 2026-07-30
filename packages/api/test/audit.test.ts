@@ -233,6 +233,25 @@ describe("audit log middleware", () => {
     expect(store.auditLogs).toHaveLength(0);
   });
 
+  it("ignores an unauthenticated write to a path that matches no route", async () => {
+    const app = createApp();
+    // The auth guard answers first, so the check cannot rely on the 404.
+    const response = await app.request("/v1/nothing/here", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(response.status).toBe(401);
+    expect(store.auditLogs).toHaveLength(0);
+  });
+
+  it("does not record a sign-out that had no session to end", async () => {
+    const app = createApp();
+    const response = await app.request("/v1/auth/logout", { method: "POST" });
+    expect(response.status).toBe(302);
+    expect(store.auditLogs).toHaveLength(0);
+  });
+
   it("still records a write to a real endpoint that authentication rejected", async () => {
     const app = createApp();
     const file = seedFile();

@@ -21,6 +21,8 @@ Metadata is bounded as well as sanitized: strings are truncated, nesting is
 capped at three levels, objects and arrays are capped in width, and anything
 still over ~8 KB is replaced with a `metadata_too_large` marker.
 
+Signing out without a session is a no-op and is not recorded either.
+
 Requests to paths with no handler are the one exception: they are 404s against
 a name the caller made up, so recording them would let anyone turn arbitrary
 traffic into unbounded rows with attacker-chosen paths. Rejected writes to real

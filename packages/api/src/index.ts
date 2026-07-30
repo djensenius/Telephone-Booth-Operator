@@ -13,7 +13,7 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { pathToFileURL } from "node:url";
 import { startAiSweeper } from "./lib/ai/sweeper.js";
-import { auditWrites, skipAudit, type AuditVariables } from "./lib/audit.js";
+import { auditWrites, type AuditVariables } from "./lib/audit.js";
 import { startAuditPruner } from "./lib/audit-pruner.js";
 import { startSnapshotPruner } from "./lib/snapshot-pruner.js";
 import {
@@ -93,15 +93,6 @@ export const createApp = (): Hono<{ Variables: AuthVariables & AuditVariables }>
   app.route("/v1/admin/data", adminDataRouter);
   app.route("/v1/audit-logs", auditRouter);
   app.route("/v1/ws", wsRouter);
-
-  // A write to a path with no handler is a 404 against a name the caller
-  // invented. Auditing those would let anyone turn arbitrary traffic into
-  // unbounded, attacker-named rows; writes to real endpoints are still
-  // recorded when rejected.
-  app.notFound((c) => {
-    skipAudit(c);
-    return c.text("404 Not Found", 404);
-  });
 
   return app;
 };

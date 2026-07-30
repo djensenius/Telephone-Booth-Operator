@@ -205,6 +205,8 @@ describe("verifyOperatorBearer", () => {
     if (!result.ok) {
       expect(result.status).toBe(403);
       expect(result.reason).toMatch(/group/);
+      // The signature was valid, so the denied write stays attributable.
+      expect(result.subject).toBe(FRESH_CLAIMS.email);
     }
   });
 

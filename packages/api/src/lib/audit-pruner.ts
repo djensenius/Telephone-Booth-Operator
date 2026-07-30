@@ -13,13 +13,22 @@ export interface AuditPrunerConfig {
   intervalSeconds: number;
 }
 
+// `Number("")` is 0, which would silently disable pruning forever, so a blank
+// value falls back to the default while an explicit "0" still means "keep".
+const positiveOrDefault = (raw: string | undefined, fallback: number): number => {
+  const trimmed = raw?.trim();
+  if (!trimmed) return fallback;
+  const value = Number(trimmed);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+};
+
 export const resolveAuditPrunerConfig = (): AuditPrunerConfig => {
-  const retentionDays = Number(process.env.AUDIT_LOG_RETENTION_DAYS);
+  const retentionDays = positiveOrDefault(process.env.AUDIT_LOG_RETENTION_DAYS, 365);
   return {
-    retentionDays: Number.isFinite(retentionDays) && retentionDays >= 0 ? retentionDays : 365,
+    retentionDays,
     intervalSeconds: Math.max(
       300,
-      Number(process.env.AUDIT_LOG_PRUNE_INTERVAL_SECONDS) || 6 * 60 * 60,
+      positiveOrDefault(process.env.AUDIT_LOG_PRUNE_INTERVAL_SECONDS, 6 * 60 * 60) || 6 * 60 * 60,
     ),
   };
 };

@@ -7,6 +7,7 @@ import {
 } from "node:crypto";
 import type { OperatorSession, OperatorUser } from "../generated/prisma/client.js";
 import type { Context, MiddlewareHandler } from "hono";
+import { recordAudit } from "./audit.js";
 import { verifyOperatorBearer } from "./bearer-auth.js";
 import { clientIp } from "./client-ip.js";
 import { getAuthConfig } from "./config.js";
@@ -530,6 +531,11 @@ const authenticateOperator: MiddlewareHandler<{ Variables: AuthVariables }> = as
   if (token) {
     const result = await verifyOperatorBearer(token);
     if (!result.ok) {
+      // The signature checked out; only the allow-list refused. Name the
+      // caller so the denied write is attributable.
+      if (result.subject) {
+        recordAudit(c, { actorType: "anonymous", actorLabel: result.subject });
+      }
       return c.json({ error: result.reason }, result.status);
     }
     c.set("user", result.user);
