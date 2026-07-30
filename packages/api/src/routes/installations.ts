@@ -132,7 +132,20 @@ installationsRouter.post(
               ],
             },
           });
+          // An adopted era can already hold prompts the operator wrote before
+          // naming it. Prompts are unique per era, so re-creating one would
+          // trip the constraint and fail the whole start over a duplicate the
+          // operator already has.
+          const existingPrompts = new Set(
+            (
+              await tx.question.findMany({
+                where: { installationId: installation.id },
+                select: { prompt: true },
+              })
+            ).map((row) => row.prompt),
+          );
           for (const question of source) {
+            if (existingPrompts.has(question.prompt)) continue;
             await tx.question.create({
               data: {
                 prompt: question.prompt,
@@ -216,6 +229,17 @@ installationsRouter.post(
 
     const endedAt = new Date();
     const ended = await db.$transaction(async (tx) => {
+      // Claim the era before doing anything else. Two admins ending it at once
+      // would otherwise both proceed, and the second `endedAt` would no longer
+      // match the `retiredAt` the first stamped on the questions — the equality
+      // that identifies "was live when the era ended" for copy-forward and for
+      // accepting a straggler recording.
+      const claimed = await tx.installation.updateMany({
+        where: { id, endedAt: null },
+        data: { endedAt },
+      });
+      if (claimed.count === 0) return null;
+
       const summary = await closeOutInstallation(tx, id, endedAt);
 
       return tx.installation.update({
@@ -229,6 +253,9 @@ installationsRouter.post(
         },
       });
     });
+
+    // Lost the claim: another admin ended this era first.
+    if (!ended) return c.json({ error: "installation_already_ended" }, 409);
 
     invalidateActiveInstallationCache();
     const dto = serializeInstallation(ended);

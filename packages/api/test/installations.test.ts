@@ -199,6 +199,21 @@ describe("installations", () => {
       expect(await second.json()).toMatchObject({ error: "installation_already_ended" });
     });
 
+    // Two admins pressing "end" at once: only one may stamp `endedAt`. A second
+    // stamp would drift from the `retiredAt` the first wrote onto the era's
+    // questions, and that equality is what identifies a rollover straggler.
+    it("lets only one of two concurrent ends win", async () => {
+      const app = createApp();
+      const question = seedQuestion({ status: "active", prompt: "Concurrent?" });
+
+      const [first, second] = await Promise.all([endDefault(app), endDefault(app)]);
+      const statuses = [first.status, second.status].sort((a, b) => a - b);
+      expect(statuses).toEqual([200, 409]);
+
+      const era = store.installations.get(DEFAULT_INSTALLATION_ID);
+      expect(store.questions.get(question.id)?.retiredAt?.getTime()).toBe(era?.endedAt?.getTime());
+    });
+
     it("404s for an unknown installation", async () => {
       const res = await createApp().request(
         "/v1/installations/11111111-1111-4111-8111-111111111111/end",
@@ -320,6 +335,38 @@ describe("installations", () => {
         body: JSON.stringify({ durationMs: 3000, sha256: "d".repeat(64), questionId: question.id }),
       });
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe("copy-forward collisions", () => {
+    // Prompts are unique per era, so a prompt the operator already wrote into
+    // the era being adopted must not be re-created underneath them.
+    it("skips a prompt the adopted era already holds", async () => {
+      const app = createApp();
+      seedQuestion({ status: "active", prompt: "Shared prompt" });
+      expect((await endDefault(app)).status).toBe(200);
+
+      // The booth opens a fresh era, and the operator writes the same prompt
+      // into it before naming the installation.
+      const active = await requireActiveInstallation();
+      seedQuestion({
+        id: "cccccccc-0000-4000-8000-0000000000b1",
+        status: "draft",
+        prompt: "Shared prompt",
+        installationId: active,
+      });
+
+      const res = await app.request("/v1/installations", {
+        method: "POST",
+        headers: jsonHeaders(adminHeaders()),
+        body: JSON.stringify({ name: "Third run", copyQuestions: true }),
+      });
+
+      expect(res.status, await res.clone().text()).toBe(201);
+      const prompts = [...store.questions.values()]
+        .filter((row) => row.installationId === active)
+        .map((row) => row.prompt);
+      expect(prompts).toEqual(["Shared prompt"]);
     });
   });
 

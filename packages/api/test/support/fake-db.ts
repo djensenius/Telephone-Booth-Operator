@@ -1995,6 +1995,21 @@ export const fakeDb = {
       store.installations.set(where.id, merged);
       return merged;
     },
+    // The end route claims the era with a conditional update, so this has to
+    // honour `endedAt: null` rather than blindly matching on id.
+    updateMany: async ({
+      where,
+      data,
+    }: {
+      where: { id: string; endedAt?: null };
+      data: Partial<FakeInstallation>;
+    }) => {
+      const existing = store.installations.get(where.id);
+      if (!existing) return { count: 0 };
+      if (where.endedAt === null && existing.endedAt !== null) return { count: 0 };
+      store.installations.set(where.id, { ...existing, ...data });
+      return { count: 1 };
+    },
     delete: async ({ where }: { where: { id: string } }) => {
       const existing = store.installations.get(where.id);
       store.installations.delete(where.id);

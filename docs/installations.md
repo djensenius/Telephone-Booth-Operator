@@ -52,6 +52,10 @@ hand is still refused — that is a deliberate withdrawal. Late `call_ended`
 events are the mirror image: they are attributed to their session's era and can
 never rewrite a closed era's outcome or frozen summary.
 
+Two admins ending the same era at once is settled inside the transaction: the
+first to claim it wins and the second gets `409`, so `retiredAt` and `endedAt`
+never drift apart.
+
 Nothing is deleted, so no backup is required to end an era — but
 `GET /v1/installations/{id}/export` gives you a scoped tar whenever you want
 one, and the Installations screen offers it per era.
@@ -72,6 +76,10 @@ booth write with no active installation lazily opens one — a recording must
 never be dropped over admin bookkeeping. Starting a named installation
 therefore **adopts** an active era that has no activity in it yet, rather than
 failing. An era the booth has actually recorded into still returns `409`.
+
+Copy-forward skips a prompt the new era already holds — prompts are unique per
+installation, and an adopted era can already contain questions the operator
+wrote before naming it.
 
 ## Reading history
 
