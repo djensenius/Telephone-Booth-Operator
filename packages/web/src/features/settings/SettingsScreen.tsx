@@ -4,6 +4,7 @@ import { GlassPanel, useBoothStatus } from "../../components/booth/index.js";
 import { LogoutButton } from "../auth/LogoutButton.js";
 import { useCurrentUser } from "../auth/useCurrentUser.js";
 import { AdminBackupPanel } from "./AdminBackupPanel.js";
+import { AdminInstallationPurgePanel } from "./AdminInstallationPurgePanel.js";
 import { PhoneClientConnection } from "./PhoneClientConnection.js";
 
 const fontSizeKey = "booth.theme.fontSize";
@@ -151,6 +152,7 @@ export function SettingsScreen(): JSX.Element {
         </div>
       </section>
       {user?.isAdmin ? <AdminBackupPanel /> : null}
+      {user?.isAdmin ? <AdminInstallationPurgePanel /> : null}
       {user?.isAdmin ? <PhoneClientConnection userSub={user.id} /> : null}
     </GlassPanel>
   );

@@ -16,6 +16,7 @@ import { RequireAdmin } from "../features/auth/RequireAdmin.js";
 import { useCurrentUser } from "../features/auth/useCurrentUser.js";
 import { DebugScreen } from "../features/debug/DebugScreen.js";
 import { EventsScreen } from "../features/events/EventsScreen.js";
+import { InstallationsScreen } from "../features/installations/InstallationsScreen.js";
 import { InstructionsScreen } from "../features/instructions/InstructionsScreen.js";
 import { MessageDetail } from "../features/messages/MessageDetail.js";
 import { MessagesScreen } from "../features/messages/MessagesScreen.js";
@@ -32,6 +33,10 @@ import { DIGIT_ROUTES, isMessageFilter } from "../lib/navigation.js";
 
 const messagesSearchSchema = z.object({
   status: z.enum(["all", "needs-review", "approved", "rejected", "uploading"]).optional(),
+});
+
+const statsSearchSchema = z.object({
+  installationId: z.string().optional(),
 });
 
 const loginSearchSchema = z.object({
@@ -111,6 +116,11 @@ function AppLayout(): JSX.Element {
                 <li>
                   <Link to="/sessions">Sessions</Link>
                 </li>
+                {isAdmin ? (
+                  <li>
+                    <Link to="/installations">Installations</Link>
+                  </li>
+                ) : null}
               </ul>
             </nav>
           </aside>
@@ -225,7 +235,17 @@ const sessionsRoute = createRoute({
 const statsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/stats",
+  validateSearch: (search: Record<string, unknown>) => {
+    const parsed = statsSearchSchema.safeParse(search);
+    return parsed.success ? parsed.data : {};
+  },
   component: () => protectedScreen(<StatsScreen />),
+});
+
+const installationsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/installations",
+  component: () => adminScreen(<InstallationsScreen />),
 });
 
 const sessionDetailRoute = createRoute({
@@ -265,6 +285,7 @@ const routeTree = rootRoute.addChildren([
   eventsRoute,
   sessionsRoute,
   statsRoute,
+  installationsRoute,
   sessionDetailRoute,
   loginRoute,
   aboutRoute,

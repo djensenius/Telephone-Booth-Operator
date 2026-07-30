@@ -1,0 +1,418 @@
+import type { FormEvent, JSX } from "react";
+import { useMemo, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
+import type { Installation, InstallationSummary } from "@telephone-booth-operator/shared";
+import { GlassPanel } from "../../components/booth/index.js";
+import {
+  ApiError,
+  useCreateInstallation,
+  useEndInstallation,
+  useInstallationsList,
+  useStatsSummary,
+  installations as installationsApi,
+} from "../../lib/api-client.js";
+import { absoluteTime } from "../../lib/time-format.js";
+import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
+
+function fmtNumber(value: number): string {
+  return new Intl.NumberFormat().format(value);
+}
+
+// Recorded audio totals can run to hours across a whole installation, so this
+// includes an hours component that `durationLabel` (built for single clips)
+// omits.
+function fmtRecordedMs(ms: number): string {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+  if (minutes > 0) return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+  return `${seconds}s`;
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) {
+    if (error.status === 409) {
+      return error.message || "That action conflicts with the current state.";
+    }
+    if (error.status === 503) {
+      return "The safety-net archive could not be written, so the installation was not ended. Try again once storage is reachable.";
+    }
+    return error.message || fallback;
+  }
+  return error instanceof Error ? error.message : fallback;
+}
+
+interface SummaryTileProps {
+  readonly label: string;
+  readonly value: string;
+  readonly hint?: string;
+}
+
+function SummaryTile({ label, value, hint }: SummaryTileProps): JSX.Element {
+  return (
+    <div className="stats-tile">
+      <span className="stats-tile__label">{label}</span>
+      <strong className="stats-tile__value">{value}</strong>
+      {hint === undefined ? null : <span className="stats-tile__hint">{hint}</span>}
+    </div>
+  );
+}
+
+function FrozenSummary({ summary }: { readonly summary: InstallationSummary }): JSX.Element {
+  return (
+    <div className="stats-tiles installations-summary">
+      <SummaryTile label="Calls" value={fmtNumber(summary.calls)} />
+      <SummaryTile label="Messages" value={fmtNumber(summary.messages)} />
+      <SummaryTile label="Approved" value={fmtNumber(summary.messagesApproved)} />
+      <SummaryTile label="Rejected" value={fmtNumber(summary.messagesRejected)} />
+      <SummaryTile label="Questions" value={fmtNumber(summary.questions)} />
+      <SummaryTile label="Events" value={fmtNumber(summary.events)} />
+      <SummaryTile label="Recorded" value={fmtRecordedMs(summary.recordedMs)} />
+    </div>
+  );
+}
+
+function ActiveSummary(): JSX.Element {
+  const summaryQuery = useStatsSummary();
+  if (summaryQuery.isPending) return <FeatureSkeleton label="Reading live counters…" />;
+  if (summaryQuery.isError || summaryQuery.data === undefined) {
+    return (
+      <p className="settings-status settings-status--error" role="status">
+        Live counters are unavailable right now.
+      </p>
+    );
+  }
+  const summary = summaryQuery.data;
+  return (
+    <div className="stats-tiles installations-summary">
+      <SummaryTile label="Calls today" value={fmtNumber(summary.calls.today)} />
+      <SummaryTile label="Calls in progress" value={fmtNumber(summary.calls.inProgress)} />
+      <SummaryTile label="Messages today" value={fmtNumber(summary.messages.receivedToday)} />
+      <SummaryTile label="Pending" value={fmtNumber(summary.messages.pending)} />
+      <SummaryTile
+        label="Awaiting moderation"
+        value={fmtNumber(summary.messages.awaitingModeration)}
+      />
+    </div>
+  );
+}
+
+type ArchiveState =
+  | { kind: "idle" }
+  | { kind: "working" }
+  | { kind: "error"; message: string }
+  | { kind: "done"; message: string };
+
+function DownloadArchiveButton({
+  installation,
+}: {
+  readonly installation: Installation;
+}): JSX.Element {
+  const [state, setState] = useState<ArchiveState>({ kind: "idle" });
+
+  const handleDownload = async (): Promise<void> => {
+    setState({ kind: "working" });
+    try {
+      const { blob, filename } = await installationsApi.exportArchive(installation.id);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setState({ kind: "done", message: `Downloaded ${filename}` });
+    } catch (error) {
+      setState({ kind: "error", message: errorMessage(error, "Archive download failed.") });
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => void handleDownload()}
+        disabled={state.kind === "working"}
+      >
+        {state.kind === "working" ? "Preparing archive…" : "Download archive"}
+      </button>
+      {state.kind === "error" || state.kind === "done" ? (
+        <p
+          className={
+            state.kind === "error" ? "settings-status settings-status--error" : "settings-status"
+          }
+          role="status"
+        >
+          {state.message}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+function EndInstallationForm({
+  installation,
+}: {
+  readonly installation: Installation;
+}): JSX.Element {
+  const endInstallation = useEndInstallation();
+  const [confirming, setConfirming] = useState(false);
+  const [notes, setNotes] = useState(installation.notes ?? "");
+  const [location, setLocation] = useState(installation.location ?? "");
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    endInstallation.mutate(
+      {
+        id: installation.id,
+        input: {
+          notes: notes.trim().length === 0 ? null : notes.trim(),
+          location: location.trim().length === 0 ? null : location.trim(),
+        },
+      },
+      { onSuccess: () => setConfirming(false) },
+    );
+  };
+
+  if (!confirming) {
+    return (
+      <button type="button" className="installations-danger" onClick={() => setConfirming(true)}>
+        End installation
+      </button>
+    );
+  }
+
+  return (
+    <form className="settings-list installations-end-form" onSubmit={handleSubmit}>
+      <p>
+        Ending <strong>{installation.name}</strong> freezes its counters, closes open calls, empties
+        the moderation queue, and archives its questions. Nothing is deleted — the era stays
+        browsable.
+      </p>
+      <label>
+        Notes (optional)
+        <textarea
+          value={notes}
+          rows={2}
+          maxLength={2000}
+          onChange={(event) => setNotes(event.currentTarget.value)}
+        />
+      </label>
+      <label>
+        Location (optional)
+        <input
+          type="text"
+          value={location}
+          maxLength={200}
+          onChange={(event) => setLocation(event.currentTarget.value)}
+        />
+      </label>
+      {endInstallation.isError ? (
+        <p className="settings-status settings-status--error" role="status">
+          {errorMessage(endInstallation.error, "Could not end the installation.")}
+        </p>
+      ) : null}
+      <div className="debug-button-row">
+        <button type="submit" className="installations-danger" disabled={endInstallation.isPending}>
+          {endInstallation.isPending ? "Ending…" : "Confirm end"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setConfirming(false)}
+          disabled={endInstallation.isPending}
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function StartInstallationForm(): JSX.Element {
+  const createInstallation = useCreateInstallation();
+  const [name, setName] = useState("");
+  const [notes, setNotes] = useState("");
+  const [location, setLocation] = useState("");
+  const [copyQuestions, setCopyQuestions] = useState(false);
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    if (name.trim().length === 0 || createInstallation.isPending) return;
+    createInstallation.mutate(
+      {
+        name: name.trim(),
+        notes: notes.trim().length === 0 ? null : notes.trim(),
+        location: location.trim().length === 0 ? null : location.trim(),
+        copyQuestions,
+      },
+      {
+        onSuccess: () => {
+          setName("");
+          setNotes("");
+          setLocation("");
+          setCopyQuestions(false);
+        },
+      },
+    );
+  };
+
+  return (
+    <section className="feature-card">
+      <h2>Start a new installation</h2>
+      <p>
+        Opening a new era ends nothing on its own — end the active installation first if one is
+        already running.
+      </p>
+      <form className="settings-list" onSubmit={handleSubmit}>
+        <label>
+          Name
+          <input
+            type="text"
+            value={name}
+            required
+            maxLength={120}
+            placeholder="Summer 2027 residency"
+            onChange={(event) => setName(event.currentTarget.value)}
+          />
+        </label>
+        <label>
+          Notes (optional)
+          <textarea
+            value={notes}
+            rows={2}
+            maxLength={2000}
+            onChange={(event) => setNotes(event.currentTarget.value)}
+          />
+        </label>
+        <label>
+          Location (optional)
+          <input
+            type="text"
+            value={location}
+            maxLength={200}
+            onChange={(event) => setLocation(event.currentTarget.value)}
+          />
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={copyQuestions}
+            onChange={(event) => setCopyQuestions(event.currentTarget.checked)}
+          />{" "}
+          Copy the current questions into the new installation
+        </label>
+        <p className="installations-hint">
+          Leave this unchecked to start the new era with no questions. When checked, the active
+          questions are carried forward without re-uploading their audio.
+        </p>
+        {createInstallation.isError ? (
+          <p className="settings-status settings-status--error" role="status">
+            {errorMessage(createInstallation.error, "Could not start the installation.")}
+          </p>
+        ) : null}
+        <div className="debug-button-row">
+          <button type="submit" disabled={name.trim().length === 0 || createInstallation.isPending}>
+            {createInstallation.isPending ? "Starting…" : "Start installation"}
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function InstallationCard({ installation }: { readonly installation: Installation }): JSX.Element {
+  const navigate = useNavigate();
+  return (
+    <section className="feature-card installations-card">
+      <div className="installations-card__head">
+        <div>
+          <h2>{installation.name}</h2>
+          <p className="installations-card__meta">
+            Started {absoluteTime(installation.startedAt) ?? installation.startedAt}
+            {installation.endedAt === null
+              ? null
+              : ` · Ended ${absoluteTime(installation.endedAt) ?? installation.endedAt}`}
+            {installation.location === null ? null : ` · ${installation.location}`}
+          </p>
+        </div>
+        {installation.isActive ? (
+          <span className="admin-badge" title="The currently active installation">
+            Active
+          </span>
+        ) : null}
+      </div>
+      {installation.notes === null ? null : (
+        <p className="installations-card__notes">{installation.notes}</p>
+      )}
+      {installation.isActive ? (
+        <ActiveSummary />
+      ) : installation.summary === null ? (
+        <p className="settings-status" role="status">
+          No frozen summary was recorded for this installation.
+        </p>
+      ) : (
+        <FrozenSummary summary={installation.summary} />
+      )}
+      <div className="debug-button-row">
+        <DownloadArchiveButton installation={installation} />
+        {installation.isActive ? (
+          <EndInstallationForm installation={installation} />
+        ) : (
+          <button
+            type="button"
+            onClick={() =>
+              void navigate({ to: "/stats", search: { installationId: installation.id } })
+            }
+          >
+            View stats
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+export function InstallationsScreen(): JSX.Element {
+  const listQuery = useInstallationsList();
+  const ordered = useMemo(() => {
+    const items = listQuery.data?.items ?? [];
+    return [...items].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  }, [listQuery.data]);
+  const hasActive = ordered.some((installation) => installation.isActive);
+
+  return (
+    <GlassPanel title="Installations" className="feature-screen installations-screen">
+      <p className="screen-kicker">Operator console · Admin</p>
+      <h1>Installations</h1>
+      <p>
+        An installation is one run of the booth. Exactly one era is active at a time; ending it
+        freezes its counters and archives its questions without deleting anything.
+      </p>
+      {hasActive ? null : <StartInstallationForm />}
+      {listQuery.isError ? (
+        <FeatureError
+          message={
+            listQuery.error instanceof Error
+              ? listQuery.error.message
+              : "Unable to load installations."
+          }
+        />
+      ) : null}
+      {listQuery.isPending ? <FeatureSkeleton label="Gathering the eras…" /> : null}
+      {!listQuery.isPending && ordered.length === 0 ? (
+        <FeatureEmpty title="No installations yet">
+          Start the first installation to begin tagging booth activity.
+        </FeatureEmpty>
+      ) : null}
+      <div className="installations-list">
+        {ordered.map((installation) => (
+          <InstallationCard key={installation.id} installation={installation} />
+        ))}
+      </div>
+      {hasActive ? <StartInstallationForm /> : null}
+    </GlassPanel>
+  );
+}

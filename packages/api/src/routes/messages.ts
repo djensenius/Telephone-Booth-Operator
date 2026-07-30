@@ -1,6 +1,7 @@
 import { zValidator } from "@hono/zod-validator";
 import { Prisma } from "../generated/prisma/client.js";
 import {
+  InstallationScopeSchema,
   MessageCreateSchema,
   MessageDecisionSchema,
   MessageStatusSchema,
@@ -20,6 +21,11 @@ import { fanOutNotification } from "../lib/apns.js";
 import { generateSasUrl, headBlob } from "../lib/azure-blob.js";
 import { wsBroadcaster } from "../lib/broadcaster.js";
 import { db } from "../lib/db.js";
+import {
+  requireActiveInstallation,
+  resolveInstallationScope,
+  scopeWhere,
+} from "../lib/installation.js";
 import { countMessagesAwaitingModeration } from "../lib/moderation-badge.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 import {
@@ -33,6 +39,7 @@ const listQuerySchema = z.object({
   status: MessageStatusSchema.optional(),
   since: z.string().datetime().optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
+  installationId: InstallationScopeSchema.optional(),
 });
 
 const idParamSchema = z.object({ id: z.guid() });
@@ -42,9 +49,11 @@ const messageBlobName = (sha256: string): string => `messages/${sha256.slice(0, 
 export const messagesRouter = new Hono<{ Variables: AuthVariables & ApiTokenVariables }>();
 
 messagesRouter.get("/", zValidator("query", listQuerySchema), async (c) => {
-  const { status, since, limit } = c.req.valid("query");
+  const { status, since, limit, installationId } = c.req.valid("query");
+  const scope = await resolveInstallationScope(installationId);
   const messages = await db.message.findMany({
     where: {
+      ...scopeWhere(scope),
       ...(status ? { status } : {}),
       ...(since ? { createdAt: { gte: new Date(since) } } : {}),
     },
@@ -161,6 +170,7 @@ messagesRouter.post("/", requireApiToken(), zValidator("json", MessageCreateSche
         status: "uploading",
         questionId: body.questionId ?? null,
         audioId: file.id,
+        installationId: await requireActiveInstallation(),
       },
     });
   } catch (err) {

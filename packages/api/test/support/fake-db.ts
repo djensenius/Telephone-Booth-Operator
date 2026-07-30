@@ -19,6 +19,7 @@ export type FakeQuestion = {
   audioId: string;
   createdAt: Date;
   retiredAt: Date | null;
+  installationId: string | null;
 };
 
 export type FakeInstruction = {
@@ -39,6 +40,7 @@ export type FakeMessage = {
   receivedAt: Date | null;
   decidedAt: Date | null;
   decidedById: string | null;
+  installationId: string | null;
 };
 
 export type FakeStatus = {
@@ -51,6 +53,7 @@ export type FakeStatus = {
   firstSeenAt: Date;
   repeatCount: number;
   updatedAt: Date;
+  installationId: string | null;
 };
 
 type FakeSession = {
@@ -83,6 +86,7 @@ export type FakeBoothEvent = {
   recordingId: string | null;
   payload: unknown;
   version: string | null;
+  installationId: string | null;
 };
 
 export type FakeCallSession = {
@@ -96,6 +100,7 @@ export type FakeCallSession = {
   recordingId: string | null;
   durationMs: number | null;
   version: string | null;
+  installationId: string | null;
 };
 
 export type FakeTranscription = {
@@ -179,6 +184,24 @@ export type FakeMetricFilter = {
   updatedAt: Date;
 };
 
+// A named era of the booth. The fake db always has exactly one active
+// installation seeded by `resetFakeDb`, mirroring the production invariant
+// enforced by the `Installation_single_active_idx` partial unique index.
+export type FakeInstallation = {
+  id: string;
+  name: string;
+  notes: string | null;
+  location: string | null;
+  startedAt: Date;
+  endedAt: Date | null;
+  endedById: string | null;
+  summary: unknown;
+  createdAt: Date;
+};
+
+// Stable id so tests can assert on scoping without reading it back first.
+export const DEFAULT_INSTALLATION_ID = "00000000-0000-4000-8000-0000000000ff";
+
 export const store = {
   files: new Map<string, FakeFile>(),
   questions: new Map<string, FakeQuestion>(),
@@ -193,6 +216,7 @@ export const store = {
   moderations: new Map<string, FakeModeration>(),
   mobileDevices: new Map<string, FakeMobileDevice>(),
   metricFilters: new Map<string, FakeMetricFilter>(),
+  installations: new Map<string, FakeInstallation>(),
 };
 
 const cloneDate = (date: Date): Date => new Date(date.getTime());
@@ -354,6 +378,23 @@ const attachAudio = <T extends { audioId: string }>(record: T): T & { audio: Fak
   return { ...record, audio };
 };
 
+// Mirrors Prisma's `select: { audio: { select: { … } } }` projection, used by
+// the installation purge to resolve the blobs an era owns.
+const projectAudio = (
+  record: { audioId: string },
+  selection?: { select?: Record<string, boolean> },
+): { audio: Record<string, unknown> | null } => {
+  const audio = store.files.get(record.audioId);
+  if (!audio) return { audio: null };
+  const fields = selection?.select;
+  if (!fields) return { audio: audio as unknown as Record<string, unknown> };
+  const projected: Record<string, unknown> = {};
+  for (const [key, wanted] of Object.entries(fields)) {
+    if (wanted) projected[key] = (audio as unknown as Record<string, unknown>)[key];
+  }
+  return { audio: projected };
+};
+
 const fileFromData = (data: Partial<FakeFile> & Omit<FakeFile, "id" | "createdAt">): FakeFile => ({
   id: data.id ?? randomUUID(),
   createdAt: data.createdAt ?? new Date(),
@@ -405,6 +446,7 @@ export const seedQuestion = (overrides: Partial<FakeQuestion> = {}): FakeQuestio
     audioId: overrides.audioId ?? seedFile().id,
     createdAt: overrides.createdAt ?? new Date(),
     retiredAt: overrides.retiredAt ?? null,
+    installationId: overrides.installationId ?? DEFAULT_INSTALLATION_ID,
   };
   store.questions.set(question.id, question);
   return question;
@@ -433,6 +475,7 @@ export const seedMessage = (overrides: Partial<FakeMessage> = {}): FakeMessage =
     receivedAt: overrides.receivedAt ?? null,
     decidedAt: overrides.decidedAt ?? null,
     decidedById: overrides.decidedById ?? null,
+    installationId: overrides.installationId ?? DEFAULT_INSTALLATION_ID,
   };
   store.messages.set(message.id, message);
   return message;
@@ -465,6 +508,7 @@ export const seedStatus = (overrides: Partial<FakeStatus> = {}): FakeStatus => {
     firstSeenAt: overrides.firstSeenAt ?? overrides.updatedAt ?? new Date(),
     repeatCount: overrides.repeatCount ?? 1,
     updatedAt: overrides.updatedAt ?? new Date(),
+    installationId: overrides.installationId ?? DEFAULT_INSTALLATION_ID,
   };
   store.statuses.push(status);
   return status;
@@ -482,9 +526,32 @@ export const seedCallSession = (overrides: Partial<FakeCallSession> = {}): FakeC
     recordingId: overrides.recordingId ?? null,
     durationMs: overrides.durationMs ?? null,
     version: overrides.version ?? null,
+    installationId: overrides.installationId ?? DEFAULT_INSTALLATION_ID,
   };
   store.callSessions.set(session.id, session);
   return session;
+};
+
+// Push a booth event into the store. Stamps the default installation so
+// installation-scoped reads see it without every caller opting in.
+export const seedBoothEvent = (overrides: Partial<FakeBoothEvent> = {}): FakeBoothEvent => {
+  const occurredAt = overrides.occurredAt ?? new Date();
+  const event: FakeBoothEvent = {
+    id: overrides.id ?? randomUUID(),
+    eventId: overrides.eventId ?? randomUUID(),
+    boothId: overrides.boothId ?? "booth-1",
+    bootId: overrides.bootId ?? "boot-1",
+    type: overrides.type ?? "state_transition",
+    occurredAt,
+    receivedAt: overrides.receivedAt ?? occurredAt,
+    sessionId: overrides.sessionId ?? null,
+    recordingId: overrides.recordingId ?? null,
+    payload: overrides.payload ?? {},
+    version: overrides.version ?? null,
+    installationId: overrides.installationId ?? DEFAULT_INSTALLATION_ID,
+  };
+  store.boothEvents.push(event);
+  return event;
 };
 
 export const resetFakeDb = (): void => {
@@ -501,6 +568,18 @@ export const resetFakeDb = (): void => {
   store.moderations.clear();
   store.mobileDevices.clear();
   store.metricFilters.clear();
+  store.installations.clear();
+  store.installations.set(DEFAULT_INSTALLATION_ID, {
+    id: DEFAULT_INSTALLATION_ID,
+    name: "Installation 1",
+    notes: null,
+    location: null,
+    startedAt: new Date("2026-01-01T00:00:00.000Z"),
+    endedAt: null,
+    endedById: null,
+    summary: null,
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+  });
 };
 
 // Supports the `transcriptions: { none: {} } | { some: {...} }` relation
@@ -603,7 +682,19 @@ export const fakeDb = {
     },
   },
   file: {
-    findMany: async () => [...store.files.values()],
+    deleteMany: async ({ where }: { where: Predicate }) => {
+      const ids = (where?.id as { in?: string[] } | undefined)?.in;
+      let count = 0;
+      for (const file of [...store.files.values()]) {
+        const match = ids ? ids.includes(file.id) : matchesWhere(file, where ?? {});
+        if (!match) continue;
+        store.files.delete(file.id);
+        count += 1;
+      }
+      return { count };
+    },
+    findMany: async ({ where = {} }: { where?: Predicate; select?: unknown } = {}) =>
+      [...store.files.values()].filter((file) => matchesWhere(file, where ?? {})),
     findUnique: async ({
       where,
     }: {
@@ -650,13 +741,37 @@ export const fakeDb = {
     },
   },
   question: {
+    updateMany: async ({ where, data }: { where: Predicate; data: Record<string, unknown> }) => {
+      let count = 0;
+      for (const question of store.questions.values()) {
+        if (!matchesWhere(question, where ?? {})) continue;
+        store.questions.set(question.id, { ...question, ...data } as FakeQuestion);
+        count += 1;
+      }
+      return { count };
+    },
+    deleteMany: async ({ where }: { where: Predicate }) => {
+      let count = 0;
+      for (const question of [...store.questions.values()]) {
+        if (!matchesWhere(question, where ?? {})) continue;
+        store.questions.delete(question.id);
+        count += 1;
+      }
+      return { count };
+    },
     findUnique: async ({ where }: { where: { id: string } }) =>
       store.questions.get(where.id) ?? null,
     create: async ({
       data,
       include,
     }: {
-      data: { prompt: string; audioId: string; status?: string };
+      data: {
+        prompt: string;
+        audioId: string;
+        status?: string;
+        createdAt?: Date;
+        installationId?: string;
+      };
       include?: { audio?: boolean };
     }) => {
       const question: FakeQuestion = {
@@ -666,6 +781,7 @@ export const fakeDb = {
         audioId: data.audioId,
         createdAt: data.createdAt ?? new Date(),
         retiredAt: null,
+        installationId: data.installationId ?? DEFAULT_INSTALLATION_ID,
       };
       store.questions.set(question.id, question);
       return include?.audio ? attachAudio(question) : question;
@@ -677,9 +793,10 @@ export const fakeDb = {
         skip?: number;
         take?: number;
         include?: { audio?: boolean };
+        select?: { audio?: { select?: Record<string, boolean> } };
       } = {},
     ) => {
-      const { cursor, where = {}, skip = 0, take, include } = params;
+      const { cursor, where = {}, skip = 0, take, include, select } = params;
       let questions = [...store.questions.values()]
         .filter((question) => matchesWhere(question, where))
         .sort(byCreatedDesc);
@@ -688,6 +805,7 @@ export const fakeDb = {
         questions = index >= 0 ? questions.slice(index + skip) : questions;
       }
       const selected = typeof take === "number" ? questions.slice(0, take) : questions;
+      if (select?.audio) return selected.map((question) => projectAudio(question, select.audio));
       return include?.audio ? selected.map(attachAudio) : selected;
     },
     count: async ({ where = {} }: { where?: Record<string, unknown> } = {}) =>
@@ -826,6 +944,15 @@ export const fakeDb = {
     },
   },
   message: {
+    deleteMany: async ({ where }: { where: Predicate }) => {
+      let count = 0;
+      for (const message of [...store.messages.values()]) {
+        if (!matchesWhere(message, where ?? {})) continue;
+        store.messages.delete(message.id);
+        count += 1;
+      }
+      return { count };
+    },
     findUnique: async ({
       where,
       include,
@@ -872,18 +999,24 @@ export const fakeDb = {
       include,
       take,
       orderBy,
+      select,
     }: {
       where?: {
         status?: string | { in: readonly string[] };
         createdAt?: { gte: Date };
+        installationId?: string;
         OR?: readonly MessageRelationFilter[];
       };
       include?: { audio?: boolean; transcriptions?: unknown; moderations?: unknown };
-      take: number;
+      take?: number;
       orderBy?: unknown;
+      select?: { audio?: { select?: Record<string, boolean> } };
     }) => {
       void orderBy;
       let messages = [...store.messages.values()];
+      if (where.installationId !== undefined) {
+        messages = messages.filter((message) => message.installationId === where.installationId);
+      }
       const status = where.status;
       if (typeof status === "string") {
         messages = messages.filter((message) => message.status === status);
@@ -898,14 +1031,21 @@ export const fakeDb = {
           clauses.some((clause) => matchesTranscriptionFilter(message, clause)),
         );
       }
-      messages = messages.sort(byCreatedDesc).slice(0, take);
+      messages = messages.sort(byCreatedDesc);
+      if (take !== undefined) messages = messages.slice(0, take);
+      if (select?.audio) return messages.map((message) => projectAudio(message, select.audio));
       if (include) return messages.map((message) => attachAi(message, include));
       return messages;
     },
     create: async ({
       data,
     }: {
-      data: { status: string; questionId?: string | null; audioId: string };
+      data: {
+        status: string;
+        questionId?: string | null;
+        audioId: string;
+        installationId?: string;
+      };
     }) => {
       const duplicate = [...store.messages.values()].find((m) => m.audioId === data.audioId);
       if (duplicate) {
@@ -928,6 +1068,7 @@ export const fakeDb = {
         receivedAt: null,
         decidedAt: null,
         decidedById: null,
+        installationId: data.installationId ?? DEFAULT_INSTALLATION_ID,
       };
       store.messages.set(message.id, message);
       return message;
@@ -951,19 +1092,14 @@ export const fakeDb = {
       store.messages.set(where.id, message);
       return message;
     },
-    updateMany: async ({
-      where,
-      data,
-    }: {
-      where: { id: string; status?: string };
-      data: Partial<FakeMessage>;
-    }) => {
-      const existing = store.messages.get(where.id);
-      if (!existing) return { count: 0 };
-      if (where.status && existing.status !== where.status) return { count: 0 };
-      const updated = { ...existing, ...data };
-      store.messages.set(where.id, updated);
-      return { count: 1 };
+    updateMany: async ({ where = {}, data }: { where?: Predicate; data: Partial<FakeMessage> }) => {
+      let count = 0;
+      for (const message of [...store.messages.values()]) {
+        if (!matchesWhere(message, where ?? {})) continue;
+        store.messages.set(message.id, { ...message, ...data });
+        count += 1;
+      }
+      return { count };
     },
     delete: async ({ where }: { where: { id: string } }) => {
       const existing = store.messages.get(where.id);
@@ -1435,8 +1571,17 @@ export const fakeDb = {
     deleteMany: async ({
       where = {},
     }: {
-      where?: { updatedAt?: { lt?: Date }; id?: { lt?: number } };
+      where?: { updatedAt?: { lt?: Date }; id?: { lt?: number }; installationId?: string };
     }) => {
+      // Installation purge deletes by scope; the snapshot pruner deletes by
+      // age/id using the bespoke rule below.
+      if (where.installationId !== undefined) {
+        const kept = store.statuses.filter((s) => s.installationId !== where.installationId);
+        const removed = store.statuses.length - kept.length;
+        store.statuses.length = 0;
+        store.statuses.push(...kept);
+        return { count: removed };
+      }
       const before = store.statuses.length;
       const keep = store.statuses.filter((s) => {
         if (where.updatedAt?.lt && s.updatedAt >= where.updatedAt.lt) return true;
@@ -1480,6 +1625,15 @@ export const fakeDb = {
     },
   },
   boothEvent: {
+    count: async ({ where }: { where?: Predicate } = {}) =>
+      store.boothEvents.filter((event) => matchesWhere(event, where ?? {})).length,
+    deleteMany: async ({ where }: { where: Predicate }) => {
+      const keep = store.boothEvents.filter((event) => !matchesWhere(event, where ?? {}));
+      const count = store.boothEvents.length - keep.length;
+      store.boothEvents.length = 0;
+      store.boothEvents.push(...keep);
+      return { count };
+    },
     createMany: async ({
       data,
       skipDuplicates,
@@ -1533,6 +1687,15 @@ export const fakeDb = {
     },
   },
   callSession: {
+    deleteMany: async ({ where }: { where: Predicate }) => {
+      let count = 0;
+      for (const session of [...store.callSessions.values()]) {
+        if (!matchesWhere(session, where ?? {})) continue;
+        store.callSessions.delete(session.id);
+        count += 1;
+      }
+      return { count };
+    },
     findUnique: async ({ where }: { where: { id: string } }) =>
       store.callSessions.get(where.id) ?? null,
     findMany: async ({
@@ -1640,6 +1803,91 @@ export const fakeDb = {
       const filter = { ...(create as unknown as FakeMetricFilter), id: where.id };
       store.metricFilters.set(where.id, filter);
       return filter;
+    },
+  },
+  installation: {
+    findUnique: async ({ where }: { where: { id: string } }) =>
+      store.installations.get(where.id) ?? null,
+    findFirst: async ({
+      where = {},
+      orderBy,
+    }: {
+      where?: Record<string, unknown>;
+      orderBy?: unknown;
+    } = {}) => {
+      const rows = [...store.installations.values()].filter((row) =>
+        matchesWhere(row as unknown as Record<string, unknown>, where),
+      );
+      const sorted = sortCallSessions(
+        rows as unknown as FakeCallSession[],
+        orderBy,
+      ) as unknown as FakeInstallation[];
+      return sorted[0] ?? null;
+    },
+    findMany: async ({
+      where = {},
+      orderBy,
+    }: {
+      where?: Record<string, unknown>;
+      orderBy?: unknown;
+    } = {}) => {
+      const rows = [...store.installations.values()].filter((row) =>
+        matchesWhere(row as unknown as Record<string, unknown>, where),
+      );
+      return sortCallSessions(
+        rows as unknown as FakeCallSession[],
+        orderBy,
+      ) as unknown as FakeInstallation[];
+    },
+    count: async ({ where = {} }: { where?: Record<string, unknown> } = {}) =>
+      [...store.installations.values()].filter((row) =>
+        matchesWhere(row as unknown as Record<string, unknown>, where),
+      ).length,
+    create: async ({ data }: { data: Partial<FakeInstallation> & { name: string } }) => {
+      // Mirrors the partial unique index: a second active installation is a
+      // constraint violation, not a silently-accepted second era.
+      const hasActive = [...store.installations.values()].some((row) => row.endedAt === null);
+      if (hasActive && (data.endedAt ?? null) === null) {
+        throw new Error("Unique constraint failed on Installation_single_active_idx");
+      }
+      const now = new Date();
+      const row: FakeInstallation = {
+        id: data.id ?? randomUUID(),
+        name: data.name,
+        notes: data.notes ?? null,
+        location: data.location ?? null,
+        startedAt: data.startedAt ?? now,
+        endedAt: data.endedAt ?? null,
+        endedById: data.endedById ?? null,
+        summary: data.summary ?? null,
+        createdAt: data.createdAt ?? now,
+      };
+      store.installations.set(row.id, row);
+      return row;
+    },
+    update: async ({ where, data }: { where: { id: string }; data: Partial<FakeInstallation> }) => {
+      const existing = store.installations.get(where.id);
+      if (!existing) throw new Error("Installation not found");
+      const merged: FakeInstallation = { ...existing, ...data };
+      store.installations.set(where.id, merged);
+      return merged;
+    },
+    delete: async ({ where }: { where: { id: string } }) => {
+      const existing = store.installations.get(where.id);
+      store.installations.delete(where.id);
+      return existing ?? null;
+    },
+    upsert: async ({
+      where,
+      create,
+    }: {
+      where: { id: string };
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => {
+      const row = { ...(create as unknown as FakeInstallation), id: where.id };
+      store.installations.set(where.id, row);
+      return row;
     },
   },
   apiToken: {

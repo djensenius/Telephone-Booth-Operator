@@ -54,6 +54,13 @@ export const fakeAzureModule = {
       sha256: options.sha256 ?? null,
     });
   },
+  // Permanent delete, used by the installation hard-purge path.
+  deleteBlob: async (blobName: string): Promise<boolean> => {
+    const existed = fakeBlobs.has(blobName);
+    fakeBlobs.delete(blobName);
+    fakeBlobData.delete(blobName);
+    return existed;
+  },
   containerClient: () => ({}),
   resetAzureBlobForTests: resetFakeAzure,
 };

@@ -120,6 +120,22 @@ const { fakeDb, openidMocks, store, FakeChallengeError } = vi.hoisted(() => {
           return question;
         }),
       },
+      // Question creation tags the row with the active installation, so this
+      // minimal mock needs an installation delegate to resolve one.
+      installation: {
+        findFirst: vi.fn(async () => ({
+          id: "00000000-0000-4000-8000-0000000000ff",
+          name: "Installation 1",
+          notes: null,
+          location: null,
+          startedAt: new Date(),
+          endedAt: null,
+          endedById: null,
+          summary: null,
+          createdAt: new Date(),
+        })),
+        count: vi.fn(async () => 1),
+      },
     },
   };
 });

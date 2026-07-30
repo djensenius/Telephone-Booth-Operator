@@ -29,6 +29,7 @@ tags:
   - name: transcriptions
   - name: moderations
   - name: stats
+  - name: installations
   - name: worker
 paths:
   /healthz:
@@ -308,6 +309,16 @@ paths:
         - operatorSession: []
         - operatorBearer: []
       parameters:
+        - name: installationId
+          in: query
+          description: |
+            Installation scope. Omit for the currently active installation
+            (the default), pass a uuid for a historical one, or `all` to span
+            every installation.
+          schema:
+            oneOf:
+              - { type: string, format: uuid }
+              - { type: string, enum: [all] }
         - name: status
           in: query
           schema: { $ref: "#/components/schemas/MessageStatus" }
@@ -624,6 +635,17 @@ paths:
       security:
         - operatorSession: []
         - operatorBearer: []
+      parameters:
+        - name: installationId
+          in: query
+          description: |
+            Installation scope. Omit for the currently active installation
+            (the default), pass a uuid for a historical one, or `all` to span
+            every installation.
+          schema:
+            oneOf:
+              - { type: string, format: uuid }
+              - { type: string, enum: [all] }
       responses:
         "200":
           description: aggregated booth statistics
@@ -646,6 +668,16 @@ paths:
         - operatorSession: []
         - operatorBearer: []
       parameters:
+        - name: installationId
+          in: query
+          description: |
+            Installation scope. Omit for the currently active installation
+            (the default), pass a uuid for a historical one, or `all` to span
+            every installation.
+          schema:
+            oneOf:
+              - { type: string, format: uuid }
+              - { type: string, enum: [all] }
         - name: window
           in: query
           schema: { $ref: "#/components/schemas/StatsWindow" }
@@ -759,6 +791,187 @@ paths:
         "204": { description: deleted }
         "401": { description: missing or invalid credentials }
         "404": { description: not found or not owned by the caller }
+
+  /v1/installations:
+    get:
+      summary: List installations, newest first.
+      description: |
+        An installation is a named era of the booth — one run of the art
+        piece. Exactly one is active (`endedAt: null`) at a time. Ending an
+        installation does not delete anything; time-series data keeps its
+        `installationId` and stays readable under that scope.
+      tags: [installations]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InstallationList" }
+        "401": { description: missing or invalid credentials }
+    post:
+      summary: Start a new installation.
+      description: |
+        Fails with 409 if an installation is still active — end it first.
+        Set `copyQuestions` to carry the previous era's questions forward;
+        they re-use the same audio blob so nothing is re-uploaded.
+      tags: [installations]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InstallationCreate" }
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Installation" }
+        "401": { description: missing or invalid credentials }
+        "403": { description: operator is not an admin }
+        "409": { description: an installation is already active }
+
+  /v1/installations/current:
+    get:
+      summary: The currently active installation.
+      tags: [installations]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Installation" }
+        "401": { description: missing or invalid credentials }
+        "404": { description: no active installation }
+
+  /v1/installations/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      summary: Fetch a single installation.
+      tags: [installations]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Installation" }
+        "401": { description: missing or invalid credentials }
+        "404": { description: not found }
+    patch:
+      summary: Edit an installation's metadata.
+      tags: [installations]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InstallationUpdate" }
+      responses:
+        "200":
+          description: updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Installation" }
+        "401": { description: missing or invalid credentials }
+        "403": { description: operator is not an admin }
+        "404": { description: not found }
+    delete:
+      summary: Irreversibly purge an ended installation and all of its data.
+      description: |
+        Deletes the installation's rows and any audio blobs that no surviving
+        `File` row still references, so audio shared with a later era (for
+        example questions copied forward) is never orphaned.
+
+        Refuses the active installation. The caller must echo the exact
+        installation name in `confirmName` as a deliberate speed bump.
+        Take an archive first — this cannot be undone.
+      tags: [installations]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InstallationPurge" }
+      responses:
+        "200":
+          description: purged
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InstallationPurgeResult" }
+        "400": { description: confirmName did not match the installation name }
+        "401": { description: missing or invalid credentials }
+        "403": { description: operator is not an admin }
+        "404": { description: not found }
+        "409": { description: installation is still active }
+
+  /v1/installations/{id}/end:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Close out an installation and start fresh.
+      description: |
+        Freezes the summary counters, closes any call sessions the booth left
+        open, moves queued messages to a terminal state so the next era's
+        moderation queue starts empty, and archives this era's questions.
+        Nothing is deleted.
+
+        A scoped tar archive is built first as a safety net; if it fails the
+        whole operation is aborted with 503.
+      tags: [installations]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InstallationEnd" }
+      responses:
+        "200":
+          description: ended
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Installation" }
+        "401": { description: missing or invalid credentials }
+        "403": { description: operator is not an admin }
+        "404": { description: not found }
+        "409": { description: installation already ended }
+        "503": { description: safety-net archive could not be built }
+
+  /v1/installations/{id}/export:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      summary: Download a tar archive scoped to one installation.
+      tags: [installations]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      responses:
+        "200":
+          description: tar archive
+          content:
+            application/x-tar:
+              schema: { type: string, format: binary }
+        "401": { description: missing or invalid credentials }
+        "403": { description: operator is not an admin }
+        "404": { description: not found }
 
   /v1/admin/data/export:
     get:
@@ -1084,6 +1297,16 @@ paths:
         - operatorSession: []
         - operatorBearer: []
       parameters:
+        - name: installationId
+          in: query
+          description: |
+            Installation scope. Omit for the currently active installation
+            (the default), pass a uuid for a historical one, or `all` to span
+            every installation.
+          schema:
+            oneOf:
+              - { type: string, format: uuid }
+              - { type: string, enum: [all] }
         - name: boothId
           in: query
           schema: { type: string }
@@ -1156,6 +1379,16 @@ paths:
         - operatorSession: []
         - operatorBearer: []
       parameters:
+        - name: installationId
+          in: query
+          description: |
+            Installation scope. Omit for the currently active installation
+            (the default), pass a uuid for a historical one, or `all` to span
+            every installation.
+          schema:
+            oneOf:
+              - { type: string, format: uuid }
+              - { type: string, enum: [all] }
         - { name: boothId, in: query, schema: { type: string } }
         - { name: cursor, in: query, schema: { type: string } }
         - {
@@ -1973,6 +2206,111 @@ components:
           properties:
             wsClients: { type: integer, minimum: 0 }
         generatedAt: { type: string, format: date-time }
+    Installation:
+      type: object
+      required:
+        [id, name, notes, location, startedAt, endedAt, endedById, summary, createdAt, isActive]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        notes: { type: string, nullable: true }
+        location: { type: string, nullable: true }
+        startedAt: { type: string, format: date-time }
+        endedAt: { type: string, format: date-time, nullable: true }
+        endedById: { type: string, nullable: true }
+        summary:
+          oneOf:
+            - $ref: "#/components/schemas/InstallationSummary"
+            - type: "null"
+          description: Frozen at end time; null while the installation is active.
+        createdAt: { type: string, format: date-time }
+        isActive: { type: boolean }
+
+    InstallationSummary:
+      type: object
+      description: Counters frozen when the installation was ended.
+      required:
+        [
+          calls,
+          messages,
+          messagesApproved,
+          messagesRejected,
+          questions,
+          events,
+          recordedMs,
+          firstActivityAt,
+          lastActivityAt,
+        ]
+      properties:
+        calls: { type: integer, minimum: 0 }
+        messages: { type: integer, minimum: 0 }
+        messagesApproved: { type: integer, minimum: 0 }
+        messagesRejected: { type: integer, minimum: 0 }
+        questions: { type: integer, minimum: 0 }
+        events: { type: integer, minimum: 0 }
+        recordedMs: { type: integer, minimum: 0 }
+        firstActivityAt: { type: string, format: date-time, nullable: true }
+        lastActivityAt: { type: string, format: date-time, nullable: true }
+
+    InstallationList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Installation" }
+
+    InstallationCreate:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        notes: { type: string, maxLength: 2000, nullable: true }
+        location: { type: string, maxLength: 200, nullable: true }
+        copyQuestions:
+          type: boolean
+          default: false
+          description: |
+            Carry the previous installation's questions forward. The copies
+            point at the same audio blob, so nothing is re-uploaded.
+
+    InstallationUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        notes: { type: string, maxLength: 2000, nullable: true }
+        location: { type: string, maxLength: 200, nullable: true }
+
+    InstallationEnd:
+      type: object
+      description: Optional metadata edits applied while closing the books.
+      properties:
+        notes: { type: string, maxLength: 2000, nullable: true }
+        location: { type: string, maxLength: 200, nullable: true }
+
+    InstallationPurge:
+      type: object
+      required: [confirmName]
+      properties:
+        confirmName:
+          type: string
+          description: Must exactly match the installation's name.
+
+    InstallationPurgeResult:
+      type: object
+      required: [installationId, rows, blobsDeleted, blobsRetained, blobFailures]
+      properties:
+        installationId: { type: string, format: uuid }
+        rows: { type: object, additionalProperties: { type: integer } }
+        blobsDeleted: { type: integer, minimum: 0 }
+        blobsRetained:
+          type: integer
+          minimum: 0
+          description: Blobs kept because a surviving File row still references them.
+        blobFailures:
+          type: array
+          items: { type: string }
+
     MetricFilter:
       type: object
       required: [id, name, window, start, end, createdAt, updatedAt]

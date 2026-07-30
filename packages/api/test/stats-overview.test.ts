@@ -13,6 +13,7 @@ import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { resetFakeAzure } from "./support/fake-azure.js";
 import {
   resetFakeDb,
+  seedBoothEvent,
   seedCallSession,
   seedFile,
   seedMessage,
@@ -36,16 +37,10 @@ const pushEvent = (overrides: {
   payload?: unknown;
   boothId?: string;
 }): void => {
-  store.boothEvents.push({
-    id: randomUUID(),
-    eventId: randomUUID(),
+  seedBoothEvent({
     boothId: overrides.boothId ?? "booth-1",
-    bootId: "boot-1",
     type: overrides.type,
     occurredAt: overrides.occurredAt,
-    receivedAt: overrides.occurredAt,
-    sessionId: null,
-    recordingId: null,
     payload: overrides.payload ?? {},
   });
 };

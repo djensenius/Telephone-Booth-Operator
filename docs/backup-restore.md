@@ -36,13 +36,20 @@ and anything older, and rejects anything newer than it understands.
 | ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | 1       | Original shape.                                                                                                                      |
 | 2       | Booth status snapshots carry `firstSeenAt`/`repeatCount`. Version 1 snapshots restore with their window starting at the report time. |
+| 3       | Installations are exported, and scoped rows carry `installationId`. Older archives restore into the active installation.             |
 
 ## Endpoints
 
 ```text
-GET  /v1/admin/data/export   → application/x-tar download
-POST /v1/admin/data/import   ← raw tar body (application/x-tar)
+GET  /v1/admin/data/export        → application/x-tar download (everything)
+GET  /v1/installations/:id/export → application/x-tar download (one era)
+POST /v1/admin/data/import        ← raw tar body (application/x-tar)
 ```
+
+The scoped export contains only the rows belonging to that installation, plus
+the blobs they reference. It is what the API generates automatically as a
+safety net when an installation is ended — see
+[installations](installations.md).
 
 Import is **idempotent**: rows are upserted by id, and each audio blob is
 uploaded only when the target storage does not already hold it (dedupe by

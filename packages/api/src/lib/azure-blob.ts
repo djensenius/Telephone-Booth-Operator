@@ -159,6 +159,16 @@ export const uploadBlob = async (
   });
 };
 
+// Permanently delete a blob. Only reached from the admin hard-purge path, and
+// only for blobs the caller has already confirmed are unreferenced by any
+// surviving `File` row. Returns false when the blob was already gone, so a
+// re-run of a partially-failed purge is idempotent rather than an error.
+export const deleteBlob = async (blobName: string): Promise<boolean> => {
+  const blob = containerClient().getBlockBlobClient(blobName);
+  const response = await blob.deleteIfExists();
+  return response.succeeded;
+};
+
 export const resetAzureBlobForTests = (): void => {
   state = null;
 };

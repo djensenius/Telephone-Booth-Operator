@@ -297,6 +297,13 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
               Sessions
             </a>
           </li>
+          <li>
+            <a
+              href="/installations"
+            >
+              Installations
+            </a>
+          </li>
         </ul>
       </nav>
     </aside>

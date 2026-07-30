@@ -88,6 +88,14 @@ client is constructed with the `@prisma/adapter-pg` driver adapter in
 `dist` alongside the rest of the API, so `prisma generate` must run before
 `build`.
 
+- `Installation` — one run of the booth, with a start, an end, and frozen
+  summary counters. `Message`, `CallSession`, `BoothEvent`,
+  `BoothStatusSnapshot`, and `Question` all carry an `installationId`, and a
+  partial unique index keeps at most one active at a time. Reads default to
+  the active installation, so ending one and starting the next resets every
+  stat without deleting anything
+  (see [installations](installations.md) and
+  [ADR 0011](adr/0011-installations-as-data-scope.md)).
 - `Question`, `Message`, `File` — content tables. `File` is content-addressed
   by `sha256` so duplicate uploads dedupe.
 - `OperatorUser` — humans authenticated via OIDC, keyed by `oidcSub`. Created

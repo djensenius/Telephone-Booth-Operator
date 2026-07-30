@@ -1,4 +1,4 @@
-import type { BoothSystemSnapshot, Message } from "@telephone-booth-operator/shared";
+import type { BoothSystemSnapshot, Installation, Message } from "@telephone-booth-operator/shared";
 import { log } from "./logger.js";
 
 export type BoothStatusEvent = {
@@ -39,7 +39,10 @@ export type WsEnvelope =
       version: string | null;
     }
   | { kind: "message"; message: Message }
-  | { kind: "work"; messageId: string; needs: WorkNeed[] };
+  | { kind: "work"; messageId: string; needs: WorkNeed[] }
+  // Emitted when an installation starts or ends so consoles re-scope their
+  // queries immediately instead of showing the previous era until a reload.
+  | { kind: "installation"; installation: Installation };
 
 // The push-mode job steps a subscribed Transcription worker can be asked to
 // run. Mirrors the `work` arm of `WsEnvelopeSchema` in the shared package.

@@ -37,6 +37,7 @@ shortcuts are ignored for non-admin operators.
 | `/messages/:id`                 | Single-message review screen with audio player                     |
 | `/questions/new`                | Open the new-question upload flow                                  |
 | `/tokens`                       | API token CRUD and usage sparklines                                |
+| `/installations`                | Installation history, rollover, and scoped stats (admin actions)   |
 | `/settings`                     | Account, theme, and phone-client connection                        |
 | `/about`                        | Public lore and credits page                                       |
 | `/debug`                        | Debug panel for the configured phone client                        |

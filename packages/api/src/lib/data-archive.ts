@@ -18,14 +18,19 @@ import { db } from "./db.js";
 
 export const EXPORT_FORMAT = "telephone-booth-export";
 // 1: original shape. 2: BoothStatusSnapshot carries `firstSeenAt`/`repeatCount`.
-// Bumped so a server that predates the collapse rejects the archive as newer
-// than supported instead of failing on unknown columns mid-restore. Version 1
-// archives still import — `withStatusWindow` fills the missing window.
-export const EXPORT_VERSION = 2;
+// 3: rows carry `installationId` and the archive may be scoped to one
+// installation. Bumped so a server that predates the collapse rejects the
+// archive as newer than supported instead of failing on unknown columns
+// mid-restore. Older archives still import — `withStatusWindow` fills the
+// missing window, and untagged rows are adopted by the active installation.
+export const EXPORT_VERSION = 3;
+// Manifest models added after v1. Nothing to migrate; listed for the record.
+const INSTALLATION_MODEL = "installation" as const;
 
 // Import order matters — parents before children so foreign keys resolve.
 const IMPORT_ORDER = [
   "operatorUser",
+  INSTALLATION_MODEL,
   "file",
   "instruction",
   "question",
@@ -71,7 +76,7 @@ type ModelDelegate = {
 const modelClientOf = (client: unknown, name: ModelName): ModelDelegate =>
   (client as Record<ModelName, ModelDelegate>)[name];
 
-const collectDump = async (): Promise<DataDump> =>
+const collectDump = async (installationId?: string): Promise<DataDump> =>
   // Read every table inside a single RepeatableRead transaction so the dump is
   // a consistent snapshot; concurrent writes can't produce child rows that
   // reference parents missing from the backup.
@@ -79,20 +84,63 @@ const collectDump = async (): Promise<DataDump> =>
     async (tx) => {
       const dump = {} as DataDump;
       for (const name of IMPORT_ORDER) {
-        dump[name] = await modelClientOf(tx, name).findMany({});
+        dump[name] = await modelClientOf(tx, name).findMany(
+          installationId ? scopedFindArgs(name, installationId) : {},
+        );
       }
       return dump;
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
   );
 
-// Build a full export archive: `manifest.json`, `data.json`, and one
+// Models carrying an `installationId` column can be filtered directly.
+const SCOPED_MODELS = new Set<ModelName>([
+  "question",
+  "message",
+  "callSession",
+  "boothEvent",
+  "boothStatusSnapshot",
+]);
+
+// Build the `findMany` args for a single-installation export. Directly scoped
+// models filter on `installationId`; models that hang off a scoped parent are
+// filtered through the relation so a scoped archive stays self-consistent.
+// Everything else (operators, tokens, devices) is global and exported whole,
+// because those carry over between installations.
+const scopedFindArgs = (name: ModelName, installationId: string): unknown => {
+  if (name === INSTALLATION_MODEL) return { where: { id: installationId } };
+  if (SCOPED_MODELS.has(name)) return { where: { installationId } };
+  if (name === "transcription" || name === "moderation") {
+    return { where: { message: { installationId } } };
+  }
+  if (name === "file") {
+    return {
+      where: {
+        OR: [
+          { question: { installationId } },
+          { message: { installationId } },
+          // Instructions are global, but their audio must travel with any
+          // archive or a restore would leave dangling references.
+          { instruction: { isNot: null } },
+        ],
+      },
+    };
+  }
+  return {};
+};
+
+// Build an export archive: `manifest.json`, `data.json`, and one
 // `blobs/<sha256>` entry per unique audio file that still exists in storage.
-export const buildExportArchive = async (): Promise<{
+// Passing `installationId` narrows the dump to a single installation (used for
+// the safety-net archive taken when an era is closed out); omitting it exports
+// the whole instance.
+export const buildExportArchive = async (
+  options: { installationId?: string } = {},
+): Promise<{
   archive: Buffer;
   manifest: ExportManifest;
 }> => {
-  const dump = await collectDump();
+  const dump = await collectDump(options.installationId);
   const counts: Record<string, number> = {};
   for (const name of IMPORT_ORDER) counts[name] = dump[name].length;
 

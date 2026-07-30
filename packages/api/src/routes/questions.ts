@@ -1,8 +1,17 @@
 import { zValidator } from "@hono/zod-validator";
-import { QuestionCreateSchema, QuestionStatusSchema } from "@telephone-booth-operator/shared";
+import {
+  InstallationScopeSchema,
+  QuestionCreateSchema,
+  QuestionStatusSchema,
+} from "@telephone-booth-operator/shared";
 import { Hono } from "hono";
 import { z } from "zod";
 import { db } from "../lib/db.js";
+import {
+  requireActiveInstallation,
+  resolveInstallationScope,
+  scopeWhere,
+} from "../lib/installation.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 import { serializeQuestion } from "../lib/serializers.js";
 import { requireAdmin, type AuthVariables } from "../lib/session.js";
@@ -11,6 +20,7 @@ const listQuerySchema = z.object({
   cursor: z.guid().optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   status: QuestionStatusSchema.optional(),
+  installationId: InstallationScopeSchema.optional(),
 });
 
 const idParamSchema = z.object({ id: z.guid() });
@@ -18,10 +28,13 @@ const idParamSchema = z.object({ id: z.guid() });
 export const questionsRouter = new Hono<{ Variables: AuthVariables & ApiTokenVariables }>();
 
 questionsRouter.get("/", zValidator("query", listQuerySchema), async (c) => {
-  const { cursor, limit, status } = c.req.valid("query");
+  const { cursor, limit, status, installationId } = c.req.valid("query");
   // Default management view hides archived questions but shows drafts; an
   // explicit status filter overrides this.
-  const where = status ? { status } : { status: { not: "archived" as const } };
+  const where = {
+    ...scopeWhere(await resolveInstallationScope(installationId)),
+    ...(status ? { status } : { status: { not: "archived" as const } }),
+  };
   const questions = await db.question.findMany({
     where,
     include: { audio: true },
@@ -45,6 +58,7 @@ questionsRouter.post("/", requireAdmin(), zValidator("json", QuestionCreateSchem
         prompt: body.prompt,
         audioId: body.audioFileId,
         status: body.status ?? "draft",
+        installationId: await requireActiveInstallation(),
       },
       include: { audio: true },
     });
@@ -103,12 +117,19 @@ questionsRouter.delete("/:id", requireAdmin(), zValidator("param", idParamSchema
 });
 
 questionsRouter.get("/random", requireApiToken(), async (c) => {
-  const count = await db.question.count({ where: { status: "active" } });
+  // The booth only ever plays questions from the installation it is currently
+  // part of; ending an era archives its questions, but scoping here keeps that
+  // true even if one is un-archived after the fact.
+  const where = {
+    status: "active" as const,
+    installationId: await requireActiveInstallation(),
+  };
+  const count = await db.question.count({ where });
   if (count === 0) return c.json({ error: "no_questions_available" }, 404);
 
   const skip = Math.floor(Math.random() * count);
   const question = await db.question.findFirst({
-    where: { status: "active" },
+    where,
     include: { audio: true },
     orderBy: { id: "asc" },
     skip,

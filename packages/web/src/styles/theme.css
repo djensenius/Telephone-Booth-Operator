@@ -2009,3 +2009,65 @@ textarea:focus-visible,
   clip: rect(0, 0, 0, 0);
   border: 0;
 }
+
+/* Installations feature: era history, live/frozen summaries, and the
+   destructive rollover/purge controls. Colours reference theme tokens only. */
+.installations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.installations-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.installations-card__meta {
+  margin: 0.15rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.installations-card__notes {
+  margin: 0.25rem 0 0;
+  color: var(--text-secondary, var(--text-primary));
+}
+
+.installations-summary {
+  margin-top: 0.75rem;
+}
+
+.installations-hint {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.installations-end-form {
+  width: 100%;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.75rem;
+}
+
+.installations-danger {
+  border-color: var(--accent-red);
+  color: var(--accent-red-strong);
+}
+
+.installations-danger:disabled {
+  opacity: 0.55;
+}
+
+.stats-scope-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+}

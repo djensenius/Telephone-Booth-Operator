@@ -64,17 +64,51 @@ enum RuntimeMode {
   simulator
 }
 
+// A named era of the booth — one run of the installation. Exactly one row has
+// `endedAt IS NULL` at a time (enforced by a partial unique index); that is the
+// "active" installation and every new booth write is tagged with it. Ending an
+// installation freezes `summary` so the history list renders without
+// re-aggregating the event table per row. See lib/installation.ts.
+model Installation {
+  id        String        @id @default(uuid()) @db.Uuid
+  name      String
+  notes     String?
+  location  String?
+  startedAt DateTime      @default(now())
+  endedAt   DateTime?
+  endedById String?
+  endedBy   OperatorUser? @relation("InstallationEnder", fields: [endedById], references: [id])
+  // Counters frozen at end time. Shape is `InstallationSummary` in
+  // @telephone-booth-operator/shared. Null while the installation is active.
+  summary   Json?
+  createdAt DateTime      @default(now())
+
+  messages     Message[]
+  callSessions CallSession[]
+  events       BoothEvent[]
+  snapshots    BoothStatusSnapshot[]
+  questions    Question[]
+
+  @@index([startedAt])
+  @@index([endedAt])
+}
+
 model Question {
-  id        String         @id @default(uuid()) @db.Uuid
-  prompt    String         @unique
-  status    QuestionStatus @default(draft)
-  audioId   String         @unique @db.Uuid
-  audio     File           @relation(fields: [audioId], references: [id])
-  createdAt DateTime       @default(now())
-  retiredAt DateTime?
-  messages  Message[]
+  id             String         @id @default(uuid()) @db.Uuid
+  prompt         String         @unique
+  status         QuestionStatus @default(draft)
+  audioId        String         @unique @db.Uuid
+  audio          File           @relation(fields: [audioId], references: [id])
+  createdAt      DateTime       @default(now())
+  retiredAt      DateTime?
+  messages       Message[]
+  // Nullable in the column so the migration never rewrites a large table, but
+  // always populated at write time via `requireActiveInstallation()`.
+  installationId String?        @db.Uuid
+  installation   Installation?  @relation(fields: [installationId], references: [id])
 
   @@index([status, createdAt])
+  @@index([installationId, status, createdAt])
 }
 
 model Instruction {
@@ -103,8 +137,11 @@ model Message {
   decidedBy      OperatorUser?   @relation(fields: [decidedById], references: [id])
   transcriptions Transcription[]
   moderations    Moderation[]
+  installationId String?         @db.Uuid
+  installation   Installation?   @relation(fields: [installationId], references: [id])
 
   @@index([status, createdAt])
+  @@index([installationId, status, createdAt])
 }
 
 model File {
@@ -122,23 +159,26 @@ model File {
 }
 
 model BoothStatusSnapshot {
-  id                Int          @id @default(autoincrement())
+  id                Int           @id @default(autoincrement())
   state             BoothState
-  currentQuestionId String?      @db.Uuid
-  currentMessageId  String?      @db.Uuid
+  currentQuestionId String?       @db.Uuid
+  currentMessageId  String?       @db.Uuid
   lastError         String?
   runtimeMode       RuntimeMode?
   // `firstSeenAt` is the first report of this status, `updatedAt` the most
   // recent one, and `repeatCount` how many identical booth reports (heartbeats)
   // have been folded into this row. See `routes/status.ts`.
-  firstSeenAt       DateTime     @default(now())
-  repeatCount       Int          @default(1)
-  updatedAt         DateTime     @default(now())
+  firstSeenAt       DateTime      @default(now())
+  repeatCount       Int           @default(1)
+  updatedAt         DateTime      @default(now())
+  installationId    String?       @db.Uuid
+  installation      Installation? @relation(fields: [installationId], references: [id])
 
   @@index([updatedAt])
   // Every heartbeat looks up the run enclosing its own timestamp:
   // `WHERE firstSeenAt <= ? ORDER BY firstSeenAt DESC, id DESC LIMIT 1`.
   @@index([firstSeenAt, id])
+  @@index([installationId, updatedAt])
 }
 
 // Persistent log of every observable event emitted by a booth (pickup,
@@ -150,20 +190,25 @@ model BoothStatusSnapshot {
 // `recordingId` is a plain string (NOT @db.Uuid) because the booth side
 // generates string ids like `recording-{monotonic_ns}`.
 model BoothEvent {
-  id          String       @id @default(cuid())
-  eventId     String
-  boothId     String
-  bootId      String
-  type        String
-  occurredAt  DateTime
-  receivedAt  DateTime     @default(now())
-  sessionId   String?
-  recordingId String?
-  payload     Json
+  id             String        @id @default(cuid())
+  eventId        String
+  boothId        String
+  bootId         String
+  type           String
+  occurredAt     DateTime
+  receivedAt     DateTime      @default(now())
+  sessionId      String?
+  recordingId    String?
+  payload        Json
   // Running version of the `telephone-booth` Rust client that produced the
   // event (e.g. `0.3.2`). Nullable for backfill / older booths.
-  version     String?
-  session     CallSession? @relation(fields: [sessionId], references: [id])
+  version        String?
+  session        CallSession?  @relation(fields: [sessionId], references: [id])
+  // Scope tag. Note the `@@unique([boothId, eventId])` idempotency key stays
+  // global rather than per-installation: a replayed event must remain deduped
+  // even if the retry straddles a rollover.
+  installationId String?       @db.Uuid
+  installation   Installation? @relation(fields: [installationId], references: [id])
 
   @@unique([boothId, eventId])
   @@index([occurredAt])
@@ -171,30 +216,34 @@ model BoothEvent {
   @@index([type, occurredAt])
   @@index([sessionId])
   @@index([boothId, receivedAt, id])
+  @@index([installationId, occurredAt])
 }
 
 // Derived from BoothEvent.call_started / call_ended pairs. The booth
 // generates `id` as a UUIDv4 on pickup so the operator can group events
 // into a session without joining on time windows.
 model CallSession {
-  id           String       @id
-  boothId      String
-  bootId       String
-  startedAt    DateTime
-  endedAt      DateTime?
-  digitsDialed String?
-  outcome      String?
-  recordingId  String?
-  durationMs   Int?
+  id             String        @id
+  boothId        String
+  bootId         String
+  startedAt      DateTime
+  endedAt        DateTime?
+  digitsDialed   String?
+  outcome        String?
+  recordingId    String?
+  durationMs     Int?
   // Booth client version captured from the `call_started` event.
-  version      String?
-  events       BoothEvent[]
+  version        String?
+  events         BoothEvent[]
+  installationId String?       @db.Uuid
+  installation   Installation? @relation(fields: [installationId], references: [id])
 
   @@index([boothId, startedAt])
   @@index([outcome])
   // Supports on-idle stale-session reconciliation, which filters open sessions
   // by `endedAt IS NULL AND startedAt <= idleTime` on every idle status write.
   @@index([endedAt, startedAt])
+  @@index([installationId, startedAt])
 }
 
 // Operator humans authenticated via OIDC (Authentik by default).
@@ -217,6 +266,7 @@ model OperatorUser {
   requestedModerations    Moderation[]      @relation("ModerationRequester")
   mobileDevices           MobileDevice[]
   metricFilters           MetricFilter[]
+  endedInstallations      Installation[]    @relation("InstallationEnder")
 }
 
 // Per-operator saved metrics filter. Captures a named time selection that can

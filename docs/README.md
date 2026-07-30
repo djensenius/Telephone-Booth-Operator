@@ -23,6 +23,7 @@ rebuilds it from the filesystem; CI fails if it drifts.
 - [Push-mode worker](operator-push.md) — WebSocket/REST contract for app-run transcription, translation, and moderation
 - [Push notifications](push-notifications.md) — APNs setup, badge pipeline, sandbox vs production
 - [UI routing](ui-routing.md) — digit shortcuts, keyboard nav, reduced motion
+- [Installations](installations.md) — ending a run, starting fresh, browsing history, hard purge
 
 ## Running it
 
@@ -45,3 +46,4 @@ rebuilds it from the filesystem; CI fails if it drifts.
 - [0006 — Reconcile stale call sessions on booth idle](adr/0006-reconcile-stale-call-sessions-on-idle.md)
 - [0009 — Human-only moderation and push-based transcription worker](adr/0009-human-moderation-and-push-worker.md)
 - [0010 — Collapse repeated booth status reports](adr/0010-collapse-repeated-booth-status-reports.md)
+- [0011 — Installations as the data scope](adr/0011-installations-as-data-scope.md)

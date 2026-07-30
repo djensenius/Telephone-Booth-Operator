@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { wsBroadcaster } from "../lib/broadcaster.js";
 import { db } from "../lib/db.js";
+import { requireActiveInstallation } from "../lib/installation.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 import { defaultStatus, serializeStatus } from "../lib/serializers.js";
 import { requireOperatorOrApiToken, type AuthVariables } from "../lib/session.js";
@@ -133,6 +134,7 @@ statusRouter.put("/", requireApiToken(), zValidator("json", StatusUpdateSchema),
           runtimeMode: update.runtimeMode ?? null,
           firstSeenAt: reportedAt,
           updatedAt: reportedAt,
+          installationId: await requireActiveInstallation(),
         },
       });
   if (update.state === "idle") {

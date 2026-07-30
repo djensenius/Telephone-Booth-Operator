@@ -14,5 +14,11 @@ import { db } from "./db.js";
 
 export const AWAITING_MODERATION_STATUSES = ["received", "pending"] as const;
 
-export const countMessagesAwaitingModeration = (): Promise<number> =>
-  db.message.count({ where: { status: { in: [...AWAITING_MODERATION_STATUSES] } } });
+// `scope` narrows the count to one installation. Callers that omit it count
+// across every era, which is what the push/badge paths want.
+export const countMessagesAwaitingModeration = (
+  scope: { installationId?: string } = {},
+): Promise<number> =>
+  db.message.count({
+    where: { ...scope, status: { in: [...AWAITING_MODERATION_STATUSES] } },
+  });

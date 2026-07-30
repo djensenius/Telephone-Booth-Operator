@@ -12,6 +12,7 @@ import {
   BoothEventBatchSchema,
   BoothEventTypeSchema,
   CallOutcomeSchema,
+  InstallationScopeSchema,
   type BoothEvent,
   type BoothEventRecord,
 } from "@telephone-booth-operator/shared";
@@ -23,6 +24,11 @@ import { fanOutNotification } from "../lib/apns.js";
 import { Broadcaster } from "../lib/broadcaster.js";
 import { decodeCursor, encodeCursor } from "../lib/cursor.js";
 import { db } from "../lib/db.js";
+import {
+  requireActiveInstallation,
+  resolveInstallationScope,
+  scopeWhere,
+} from "../lib/installation.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 import { serializeBoothEvent } from "../lib/serializers.js";
 import { requireOperator, type AuthVariables } from "../lib/session.js";
@@ -45,6 +51,7 @@ const listQuerySchema = z.object({
   sessionId: z.guid().optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(MAX_LIMIT).default(DEFAULT_LIMIT),
+  installationId: InstallationScopeSchema.optional(),
 });
 
 const streamQuerySchema = z.object({
@@ -97,8 +104,9 @@ eventsRouter.get("/stream", requireOperator(), zValidator("query", streamQuerySc
 });
 
 eventsRouter.get("/", requireOperator(), zValidator("query", listQuerySchema), async (c) => {
-  const { boothId, since, until, type, sessionId, cursor, limit } = c.req.valid("query");
-  const where: Record<string, unknown> = {};
+  const { boothId, since, until, type, sessionId, cursor, limit, installationId } =
+    c.req.valid("query");
+  const where: Record<string, unknown> = scopeWhere(await resolveInstallationScope(installationId));
   if (boothId) where.boothId = boothId;
   if (sessionId) where.sessionId = sessionId;
   if (type && type.length > 0) where.type = type.length === 1 ? type[0] : { in: type };
@@ -204,6 +212,7 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
     if (end) sessionInits.set(end.id!, { ...sessionInits.get(end.id!), ...end });
   }
 
+  const installationId = await requireActiveInstallation();
   const rows = events.map((event) => ({
     eventId: event.eventId,
     boothId: event.boothId,
@@ -214,6 +223,7 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
     recordingId: event.recordingId ?? null,
     payload: event.payload ?? {},
     version: event.version ?? null,
+    installationId,
   }));
 
   // 2. Atomically upsert sessions and insert events in a single transaction.
@@ -236,6 +246,7 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
           recordingId: init.recordingId ?? null,
           durationMs: init.durationMs ?? null,
           version: init.version ?? null,
+          installationId,
         },
         update: {
           // Never overwrite startedAt; never null-out fields that the event
