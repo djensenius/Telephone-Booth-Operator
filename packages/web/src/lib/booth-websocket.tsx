@@ -1,0 +1,140 @@
+import type { JSX, ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { BoothStatusSchema, WsEnvelopeSchema } from "@telephone-booth-operator/shared";
+import type { BoothStatus, WsEnvelope } from "@telephone-booth-operator/shared";
+import { useBoothStatus } from "../components/booth/BoothStatusContext.js";
+import { apiWebSocketUrlFor, invalidateInstallationScopedQueries } from "./api-client.js";
+
+// One shared `/v1/ws/status` connection for the whole authenticated app. The
+// socket must live above the router so envelopes (installation rollovers,
+// message pushes, system snapshots) reach the query cache no matter which
+// screen the operator is on. StatusScreen still owns the presentation of
+// booth status/history, but it consumes this shared subscription rather than
+// opening its own socket.
+
+type BoothWebSocketState = "polling" | "connecting" | "live";
+type EnvelopeListener = (envelope: WsEnvelope) => void;
+type LegacyStatusListener = (status: BoothStatus) => void;
+
+export interface BoothWebSocketApi {
+  readonly state: BoothWebSocketState;
+  subscribe(listener: EnvelopeListener): () => void;
+  subscribeLegacyStatus(listener: LegacyStatusListener): () => void;
+}
+
+const BoothWebSocketContext = createContext<BoothWebSocketApi | null>(null);
+
+export function BoothWebSocketProvider({
+  enabled,
+  children,
+}: {
+  readonly enabled: boolean;
+  readonly children: ReactNode;
+}): JSX.Element {
+  const [state, setState] = useState<BoothWebSocketState>("polling");
+  const listenersRef = useRef<Set<EnvelopeListener>>(new Set());
+  const legacyRef = useRef<Set<LegacyStatusListener>>(new Set());
+
+  // Latched via ref so we can call setters from the socket's lifetime without
+  // re-running the effect (and re-opening the socket) every time the
+  // BoothStatus context re-renders.
+  const boothStatus = useBoothStatus();
+  const boothStatusRef = useRef(boothStatus);
+  useEffect(() => {
+    boothStatusRef.current = boothStatus;
+  }, [boothStatus]);
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+    if (typeof WebSocket === "undefined") return undefined;
+    const socket = new WebSocket(apiWebSocketUrlFor("/v1/ws/status"));
+    setState("connecting");
+    socket.addEventListener("open", () => {
+      setState("live");
+      boothStatusRef.current.setConnectionStatus("connected");
+      boothStatusRef.current.setLastError(null);
+    });
+    socket.addEventListener("message", (event) => {
+      let raw: unknown;
+      try {
+        raw = JSON.parse(String(event.data));
+      } catch {
+        return;
+      }
+      const envelope = WsEnvelopeSchema.safeParse(raw);
+      if (envelope.success) {
+        // Iterate a snapshot: listeners may unsubscribe themselves during
+        // dispatch (React 19 StrictMode double-invokes cleanups).
+        for (const listener of Array.from(listenersRef.current)) listener(envelope.data);
+        return;
+      }
+      // Back-compat: tolerate the legacy bare-status frame from older API
+      // builds. The op-api PR migrated the wire to a discriminated envelope.
+      const legacy = BoothStatusSchema.safeParse(raw);
+      if (legacy.success) {
+        for (const listener of Array.from(legacyRef.current)) listener(legacy.data);
+      }
+    });
+    socket.addEventListener("error", () => {
+      setState("polling");
+      boothStatusRef.current.setConnectionStatus("disconnected");
+      boothStatusRef.current.setLastError(
+        "Live status socket is busy; polling every five seconds.",
+      );
+    });
+    socket.addEventListener("close", () => setState("polling"));
+    return () => socket.close();
+  }, [enabled]);
+
+  const api = useMemo<BoothWebSocketApi>(
+    () => ({
+      state,
+      subscribe(listener: EnvelopeListener): () => void {
+        listenersRef.current.add(listener);
+        return () => {
+          listenersRef.current.delete(listener);
+        };
+      },
+      subscribeLegacyStatus(listener: LegacyStatusListener): () => void {
+        legacyRef.current.add(listener);
+        return () => {
+          legacyRef.current.delete(listener);
+        };
+      },
+    }),
+    [state],
+  );
+
+  return <BoothWebSocketContext.Provider value={api}>{children}</BoothWebSocketContext.Provider>;
+}
+
+// Always returns a value: when the provider is missing (unauthenticated
+// routes, unit tests that render a screen in isolation), we hand back an
+// inert stub so consumers don't have to guard for provider presence.
+const INERT_API: BoothWebSocketApi = {
+  state: "polling",
+  subscribe: () => () => {},
+  subscribeLegacyStatus: () => () => {},
+};
+
+export function useBoothWebSocket(): BoothWebSocketApi {
+  return useContext(BoothWebSocketContext) ?? INERT_API;
+}
+
+// Always-mounted bridge: converts the shared `installation` envelope into the
+// same query-cache invalidation a local start/end mutation triggers, so a
+// console sitting on any authenticated route (not just Status) re-scopes when
+// a rollover happens on another console.
+export function InstallationRolloverBridge(): null {
+  const ws = useBoothWebSocket();
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    return ws.subscribe((envelope) => {
+      if (envelope.kind === "installation") {
+        invalidateInstallationScopedQueries(queryClient);
+      }
+    });
+  }, [ws, queryClient]);
+  return null;
+}

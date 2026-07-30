@@ -41,7 +41,16 @@ action. It is admin-only, runs in one transaction, and **deletes nothing**:
 5. Archives the questions that were live, stamping `retiredAt` with the era's
    end time. Drafts are left alone.
 6. Broadcasts an `installation` envelope on `/v1/ws/status` so connected
-   consoles re-scope without a reload.
+   consoles re-scope without a reload. Every console subscribes to this for as
+   long as it is signed in, not just while the Status screen is open.
+
+A caller can be midway through answering when an operator ends the era. That
+recording still lands: a question retired _by a rollover_ stays answerable, and
+the late message is filed under the era that is open when it arrives, where an
+operator will actually see it in the queue. A question an operator retired by
+hand is still refused — that is a deliberate withdrawal. Late `call_ended`
+events are the mirror image: they are attributed to their session's era and can
+never rewrite a closed era's outcome or frozen summary.
 
 Nothing is deleted, so no backup is required to end an era — but
 `GET /v1/installations/{id}/export` gives you a scoped tar whenever you want

@@ -231,13 +231,32 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
         })
       : [];
   const sessionEra = new Map(knownSessions.map((row) => [row.id, row]));
+
+  // Whether the session's era is closed is asked of the database, not inferred
+  // by comparing against the cached active id: that cache is per-replica and
+  // briefly stale, which would let a straggler through on the replica that did
+  // not serve the admin's rollover.
+  const eraIds = [
+    ...new Set(
+      knownSessions
+        .map((row) => row.installationId)
+        .filter((id): id is string => typeof id === "string"),
+    ),
+  ];
+  const endedEras = new Set(
+    eraIds.length > 0
+      ? (
+          await db.installation.findMany({
+            where: { id: { in: eraIds }, endedAt: { not: null } },
+            select: { id: true },
+          })
+        ).map((row) => row.id)
+      : [],
+  );
   const frozen = (sessionId: string): boolean => {
     const known = sessionEra.get(sessionId);
     return (
-      known !== undefined &&
-      known.installationId !== null &&
-      known.installationId !== installationId &&
-      known.endedAt !== null
+      known !== undefined && known.installationId !== null && endedEras.has(known.installationId)
     );
   };
   const eraFor = (sessionId: string | null | undefined): string =>

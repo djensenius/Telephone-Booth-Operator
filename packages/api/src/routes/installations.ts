@@ -23,7 +23,7 @@ import { buildExportArchive } from "../lib/data-archive.js";
 import { db } from "../lib/db.js";
 import { Prisma } from "../generated/prisma/client.js";
 import {
-  computeInstallationSummary,
+  closeOutInstallation,
   findActiveInstallation,
   installationHasActivity,
   invalidateActiveInstallationCache,
@@ -33,16 +33,15 @@ import {
 import { log } from "../lib/logger.js";
 import { requireAdmin, requireOperator, type AuthVariables } from "../lib/session.js";
 
+// How many blob deletions a purge has in flight at once.
+const PURGE_BLOB_CONCURRENCY = 8;
+
 export const installationsRouter = new Hono<{ Variables: AuthVariables }>();
 
 const idParamSchema = z.object({ id: z.guid() });
 
 const isUniqueViolation = (err: unknown): boolean =>
   err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
-
-// Outcome stamped on call sessions still open when the era is closed, so they
-// are distinguishable from sessions the booth ended itself.
-const ROLLOVER_OUTCOME = "installation_ended";
 
 // Any operator can read the history; only admins can change it.
 installationsRouter.get("/", requireOperator(), async (c) => {
@@ -217,35 +216,7 @@ installationsRouter.post(
 
     const endedAt = new Date();
     const ended = await db.$transaction(async (tx) => {
-      // Close sessions the booth never ended (power cut, crash mid-call).
-      await tx.callSession.updateMany({
-        where: { installationId: id, endedAt: null },
-        data: { endedAt, outcome: ROLLOVER_OUTCOME },
-      });
-
-      // Empty the moderation queue so the next era starts clean. The audio and
-      // transcripts are untouched and stay visible under this installation's
-      // scope; only the queue-visible statuses move to a terminal one.
-      await tx.message.updateMany({
-        where: { installationId: id, status: { in: ["uploading", "received", "pending"] } },
-        data: {
-          status: "rejected",
-          notes: "Closed out when the installation ended.",
-          decidedAt: endedAt,
-        },
-      });
-
-      // Retire this era's live questions. Drafts are left alone so they stay
-      // distinguishable from questions that were actually in rotation.
-      await tx.question.updateMany({
-        where: { installationId: id, status: "active" },
-        data: { status: "archived", retiredAt: endedAt },
-      });
-
-      // Computed last, so the frozen counters agree with what browsing this
-      // era afterwards reports — in particular the messages the rollover
-      // itself just rejected.
-      const summary = await computeInstallationSummary(tx, id);
+      const summary = await closeOutInstallation(tx, id, endedAt);
 
       return tx.installation.update({
         where: { id },
@@ -400,16 +371,27 @@ const purgeOrphanFiles = async (
   // Blob deletion runs after the database transaction has committed. A partial
   // failure leaves an orphaned blob, which is wasteful but harmless, so we
   // report it rather than rolling back a delete that already succeeded.
-  for (const { blobKey } of orphans) {
-    try {
-      // `deleteBlob` reports false when the blob was already gone. Counting
-      // that as a deletion would overstate what the purge actually removed.
-      if (await deleteBlob(blobKey)) blobsDeleted += 1;
-    } catch (error) {
-      log.error({ err: error, blobKey }, "failed to delete blob during purge");
-      blobFailures.push(blobKey);
+  //
+  // A long installation can hold thousands of recordings, and one round trip at
+  // a time would put the request in reach of a proxy timeout. A small pool
+  // keeps it bounded without hammering the storage account.
+  const queue = [...orphans];
+  const worker = async (): Promise<void> => {
+    for (let next = queue.pop(); next !== undefined; next = queue.pop()) {
+      const { blobKey } = next;
+      try {
+        // `deleteBlob` reports false when the blob was already gone. Counting
+        // that as a deletion would overstate what the purge actually removed.
+        if (await deleteBlob(blobKey)) blobsDeleted += 1;
+      } catch (error) {
+        log.error({ err: error, blobKey }, "failed to delete blob during purge");
+        blobFailures.push(blobKey);
+      }
     }
-  }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(PURGE_BLOB_CONCURRENCY, queue.length) }, () => worker()),
+  );
 
   return { blobsDeleted, blobsRetained, blobFailures };
 };

@@ -29,6 +29,7 @@ import { LiveSystemPanel } from "../features/system/LiveSystemPanel.js";
 import { SystemVitalsStrip } from "../features/system/SystemVitalsStrip.js";
 import { TokensScreen } from "../features/tokens/TokensScreen.js";
 import { useNumericNavigation } from "../hooks/useNumericNavigation.js";
+import { BoothWebSocketProvider, InstallationRolloverBridge } from "../lib/booth-websocket.js";
 import { DIGIT_ROUTES, isMessageFilter } from "../lib/navigation.js";
 
 const messagesSearchSchema = z.object({
@@ -74,73 +75,76 @@ function AppLayout(): JSX.Element {
   const { isAuthenticated, isAdmin } = useCurrentUser();
   useNumericNavigation(isAuthenticated, isAdmin);
   return (
-    <BoothFrame>
-      <a className="skip-link" href="#main-content">
-        Skip to content
-      </a>
-      <TelephoneBanner />
-      <div className={isAuthenticated ? "app-shell" : "app-shell app-shell--public"}>
-        {isAuthenticated ? (
-          <aside className="operator-sidebar" aria-label="Operator navigation">
-            <BoothStatusBadge />
-            <SystemVitalsStrip />
-            <nav className="operator-sidebar__nav" aria-label="Digit shortcut routes">
-              <h2>Shortcuts</h2>
-              <ul>
-                {DIGIT_ROUTES.map((route) => (
-                  <li key={route.digit}>
-                    {route.reserved === true ? (
-                      <span className="operator-sidebar__reserved">{route.digit} · Reserved</span>
-                    ) : route.adminOnly === true && !isAdmin ? (
-                      <span
-                        className="operator-sidebar__reserved operator-sidebar__admin-locked"
-                        aria-disabled="true"
-                        title="Admin only"
-                      >
-                        {`${route.digit} · ${route.label} · Admin`}
-                      </span>
-                    ) : route.digit === "7" ? (
-                      <LogoutButton className="operator-sidebar__logout">
-                        {`${route.digit} · ${route.label}`}
-                      </LogoutButton>
-                    ) : (
-                      <Link to={route.href}>{`${route.digit} · ${route.label}`}</Link>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </nav>
-            <nav className="operator-sidebar__nav" aria-label="Observability routes">
-              <h2>Observability</h2>
-              <ul>
-                <li>
-                  <Link to="/stats">Stats</Link>
-                </li>
-                <li>
-                  <Link to="/system">Live system</Link>
-                </li>
-                <li>
-                  <Link to="/events">Events</Link>
-                </li>
-                <li>
-                  <Link to="/sessions">Sessions</Link>
-                </li>
-                {isAdmin ? (
+    <BoothWebSocketProvider enabled={isAuthenticated}>
+      <InstallationRolloverBridge />
+      <BoothFrame>
+        <a className="skip-link" href="#main-content">
+          Skip to content
+        </a>
+        <TelephoneBanner />
+        <div className={isAuthenticated ? "app-shell" : "app-shell app-shell--public"}>
+          {isAuthenticated ? (
+            <aside className="operator-sidebar" aria-label="Operator navigation">
+              <BoothStatusBadge />
+              <SystemVitalsStrip />
+              <nav className="operator-sidebar__nav" aria-label="Digit shortcut routes">
+                <h2>Shortcuts</h2>
+                <ul>
+                  {DIGIT_ROUTES.map((route) => (
+                    <li key={route.digit}>
+                      {route.reserved === true ? (
+                        <span className="operator-sidebar__reserved">{route.digit} · Reserved</span>
+                      ) : route.adminOnly === true && !isAdmin ? (
+                        <span
+                          className="operator-sidebar__reserved operator-sidebar__admin-locked"
+                          aria-disabled="true"
+                          title="Admin only"
+                        >
+                          {`${route.digit} · ${route.label} · Admin`}
+                        </span>
+                      ) : route.digit === "7" ? (
+                        <LogoutButton className="operator-sidebar__logout">
+                          {`${route.digit} · ${route.label}`}
+                        </LogoutButton>
+                      ) : (
+                        <Link to={route.href}>{`${route.digit} · ${route.label}`}</Link>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </nav>
+              <nav className="operator-sidebar__nav" aria-label="Observability routes">
+                <h2>Observability</h2>
+                <ul>
                   <li>
-                    <Link to="/installations">Installations</Link>
+                    <Link to="/stats">Stats</Link>
                   </li>
-                ) : null}
-              </ul>
-            </nav>
-          </aside>
-        ) : null}
-        <main className="app-shell__main" id="main-content" tabIndex={-1}>
-          <Outlet />
-        </main>
-      </div>
-      <BuildFooter />
-      <LineBusyPlacard />
-    </BoothFrame>
+                  <li>
+                    <Link to="/system">Live system</Link>
+                  </li>
+                  <li>
+                    <Link to="/events">Events</Link>
+                  </li>
+                  <li>
+                    <Link to="/sessions">Sessions</Link>
+                  </li>
+                  {isAdmin ? (
+                    <li>
+                      <Link to="/installations">Installations</Link>
+                    </li>
+                  ) : null}
+                </ul>
+              </nav>
+            </aside>
+          ) : null}
+          <main className="app-shell__main" id="main-content" tabIndex={-1}>
+            <Outlet />
+          </main>
+        </div>
+        <BuildFooter />
+        <LineBusyPlacard />
+      </BoothFrame>
+    </BoothWebSocketProvider>
   );
 }
 

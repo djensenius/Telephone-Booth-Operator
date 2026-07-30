@@ -5,6 +5,25 @@ vi.mock(
   "../src/lib/azure-blob.js",
   async () => (await import("./support/fake-azure.js")).fakeAzureModule,
 );
+// The booth authenticates with a static bearer token; the straggler tests need
+// to post as the phone without standing up the real Argon2id verification.
+vi.mock("../src/lib/require-api-token.js", () => ({
+  requireApiToken:
+    () =>
+    async (
+      c: {
+        req: { header: (name: string) => string | undefined };
+        json: (body: unknown, status?: number) => Response;
+      },
+      next: () => Promise<void>,
+    ) => {
+      if (c.req.header("authorization") === phoneHeaders.authorization) {
+        await next();
+        return;
+      }
+      return c.json({ error: "invalid_token" }, 401);
+    },
+}));
 
 import { readTar } from "../src/lib/archive.js";
 import { createApp } from "../src/index.js";
@@ -22,10 +41,11 @@ import {
   seedCallSession,
   seedFile,
   seedMessage,
+  seedMobileDevice,
   seedQuestion,
   store,
 } from "./support/fake-db.js";
-import { operatorCookie } from "./support/http.js";
+import { operatorCookie, phoneHeaders } from "./support/http.js";
 
 const setup = (): void => {
   process.env.NODE_ENV = "test";
@@ -265,6 +285,41 @@ describe("installations", () => {
       // no unique constraint (blobKey, sha256) can be violated.
       expect(carried[0]?.audioId).toBe(file.id);
       expect(store.files.size).toBe(1);
+    });
+  });
+
+  describe("rollover stragglers", () => {
+    it("still accepts a recording for a question the rollover archived", async () => {
+      const question = seedQuestion({ status: "active", prompt: "What did you lose?" });
+      const app = createApp();
+      expect((await endDefault(app)).status).toBe(200);
+
+      // The booth read this question out before the operator ended the era and
+      // only finishes uploading afterwards. Dropping it would lose a real
+      // recording over admin bookkeeping.
+      const res = await app.request("/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ durationMs: 3000, sha256: "c".repeat(64), questionId: question.id }),
+      });
+      expect(res.status, await res.clone().text()).toBe(201);
+
+      // ...and it lands in the open era, where an operator will actually see it.
+      const created = (await res.json()) as { id: string };
+      const active = [...store.installations.values()].find((row) => row.endedAt === null);
+      expect(store.messages.get(created.id)?.installationId).toBe(active?.id);
+    });
+
+    it("still refuses a question an operator retired by hand", async () => {
+      const question = seedQuestion({ status: "archived", retiredAt: new Date() });
+      const app = createApp();
+
+      const res = await app.request("/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ durationMs: 3000, sha256: "d".repeat(64), questionId: question.id }),
+      });
+      expect(res.status).toBe(404);
     });
   });
 
@@ -618,6 +673,38 @@ describe("installations", () => {
       ) as { file?: { id: string }[]; question?: { id: string }[] };
       expect(dump.file?.map((row) => row.id)).toEqual([mine.id]);
       expect(dump.question?.map((row) => row.id)).toEqual(["cccccccc-0000-4000-8000-0000000000a1"]);
+    });
+
+    // A scoped archive is handed around (the purge flow offers it as a safety
+    // copy), so it must not carry the instance's credentials or the whole
+    // staff directory along with one era's recordings.
+    it("withholds credential tables and unrelated operators", async () => {
+      const app = createApp();
+      seedMobileDevice();
+      store.users.set("operator-9", {
+        id: "operator-9",
+        oidcSub: "operator-9",
+        email: "stranger@example.com",
+        name: "Stranger",
+        groups: ["operators"],
+        isAdmin: false,
+        picture: null,
+      });
+
+      const res = await app.request(`/v1/installations/${DEFAULT_INSTALLATION_ID}/export`, {
+        headers: adminHeaders(),
+      });
+
+      expect(res.status, await res.clone().text()).toBe(200);
+      const entries = readTar(Buffer.from(await res.arrayBuffer()));
+      const dump = JSON.parse(
+        entries.find((entry) => entry.name === "data.json")?.data.toString("utf8") ?? "{}",
+      ) as Record<string, unknown[]>;
+      expect(dump.mobileDevice).toEqual([]);
+      expect(dump.apiToken).toEqual([]);
+      expect(dump.metricFilter).toEqual([]);
+      // Nothing in this era points at an operator, so none travel with it.
+      expect(dump.operatorUser).toEqual([]);
     });
   });
 

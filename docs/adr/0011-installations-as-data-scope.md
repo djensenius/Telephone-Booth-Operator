@@ -75,7 +75,7 @@ it. Attributing it to an era that had not started yet would be worse, and
 taking a shared lock on every booth write — the path that must never drop a
 recording — is too high a price for a sub-second window on a counter.
 
-What is *not* accepted is a straggler mutating an era after it was frozen. A
+What is _not_ accepted is a straggler mutating an era after it was frozen. A
 `call_ended` for a session the rollover already closed does not take the update
 arm, and booth events are tagged with the era of the session they belong to
 rather than whichever era is open. An ended era therefore always agrees with

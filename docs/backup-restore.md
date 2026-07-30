@@ -50,6 +50,14 @@ The scoped export contains only the rows belonging to that installation, plus
 the blobs they reference — download one before purging an era if you want a
 copy to keep. See [installations](installations.md).
 
+Because a per-era archive is meant to be handed around, it deliberately
+withholds the instance's credentials and personal data: **API tokens, mobile
+devices, and metric filters are omitted entirely**, and operator accounts are
+narrowed to the ones the era's own rows point at (who ended it, who moderated a
+message, who requested a transcription). Instructions travel whole, because
+they are booth configuration and their audio would otherwise dangle. Use the
+full `/v1/admin/data/export` when you want a restorable copy of the instance.
+
 Import is **idempotent**: rows are upserted by id, and each audio blob is
 uploaded only when the target storage does not already hold it (dedupe by
 `blobKey`). Every blob's bytes are re-hashed and checked against the
@@ -58,7 +66,11 @@ archived `sha256` before upload, so a corrupted archive is rejected.
 Only one installation may be open at a time. If the archive carries an active
 era and the target already has one, the target's yields: an era with nothing
 recorded against it is removed, and one holding data is closed out so nothing
-becomes unreachable.
+becomes unreachable. That close-out is the same operation `POST /:id/end`
+performs — open sessions are ended, the moderation queue is emptied, live
+questions are retired and the summary is frozen — so a restored instance never
+inherits an era that is ended in name only while its pending messages keep
+feeding the moderation badge.
 
 ## CLI wrapper
 

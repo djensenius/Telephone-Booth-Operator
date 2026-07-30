@@ -243,3 +243,52 @@ export const computeInstallationSummary = async (
     lastActivityAt: lastEvent ? lastEvent.occurredAt.toISOString() : null,
   };
 };
+
+// -----------------------------------------------------------------------------
+// Rollover close-out
+// -----------------------------------------------------------------------------
+
+// `CallSession.outcome` written to sessions the booth never ended itself.
+export const ROLLOVER_OUTCOME = "installation_ended";
+
+// Bring an era to a consistent terminal state: no session left open, no message
+// left in the moderation queue, no question left live, and the counters frozen.
+//
+// Shared by the `POST /:id/end` route and the restore path, which has to close
+// out whatever era the target instance had open. Doing it in one place keeps a
+// restored instance from inheriting an era that is "ended" in name only, with
+// pending messages still feeding the moderation badge.
+export const closeOutInstallation = async (
+  tx: Prisma.TransactionClient,
+  installationId: string,
+  endedAt: Date,
+): Promise<InstallationSummary> => {
+  // Close sessions the booth never ended (power cut, crash mid-call).
+  await tx.callSession.updateMany({
+    where: { installationId, endedAt: null },
+    data: { endedAt, outcome: ROLLOVER_OUTCOME },
+  });
+
+  // Empty the moderation queue so the next era starts clean. The audio and
+  // transcripts are untouched and stay visible under this installation's
+  // scope; only the queue-visible statuses move to a terminal one.
+  await tx.message.updateMany({
+    where: { installationId, status: { in: ["uploading", "received", "pending"] } },
+    data: {
+      status: "rejected",
+      notes: "Closed out when the installation ended.",
+      decidedAt: endedAt,
+    },
+  });
+
+  // Retire this era's live questions. Drafts are left alone so they stay
+  // distinguishable from questions that were actually in rotation.
+  await tx.question.updateMany({
+    where: { installationId, status: "active" },
+    data: { status: "archived", retiredAt: endedAt },
+  });
+
+  // Computed last, so the frozen counters agree with what browsing this era
+  // afterwards reports — in particular the messages just rejected above.
+  return computeInstallationSummary(tx, installationId);
+};

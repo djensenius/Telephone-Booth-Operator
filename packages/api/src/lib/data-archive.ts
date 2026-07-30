@@ -15,7 +15,7 @@ import { Prisma } from "../generated/prisma/client.js";
 import { downloadBlob, headBlob, uploadBlob } from "./azure-blob.js";
 import { createTar, readTar } from "./archive.js";
 import { db } from "./db.js";
-import { invalidateActiveInstallationCache } from "./installation.js";
+import { closeOutInstallation, invalidateActiveInstallationCache } from "./installation.js";
 
 export const EXPORT_FORMAT = "telephone-booth-export";
 // 1: original shape. 2: BoothStatusSnapshot carries `firstSeenAt`/`repeatCount`.
@@ -86,14 +86,51 @@ const collectDump = async (installationId?: string): Promise<DataDump> =>
     async (tx) => {
       const dump = {} as DataDump;
       for (const name of IMPORT_ORDER) {
+        if (installationId && name === "operatorUser") continue;
         dump[name] = await modelClientOf(tx, name).findMany(
           installationId ? scopedFindArgs(name, installationId) : {},
         );
+      }
+      // Operators are global, but a scoped archive is a per-era artifact that
+      // gets handed around (it is what the purge flow offers as a safety
+      // copy), so it carries only the accounts its own rows point at rather
+      // than the whole staff directory.
+      if (installationId) {
+        const ids = referencedOperatorIds(dump);
+        dump.operatorUser =
+          ids.length > 0
+            ? await modelClientOf(tx, "operatorUser").findMany({ where: { id: { in: ids } } })
+            : [];
       }
       return dump;
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
   );
+
+// Columns pointing at `OperatorUser` from the models a scoped export collects.
+// `apiToken.createdByUserId` is absent on purpose: scoped archives omit tokens.
+const OPERATOR_REFERENCES: Partial<Record<ModelName, readonly string[]>> = {
+  [INSTALLATION_MODEL]: ["endedById"],
+  message: ["decidedById"],
+  transcription: ["requestedById"],
+  moderation: ["requestedById"],
+};
+
+const referencedOperatorIds = (dump: Partial<DataDump>): string[] => {
+  const ids = new Set<string>();
+  for (const [name, fields] of Object.entries(OPERATOR_REFERENCES) as [
+    ModelName,
+    readonly string[],
+  ][]) {
+    for (const row of dump[name] ?? []) {
+      for (const field of fields) {
+        const value = row[field];
+        if (typeof value === "string") ids.add(value);
+      }
+    }
+  }
+  return [...ids];
+};
 
 // Models carrying an `installationId` column can be filtered directly.
 const SCOPED_MODELS = new Set<ModelName>([
@@ -107,8 +144,9 @@ const SCOPED_MODELS = new Set<ModelName>([
 // Build the `findMany` args for a single-installation export. Directly scoped
 // models filter on `installationId`; models that hang off a scoped parent are
 // filtered through the relation so a scoped archive stays self-consistent.
-// Everything else (operators, tokens, devices) is global and exported whole,
-// because those carry over between installations.
+// Instructions are global and travel whole because they are booth
+// configuration rather than era data; tokens, devices and metric filters are
+// dropped entirely and operators are narrowed to the referenced accounts.
 // The relation filters are annotated so the compiler checks them. The dump
 // walks models generically, so `findMany` is otherwise reached through an
 // untyped client and a wrong relation name would only surface as a Prisma
@@ -135,12 +173,25 @@ const moderationScopeArgs = (installationId: string): Prisma.ModerationFindManyA
   where: { message: { installationId } },
 });
 
+// Global tables holding credentials or personal data that no scoped row
+// references. A per-era archive has no use for them, and shipping API-token
+// hashes or push-device registrations inside a downloadable safety copy would
+// spread secrets around for nothing.
+const EXCLUDED_FROM_SCOPED_EXPORT = new Set<ModelName>([
+  "apiToken",
+  "mobileDevice",
+  "metricFilter",
+]);
+
 const scopedFindArgs = (name: ModelName, installationId: string): unknown => {
   if (name === INSTALLATION_MODEL) return { where: { id: installationId } };
   if (SCOPED_MODELS.has(name)) return { where: { installationId } };
   if (name === "transcription") return transcriptionScopeArgs(installationId);
   if (name === "moderation") return moderationScopeArgs(installationId);
   if (name === "file") return fileScopeArgs(installationId);
+  // `id: { in: [] }` rather than a skipped read: the dump is keyed by model and
+  // every entry must exist, empty or not.
+  if (EXCLUDED_FROM_SCOPED_EXPORT.has(name)) return { where: { id: { in: [] } } };
   return {};
 };
 
@@ -360,10 +411,16 @@ const reconcileActiveInstallation = async (
     return;
   }
 
+  // Not just a timestamp: the era gets the same treatment the rollover gives
+  // it, so the restored instance never inherits open sessions, a moderation
+  // queue that keeps feeding the badge from a dead era, or missing counters.
+  const endedAt = new Date();
+  const summary = await closeOutInstallation(tx, existing.id, endedAt);
   await tx.installation.update({
     where: { id: existing.id },
     data: {
-      endedAt: new Date(),
+      endedAt,
+      summary,
       notes: [existing.notes, "Closed automatically to restore an archive."]
         .filter((part) => part != null && part !== "")
         .join("\n"),

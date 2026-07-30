@@ -860,6 +860,53 @@ describe("Events feature", () => {
     );
   });
 
+  it("re-scopes installation-scoped queries on a WS envelope while off Status", async () => {
+    // A controllable stub instead of the default QuietWebSocket so the test
+    // can dispatch a synthetic `installation` frame. The bridge is mounted in
+    // the root layout, so the invalidation must run even when the operator is
+    // parked on Sessions (or any non-Status route).
+    class ControllableWebSocket extends EventTarget {
+      static instances: ControllableWebSocket[] = [];
+      constructor(readonly url: string) {
+        super();
+        ControllableWebSocket.instances.push(this);
+      }
+      send(_data: string): void {}
+      close(): void {}
+    }
+    vi.stubGlobal("WebSocket", ControllableWebSocket);
+
+    renderPath("/sessions");
+    await waitFor(() => expect(sessionsUrls.length).toBeGreaterThan(0));
+    const before = sessionsUrls.length;
+
+    await waitFor(() => expect(ControllableWebSocket.instances.length).toBeGreaterThan(0));
+    const socket = ControllableWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Provider did not open a WebSocket.");
+    socket.dispatchEvent(new Event("open"));
+    socket.dispatchEvent(
+      new MessageEvent("message", {
+        data: JSON.stringify({
+          kind: "installation",
+          installation: {
+            id: "ee333333-3333-4333-8333-333333333333",
+            name: "Fresh era",
+            notes: null,
+            location: null,
+            startedAt: "2026-08-01T00:00:00.000Z",
+            endedAt: null,
+            endedById: null,
+            summary: null,
+            createdAt: "2026-08-01T00:00:00.000Z",
+            isActive: true,
+          },
+        }),
+      }),
+    );
+
+    await waitFor(() => expect(sessionsUrls.length).toBeGreaterThan(before));
+  });
+
   it("surfaces the payload detail for error events", async () => {
     server.use(
       http.get("http://localhost/v1/events", () =>

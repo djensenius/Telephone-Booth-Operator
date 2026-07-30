@@ -46,6 +46,37 @@ const idParamSchema = z.object({ id: z.guid() });
 
 const messageBlobName = (sha256: string): string => `messages/${sha256.slice(0, 2)}/${sha256}.flac`;
 
+/**
+ * A question the booth may still record an answer for.
+ *
+ * `active` is the normal case. The exception is the rollover straggler: an
+ * operator ends an era while a caller is midway through answering, the era's
+ * live questions are archived with `retiredAt = endedAt`, and the recording
+ * lands afterwards. Bouncing that with a 404 would throw away a real recording
+ * over admin bookkeeping, which is precisely what this feature is meant to
+ * tolerate, so a question retired *by a rollover* stays answerable. A question
+ * an operator retired by hand does not: that is a deliberate withdrawal.
+ *
+ * The straggler's message is still attributed to the open era rather than the
+ * closed one. The closed era's moderation queue was drained and its summary
+ * frozen on the way out, so filing it there would leave it pending in a scope
+ * nobody is watching -- visible-and-moderatable beats chronologically tidy.
+ */
+async function questionIsAnswerable(question: {
+  status: string;
+  retiredAt: Date | null;
+  installationId: string | null;
+}): Promise<boolean> {
+  if (question.status === "active") return true;
+  if (question.status !== "archived" || question.retiredAt === null) return false;
+  if (question.installationId === null) return false;
+  const era = await db.installation.findUnique({
+    where: { id: question.installationId },
+    select: { endedAt: true },
+  });
+  return era?.endedAt?.getTime() === question.retiredAt.getTime();
+}
+
 export const messagesRouter = new Hono<{ Variables: AuthVariables & ApiTokenVariables }>();
 
 messagesRouter.get("/", zValidator("query", listQuerySchema), async (c) => {
@@ -135,7 +166,7 @@ messagesRouter.post("/", requireApiToken(), zValidator("json", MessageCreateSche
 
   if (body.questionId) {
     const question = await db.question.findUnique({ where: { id: body.questionId } });
-    if (!question || question.status !== "active")
+    if (!question || !(await questionIsAnswerable(question)))
       return c.json({ error: "question_not_found" }, 404);
   }
   if (existingFile && existingFile.blobKey !== blobName) {

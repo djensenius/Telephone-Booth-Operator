@@ -711,7 +711,11 @@ const attachAi = (
 
 export const fakeDb = {
   operatorUser: {
-    findMany: async () => [...store.users.values()],
+    findMany: async ({ where }: { where?: { id?: { in?: string[] } } } = {}) => {
+      const ids = where?.id?.in;
+      const users = [...store.users.values()];
+      return ids === undefined ? users : users.filter((user) => ids.includes(user.id));
+    },
     upsert: async ({
       where,
       create,
@@ -1234,13 +1238,15 @@ export const fakeDb = {
       select,
       distinct,
     }: {
-      where?: { userId?: string; revokedAt?: Date | null };
+      where?: { userId?: string; revokedAt?: Date | null; id?: { in?: string[] } };
       select?: Record<string, boolean>;
       distinct?: string[];
     } = {}) => {
       let devices = [...store.mobileDevices.values()].filter((device) => {
         if ("revokedAt" in where && device.revokedAt !== where.revokedAt) return false;
         if (where.userId !== undefined && device.userId !== where.userId) return false;
+        // A scoped export asks for `id: { in: [] }` to withhold the table.
+        if (where.id?.in !== undefined && !where.id.in.includes(device.id)) return false;
         return true;
       });
       if (distinct?.includes("userId")) {
