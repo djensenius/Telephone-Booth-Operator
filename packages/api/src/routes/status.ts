@@ -81,13 +81,14 @@ statusRouter.get("/", requireOperatorOrApiToken(), async (c) => {
 statusRouter.put("/", requireApiToken(), zValidator("json", StatusUpdateSchema), async (c) => {
   const update = c.req.valid("json");
   const reportedAt = update.updatedAt ? new Date(update.updatedAt) : new Date();
+  const installationId = await requireActiveInstallation();
   // The run the report belongs to. That is normally the newest row, but a
   // delayed report belongs to the run that was current at its own timestamp —
   // the booth supplies `updatedAt`, so `id` breaks ties and keeps the choice
   // deterministic when two rows share a millisecond.
   const [enclosing, successor] = await Promise.all([
     db.boothStatusSnapshot.findFirst({
-      where: { firstSeenAt: { lte: reportedAt } },
+      where: { installationId, firstSeenAt: { lte: reportedAt } },
       orderBy: [{ firstSeenAt: "desc" }, { id: "desc" }],
     }),
     // The run that started next. A report can fall in the gap between the run
@@ -97,7 +98,7 @@ statusRouter.put("/", requireApiToken(), zValidator("json", StatusUpdateSchema),
     // two identical ones. This is also the fallback for a report that predates
     // every stored snapshot.
     db.boothStatusSnapshot.findFirst({
-      where: { firstSeenAt: { gt: reportedAt } },
+      where: { installationId, firstSeenAt: { gt: reportedAt } },
       orderBy: [{ firstSeenAt: "asc" }, { id: "asc" }],
     }),
   ]);
@@ -134,7 +135,7 @@ statusRouter.put("/", requireApiToken(), zValidator("json", StatusUpdateSchema),
           runtimeMode: update.runtimeMode ?? null,
           firstSeenAt: reportedAt,
           updatedAt: reportedAt,
-          installationId: await requireActiveInstallation(),
+          installationId,
         },
       });
   if (update.state === "idle") {

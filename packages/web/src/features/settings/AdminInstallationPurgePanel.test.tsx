@@ -1,3 +1,4 @@
+import axe from "axe-core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
@@ -95,7 +96,7 @@ afterEach(() => {
 
 describe("AdminInstallationPurgePanel", () => {
   it("only offers ended installations and gates the purge behind archive + name", async () => {
-    renderPanel();
+    const { container } = renderPanel();
 
     const select = await screen.findByLabelText("Installation");
     await screen.findByRole("option", { name: "Spring 2026 residency" });
@@ -122,6 +123,9 @@ describe("AdminInstallationPurgePanel", () => {
 
     fireEvent.change(confirmInput, { target: { value: "Spring 2026 residency" } });
     expect(purgeButton.hasAttribute("disabled")).toBe(false);
+
+    const results = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
+    expect(results.violations).toHaveLength(0);
   });
 
   it("purges and reports the result counts", async () => {
@@ -148,5 +152,29 @@ describe("AdminInstallationPurgePanel", () => {
       expect(status.textContent).toContain("30 audio blobs");
       expect(status.textContent).toContain("2 retained");
     });
+  });
+
+  it("reports a backend confirmation mismatch without deleting", async () => {
+    server.use(
+      http.delete("http://localhost/v1/installations/:id", () =>
+        HttpResponse.json({ error: "confirm_name_mismatch" }, { status: 400 }),
+      ),
+    );
+    renderPanel();
+
+    const select = await screen.findByLabelText("Installation");
+    await screen.findByRole("option", { name: "Spring 2026 residency" });
+    fireEvent.change(select, { target: { value: endedId } });
+    fireEvent.click(screen.getByRole("button", { name: "Download archive (required)" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Download archive again" })).toBeTruthy(),
+    );
+
+    fireEvent.change(screen.getByLabelText(/to confirm/), {
+      target: { value: "Spring 2026 residency" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Permanently delete installation" }));
+
+    expect(await screen.findByText("The confirmation name did not match.")).toBeTruthy();
   });
 });

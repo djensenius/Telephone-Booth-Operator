@@ -32,11 +32,11 @@ only their Argon2id **hash** is stored — never a plaintext token.
 `manifest.json` carries a numeric `version`. A server restores its own version
 and anything older, and rejects anything newer than it understands.
 
-| Version | Change                                                                                                                               |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| 1       | Original shape.                                                                                                                      |
-| 2       | Booth status snapshots carry `firstSeenAt`/`repeatCount`. Version 1 snapshots restore with their window starting at the report time. |
-| 3       | Installations are exported, and scoped rows carry `installationId`. Older archives restore into the active installation.             |
+| Version | Change                                                                                                                                                                                                                 |
+| ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1       | Original shape.                                                                                                                                                                                                        |
+| 2       | Booth status snapshots carry `firstSeenAt`/`repeatCount`. Version 1 snapshots restore with their window starting at the report time.                                                                                   |
+| 3       | Installations are exported, and scoped rows carry `installationId`. Older archives restore untagged rows into an ended `Restored <generatedAt>` installation so they remain browsable without becoming the active era. |
 
 ## Endpoints
 

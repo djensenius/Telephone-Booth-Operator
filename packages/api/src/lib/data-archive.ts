@@ -22,7 +22,8 @@ export const EXPORT_FORMAT = "telephone-booth-export";
 // installation. Bumped so a server that predates the collapse rejects the
 // archive as newer than supported instead of failing on unknown columns
 // mid-restore. Older archives still import — `withStatusWindow` fills the
-// missing window, and untagged rows are adopted by the active installation.
+// missing window, and legacy untagged rows are adopted into a deterministic
+// ended "Restored …" installation after the archived rows are upserted.
 export const EXPORT_VERSION = 3;
 // Manifest models added after v1. Nothing to migrate; listed for the record.
 const INSTALLATION_MODEL = "installation" as const;
@@ -252,6 +253,67 @@ const withStatusWindow = (row: Row): Row =>
     ? { ...row, firstSeenAt: row.updatedAt, repeatCount: row.repeatCount ?? 1 }
     : row;
 
+type LegacyAdoptionClient = Pick<
+  Prisma.TransactionClient,
+  "installation" | "question" | "message" | "callSession" | "boothEvent" | "boothStatusSnapshot"
+>;
+
+const dateFromManifest = (manifest: ExportManifest): Date => {
+  const generated = new Date(manifest.generatedAt);
+  return Number.isNaN(generated.getTime()) ? new Date(0) : generated;
+};
+
+const restoredInstallationId = (manifest: ExportManifest): string => {
+  const bytes = createHash("sha256")
+    .update(`${EXPORT_FORMAT}:legacy-restore:${manifest.version}:${manifest.generatedAt}`)
+    .digest()
+    .subarray(0, 16);
+  bytes.writeUInt8((bytes.readUInt8(6) & 0x0f) | 0x40, 6);
+  bytes.writeUInt8((bytes.readUInt8(8) & 0x3f) | 0x80, 8);
+  const hex = bytes.toString("hex");
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20, 32),
+  ].join("-");
+};
+
+const adoptLegacyRows = async (
+  tx: LegacyAdoptionClient,
+  manifest: ExportManifest,
+): Promise<void> => {
+  if (manifest.version >= 3) return;
+
+  const installationId = restoredInstallationId(manifest);
+  const generatedAt = dateFromManifest(manifest);
+  const generatedLabel = generatedAt.toISOString();
+
+  await tx.installation.upsert({
+    where: { id: installationId },
+    create: {
+      id: installationId,
+      name: `Restored ${generatedLabel}`,
+      notes: `Created during import of legacy archive version ${manifest.version}.`,
+      startedAt: generatedAt,
+      endedAt: generatedAt,
+    },
+    update: {},
+  });
+
+  await Promise.all([
+    tx.question.updateMany({ where: { installationId: null }, data: { installationId } }),
+    tx.message.updateMany({ where: { installationId: null }, data: { installationId } }),
+    tx.callSession.updateMany({ where: { installationId: null }, data: { installationId } }),
+    tx.boothEvent.updateMany({ where: { installationId: null }, data: { installationId } }),
+    tx.boothStatusSnapshot.updateMany({
+      where: { installationId: null },
+      data: { installationId },
+    }),
+  ]);
+};
+
 // Restore an export archive into the current instance. Rows are upserted by id
 // (idempotent) inside a single transaction, so a mid-restore failure never
 // leaves a partially populated database. Each referenced audio blob is uploaded
@@ -259,7 +321,7 @@ const withStatusWindow = (row: Row): Row =>
 // by SHA-256), so truncated or corrupted target blobs are repaired rather than
 // silently trusted.
 export const restoreImportArchive = async (archive: Buffer): Promise<ImportSummary> => {
-  const { dump, blobs } = parseArchive(archive);
+  const { manifest, dump, blobs } = parseArchive(archive);
 
   let blobsUploaded = 0;
   let blobsSkipped = 0;
@@ -302,6 +364,7 @@ export const restoreImportArchive = async (archive: Buffer): Promise<ImportSumma
         }
         rows[name] = count;
       }
+      await adoptLegacyRows(tx, manifest);
     },
     // A full restore can touch many rows; allow well beyond the 5s default so
     // the whole database is applied atomically.

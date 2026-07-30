@@ -95,9 +95,11 @@ model Installation {
 
 model Question {
   id             String         @id @default(uuid()) @db.Uuid
-  prompt         String         @unique
+  prompt         String
   status         QuestionStatus @default(draft)
-  audioId        String         @unique @db.Uuid
+  // Not unique: copying a question forward into a new installation reuses the
+  // same File row (and therefore the same audio blob) rather than cloning it.
+  audioId        String         @db.Uuid
   audio          File           @relation(fields: [audioId], references: [id])
   createdAt      DateTime       @default(now())
   retiredAt      DateTime?
@@ -107,8 +109,10 @@ model Question {
   installationId String?        @db.Uuid
   installation   Installation?  @relation(fields: [installationId], references: [id])
 
+  @@unique([installationId, prompt])
   @@index([status, createdAt])
   @@index([installationId, status, createdAt])
+  @@index([audioId])
 }
 
 model Instruction {
@@ -153,7 +157,7 @@ model File {
   durationMs    Int?
   contentType   String
   createdAt     DateTime     @default(now())
-  question      Question?
+  questions     Question[]
   instruction   Instruction?
   message       Message?
 }

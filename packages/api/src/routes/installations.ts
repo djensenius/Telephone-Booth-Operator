@@ -67,6 +67,13 @@ installationsRouter.get(
 // Start a new installation. The previous one must already be ended — the
 // partial unique index guarantees this, but we check first so the caller gets
 // a useful 409 rather than a constraint error.
+//
+// One wrinkle: a booth that is powered on keeps posting events, and a write
+// with no active installation lazily creates one (a booth must never fail to
+// record a call over admin bookkeeping). So between the operator ending an era
+// and naming the next one, the booth can quietly open an unnamed era. Rather
+// than making the operator fight that race, an active era with no activity in
+// it yet is *adopted*: named, described, and used as the new era.
 installationsRouter.post(
   "/",
   requireAdmin(),
@@ -74,25 +81,34 @@ installationsRouter.post(
   async (c) => {
     const body = c.req.valid("json");
     const active = await findActiveInstallation();
-    if (active) {
+    if (active && (await hasActivity(active.id))) {
       return c.json({ error: "installation_already_active", installationId: active.id }, 409);
     }
 
-    const previous = await db.installation.findFirst({ orderBy: [{ startedAt: "desc" }] });
+    // Questions carry forward from the last era that was actually closed, not
+    // from an empty one we are about to adopt.
+    const previous = await db.installation.findFirst({
+      where: { endedAt: { not: null } },
+      orderBy: [{ endedAt: "desc" }],
+    });
 
     const created = await db.$transaction(async (tx) => {
-      const installation = await tx.installation.create({
-        data: {
-          name: body.name.length > 0 ? body.name : await nextInstallationName(),
-          notes: body.notes ?? null,
-          location: body.location ?? null,
-        },
-      });
+      const data = {
+        name: body.name.length > 0 ? body.name : await nextInstallationName(),
+        notes: body.notes ?? null,
+        location: body.location ?? null,
+      };
+      const installation = active
+        ? await tx.installation.update({
+            where: { id: active.id },
+            data: { ...data, startedAt: new Date() },
+          })
+        : await tx.installation.create({ data });
 
-      // Copying questions forward re-uses the same blob, so no audio is
-      // re-uploaded and SHA-256 dedupe is preserved. `Question.audioId` is
-      // unique, though, so a copied question cannot point at the original
-      // file — we clone the File row instead, pointing at the same blob.
+      // Copied questions point at the *same* `File` row as the original, so
+      // the audio is shared rather than re-uploaded and SHA-256 dedupe is
+      // preserved. This is why `Question.audioId` is not unique, and why the
+      // purge below refcounts `File` rows before deleting any blob.
       //
       // Ending an installation archives the questions that were live at the
       // time, stamping `retiredAt` with the era's `endedAt`. That stamp is
@@ -110,29 +126,15 @@ installationsRouter.post(
                 : []),
             ],
           },
-          include: { audio: true },
         });
         for (const question of source) {
-          const audio = await tx.file.create({
-            data: {
-              blobContainer: question.audio.blobContainer,
-              blobKey: question.audio.blobKey,
-              // `sha256` and `blobKey` are unique, so a clone needs its own
-              // values. Suffixing keeps the original discoverable while
-              // pointing at the identical blob content.
-              sha256: `${question.audio.sha256}:${installation.id}`,
-              sizeBytes: question.audio.sizeBytes,
-              durationMs: question.audio.durationMs,
-              contentType: question.audio.contentType,
-            },
-          });
           await tx.question.create({
             data: {
               prompt: question.prompt,
               // Drafts stay drafts; anything that was live (or was archived by
               // the rollover) comes back live in the new era.
               status: question.status === "draft" ? "draft" : "active",
-              audioId: audio.id,
+              audioId: question.audioId,
               installationId: installation.id,
             },
           });
@@ -192,19 +194,8 @@ installationsRouter.post(
     if (!existing) return c.json({ error: "installation_not_found" }, 404);
     if (existing.endedAt) return c.json({ error: "installation_already_ended" }, 409);
 
-    // Build the safety-net archive BEFORE mutating anything. If the export
-    // fails we abort rather than closing the books with no backup.
-    try {
-      await buildExportArchive({ installationId: id });
-    } catch (error) {
-      log.error({ err: error, installationId: id }, "installation end aborted: archive failed");
-      return c.json({ error: "archive_failed" }, 503);
-    }
-
     const endedAt = new Date();
     const ended = await db.$transaction(async (tx) => {
-      const summary = await computeInstallationSummary(tx, id);
-
       // Close sessions the booth never ended (power cut, crash mid-call).
       await tx.callSession.updateMany({
         where: { installationId: id, endedAt: null },
@@ -229,6 +220,11 @@ installationsRouter.post(
         where: { installationId: id, status: "active" },
         data: { status: "archived", retiredAt: endedAt },
       });
+
+      // Computed last, so the frozen counters agree with what browsing this
+      // era afterwards reports — in particular the messages the rollover
+      // itself just rejected.
+      const summary = await computeInstallationSummary(tx, id);
 
       return tx.installation.update({
         where: { id },
@@ -314,11 +310,10 @@ installationsRouter.delete(
       };
     });
 
-    // File rows are only reachable through their owning Question/Message, so
-    // they are now orphaned. Delete the rows, then the blobs — but only where
-    // no surviving File row still points at the same blobKey. Questions copied
-    // forward into a later era clone the File row while sharing a blobKey, so
-    // this check is what stops a purge from silently muting a live booth.
+    // A File row is shared: a question copied forward into a later era points
+    // at the same row as the original. So a file is only orphaned once nothing
+    // references it any more — that check is what stops a purge from silently
+    // muting a live booth.
     const result = await purgeOrphanFiles(ownedFiles);
 
     log.warn({ installationId: id, rows, ...result }, "installation purged");
@@ -326,6 +321,20 @@ installationsRouter.delete(
     return c.json(body);
   },
 );
+
+// Whether an installation has recorded anything yet. Used to tell a freshly
+// auto-created era (which the operator can safely adopt and name) apart from
+// one the booth has actually been running in.
+const hasActivity = async (installationId: string): Promise<boolean> => {
+  const where = { installationId };
+  const [calls, messages, events, snapshots] = await Promise.all([
+    db.callSession.count({ where }),
+    db.message.count({ where }),
+    db.boothEvent.count({ where }),
+    db.boothStatusSnapshot.count({ where }),
+  ]);
+  return calls + messages + events + snapshots > 0;
+};
 
 type OwnedFile = { id: string; blobKey: string };
 
@@ -352,27 +361,36 @@ const purgeOrphanFiles = async (
 ): Promise<{ blobsDeleted: number; blobsRetained: number; blobFailures: string[] }> => {
   if (owned.length === 0) return { blobsDeleted: 0, blobsRetained: 0, blobFailures: [] };
 
-  await db.file.deleteMany({ where: { id: { in: owned.map((file) => file.id) } } });
+  const ids = owned.map((file) => file.id);
 
-  const blobKeys = [...new Set(owned.map((file) => file.blobKey))];
-  const stillReferenced = await db.file.findMany({
-    where: { blobKey: { in: blobKeys } },
-    select: { blobKey: true },
-  });
-  const keep = new Set(stillReferenced.map((row) => row.blobKey));
+  // The era's own rows are already gone, so anything still pointing at these
+  // files belongs to another era (a question copied forward) or to an
+  // installation-independent instruction. `Question.audioId` is `ON DELETE
+  // RESTRICT`, so deleting a file that is still referenced would error anyway.
+  const [questions, messages, instructions] = await Promise.all([
+    db.question.findMany({ where: { audioId: { in: ids } }, select: { audioId: true } }),
+    db.message.findMany({ where: { audioId: { in: ids } }, select: { audioId: true } }),
+    db.instruction.findMany({ where: { audioId: { in: ids } }, select: { audioId: true } }),
+  ]);
+  const referenced = new Set([
+    ...questions.map((row) => row.audioId),
+    ...messages.map((row) => row.audioId),
+    ...instructions.map((row) => row.audioId),
+  ]);
+
+  const orphans = owned.filter((file) => !referenced.has(file.id));
+  const blobsRetained = owned.length - orphans.length;
+  if (orphans.length > 0) {
+    await db.file.deleteMany({ where: { id: { in: orphans.map((file) => file.id) } } });
+  }
 
   let blobsDeleted = 0;
-  let blobsRetained = 0;
   const blobFailures: string[] = [];
 
   // Blob deletion runs after the database transaction has committed. A partial
   // failure leaves an orphaned blob, which is wasteful but harmless, so we
   // report it rather than rolling back a delete that already succeeded.
-  for (const blobKey of blobKeys) {
-    if (keep.has(blobKey)) {
-      blobsRetained += 1;
-      continue;
-    }
+  for (const { blobKey } of orphans) {
     try {
       await deleteBlob(blobKey);
       blobsDeleted += 1;

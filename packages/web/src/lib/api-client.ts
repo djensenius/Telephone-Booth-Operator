@@ -258,10 +258,11 @@ export const questions = {
       readonly cursor?: string;
       readonly limit?: number;
       readonly status?: QuestionStatus;
+      readonly installationId?: InstallationScope;
     } = {},
   ) =>
     apiFetch<QuestionList>(
-      `/v1/questions${query({ cursor: params.cursor, limit: params.limit ?? 50, status: params.status })}`,
+      `/v1/questions${query({ cursor: params.cursor, limit: params.limit ?? 50, status: params.status, installationId: params.installationId })}`,
       { schema: QuestionListSchema },
     ),
   create: (input: QuestionCreate) =>
@@ -553,7 +554,8 @@ export const apiQueryKeys = {
   me: ["auth", "me"] as const,
   status: ["status", "current"] as const,
   statusHistory: ["status", "history"] as const,
-  questions: (filter?: QuestionStatus | "all") => ["questions", "list", filter ?? "all"] as const,
+  questions: (filter?: QuestionStatus | "all", scope?: InstallationScope) =>
+    ["questions", "list", filter ?? "all", scope ?? null] as const,
   instructions: (filter?: InstructionStatus | "all") =>
     ["instructions", "list", filter ?? "all"] as const,
   messages: (filter?: MessageStatus | "all", scope?: InstallationScope) =>
@@ -683,15 +685,19 @@ export function useStatusHistory(options?: { paused?: boolean }) {
   });
 }
 
-export function useQuestionsList(filter: QuestionStatus | "all" = "all") {
+export function useQuestionsList(
+  filter: QuestionStatus | "all" = "all",
+  options: { readonly installationId?: InstallationScope } = {},
+) {
   const statusFilter = QuestionStatusSchema.safeParse(filter).success
     ? (filter as QuestionStatus)
     : undefined;
   return useQuery({
-    queryKey: apiQueryKeys.questions(filter),
+    queryKey: apiQueryKeys.questions(filter, options.installationId),
     queryFn: () =>
       questions.list({
         ...(statusFilter === undefined ? {} : { status: statusFilter }),
+        ...(options.installationId ? { installationId: options.installationId } : {}),
         limit: 100,
       }),
   });
@@ -897,8 +903,7 @@ export function useInstallationsList() {
 // installation moved, frozen summaries changed, and live stats now belong to a
 // different era. Invalidate broadly so the whole console re-scopes.
 function invalidateInstallationScopedQueries(queryClient: ReturnType<typeof useQueryClient>): void {
-  void queryClient.invalidateQueries({ queryKey: apiQueryKeys.installations });
-  void queryClient.invalidateQueries({ queryKey: apiQueryKeys.installationCurrent });
+  void queryClient.invalidateQueries({ queryKey: ["installations"] });
   void queryClient.invalidateQueries({ queryKey: ["stats"] });
   void queryClient.invalidateQueries({ queryKey: ["messages", "list"] });
   void queryClient.invalidateQueries({ queryKey: ["sessions", "list"] });

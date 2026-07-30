@@ -24,9 +24,16 @@ vi.mock("../src/lib/require-api-token.js", () => ({
 }));
 
 import { createApp } from "../src/index.js";
+import { resetInstallationCacheForTests } from "../src/lib/installation.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { resetFakeAzure } from "./support/fake-azure.js";
-import { fakeDb, resetFakeDb, seedCallSession } from "./support/fake-db.js";
+import {
+  DEFAULT_INSTALLATION_ID,
+  fakeDb,
+  resetFakeDb,
+  seedCallSession,
+  store,
+} from "./support/fake-db.js";
 import { operatorCookie, phoneHeaders } from "./support/http.js";
 
 const setup = () => {
@@ -35,6 +42,7 @@ const setup = () => {
   resetSessionCryptoForTests();
   resetFakeDb();
   resetFakeAzure();
+  resetInstallationCacheForTests();
   return createApp();
 };
 
@@ -122,6 +130,55 @@ describe("status routes", () => {
       repeatCount: 3,
       firstSeenAt: "2026-07-28T12:00:00.000Z",
       updatedAt: "2026-07-28T12:00:20.000Z",
+    });
+  });
+
+  it("starts a new collapsed status run after an installation rollover", async () => {
+    const app = createApp();
+    const nextInstallationId = "11111111-1111-4111-8111-111111111111";
+
+    const beat = async (updatedAt: string) => {
+      const response = await app.request("/v1/status", {
+        method: "PUT",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ state: "idle", updatedAt }),
+      });
+      expect(response.status).toBe(204);
+    };
+
+    await beat("2026-07-28T12:00:00.000Z");
+    store.installations.set(DEFAULT_INSTALLATION_ID, {
+      ...store.installations.get(DEFAULT_INSTALLATION_ID)!,
+      endedAt: new Date("2026-07-28T12:00:05.000Z"),
+    });
+    store.installations.set(nextInstallationId, {
+      id: nextInstallationId,
+      name: "Installation 2",
+      notes: null,
+      location: null,
+      startedAt: new Date("2026-07-28T12:00:06.000Z"),
+      endedAt: null,
+      endedById: null,
+      summary: null,
+      createdAt: new Date("2026-07-28T12:00:06.000Z"),
+    });
+    resetInstallationCacheForTests();
+
+    await beat("2026-07-28T12:00:10.000Z");
+    await beat("2026-07-28T12:00:20.000Z");
+
+    expect(store.statuses).toHaveLength(2);
+    expect(store.statuses[0]).toMatchObject({
+      installationId: DEFAULT_INSTALLATION_ID,
+      repeatCount: 1,
+      firstSeenAt: new Date("2026-07-28T12:00:00.000Z"),
+      updatedAt: new Date("2026-07-28T12:00:00.000Z"),
+    });
+    expect(store.statuses[1]).toMatchObject({
+      installationId: nextInstallationId,
+      repeatCount: 2,
+      firstSeenAt: new Date("2026-07-28T12:00:10.000Z"),
+      updatedAt: new Date("2026-07-28T12:00:20.000Z"),
     });
   });
 

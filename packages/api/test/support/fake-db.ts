@@ -395,6 +395,36 @@ const projectAudio = (
   return { audio: projected };
 };
 
+// The real schema enforces unique indexes that this store otherwise ignores,
+// which lets a query that Postgres would reject pass in tests. Mirror the ones
+// the app actually relies on.
+const uniqueViolation = (fields: string[]): Prisma.PrismaClientKnownRequestError =>
+  new Prisma.PrismaClientKnownRequestError(
+    `Unique constraint failed on the fields: (\`${fields.join("`,`")}\`)`,
+    { code: "P2002", clientVersion: "5.0.0", meta: { target: fields } },
+  );
+
+const assertFileUnique = (file: FakeFile): void => {
+  for (const existing of store.files.values()) {
+    if (existing.id === file.id) continue;
+    if (existing.blobKey === file.blobKey) throw uniqueViolation(["blobKey"]);
+    if (existing.sha256 === file.sha256) throw uniqueViolation(["sha256"]);
+  }
+};
+
+// `Question.prompt` is unique per installation, not globally.
+const assertQuestionUnique = (question: FakeQuestion): void => {
+  for (const existing of store.questions.values()) {
+    if (existing.id === question.id) continue;
+    if (
+      existing.prompt === question.prompt &&
+      existing.installationId === question.installationId
+    ) {
+      throw uniqueViolation(["installationId", "prompt"]);
+    }
+  }
+};
+
 const fileFromData = (data: Partial<FakeFile> & Omit<FakeFile, "id" | "createdAt">): FakeFile => ({
   id: data.id ?? randomUUID(),
   createdAt: data.createdAt ?? new Date(),
@@ -709,6 +739,7 @@ export const fakeDb = {
     },
     create: async ({ data }: { data: Partial<FakeFile> & Omit<FakeFile, "id" | "createdAt"> }) => {
       const file = fileFromData(data);
+      assertFileUnique(file);
       store.files.set(file.id, file);
       return file;
     },
@@ -783,6 +814,7 @@ export const fakeDb = {
         retiredAt: null,
         installationId: data.installationId ?? DEFAULT_INSTALLATION_ID,
       };
+      assertQuestionUnique(question);
       store.questions.set(question.id, question);
       return include?.audio ? attachAudio(question) : question;
     },
@@ -1524,14 +1556,28 @@ export const fakeDb = {
       if (data.repeatCount) snapshot.repeatCount += data.repeatCount.increment;
       return snapshot;
     },
+    updateMany: async ({ where = {}, data }: { where?: Predicate; data: Partial<FakeStatus> }) => {
+      const matches = store.statuses.filter((status) =>
+        matchesWhere(status as unknown as Record<string, unknown>, where ?? {}),
+      );
+      for (const status of matches) {
+        Object.assign(status, data);
+      }
+      return { count: matches.length };
+    },
     findFirst: async (
       args: {
-        where?: { firstSeenAt?: { lte?: Date; gt?: Date } };
+        where?: { firstSeenAt?: { lte?: Date; gt?: Date }; installationId?: string };
         orderBy?: StatusOrder | StatusOrder[];
       } = {},
     ) => {
       const { lte, gt } = args.where?.firstSeenAt ?? {};
       let statuses = [...store.statuses];
+      if (args.where?.installationId !== undefined) {
+        statuses = statuses.filter(
+          (status) => status.installationId === args.where?.installationId,
+        );
+      }
       if (lte) statuses = statuses.filter((status) => status.firstSeenAt <= lte);
       if (gt) statuses = statuses.filter((status) => status.firstSeenAt > gt);
       return sortStatuses(statuses, args.orderBy)[0] ?? null;
@@ -1684,6 +1730,38 @@ export const fakeDb = {
         orderBy,
       );
       return events[0] ?? null;
+    },
+    updateMany: async ({
+      where = {},
+      data,
+    }: {
+      where?: Record<string, unknown>;
+      data: Partial<FakeBoothEvent>;
+    }) => {
+      const matches = store.boothEvents.filter((event) => matchesWhere(event, where));
+      for (const event of matches) {
+        Object.assign(event, data);
+      }
+      return { count: matches.length };
+    },
+    upsert: async ({
+      where,
+      create,
+      update,
+    }: {
+      where: { id: string };
+      create: FakeBoothEvent;
+      update: Partial<FakeBoothEvent>;
+    }) => {
+      const index = store.boothEvents.findIndex((event) => event.id === where.id);
+      if (index === -1) {
+        const created: FakeBoothEvent = { ...create, id: where.id };
+        store.boothEvents.push(created);
+        return created;
+      }
+      const merged: FakeBoothEvent = { ...store.boothEvents[index]!, ...update };
+      store.boothEvents[index] = merged;
+      return merged;
     },
   },
   callSession: {
@@ -1911,8 +1989,12 @@ const matchesWhere = (record: Record<string, unknown>, where: Record<string, unk
       continue;
     }
     const value = record[key];
-    if (raw === null || raw === undefined) {
-      if (value !== raw) return false;
+    if (raw === null) {
+      if (value !== null && value !== undefined) return false;
+      continue;
+    }
+    if (raw === undefined) {
+      if (value !== undefined) return false;
       continue;
     }
     if (typeof raw === "object") {

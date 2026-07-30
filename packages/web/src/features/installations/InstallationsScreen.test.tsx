@@ -121,12 +121,14 @@ describe("InstallationsScreen", () => {
     // Active installation is clearly marked.
     expect(screen.getByText("Active")).toBeTruthy();
     // Frozen counters for the ended era.
-    const endedCard = screen.getByText("Spring 2026 residency").closest("section") as HTMLElement;
+    const endedCard = screen.getByText("Spring 2026 residency").closest("section");
+    if (endedCard === null) throw new Error("Ended installation card was not rendered.");
     expect(within(endedCard).getByText("120")).toBeTruthy();
     expect(within(endedCard).getByText("1h 02m")).toBeTruthy();
     // Live counters for the active era from /v1/stats/summary.
     await waitFor(() => expect(screen.getByText("Awaiting moderation")).toBeTruthy());
-    const activeCard = screen.getByText("Summer 2026 tour").closest("section") as HTMLElement;
+    const activeCard = screen.getByText("Summer 2026 tour").closest("section");
+    if (activeCard === null) throw new Error("Active installation card was not rendered.");
     expect(within(activeCard).getByText("6")).toBeTruthy();
 
     const results = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
@@ -147,6 +149,22 @@ describe("InstallationsScreen", () => {
     expect(createBody).toMatchObject({ name: "Autumn 2026", copyQuestions: false });
   });
 
+  it("reports an already-active conflict when starting a new installation", async () => {
+    server.use(
+      http.post("http://localhost/v1/installations", () =>
+        HttpResponse.json({ error: "An installation is already active." }, { status: 409 }),
+      ),
+    );
+    renderScreen([endedInstallation]);
+
+    fireEvent.change(await screen.findByPlaceholderText("Summer 2027 residency"), {
+      target: { value: "Autumn 2026" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start installation" }));
+
+    expect(await screen.findByText("An installation is already active.")).toBeTruthy();
+  });
+
   it("ends the active installation after confirmation", async () => {
     renderScreen([activeInstallation]);
 
@@ -154,5 +172,19 @@ describe("InstallationsScreen", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Confirm end" }));
 
     await waitFor(() => expect(endCalledId).toBe(activeId));
+  });
+
+  it("reports when the end-installation safety archive fails", async () => {
+    server.use(
+      http.post("http://localhost/v1/installations/:id/end", () =>
+        HttpResponse.json({ error: "archive_failed" }, { status: 503 }),
+      ),
+    );
+    renderScreen([activeInstallation]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "End installation" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm end" }));
+
+    expect(await screen.findByText(/safety-net archive could not be written/)).toBeTruthy();
   });
 });

@@ -658,7 +658,7 @@ function InstallationScopePicker({
 export function StatsScreen(): JSX.Element {
   const search = useSearch({ strict: false });
   const navigate = useNavigate();
-  const initialScope = useMemo<InstallationScope | undefined>(() => {
+  const scope = useMemo<InstallationScope | undefined>(() => {
     if (search.installationId === undefined) return undefined;
     const parsed = InstallationScopeSchema.safeParse(search.installationId);
     return parsed.success ? parsed.data : undefined;
@@ -667,12 +667,10 @@ export function StatsScreen(): JSX.Element {
     kind: "preset",
     window: "7d",
   });
-  const [scope, setScope] = useState<InstallationScope | undefined>(initialScope);
   const query = useStatsOverview(selection, scope);
   const overview = query.data ?? null;
 
   const handleScopeChange = (next: InstallationScope | undefined): void => {
-    setScope(next);
     void navigate({
       to: "/stats",
       search: next === undefined ? {} : { installationId: next },
@@ -686,7 +684,7 @@ export function StatsScreen(): JSX.Element {
   );
 
   return (
-    <article className="stats-screen" aria-labelledby="stats-title">
+    <GlassPanel title="Usage statistics" className="feature-screen stats-screen">
       <header className="stats-screen__header">
         <div>
           <span className="screen-kicker">Operator console</span>
@@ -715,6 +713,6 @@ export function StatsScreen(): JSX.Element {
           <BoothBreakdownSection overview={overview} />
         </div>
       )}
-    </article>
+    </GlassPanel>
   );
 }

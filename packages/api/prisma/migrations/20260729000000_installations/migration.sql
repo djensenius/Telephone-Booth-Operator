@@ -83,3 +83,14 @@ ALTER TABLE "Message" ADD CONSTRAINT "Message_installationId_fkey" FOREIGN KEY (
 ALTER TABLE "CallSession" ADD CONSTRAINT "CallSession_installationId_fkey" FOREIGN KEY ("installationId") REFERENCES "Installation"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 ALTER TABLE "BoothEvent" ADD CONSTRAINT "BoothEvent_installationId_fkey" FOREIGN KEY ("installationId") REFERENCES "Installation"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 ALTER TABLE "BoothStatusSnapshot" ADD CONSTRAINT "BoothStatusSnapshot_installationId_fkey" FOREIGN KEY ("installationId") REFERENCES "Installation"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- Questions can now share a File row across installations. Copying a question
+-- forward into a new era reuses the same audio blob instead of cloning the
+-- File, so `audioId` can no longer be globally unique.
+DROP INDEX "Question_audioId_key";
+CREATE INDEX "Question_audioId_idx" ON "Question"("audioId");
+
+-- Prompts are unique within an installation rather than globally, so the same
+-- question can run in more than one era.
+DROP INDEX "Question_prompt_key";
+CREATE UNIQUE INDEX "Question_installationId_prompt_key" ON "Question"("installationId", "prompt");

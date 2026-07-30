@@ -7,7 +7,10 @@ vi.mock(
 );
 
 import { createApp } from "../src/index.js";
-import { resetInstallationCacheForTests } from "../src/lib/installation.js";
+import {
+  requireActiveInstallation,
+  resetInstallationCacheForTests,
+} from "../src/lib/installation.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { fakeBlobs, resetFakeAzure, seedBlobData } from "./support/fake-azure.js";
 import {
@@ -183,7 +186,8 @@ describe("installations", () => {
   });
 
   describe("starting a new installation", () => {
-    it("refuses while one is still active", async () => {
+    it("refuses while one is still active and has recorded something", async () => {
+      seedCallSession({ id: "live-call" });
       const res = await createApp().request("/v1/installations", {
         method: "POST",
         headers: jsonHeaders(adminHeaders()),
@@ -212,7 +216,31 @@ describe("installations", () => {
       expect(carried).toHaveLength(0);
     });
 
-    it("copies questions forward when asked, sharing the same blob", async () => {
+    it("adopts an era the booth auto-created before the operator named one", async () => {
+      const app = createApp();
+      expect((await endDefault(app)).status).toBe(200);
+
+      // A powered-on booth keeps posting events, and every booth write resolves
+      // the active installation — lazily opening an unnamed one so a recording
+      // is never dropped over admin bookkeeping.
+      await requireActiveInstallation();
+      const opened = [...store.installations.values()].find((row) => row.endedAt === null);
+      expect(opened).toBeDefined();
+
+      // Naming the era must not collide with the one the booth just opened.
+      const res = await app.request("/v1/installations", {
+        method: "POST",
+        headers: jsonHeaders(adminHeaders()),
+        body: JSON.stringify({ name: "Nuit Blanche" }),
+      });
+      expect(res.status, await res.clone().text()).toBe(201);
+      const body = (await res.json()) as { id: string; name: string };
+      expect(body.name).toBe("Nuit Blanche");
+      expect(body.id).toBe(opened?.id);
+      expect([...store.installations.values()].filter((r) => r.endedAt === null)).toHaveLength(1);
+    });
+
+    it("copies questions forward when asked, sharing the same audio file", async () => {
       const file = seedFile({ blobKey: "questions/ab/abc.flac", sha256: "sha-original" });
       seedQuestion({ status: "active", prompt: "Where do you feel most alone?", audioId: file.id });
 
@@ -230,12 +258,10 @@ describe("installations", () => {
       const carried = [...store.questions.values()].filter((q) => q.installationId === created.id);
       expect(carried).toHaveLength(1);
 
-      // The copy points at a distinct File row that reuses the same blob, so
-      // no audio is re-uploaded.
-      const copiedFile = store.files.get(carried[0]!.audioId);
-      expect(copiedFile).toBeDefined();
-      expect(copiedFile?.id).not.toBe(file.id);
-      expect(copiedFile?.blobKey).toBe(file.blobKey);
+      // The copy points at the *same* File row, so nothing is re-uploaded and
+      // no unique constraint (blobKey, sha256) can be violated.
+      expect(carried[0]?.audioId).toBe(file.id);
+      expect(store.files.size).toBe(1);
     });
   });
 
@@ -365,7 +391,7 @@ describe("installations", () => {
       expect(fakeBlobs.has(file.blobKey)).toBe(false);
     });
 
-    it("retains a blob still referenced by a question copied into a later era", async () => {
+    it("retains audio still referenced by a question copied into a later era", async () => {
       const file = seedFile({ blobKey: "questions/bb/bbb.flac", sha256: "sha-shared" });
       seedBlobData(file.blobKey, Buffer.from("question audio"), file.sha256);
       seedQuestion({ status: "active", audioId: file.id, prompt: "Carried forward" });

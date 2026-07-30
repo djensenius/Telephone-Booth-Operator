@@ -37,6 +37,8 @@ new row (`packages/api/src/routes/status.ts`):
 - Anything that differs — a real transition, a new error string, a runtime-mode
   change — still creates a new row, so the history reads as one row per booth
   status.
+- Runs are scoped to one installation; a rollover starts a fresh run even when
+  the booth's heartbeat is otherwise identical.
 
 `firstSeenAt`, `repeatCount`, and the snapshot's row `id` are added to the
 `BoothStatus` wire shape as optional fields, so existing clients (mobile, CLI)

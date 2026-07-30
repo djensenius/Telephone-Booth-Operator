@@ -60,6 +60,12 @@ assigns every pre-existing row to a seeded "Installation 1".
 exists rather than rejecting the write. A missing admin record is not a good
 reason to drop somebody's recording.
 
+The cost is a race: a booth that is powered on will open an unnamed era within
+seconds of the operator ending one, so naming the next era would always collide.
+Starting an installation therefore adopts an active era with no activity in it
+instead of returning `409`. Only an era the booth has actually recorded into is
+treated as a genuine conflict.
+
 ### Why `installationId` is nullable
 
 The column is nullable but always populated at write time. Nullable avoids a
@@ -81,11 +87,13 @@ admin-only, refuses the active installation, and requires the caller to echo the
 installation's exact name.
 
 It deletes blobs too, which is where it gets interesting. Questions copied
-forward into a new era clone the `File` row but **share the underlying blob**,
-because audio is content-addressed by SHA-256 and we do not want to re-upload
-it. So the purge refcounts by `blobKey` and only deletes blobs no surviving
-`File` row points at. Without that check, purging an old era would silently mute
-a live booth.
+forward into a new era **share the original `File` row**, because audio is
+content-addressed by SHA-256 and we do not want to re-upload it. That is why
+`Question.audioId` is not unique and why `Question.prompt` is unique per
+installation rather than globally. The purge therefore refcounts: a `File` still
+referenced by a surviving question, message, or instruction is retained, and
+only genuinely orphaned files (and their blobs) are deleted. Without that check,
+purging an old era would silently mute a live booth.
 
 Blob deletion runs after the database transaction commits. A partial blob
 failure is reported in the response rather than rolled back — an orphaned blob

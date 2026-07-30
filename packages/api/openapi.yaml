@@ -814,9 +814,13 @@ paths:
     post:
       summary: Start a new installation.
       description: |
-        Fails with 409 if an installation is still active — end it first.
-        Set `copyQuestions` to carry the previous era's questions forward;
-        they re-use the same audio blob so nothing is re-uploaded.
+        Fails with 409 if an installation is still active *and* the booth has
+        recorded into it — end it first. An active era with no activity yet
+        (one the booth opened automatically while the operator was between
+        steps) is adopted and renamed instead.
+
+        Set `copyQuestions` to carry the last ended era's questions forward;
+        copies share the original audio file so nothing is re-uploaded.
       tags: [installations]
       security:
         - operatorSession: []
@@ -834,7 +838,7 @@ paths:
               schema: { $ref: "#/components/schemas/Installation" }
         "401": { description: missing or invalid credentials }
         "403": { description: operator is not an admin }
-        "409": { description: an installation is already active }
+        "409": { description: an installation is already active and in use }
 
   /v1/installations/current:
     get:
@@ -929,10 +933,9 @@ paths:
         Freezes the summary counters, closes any call sessions the booth left
         open, moves queued messages to a terminal state so the next era's
         moderation queue starts empty, and archives this era's questions.
-        Nothing is deleted.
-
-        A scoped tar archive is built first as a safety net; if it fails the
-        whole operation is aborted with 503.
+        Nothing is deleted; the era stays readable under its own
+        `installationId`, and `GET /v1/installations/{id}/export` can produce a
+        scoped archive at any time.
       tags: [installations]
       security:
         - operatorSession: []
@@ -952,7 +955,6 @@ paths:
         "403": { description: operator is not an admin }
         "404": { description: not found }
         "409": { description: installation already ended }
-        "503": { description: safety-net archive could not be built }
 
   /v1/installations/{id}/export:
     parameters:

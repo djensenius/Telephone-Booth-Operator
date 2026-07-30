@@ -43,20 +43,26 @@ action. It is admin-only, runs in one transaction, and **deletes nothing**:
 6. Broadcasts an `installation` envelope on `/v1/ws/status` so connected
    consoles re-scope without a reload.
 
-A scoped archive is built **before** any of this and offered as a download. If
-the archive can't be built the whole operation aborts with `503` — the books
-don't get closed without a backup.
+Nothing is deleted, so no backup is required to end an era — but
+`GET /v1/installations/{id}/export` gives you a scoped tar whenever you want
+one, and the Installations screen offers it per era.
 
 ## Starting a new one
 
 `POST /v1/installations` opens a fresh era. It returns `409` if one is still
 active — end the current one first.
 
-`copyQuestions: true` carries the previous era's questions forward. Copies
-point at the **same blob**: `Question.audioId` is unique, so the copy gets its
-own `File` row referencing the identical `blobKey`. No audio is re-uploaded and
-SHA-256 dedupe is preserved. The checkbox is **off by default**; most new
-installations want a fresh set.
+`copyQuestions: true` carries the previous era's questions forward. A copy
+points at the **same `File` row** as the original, so no audio is re-uploaded
+and SHA-256 dedupe is preserved. This is why `Question.audioId` is not unique,
+and why question prompts are unique _per installation_ rather than globally.
+The checkbox is **off by default**; most new installations want a fresh set.
+
+If the booth is powered on when you end an era, it keeps posting events, and a
+booth write with no active installation lazily opens one — a recording must
+never be dropped over admin bookkeeping. Starting a named installation
+therefore **adopts** an active era that has no activity in it yet, rather than
+failing. An era the booth has actually recorded into still returns `409`.
 
 ## Reading history
 
@@ -102,10 +108,10 @@ Guardrails:
 - Refuses the **active** installation. End it first.
 - Requires the caller to echo the installation's exact name in the request
   body (`{ "confirmName": "…" }`), or it returns `400 name_mismatch`.
-- Blobs are refcounted by `blobKey`. A blob shared with a surviving `File` row
-  — for instance a question copied forward into the current era — is
-  **retained**. Without this, purging an old era would silently mute a live
-  booth.
+- Audio is refcounted. A `File` still referenced by a surviving question,
+  message, or instruction — for instance a question copied forward into the
+  current era — is **retained**, along with its blob. Without this, purging an
+  old era would silently mute a live booth.
 
 The response reports what happened:
 
