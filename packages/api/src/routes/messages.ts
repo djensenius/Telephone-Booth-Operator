@@ -4,13 +4,19 @@ import {
   MessageCreateSchema,
   MessageDecisionSchema,
   MessageStatusSchema,
+  TranscriptionSubmitSchema,
   TranslationSubmitSchema,
 } from "@telephone-booth-operator/shared";
 import { Hono } from "hono";
 import { z } from "zod";
 import { resolveAiConfig } from "../lib/ai/config.js";
 import { recordAudit } from "../lib/audit.js";
-import { kickPipelineForMessage, runModeration, runTranscription } from "../lib/ai/pipeline.js";
+import {
+  kickPipelineForMessage,
+  recordTranscriptionResult,
+  runModeration,
+  runTranscription,
+} from "../lib/ai/pipeline.js";
 import { fanOutNotification } from "../lib/apns.js";
 import { generateSasUrl, headBlob } from "../lib/azure-blob.js";
 import { wsBroadcaster } from "../lib/broadcaster.js";
@@ -292,6 +298,43 @@ messagesRouter.post("/:id/transcribe", zValidator("param", idParamSchema), async
   recordAudit(c, { metadata: { transcriptionId: row.id, provider: row.provider } });
   return c.json(serializeTranscription(row), 202);
 });
+
+// Operator-submitted transcript: a logged-in operator (e.g. the iOS Transcriber
+// app doing on-device transcription) records transcript text directly, rather
+// than triggering the server-side transcription pipeline via `/transcribe`.
+// Mirrors the worker push-back semantics — finalizes a pending row or records a
+// new succeeded one — but attributes the row to the submitting operator and,
+// like all pushed transcripts, still runs translation and moderation
+// server-side before the text can be acted on.
+messagesRouter.post(
+  "/:id/transcription",
+  zValidator("param", idParamSchema),
+  zValidator("json", TranscriptionSubmitSchema),
+  async (c) => {
+    const { id } = c.req.valid("param");
+    const { text, language, model } = c.req.valid("json");
+    // An operator overriding the machine transcript is exactly the kind of
+    // edit the trail exists for; the text itself stays in the Transcription row.
+    recordAudit(c, {
+      action: "message.transcription.submit",
+      targetType: "message",
+      targetId: id,
+      metadata: { model: model ?? null, language: language ?? null, textLength: text.length },
+    });
+    const user = c.get("user") as { id: string } | undefined;
+    const result = await recordTranscriptionResult({
+      messageId: id,
+      text,
+      language: language ?? null,
+      model: model ?? null,
+      requestedByUserId: user?.id ?? null,
+    });
+    if (result.outcome === "not_found") return c.json({ error: "not_found" }, 404);
+    const row = await db.transcription.findUnique({ where: { id: result.transcriptionId } });
+    if (!row) return c.json({ error: "not_found" }, 404);
+    return c.json(serializeTranscription(row), 202);
+  },
+);
 
 messagesRouter.post("/:id/moderate", zValidator("param", idParamSchema), async (c) => {
   const { id } = c.req.valid("param");

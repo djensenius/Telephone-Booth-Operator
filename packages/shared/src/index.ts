@@ -208,6 +208,16 @@ export const TranslationSubmitSchema = z.object({
 });
 export type TranslationSubmit = z.infer<typeof TranslationSubmitSchema>;
 
+// Operator-supplied transcript text (e.g. from the iOS Transcriber app doing
+// on-device transcription). Text may be empty for a silent recording, mirroring
+// the worker push-back callback. `language` and `model` are optional metadata.
+export const TranscriptionSubmitSchema = z.object({
+  text: z.string().max(20_000),
+  language: z.string().trim().min(1).max(64).nullable().optional(),
+  model: z.string().trim().min(1).max(128).nullable().optional(),
+});
+export type TranscriptionSubmit = z.infer<typeof TranscriptionSubmitSchema>;
+
 // 5 minutes — generous upper bound for booth recordings.
 export const MAX_AUDIO_DURATION_MS = 300_000;
 

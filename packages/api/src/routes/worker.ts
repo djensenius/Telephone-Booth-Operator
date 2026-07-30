@@ -19,8 +19,8 @@ import { recordAudit } from "../lib/audit.js";
 import { db } from "../lib/db.js";
 import {
   advanceMessageAfterModeration,
+  recordTranscriptionResult,
   runModeration,
-  runTranslationThenModeration,
 } from "../lib/ai/pipeline.js";
 import { generateSasUrl } from "../lib/azure-blob.js";
 import { wsBroadcaster } from "../lib/broadcaster.js";
@@ -71,17 +71,6 @@ const broadcastMessageById = async (messageId: string): Promise<void> => {
 // This surface is gated by `requireApiToken("worker")` (see below): only a
 // worker-scoped token may reach it, and such tokens receive nothing but `work`
 // events on the status WebSocket.
-
-// Nudge a message from "received" into the operator queue without deciding it.
-const advanceReceivedMessage = async (messageId: string): Promise<void> => {
-  const current = await db.message.findUnique({
-    where: { id: messageId },
-    select: { status: true },
-  });
-  if (current?.status === "received") {
-    await db.message.update({ where: { id: messageId }, data: { status: "pending" } });
-  }
-};
 
 export const workerRouter = new Hono<{ Variables: ApiTokenVariables }>();
 
@@ -149,7 +138,9 @@ workerRouter.get("/messages/:id/work", zValidator("param", idParamSchema), async
 // Transcriptions are unsolicited by design: the message is already `pending`
 // in the operator queue and the app decides on its own when (or whether) to
 // transcribe. So when there is no pending row to finalize we record a new
-// succeeded one rather than dropping the text on the floor.
+// succeeded one rather than dropping the text on the floor. The shared
+// `recordTranscriptionResult` helper owns this logic (and guards against stale
+// or duplicate callbacks); the operator submit route reuses it.
 workerRouter.post(
   "/messages/:id/transcription",
   zValidator("param", idParamSchema),
@@ -169,80 +160,13 @@ workerRouter.post(
         textLength: data.text.length,
       },
     });
-    const message = await db.message.findUnique({
-      where: { id },
-      select: { id: true, audio: { select: { durationMs: true } } },
-    });
-    if (!message) return c.json({ error: "not_found" }, 404);
-
-    const pending = await db.transcription.findFirst({
-      where: { messageId: id, status: "pending" },
-      orderBy: { createdAt: "desc" },
-    });
-    const now = new Date();
-    let transcriptionId: string;
-    if (pending) {
-      const startedAt = pending.createdAt;
-      const updated = await db.transcription.updateMany({
-        where: { id: pending.id, status: "pending" },
-        data: {
-          status: "succeeded",
-          text: data.text,
-          language: data.language ?? null,
-          model: data.model ?? pending.model,
-          latencyMs: now.getTime() - startedAt.getTime(),
-          completedAt: now,
-        },
-      });
-      if (updated.count === 0) return c.json({ ok: true });
-      transcriptionId = pending.id;
-    } else {
-      // Unsolicited push: no row was ever requested for this message.
-      //
-      // Retries must not duplicate history. Without a pending row to consume,
-      // an identical redelivery (network timeout, app restart mid-POST) would
-      // otherwise create a second succeeded row and re-run translation and
-      // moderation. Treat a repeat of the latest succeeded transcript as the
-      // no-op it is; a genuinely different transcript still records a new
-      // attempt.
-      const latest = await db.transcription.findFirst({
-        where: { messageId: id },
-        orderBy: { createdAt: "desc" },
-      });
-      if (latest?.status === "succeeded" && (latest.text ?? "").trim() === data.text.trim()) {
-        return c.json({ ok: true });
-      }
-      // The app owns the latency here, so we do not invent one.
-      const created = await db.transcription.create({
-        data: {
-          messageId: id,
-          provider: "push",
-          model: data.model ?? null,
-          status: "succeeded",
-          text: data.text,
-          language: data.language ?? null,
-          durationMs: message.audio?.durationMs ?? null,
-          completedAt: now,
-        },
-      });
-      transcriptionId = created.id;
-    }
-
-    await broadcastMessageById(id);
-
-    const hasText = data.text.trim().length > 0;
-    if (!hasText) {
-      // Silent recording: nothing to translate or moderate. Legacy `received`
-      // messages still need surfacing; anything newer is already `pending`.
-      await advanceReceivedMessage(id);
-      await broadcastMessageById(id);
-      return c.json({ ok: true });
-    }
-
-    await runTranslationThenModeration({
+    const result = await recordTranscriptionResult({
       messageId: id,
-      transcriptionId,
+      text: data.text,
+      language: data.language ?? null,
+      model: data.model ?? null,
     });
+    if (result.outcome === "not_found") return c.json({ error: "not_found" }, 404);
     return c.json({ ok: true });
   },
 );

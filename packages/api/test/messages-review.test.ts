@@ -27,7 +27,7 @@ import { createApp } from "../src/index.js";
 import { wsBroadcaster } from "../src/lib/broadcaster.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { fakeBlobs, resetFakeAzure } from "./support/fake-azure.js";
-import { fakeDb, resetFakeDb } from "./support/fake-db.js";
+import { fakeDb, resetFakeDb, store } from "./support/fake-db.js";
 import { operatorCookie, phoneHeaders } from "./support/http.js";
 
 const setup = () => {
@@ -248,6 +248,150 @@ describe("message review actions", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ translatedText: "hello" }),
+      });
+      expect(res.status).toBe(401);
+    });
+  });
+
+  describe("POST /:id/transcription", () => {
+    it("finalizes a pending transcription and attributes it to the operator", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const pending = await fakeDb.transcription.create({
+        data: {
+          messageId: id,
+          provider: "push",
+          model: null,
+          status: "pending",
+          requestedById: null,
+        },
+      });
+      const cookie = operatorCookie();
+      const broadcasts: Array<{ kind: string }> = [];
+      wsBroadcaster.subscribe("test-transcription", (e) => broadcasts.push(e));
+      const res = await app.request(`/v1/messages/${id}/transcription`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ text: "hola mundo", language: "es", model: "apple-speech" }),
+      });
+      wsBroadcaster.unsubscribe("test-transcription");
+      expect(res.status, await res.clone().text()).toBe(202);
+      const body = await res.json();
+      expect(body).toMatchObject({
+        id: pending.id,
+        messageId: id,
+        status: "succeeded",
+        text: "hola mundo",
+        language: "es",
+        model: "apple-speech",
+        requestedById: "operator-1",
+      });
+      expect(broadcasts).toContainEqual(expect.objectContaining({ kind: "message" }));
+    });
+
+    it("records a new succeeded transcription when none is pending", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const cookie = operatorCookie();
+      const res = await app.request(`/v1/messages/${id}/transcription`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ text: "hello there" }),
+      });
+      expect(res.status, await res.clone().text()).toBe(202);
+      const body = await res.json();
+      expect(body).toMatchObject({
+        messageId: id,
+        provider: "push",
+        status: "succeeded",
+        text: "hello there",
+        requestedById: "operator-1",
+      });
+    });
+
+    it("accepts an empty transcript for a silent recording", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const cookie = operatorCookie();
+      const res = await app.request(`/v1/messages/${id}/transcription`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ text: "" }),
+      });
+      expect(res.status, await res.clone().text()).toBe(202);
+      const body = await res.json();
+      expect(body).toMatchObject({ messageId: id, status: "succeeded", text: "" });
+    });
+
+    it("treats an identical resubmission as a no-op", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const cookie = operatorCookie();
+      const headers = { cookie, "content-type": "application/json" };
+      const body = JSON.stringify({ text: "hello there", language: "en" });
+
+      const first = await app.request(`/v1/messages/${id}/transcription`, {
+        method: "POST",
+        headers,
+        body,
+      });
+      const second = await app.request(`/v1/messages/${id}/transcription`, {
+        method: "POST",
+        headers,
+        body,
+      });
+
+      expect(first.status).toBe(202);
+      expect(second.status).toBe(202);
+      expect(await first.json()).toMatchObject({ id: (await second.json()).id });
+      const rows = [...store.transcriptions.values()].filter((t) => t.messageId === id);
+      expect(rows).toHaveLength(1);
+    });
+
+    it("records a corrected language for the same text as a new attempt", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const cookie = operatorCookie();
+      const headers = { cookie, "content-type": "application/json" };
+
+      await app.request(`/v1/messages/${id}/transcription`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ text: "bonjour" }),
+      });
+      const corrected = await app.request(`/v1/messages/${id}/transcription`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ text: "bonjour", language: "fr" }),
+      });
+
+      expect(corrected.status, await corrected.clone().text()).toBe(202);
+      expect(await corrected.json()).toMatchObject({ language: "fr" });
+      const rows = [...store.transcriptions.values()].filter((t) => t.messageId === id);
+      expect(rows).toHaveLength(2);
+    });
+
+    it("returns 404 for an unknown message", async () => {
+      const app = createApp();
+      const cookie = operatorCookie();
+      const res = await app.request(
+        "/v1/messages/00000000-0000-0000-0000-000000000000/transcription",
+        {
+          method: "POST",
+          headers: { cookie, "content-type": "application/json" },
+          body: JSON.stringify({ text: "hello" }),
+        },
+      );
+      expect(res.status).toBe(404);
+    });
+
+    it("requires an operator session", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const res = await app.request(`/v1/messages/${id}/transcription`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: "hello" }),
       });
       expect(res.status).toBe(401);
     });

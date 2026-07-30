@@ -221,6 +221,23 @@ describe("worker push-back callbacks", () => {
     expect(rows.map((r) => r.text)).toEqual(expect.arrayContaining(["first pass", "second pass"]));
   });
 
+  it("records a corrected language for the same text as a new attempt", async () => {
+    const app = createApp();
+    const message = seedMessage({ status: "pending" });
+
+    await postJson(app, `/v1/worker/messages/${message.id}/transcription`, { text: "bonjour" });
+    // Same text, but now tagged as French — translation depends on it, so this
+    // is a correction rather than a redelivery.
+    await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      text: "bonjour",
+      language: "fr",
+    });
+
+    const rows = [...store.transcriptions.values()].filter((t) => t.messageId === message.id);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.language ?? null)).toEqual(expect.arrayContaining([null, "fr"]));
+  });
+
   it("uses provider-aware routing after transcription instead of always pushing work", async () => {
     const app = createApp();
     const message = seedMessage({ status: "received" });
