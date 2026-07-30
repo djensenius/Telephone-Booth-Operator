@@ -50,13 +50,19 @@ The scoped export contains only the rows belonging to that installation, plus
 the blobs they reference — download one before purging an era if you want a
 copy to keep. See [installations](installations.md).
 
-Because a per-era archive is meant to be handed around, it deliberately
-withholds the instance's credentials and personal data: **API tokens, mobile
-devices, and metric filters are omitted entirely**, and operator accounts are
-narrowed to the ones the era's own rows point at (who ended it, who moderated a
-message, who requested a transcription). Instructions travel whole, because
-they are booth configuration and their audio would otherwise dangle. Use the
-full `/v1/admin/data/export` when you want a restorable copy of the instance.
+A per-era archive deliberately withholds the instance's credentials: **API
+tokens, mobile devices, and metric filters are omitted entirely**, and operator
+accounts are narrowed to the ones the era's own rows point at (who ended it,
+who moderated a message, who requested a transcription). Instructions travel
+whole, because they are booth configuration and their audio would otherwise
+dangle. Use the full `/v1/admin/data/export` when you want a restorable copy of
+the instance.
+
+> **These archives still contain personal data.** The operator accounts that do
+> come along are exported whole — subject identifier, email, name, groups,
+> picture, last login — and the recordings themselves are people's voices.
+> Narrowing which accounts appear reduces the exposure; it does not make an
+> archive safe to publish. Treat one like a database dump.
 
 Import is **idempotent**: rows are upserted by id, and each audio blob is
 uploaded only when the target storage does not already hold it (dedupe by

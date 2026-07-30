@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { useMemo, useState } from "react";
-import type { InstallationPurgeResult } from "@telephone-booth-operator/shared";
+import type { Installation, InstallationPurgeResult } from "@telephone-booth-operator/shared";
 import {
   ApiError,
   installations as installationsApi,
@@ -23,6 +23,17 @@ function purgeErrorMessage(error: unknown): string {
     return error.message || "Purge failed.";
   }
   return error instanceof Error ? error.message : "Purge failed.";
+}
+
+// Names are not unique, and two runs of the same festival can share one. The
+// purge is irreversible, so the option has to say which row it is: the era's
+// start date and the head of its id disambiguate identically-named runs.
+function optionLabel(installation: Installation): string {
+  const started = new Date(installation.startedAt);
+  const stamp = Number.isNaN(started.getTime())
+    ? installation.startedAt
+    : started.toLocaleDateString();
+  return `${installation.name} — started ${stamp} (${installation.id.slice(0, 8)})`;
 }
 
 // Admin-only irreversible hard purge of a single ENDED installation and its
@@ -106,7 +117,7 @@ export function AdminInstallationPurgePanel(): JSX.Element {
             <option value="">Choose an ended installation…</option>
             {endable.map((installation) => (
               <option key={installation.id} value={installation.id}>
-                {installation.name}
+                {optionLabel(installation)}
               </option>
             ))}
           </select>

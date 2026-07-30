@@ -104,7 +104,13 @@ const collectDump = async (installationId?: string): Promise<DataDump> =>
       }
       return dump;
     },
-    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+      // A long run's era is far more than Prisma's five-second interactive
+      // default can read, and the pre-purge download must not time out.
+      timeout: 120_000,
+      maxWait: 10_000,
+    },
   );
 
 // Columns pointing at `OperatorUser` from the models a scoped export collects.

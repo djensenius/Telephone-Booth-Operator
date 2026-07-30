@@ -589,7 +589,10 @@ export const InstallationSummarySchema = z.object({
   questions: z.number().int().nonnegative(),
   events: z.number().int().nonnegative(),
   recordedMs: z.number().int().nonnegative(),
-  // null when the installation saw no activity at all.
+  // Bounds of the era's *booth event* stream, which is what the booth emits
+  // continuously while it is running. Null when the era recorded no events —
+  // an era can still hold messages or questions in that case, so read these as
+  // "when the booth was live", not as "whether anything happened".
   firstActivityAt: z.string().datetime().nullable(),
   lastActivityAt: z.string().datetime().nullable(),
 });

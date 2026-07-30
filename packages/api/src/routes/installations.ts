@@ -32,6 +32,7 @@ import {
 } from "../lib/installation.js";
 import { log } from "../lib/logger.js";
 import { requireAdmin, requireOperator, type AuthVariables } from "../lib/session.js";
+import { invalidateStatsCaches } from "./stats.js";
 
 // How many blob deletions a purge has in flight at once.
 const PURGE_BLOB_CONCURRENCY = 8;
@@ -110,13 +111,21 @@ installationsRouter.post(
         // Creating is arbitrated by the single-active index, but adopting is
         // just an update, so two admins naming the same auto-created era would
         // both succeed and the loser's metadata would vanish. Claim it on the
-        // name it still has: whoever renames it first wins, the other is told
-        // an era is already open.
+        // era as it stands: whoever writes first wins, the other is told an era
+        // is already open. `startedAt` is advanced past its current value so
+        // the predicate is falsified even when both admins submit the same
+        // name — matching on the name alone would let the second through.
         let installation;
         if (active) {
+          const claimedAt = new Date(Math.max(Date.now(), active.startedAt.getTime() + 1));
           const claimed = await tx.installation.updateMany({
-            where: { id: active.id, endedAt: null, name: active.name },
-            data: { ...data, startedAt: new Date() },
+            where: {
+              id: active.id,
+              endedAt: null,
+              name: active.name,
+              startedAt: active.startedAt,
+            },
+            data: { ...data, startedAt: claimedAt },
           });
           if (claimed.count === 0) return null;
           installation = await tx.installation.findUnique({ where: { id: active.id } });
@@ -277,6 +286,8 @@ installationsRouter.post(
     if (!ended) return c.json({ error: "installation_already_ended" }, 409);
 
     invalidateActiveInstallationCache();
+    // The frozen era's rows just changed underneath every cached aggregate.
+    invalidateStatsCaches();
     const dto = serializeInstallation(ended);
     wsBroadcaster.broadcast({ kind: "installation", installation: dto });
     log.info({ installationId: id }, "installation ended");
@@ -352,6 +363,8 @@ installationsRouter.delete(
     // at the same row as the original. So a file is only orphaned once nothing
     // references it any more — that check is what stops a purge from silently
     // muting a live booth.
+    invalidateStatsCaches();
+
     const result = await purgeOrphanFiles(ownedFiles);
 
     log.warn({ installationId: id, rows, ...result }, "installation purged");

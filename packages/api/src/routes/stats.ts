@@ -147,6 +147,15 @@ export const statsCacheSizesForTests = (): { summary: number; overview: number }
   overview: overviewCache.size,
 });
 
+// Ending or purging an era rewrites the rows both caches aggregate. Their keys
+// carry the scope, and an `all`-scoped entry covers every era, so the only
+// correct answer is to drop everything cached rather than guess which keys the
+// change touched.
+export const invalidateStatsCaches = (): void => {
+  summaryCache.clear();
+  overviewCache.clear();
+};
+
 export const resetStatsCacheForTests = (): void => {
   summaryCache.clear();
   overviewCache.clear();

@@ -944,10 +944,13 @@ export function invalidateInstallationScopedQueries(
 ): void {
   void queryClient.invalidateQueries({ queryKey: ["installations"] });
   void queryClient.invalidateQueries({ queryKey: ["stats"] });
-  void queryClient.invalidateQueries({ queryKey: ["messages", "list"] });
-  void queryClient.invalidateQueries({ queryKey: ["sessions", "list"] });
-  void queryClient.invalidateQueries({ queryKey: ["events", "list"] });
-  void queryClient.invalidateQueries({ queryKey: ["questions", "list"] });
+  // Whole prefixes, not just the lists: a rollover rejects queued messages and
+  // closes open sessions, and a detail view has no polling of its own, so an
+  // operator sitting on one would otherwise keep seeing the pre-rollover row.
+  void queryClient.invalidateQueries({ queryKey: ["messages"] });
+  void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+  void queryClient.invalidateQueries({ queryKey: ["events"] });
+  void queryClient.invalidateQueries({ queryKey: ["questions"] });
 }
 
 export function useCreateInstallation() {

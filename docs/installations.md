@@ -31,8 +31,9 @@ action. It is admin-only, runs in one transaction, and **deletes nothing**:
 
 1. Stamps `endedAt` and who ended it.
 2. Freezes the summary counters — calls, messages by status, recorded minutes,
-   question count, first/last activity — onto the row, so the history list
-   renders without re-aggregating the event table.
+   question count, and the first/last booth event (null if the era recorded
+   none) — onto the row, so the history list renders without re-aggregating the
+   event table.
 3. Closes call sessions the booth never ended (power cut, crash mid-call) with
    outcome `installation_ended`.
 4. Moves anything still in the moderation queue to a terminal state so the next

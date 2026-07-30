@@ -9,6 +9,7 @@
 
 import {
   INSTALLATION_SCOPE_ALL,
+  InstallationSummarySchema,
   type Installation as InstallationDto,
   type InstallationSummary,
 } from "@telephone-booth-operator/shared";
@@ -61,6 +62,12 @@ type InstallationRow = {
   createdAt: Date;
 };
 
+const parseSummary = (raw: unknown): InstallationSummary | null => {
+  if (raw === null || raw === undefined) return null;
+  const parsed = InstallationSummarySchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+};
+
 export const serializeInstallation = (row: InstallationRow): InstallationDto => ({
   id: row.id,
   name: row.name,
@@ -69,10 +76,10 @@ export const serializeInstallation = (row: InstallationRow): InstallationDto => 
   startedAt: row.startedAt.toISOString(),
   endedAt: row.endedAt ? row.endedAt.toISOString() : null,
   endedById: row.endedById,
-  // Stored as an opaque JSON column; it is written by `computeSummary` below
-  // and only ever read back for display, so we pass it through as-is rather
-  // than failing a whole list request on one malformed legacy row.
-  summary: (row.summary as InstallationSummary | null) ?? null,
+  // Stored as an opaque JSON column, and an imported archive can carry anything
+  // at all in it. Parse rather than cast: one malformed row should render as a
+  // summary-less era, not make the whole list fail the client's own schema.
+  summary: parseSummary(row.summary),
   createdAt: row.createdAt.toISOString(),
   isActive: row.endedAt === null,
 });

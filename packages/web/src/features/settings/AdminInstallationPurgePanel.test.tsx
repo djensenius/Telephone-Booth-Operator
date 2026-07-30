@@ -99,7 +99,9 @@ describe("AdminInstallationPurgePanel", () => {
     const { container } = renderPanel();
 
     const select = await screen.findByLabelText("Installation");
-    await screen.findByRole("option", { name: "Spring 2026 residency" });
+    // Names are not unique, so the option is labelled with the era's start date
+    // and the head of its id as well.
+    await screen.findByRole("option", { name: /Spring 2026 residency — started .+ \(/ });
     // Active installation is never offered.
     expect(screen.queryByRole("option", { name: "Live era" })).toBeNull();
     fireEvent.change(select, { target: { value: endedId } });
@@ -132,7 +134,9 @@ describe("AdminInstallationPurgePanel", () => {
     renderPanel();
 
     const select = await screen.findByLabelText("Installation");
-    await screen.findByRole("option", { name: "Spring 2026 residency" });
+    // Names are not unique, so the option is labelled with the era's start date
+    // and the head of its id as well.
+    await screen.findByRole("option", { name: /Spring 2026 residency — started .+ \(/ });
     fireEvent.change(select, { target: { value: endedId } });
     fireEvent.click(screen.getByRole("button", { name: "Download archive (required)" }));
     await waitFor(() =>
@@ -163,7 +167,9 @@ describe("AdminInstallationPurgePanel", () => {
     renderPanel();
 
     const select = await screen.findByLabelText("Installation");
-    await screen.findByRole("option", { name: "Spring 2026 residency" });
+    // Names are not unique, so the option is labelled with the era's start date
+    // and the head of its id as well.
+    await screen.findByRole("option", { name: /Spring 2026 residency — started .+ \(/ });
     fireEvent.change(select, { target: { value: endedId } });
     fireEvent.click(screen.getByRole("button", { name: "Download archive (required)" }));
     await waitFor(() =>
