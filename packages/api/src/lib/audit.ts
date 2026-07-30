@@ -70,6 +70,8 @@ const MAX_METADATA_STRING_LENGTH = 2000;
 const truncate = (value: string, max: number): string =>
   value.length <= max ? value : `${value.slice(0, max - 1)}…`;
 
+const warnedFlags = new Set<string>();
+
 const TRUE_VALUES: ReadonlySet<string> = new Set(["1", "true", "yes", "on"]);
 const FALSE_VALUES: ReadonlySet<string> = new Set(["0", "false", "no", "off"]);
 
@@ -81,7 +83,12 @@ const flag = (name: string, fallback: boolean): boolean => {
   if (raw === undefined || raw === "") return fallback;
   if (TRUE_VALUES.has(raw)) return true;
   if (FALSE_VALUES.has(raw)) return false;
-  log.warn({ event: "audit.invalid_flag", flag: name, value: raw, using: fallback });
+  // One misconfiguration must not flood the logs at request rate.
+  const seen = `${name}=${raw}`;
+  if (!warnedFlags.has(seen)) {
+    warnedFlags.add(seen);
+    log.warn({ event: "audit.invalid_flag", flag: name, value: raw, using: fallback });
+  }
   return fallback;
 };
 
@@ -185,6 +192,7 @@ const anonBuckets = new Map<string, AnonBucket>();
 /** Test seam: the quota is process-wide state. */
 export const resetAuditThrottleForTests = (): void => {
   anonBuckets.clear();
+  warnedFlags.clear();
 };
 
 const dropExpired = (now: number): void => {

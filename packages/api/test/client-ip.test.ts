@@ -31,6 +31,10 @@ describe("matchesProxyRule", () => {
     expect(matchesProxyRule("10.0.0.1", "not-an-address")).toBe(false);
     expect(matchesProxyRule("999.0.0.1", "10.0.0.0/8")).toBe(false);
     expect(matchesProxyRule("10.0.0.1", "10.0.0.0/64")).toBe(false);
+    // `::` stands for at least one omitted group, so a full eight groups
+    // alongside it is malformed and must not parse as a real address.
+    expect(matchesProxyRule("2001:db8:0:0:0:0:0:1::", "2001:db8::/32")).toBe(false);
+    expect(matchesProxyRule("2001:db8::1", "2001:db8:0:0:0:0:0:1::/32")).toBe(false);
   });
 
   // docs/azure-deployment.md ships TRUSTED_PROXIES=azure-container-apps.

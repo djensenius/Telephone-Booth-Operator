@@ -83,6 +83,9 @@ const toBytes = (address: string): Uint8Array | null => {
   const right = tail === undefined ? [] : parse(tail);
   if (!left || !right) return null;
   if (tail === undefined && left.length !== 16) return null;
+  // `::` stands for at least one omitted group, so a compressed form that
+  // already spells out all sixteen bytes is malformed, not merely redundant.
+  if (tail !== undefined && left.length + right.length >= 16) return null;
   if (left.length + right.length > 16) return null;
 
   const bytes = new Uint8Array(16);

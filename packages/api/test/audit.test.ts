@@ -31,6 +31,7 @@ vi.mock("../src/lib/require-api-token.js", () => ({
 import { createApp } from "../src/index.js";
 import { pruneAuditLogs } from "../src/lib/audit-pruner.js";
 import { resetAuditThrottleForTests, sanitizeMetadata } from "../src/lib/audit.js";
+import { escapeLikePrefix } from "../src/routes/audit.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { fakeBlobs, resetFakeAzure } from "./support/fake-azure.js";
 import { fakeDb, resetFakeDb, seedFile, seedMessage, store } from "./support/fake-db.js";
@@ -57,6 +58,17 @@ const auditFor = (action: string) => store.auditLogs.filter((row) => row.action 
 // conninfo helper, which is how the API learns the TCP peer address.
 const fromPeer = (remoteAddress: string) => ({
   incoming: { socket: { remoteAddress, remotePort: 51234, remoteFamily: "IPv4" } },
+});
+
+describe("audit action prefix escaping", () => {
+  it("escapes the characters SQL LIKE would otherwise treat as wildcards", () => {
+    // The fake database matches with String.prototype.startsWith, so the SQL
+    // semantics have to be asserted on the escaping itself.
+    expect(escapeLikePrefix("%")).toBe("\\%");
+    expect(escapeLikePrefix("auth.log_n")).toBe("auth.log\\_n");
+    expect(escapeLikePrefix("a\\b")).toBe("a\\\\b");
+    expect(escapeLikePrefix("message.approve")).toBe("message.approve");
+  });
 });
 
 describe("audit metadata bounds", () => {

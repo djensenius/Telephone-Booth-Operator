@@ -53,7 +53,7 @@ export const auditRouter = new Hono<{ Variables: AuthVariables }>();
 // Action names are literal, so a caller filtering on `auth.log_n` must not
 // silently match everything with that shape. Postgres treats a backslash as
 // the escape character by default, and the value stays a bound parameter.
-const escapeLikePrefix = (value: string): string => value.replace(/[\\%_]/g, "\\$&");
+export const escapeLikePrefix = (value: string): string => value.replace(/[\\%_]/g, "\\$&");
 
 auditRouter.get("/", requireAdmin(), zValidator("query", listQuerySchema), async (c) => {
   const { action, actorType, actorUserId, targetType, targetId, ip, since, until, cursor, limit } =
