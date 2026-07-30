@@ -13,6 +13,7 @@
 //     legacy `received` messages that have no successful transcription, which
 //     covers server restarts mid-flight.
 
+import type { ModerationRecommendation } from "@telephone-booth-operator/shared";
 import { generateSasUrl } from "../azure-blob.js";
 import { broadcastWork, wsBroadcaster } from "../broadcaster.js";
 import { db } from "../db.js";
@@ -600,6 +601,141 @@ export const recordTranscriptionResult = async (
     transcriptionId,
   });
   return { outcome: "recorded", transcriptionId };
+};
+
+export interface RecordModerationResultOptions {
+  readonly messageId: string;
+  readonly transcriptionId?: string | null;
+  readonly flagged: boolean;
+  readonly recommendation: ModerationRecommendation;
+  readonly maxScore: number;
+  readonly categories?: Record<string, number> | null;
+  readonly reasonSummary?: string | null;
+  readonly model?: string | null;
+  // Provider label to stamp on the row. The worker callback leaves the
+  // solicited row's own provider in place; the operator submit route records
+  // "on_device" so the UI can tell a locally computed verdict from an
+  // upstream one.
+  readonly provider?: string;
+  readonly requestedByUserId?: string | null;
+  // What to do when there is no pending row to finalize. Worker callbacks are
+  // solicited — `runModeration` always creates the pending row first — so a
+  // callback without one is stale and is dropped. An operator device
+  // volunteering a verdict out of band has no pending row by definition, so it
+  // records a new succeeded one instead.
+  readonly createWhenMissing: boolean;
+}
+
+export type RecordModerationResultOutcome =
+  | { outcome: "not_found" }
+  | { outcome: "transcription_not_found" }
+  | { outcome: "unchanged"; moderationId: string | null }
+  | { outcome: "recorded"; moderationId: string };
+
+// Record a moderation verdict produced outside the in-process pipeline. Shared
+// by the worker push-back callback (`POST /v1/worker/messages/:id/moderation`)
+// and the operator submit route (`POST /v1/messages/:id/moderation`).
+//
+// The verdict is always ADVISORY: it surfaces the message for review
+// (`received` → `pending`) but never decides it. Only
+// `POST /v1/messages/:id/decision` does that.
+export const recordModerationResult = async (
+  opts: RecordModerationResultOptions,
+): Promise<RecordModerationResultOutcome> => {
+  const message = await db.message.findUnique({
+    where: { id: opts.messageId },
+    select: { id: true },
+  });
+  if (!message) return { outcome: "not_found" };
+
+  if (opts.transcriptionId) {
+    const transcription = await db.transcription.findUnique({
+      where: { id: opts.transcriptionId },
+      select: { messageId: true },
+    });
+    if (!transcription || transcription.messageId !== opts.messageId) {
+      return { outcome: "transcription_not_found" };
+    }
+  }
+
+  const pending = await db.moderation.findFirst({
+    where: {
+      messageId: opts.messageId,
+      ...(opts.transcriptionId ? { transcriptionId: opts.transcriptionId } : {}),
+      status: "pending",
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  const now = new Date();
+  let moderationId: string;
+  if (pending) {
+    const startedAt = pending.createdAt;
+    // Guard: only a still-pending row may be finalized, so a duplicate or
+    // stale callback cannot downgrade a finalized verdict.
+    const updated = await db.moderation.updateMany({
+      where: { id: pending.id, status: "pending" },
+      data: {
+        status: "succeeded",
+        flagged: opts.flagged,
+        recommendation: opts.recommendation,
+        maxScore: opts.maxScore,
+        categories: opts.categories ?? {},
+        reasonSummary: opts.reasonSummary ?? null,
+        model: opts.model ?? pending.model,
+        ...(opts.provider ? { provider: opts.provider } : {}),
+        latencyMs: now.getTime() - startedAt.getTime(),
+        completedAt: now,
+        ...(opts.requestedByUserId != null ? { requestedById: opts.requestedByUserId } : {}),
+      },
+    });
+    if (updated.count === 0) return { outcome: "unchanged", moderationId: pending.id };
+    moderationId = pending.id;
+  } else if (opts.createWhenMissing) {
+    const latest = await db.moderation.findFirst({
+      where: { messageId: opts.messageId },
+      orderBy: { createdAt: "desc" },
+    });
+    // A retry resends the same verdict from the same submitter. The table is
+    // append-only, so swallow an exact redelivery rather than growing a run of
+    // identical rows; anything that differs is a new attempt.
+    if (
+      latest &&
+      latest.status === "succeeded" &&
+      (latest.transcriptionId ?? null) === (opts.transcriptionId ?? null) &&
+      latest.flagged === opts.flagged &&
+      latest.recommendation === opts.recommendation &&
+      latest.maxScore === opts.maxScore &&
+      (latest.reasonSummary ?? null) === (opts.reasonSummary ?? null) &&
+      (latest.model ?? null) === (opts.model ?? null) &&
+      (latest.requestedById ?? null) === (opts.requestedByUserId ?? null)
+    ) {
+      return { outcome: "unchanged", moderationId: latest.id };
+    }
+    // The client owns the latency here, so we do not invent one.
+    const created = await db.moderation.create({
+      data: {
+        messageId: opts.messageId,
+        transcriptionId: opts.transcriptionId ?? null,
+        provider: opts.provider ?? "push",
+        model: opts.model ?? null,
+        status: "succeeded",
+        flagged: opts.flagged,
+        recommendation: opts.recommendation,
+        maxScore: opts.maxScore,
+        categories: opts.categories ?? {},
+        reasonSummary: opts.reasonSummary ?? null,
+        completedAt: now,
+        requestedById: opts.requestedByUserId ?? null,
+      },
+    });
+    moderationId = created.id;
+  } else {
+    return { outcome: "unchanged", moderationId: null };
+  }
+
+  await advanceMessageAfterModeration(opts.messageId);
+  await broadcastMessage(opts.messageId);
+  return { outcome: "recorded", moderationId };
 };
 
 export interface RunModerationOptions {

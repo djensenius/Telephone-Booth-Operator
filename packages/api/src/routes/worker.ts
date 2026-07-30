@@ -18,7 +18,7 @@ import { z } from "zod";
 import { recordAudit } from "../lib/audit.js";
 import { db } from "../lib/db.js";
 import {
-  advanceMessageAfterModeration,
+  recordModerationResult,
   recordTranscriptionResult,
   runModeration,
 } from "../lib/ai/pipeline.js";
@@ -248,43 +248,23 @@ workerRouter.post(
         maxScore: data.maxScore,
       },
     });
-    const message = await db.message.findUnique({ where: { id }, select: { id: true } });
-    if (!message) return c.json({ error: "not_found" }, 404);
-
-    const pending = data.transcriptionId
-      ? await db.moderation.findFirst({
-          where: { messageId: id, transcriptionId: data.transcriptionId, status: "pending" },
-          orderBy: { createdAt: "desc" },
-        })
-      : await db.moderation.findFirst({
-          where: { messageId: id, status: "pending" },
-          orderBy: { createdAt: "desc" },
-        });
-    const now = new Date();
-    if (pending) {
-      const startedAt = pending.createdAt;
-      const updated = await db.moderation.updateMany({
-        where: { id: pending.id, status: "pending" },
-        data: {
-          status: "succeeded",
-          flagged: data.flagged,
-          recommendation: data.recommendation,
-          maxScore: data.maxScore,
-          categories: data.categories ?? {},
-          reasonSummary: data.reasonSummary ?? null,
-          model: data.model ?? pending.model,
-          latencyMs: now.getTime() - startedAt.getTime(),
-          completedAt: now,
-        },
-      });
-      if (updated.count === 0) return c.json({ ok: true });
-    } else {
-      return c.json({ ok: true });
+    const result = await recordModerationResult({
+      messageId: id,
+      transcriptionId: data.transcriptionId ?? null,
+      flagged: data.flagged,
+      recommendation: data.recommendation,
+      maxScore: data.maxScore,
+      categories: data.categories ?? null,
+      reasonSummary: data.reasonSummary ?? null,
+      model: data.model ?? null,
+      // Worker moderation is solicited: `runModeration` creates the pending
+      // row before emitting the `work` event, so a callback with nothing
+      // pending is stale and is dropped rather than resurrected.
+      createWhenMissing: false,
+    });
+    if (result.outcome === "not_found" || result.outcome === "transcription_not_found") {
+      return c.json({ error: "not_found" }, 404);
     }
-    // Advisory only: record the suggestion and surface the message for a human
-    // decision. Never auto-approve / auto-reject.
-    await advanceMessageAfterModeration(id);
-    await broadcastMessageById(id);
     return c.json({ ok: true });
   },
 );

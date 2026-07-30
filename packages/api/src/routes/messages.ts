@@ -4,6 +4,7 @@ import {
   MessageCreateSchema,
   MessageDecisionSchema,
   MessageStatusSchema,
+  ModerationSubmitSchema,
   TranscriptionSubmitSchema,
   TranslationSubmitSchema,
 } from "@telephone-booth-operator/shared";
@@ -13,6 +14,7 @@ import { resolveAiConfig } from "../lib/ai/config.js";
 import { recordAudit } from "../lib/audit.js";
 import {
   kickPipelineForMessage,
+  recordModerationResult,
   recordTranscriptionResult,
   runModeration,
   runTranscription,
@@ -333,6 +335,61 @@ messagesRouter.post(
     const row = await db.transcription.findUnique({ where: { id: result.transcriptionId } });
     if (!row) return c.json({ error: "not_found" }, 404);
     return c.json(serializeTranscription(row), 202);
+  },
+);
+
+// Operator-submitted moderation verdict: a logged-in operator's device (e.g.
+// the iOS review app running Apple Intelligence) computed the verdict locally
+// and records it here, rather than asking the server to re-run moderation
+// through the configured upstream via `/moderate`. Mirrors the worker
+// push-back semantics — a pending row is finalized — but attributes the row to
+// the submitting operator and records a new succeeded row when nothing is
+// pending, since an out-of-band verdict has no pending row to claim.
+//
+// Advisory only, exactly like the worker path: the verdict never changes the
+// message's status beyond surfacing it for review. `POST /:id/decision`
+// remains the only thing that decides a message.
+messagesRouter.post(
+  "/:id/moderation",
+  zValidator("param", idParamSchema),
+  zValidator("json", ModerationSubmitSchema),
+  async (c) => {
+    const { id } = c.req.valid("param");
+    const data = c.req.valid("json");
+    recordAudit(c, {
+      action: "message.moderation.submit",
+      targetType: "message",
+      targetId: id,
+      metadata: {
+        transcriptionId: data.transcriptionId ?? null,
+        model: data.model ?? null,
+        flagged: data.flagged,
+        recommendation: data.recommendation,
+        maxScore: data.maxScore,
+      },
+    });
+    const user = c.get("user") as { id: string } | undefined;
+    const result = await recordModerationResult({
+      messageId: id,
+      transcriptionId: data.transcriptionId ?? null,
+      flagged: data.flagged,
+      recommendation: data.recommendation,
+      maxScore: data.maxScore,
+      categories: data.categories ?? null,
+      reasonSummary: data.reasonSummary ?? null,
+      model: data.model ?? null,
+      provider: "on_device",
+      requestedByUserId: user?.id ?? null,
+      createWhenMissing: true,
+    });
+    if (result.outcome === "not_found") return c.json({ error: "not_found" }, 404);
+    if (result.outcome === "transcription_not_found") {
+      return c.json({ error: "transcription_not_found" }, 404);
+    }
+    if (result.moderationId === null) return c.json({ error: "not_found" }, 404);
+    const row = await db.moderation.findUnique({ where: { id: result.moderationId } });
+    if (!row) return c.json({ error: "not_found" }, 404);
+    return c.json(serializeModeration(row), 202);
   },
 );
 
