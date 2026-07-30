@@ -42,10 +42,12 @@ request from a single Hono middleware (`packages/api/src/lib/audit.ts`).
 - **Never fails the request.** A failed insert is logged as
   `audit.write_failed` and the original response is returned unchanged.
   Observability must not become an availability risk.
-- **Telemetry excluded by default.** `PUT /v1/status`, `PUT /v1/system`, and
-  `POST /v1/events` are writes, but they are booth heartbeats rather than human
-  decisions. They are matched on route pattern and skipped unless
-  `AUDIT_LOG_TELEMETRY=true`.
+- **Successful telemetry excluded by default.** `PUT /v1/status`,
+  `PUT /v1/system`, and `POST /v1/events` are writes, but they are booth
+  heartbeats rather than human decisions. They are matched on route pattern and
+  skipped unless `AUDIT_LOG_TELEMETRY=true`. The exclusion is about volume, so
+  it applies only to heartbeats that succeeded: one the API rejected is
+  recorded like any other denied write.
 - **Retention.** `AUDIT_LOG_RETENTION_DAYS` (default 365, `0` = forever) is
   enforced by a background pruner, mirroring the existing snapshot pruner.
 - **Read access is admin-only,** through `GET /v1/audit-logs` with prefix

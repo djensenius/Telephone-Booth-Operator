@@ -95,7 +95,8 @@ export function AuditScreen(): JSX.Element {
       <h1>Audit log</h1>
       <p>
         Every write action against the operator API, with the operator or token that made it, the
-        address it came from, and when. Booth telemetry heartbeats are excluded.
+        address it came from, and when. Successful booth telemetry heartbeats are excluded; rejected
+        ones are kept.
       </p>
 
       <div className="audit-screen__filters" role="group" aria-label="Audit log filters">
