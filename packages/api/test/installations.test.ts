@@ -441,6 +441,47 @@ describe("installations", () => {
       expect(store.messages.get(slot.id)?.status).toBe("pending");
     });
 
+    // The booth retries a completion it did not hear the answer to. If the
+    // first one landed and the era has since ended, the retry must stay the
+    // no-op it always was rather than opening a blank era on its way to an
+    // update that matches nothing.
+    it("does not open an era for a completion that already landed", async () => {
+      const app = createApp();
+      const sha256 = "3c".repeat(32);
+      const initiated = await app.request("/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ durationMs: 3000, sha256 }),
+      });
+      const slot = (await initiated.json()) as { id: string; blobName: string };
+      fakeBlobs.set(slot.blobName, {
+        exists: true,
+        sizeBytes: 4242,
+        contentType: "audio/flac",
+        sha256,
+      });
+
+      const first = await app.request(`/v1/messages/${slot.id}/complete`, {
+        method: "POST",
+        headers: phoneHeaders,
+      });
+      expect(first.status, await first.clone().text()).toBe(200);
+
+      expect((await endDefault(app)).status).toBe(200);
+      resetInstallationCacheForTests(DEFAULT_INSTALLATION_ID);
+      const before = store.installations.size;
+
+      const retry = await app.request(`/v1/messages/${slot.id}/complete`, {
+        method: "POST",
+        headers: phoneHeaders,
+      });
+      expect(retry.status, await retry.clone().text()).toBe(200);
+      expect(store.installations.size).toBe(before);
+      expect([...store.installations.values()].filter((row) => row.endedAt === null)).toHaveLength(
+        0,
+      );
+    });
+
     // An admin write has no reason to tolerate the rollover race the booth
     // does: a prompt created against an era that has since been closed out
     // would sit live inside a frozen one, invisible to the close-out that

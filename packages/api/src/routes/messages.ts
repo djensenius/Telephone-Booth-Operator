@@ -324,17 +324,23 @@ messagesRouter.post(
     // The recording's own era is only a hint: it may have ended while the
     // upload was in flight, in which case another is resolved — or opened —
     // outside the transaction and the promotion retried.
-    const { count } = await runWithOpenEra(message.installationId ?? undefined, async (tx, era) => {
-      const refiled = era === message.installationId ? null : era;
-      return tx.message.updateMany({
-        where: { id, status: "uploading" },
-        data: {
-          status: "pending",
-          receivedAt,
-          ...(refiled ? { installationId: refiled } : {}),
-        },
-      });
-    });
+    // A retry of a completion that already landed must stay a no-op. Resolving
+    // an era for it would open a blank one on the way to an update that
+    // matches nothing, so the already-promoted case never gets that far.
+    const alreadyLanded = message.status !== "uploading";
+    const { count } = alreadyLanded
+      ? { count: 0 }
+      : await runWithOpenEra(message.installationId ?? undefined, async (tx, era) => {
+          const refiled = era === message.installationId ? null : era;
+          return tx.message.updateMany({
+            where: { id, status: "uploading" },
+            data: {
+              status: "pending",
+              receivedAt,
+              ...(refiled ? { installationId: refiled } : {}),
+            },
+          });
+        });
 
     if (count === 0) {
       const current = await db.message.findUnique({ where: { id } });

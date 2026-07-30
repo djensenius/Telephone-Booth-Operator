@@ -55,10 +55,16 @@ export function StatusScreen(): JSX.Element {
 
   const latestStatusRef = useRef<BoothStatus | null>(null);
   useEffect(() => {
-    setLiveStatus(statusQuery.data ?? null);
-    latestStatusRef.current = statusQuery.data ?? null;
-    if (statusQuery.data?.updatedAt) {
-      setLastStatusAt(new Date(statusQuery.data.updatedAt));
+    const polled = statusQuery.data ?? null;
+    // A poll can be in flight while the socket connects and resolve after a
+    // newer frame has already landed. Rewinding the reference to that older
+    // snapshot would let the next out-of-order frame through, so the poll is
+    // held to the same ordering rule as the socket.
+    if (polled !== null && !isNewerThan(polled, latestStatusRef.current)) return;
+    setLiveStatus(polled);
+    latestStatusRef.current = polled;
+    if (polled?.updatedAt) {
+      setLastStatusAt(new Date(polled.updatedAt));
     }
   }, [statusQuery.data, setLastStatusAt]);
 

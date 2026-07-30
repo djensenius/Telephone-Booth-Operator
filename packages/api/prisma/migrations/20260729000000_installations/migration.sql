@@ -79,6 +79,9 @@ CREATE INDEX "Question_installationId_status_createdAt_idx" ON "Question"("insta
 CREATE INDEX "Message_installationId_status_createdAt_idx" ON "Message"("installationId", "status", "createdAt");
 CREATE INDEX "CallSession_installationId_startedAt_idx" ON "CallSession"("installationId", "startedAt");
 CREATE INDEX "BoothEvent_installationId_occurredAt_idx" ON "BoothEvent"("installationId", "occurredAt");
+-- The events list scopes by installation but orders and paginates by
+-- (receivedAt, id), and the console polls it every ten seconds.
+CREATE INDEX "BoothEvent_installationId_receivedAt_id_idx" ON "BoothEvent"("installationId", "receivedAt", "id");
 CREATE INDEX "BoothStatusSnapshot_installationId_updatedAt_idx" ON "BoothStatusSnapshot"("installationId", "updatedAt");
 
 -- AddForeignKey
@@ -110,13 +113,40 @@ CREATE UNIQUE INDEX "Question_installationId_prompt_key" ON "Question"("installa
 -- backstop: the application always supplies the column, and when it does the
 -- trigger does nothing.
 CREATE OR REPLACE FUNCTION "installation_default_scope"() RETURNS trigger AS $$
+DECLARE
+    era uuid;
 BEGIN
-    IF NEW."installationId" IS NULL THEN
-        NEW."installationId" := (
-            SELECT "id" FROM "Installation" WHERE "endedAt" IS NULL
-            ORDER BY "startedAt" DESC LIMIT 1
-        );
+    IF NEW."installationId" IS NOT NULL THEN
+        RETURN NEW;
     END IF;
+
+    SELECT "id" INTO era FROM "Installation" WHERE "endedAt" IS NULL
+        ORDER BY "startedAt" DESC LIMIT 1;
+
+    -- A new-revision replica can end the only open era while an old one is
+    -- still writing, so "none open" is reachable during a rollout. Open one
+    -- the same way the API does rather than let the row fall outside every
+    -- scoped read. ON CONFLICT covers the partial unique index that allows
+    -- only one open era: the loser re-reads the winner's row.
+    IF era IS NULL THEN
+        INSERT INTO "Installation" ("id", "name", "notes", "startedAt", "createdAt")
+        VALUES (
+            gen_random_uuid(),
+            'Installation ' || ((SELECT COUNT(*) FROM "Installation") + 1)::text,
+            'Opened automatically for a write that arrived with no installation active.',
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+        )
+        ON CONFLICT DO NOTHING
+        RETURNING "id" INTO era;
+
+        IF era IS NULL THEN
+            SELECT "id" INTO era FROM "Installation" WHERE "endedAt" IS NULL
+                ORDER BY "startedAt" DESC LIMIT 1;
+        END IF;
+    END IF;
+
+    NEW."installationId" := era;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;

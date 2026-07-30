@@ -226,6 +226,9 @@ model BoothEvent {
   @@index([sessionId])
   @@index([boothId, receivedAt, id])
   @@index([installationId, occurredAt])
+  // The events list is scoped by installation but ordered and paginated by
+  // (receivedAt, id), and the console polls it every ten seconds.
+  @@index([installationId, receivedAt, id])
 }
 
 // Derived from BoothEvent.call_started / call_ended pairs. The booth

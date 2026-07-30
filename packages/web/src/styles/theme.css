@@ -1319,10 +1319,17 @@ textarea:focus-visible,
   box-shadow: 0 12px 28px color-mix(in srgb, var(--accent-red) 24%, transparent);
 }
 
+/* This list used to end in a dangling comma, so it swallowed whatever rule
+   followed it instead of standing on its own. It matches the disabled styling
+   the other button groups already use. */
 .feature-primary-button:disabled,
 .feature-toolbar button:disabled,
 .feature-table button:disabled,
-.feature-dialog button:disabled,
+.feature-dialog button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
 /* Stands in for the actions an ended era does not offer, so the row does not
    silently lose its buttons with nothing said. */
 .message-card__frozen {
