@@ -632,6 +632,23 @@ export type RecordModerationResultOutcome =
   | { outcome: "unchanged"; moderationId: string | null }
   | { outcome: "recorded"; moderationId: string };
 
+// Compare a stored `categories` JSON blob with a submitted map, independent of
+// key order. Used only for the redelivery check: a corrected category score is
+// a new verdict, not a duplicate.
+const categoriesMatch = (
+  stored: unknown,
+  submitted: Record<string, number> | null | undefined,
+): boolean => {
+  const next = submitted ?? {};
+  const previous =
+    stored !== null && typeof stored === "object" && !Array.isArray(stored)
+      ? (stored as Record<string, unknown>)
+      : {};
+  const nextKeys = Object.keys(next);
+  if (nextKeys.length !== Object.keys(previous).length) return false;
+  return nextKeys.every((key) => previous[key] === next[key]);
+};
+
 // Record a moderation verdict produced outside the in-process pipeline. Shared
 // by the worker push-back callback (`POST /v1/worker/messages/:id/moderation`)
 // and the operator submit route (`POST /v1/messages/:id/moderation`).
@@ -667,7 +684,8 @@ export const recordModerationResult = async (
     orderBy: { createdAt: "desc" },
   });
   const now = new Date();
-  let moderationId: string;
+  const provider = opts.provider ?? null;
+  let moderationId: string | null = null;
   if (pending) {
     const startedAt = pending.createdAt;
     // Guard: only a still-pending row may be finalized, so a duplicate or
@@ -681,30 +699,44 @@ export const recordModerationResult = async (
         maxScore: opts.maxScore,
         categories: opts.categories ?? {},
         reasonSummary: opts.reasonSummary ?? null,
-        model: opts.model ?? pending.model,
-        ...(opts.provider ? { provider: opts.provider } : {}),
+        // A submission that restamps the provider owns the whole attribution:
+        // inheriting the solicited row's model would credit an upstream model
+        // for a verdict it did not produce. Only a same-provider callback
+        // (the worker) falls back to the pending row's model.
+        model: opts.model ?? (provider === null ? pending.model : null),
+        ...(provider !== null ? { provider } : {}),
         latencyMs: now.getTime() - startedAt.getTime(),
         completedAt: now,
         ...(opts.requestedByUserId != null ? { requestedById: opts.requestedByUserId } : {}),
       },
     });
-    if (updated.count === 0) return { outcome: "unchanged", moderationId: pending.id };
-    moderationId = pending.id;
-  } else if (opts.createWhenMissing) {
+    if (updated.count > 0) moderationId = pending.id;
+    // Lost the compare-and-set: something else finalized the row first. A
+    // solicited callback is stale and stops here; a volunteered verdict falls
+    // through to the append path below, which either recognizes the winner as
+    // its own redelivery or records the difference.
+    else if (!opts.createWhenMissing) return { outcome: "unchanged", moderationId: pending.id };
+  }
+
+  if (moderationId === null) {
+    if (!opts.createWhenMissing) return { outcome: "unchanged", moderationId: null };
     const latest = await db.moderation.findFirst({
       where: { messageId: opts.messageId },
       orderBy: { createdAt: "desc" },
     });
     // A retry resends the same verdict from the same submitter. The table is
     // append-only, so swallow an exact redelivery rather than growing a run of
-    // identical rows; anything that differs is a new attempt.
+    // identical rows; anything that differs — including a corrected category
+    // score — is a new attempt.
     if (
       latest &&
       latest.status === "succeeded" &&
       (latest.transcriptionId ?? null) === (opts.transcriptionId ?? null) &&
+      latest.provider === (provider ?? "push") &&
       latest.flagged === opts.flagged &&
       latest.recommendation === opts.recommendation &&
       latest.maxScore === opts.maxScore &&
+      categoriesMatch(latest.categories, opts.categories) &&
       (latest.reasonSummary ?? null) === (opts.reasonSummary ?? null) &&
       (latest.model ?? null) === (opts.model ?? null) &&
       (latest.requestedById ?? null) === (opts.requestedByUserId ?? null)
@@ -716,7 +748,7 @@ export const recordModerationResult = async (
       data: {
         messageId: opts.messageId,
         transcriptionId: opts.transcriptionId ?? null,
-        provider: opts.provider ?? "push",
+        provider: provider ?? "push",
         model: opts.model ?? null,
         status: "succeeded",
         flagged: opts.flagged,
@@ -729,8 +761,6 @@ export const recordModerationResult = async (
       },
     });
     moderationId = created.id;
-  } else {
-    return { outcome: "unchanged", moderationId: null };
   }
 
   await advanceMessageAfterModeration(opts.messageId);
