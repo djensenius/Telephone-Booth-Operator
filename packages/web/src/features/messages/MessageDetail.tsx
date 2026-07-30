@@ -410,7 +410,7 @@ export function MessageDetail(): JSX.Element {
   // own), and questions are archived at rollover. `installationId=all` is the
   // documented escape hatch that guarantees the message's question is in the
   // response so the prompt resolves for historical messages.
-  const questions = useQuestionsList("all", { installationId: INSTALLATION_SCOPE_ALL });
+  const questions = useQuestionsList("any", { installationId: INSTALLATION_SCOPE_ALL });
   const transcriptions = useMessageTranscriptions(id);
   const retranscribe = useRetranscribeMessage();
   const remoderate = useRemoderateMessage();

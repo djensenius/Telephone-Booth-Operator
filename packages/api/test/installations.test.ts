@@ -338,6 +338,51 @@ describe("installations", () => {
     });
   });
 
+  describe("historical prompts", () => {
+    // The rollover archives an era's questions, and the list hides archived
+    // rows by default, so browsing an ended era would otherwise show messages
+    // with no prompt at all.
+    it("lists archived questions when asked for any status", async () => {
+      const app = createApp();
+      seedQuestion({ status: "active", prompt: "What did you lose?" });
+      expect((await endDefault(app)).status).toBe(200);
+
+      const hidden = await app.request(`/v1/questions?installationId=${DEFAULT_INSTALLATION_ID}`, {
+        headers: operatorHeaders(),
+      });
+      expect(((await hidden.json()) as { items: unknown[] }).items).toHaveLength(0);
+
+      const shown = await app.request(
+        `/v1/questions?status=any&installationId=${DEFAULT_INSTALLATION_ID}`,
+        { headers: operatorHeaders() },
+      );
+      expect(shown.status, await shown.clone().text()).toBe(200);
+      const items = ((await shown.json()) as { items: { prompt: string }[] }).items;
+      expect(items.map((row) => row.prompt)).toEqual(["What did you lose?"]);
+    });
+
+    // A straggler recording sits in the era that was open when it landed while
+    // its question stays with the era that issued it. Top questions must still
+    // name the prompt rather than calling it deleted.
+    it("names the prompt of a straggler message whose question is in another era", async () => {
+      const app = createApp();
+      const question = seedQuestion({ status: "active", prompt: "Straggler prompt" });
+      expect((await endDefault(app)).status).toBe(200);
+
+      const created = await app.request("/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ durationMs: 3000, sha256: "e".repeat(64), questionId: question.id }),
+      });
+      expect(created.status, await created.clone().text()).toBe(201);
+
+      const res = await app.request("/v1/stats/overview", { headers: operatorHeaders() });
+      expect(res.status, await res.clone().text()).toBe(200);
+      const body = (await res.json()) as { topQuestions: { prompt: string }[] };
+      expect(body.topQuestions.map((row) => row.prompt)).toEqual(["Straggler prompt"]);
+    });
+  });
+
   describe("concurrent adoption", () => {
     // Adoption is an update, not a create, so the single-active index does not
     // arbitrate it. Without a conditional claim both requests would return 201

@@ -2105,6 +2105,17 @@ const matchesWhere = (record: Record<string, unknown>, where: Record<string, unk
       if (matchesWhere(record, raw as Record<string, unknown>)) return false;
       continue;
     }
+    // `installation: { is: { … } }` — the era a row belongs to, resolved
+    // through `installationId`. The conditional session update depends on
+    // this, so the fake has to model it rather than ignore it.
+    if (key === "installation" && raw !== null && typeof raw === "object" && "is" in raw) {
+      const id = record.installationId;
+      const era = typeof id === "string" ? store.installations.get(id) : undefined;
+      if (!era) return false;
+      const inner = (raw as { is: Record<string, unknown> }).is;
+      if (!matchesWhere(era as unknown as Record<string, unknown>, inner)) return false;
+      continue;
+    }
     const value = record[key];
     if (raw === null) {
       if (value !== null && value !== undefined) return false;

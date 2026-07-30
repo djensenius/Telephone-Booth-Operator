@@ -257,7 +257,7 @@ export const questions = {
     params: {
       readonly cursor?: string;
       readonly limit?: number;
-      readonly status?: QuestionStatus;
+      readonly status?: QuestionStatus | "any";
       readonly installationId?: InstallationScope;
     } = {},
   ) =>
@@ -554,7 +554,7 @@ export const apiQueryKeys = {
   me: ["auth", "me"] as const,
   status: ["status", "current"] as const,
   statusHistory: ["status", "history"] as const,
-  questions: (filter?: QuestionStatus | "all", scope?: InstallationScope) =>
+  questions: (filter?: QuestionStatus | "all" | "any", scope?: InstallationScope) =>
     ["questions", "list", filter ?? "all", scope ?? null] as const,
   instructions: (filter?: InstructionStatus | "all") =>
     ["instructions", "list", filter ?? "all"] as const,
@@ -686,17 +686,20 @@ export function useStatusHistory(options?: { paused?: boolean }) {
 }
 
 export function useQuestionsList(
-  filter: QuestionStatus | "all" = "all",
+  filter: QuestionStatus | "all" | "any" = "all",
   options: { readonly installationId?: InstallationScope } = {},
 ) {
-  const statusFilter = QuestionStatusSchema.safeParse(filter).success
-    ? (filter as QuestionStatus)
-    : undefined;
+  const statusParam: QuestionStatus | "any" | undefined =
+    filter === "any"
+      ? "any"
+      : QuestionStatusSchema.safeParse(filter).success
+        ? (filter as QuestionStatus)
+        : undefined;
   return useQuery({
     queryKey: apiQueryKeys.questions(filter, options.installationId),
     queryFn: () =>
       questions.list({
-        ...(statusFilter === undefined ? {} : { status: statusFilter }),
+        ...(statusParam === undefined ? {} : { status: statusParam }),
         ...(options.installationId ? { installationId: options.installationId } : {}),
         limit: 100,
       }),

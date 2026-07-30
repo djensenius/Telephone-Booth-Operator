@@ -77,9 +77,9 @@ recording — is too high a price for a sub-second window on a counter.
 
 What is _not_ accepted is a straggler mutating an era after it was frozen. A
 `call_ended` for a session the rollover already closed does not take the update
-arm — the update is conditional in the database on the session not already
-carrying `installation_ended`, so a rollover committing between the check and
-the write is still refused, and booth events are tagged with the era of the session they belong to
+arm — the update is conditional in the database on the session's era still
+being open, so a rollover committing between the check and the write is still
+refused, and booth events are tagged with the era of the session they belong to
 rather than whichever era is open. An ended era therefore always agrees with
 its own drill-down.
 

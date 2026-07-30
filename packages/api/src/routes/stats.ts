@@ -408,7 +408,29 @@ const computeStatsOverview = async (
   const uploadFailureRate = uploadTotal > 0 ? uploadFailed / uploadTotal : null;
 
   // top questions
-  const questionsById = new Map(questions.map((q) => [q.id, q]));
+  //
+  // A straggler recording is filed in the era that was open when it landed
+  // while its question stays in the era that issued it, so resolving prompts
+  // from the scoped questions alone would label those "(deleted question)".
+  // Anything the scoped messages reference is looked up by id as well.
+  const referencedQuestionIds = [
+    ...new Set(
+      messages
+        .map((message) => message.questionId)
+        .filter((id): id is string => typeof id === "string"),
+    ),
+  ].filter((id) => !questions.some((question) => question.id === id));
+  const referenced =
+    referencedQuestionIds.length > 0
+      ? ((await db.question.findMany({
+          where: { id: { in: referencedQuestionIds } },
+        })) as unknown as Array<{
+          id: string;
+          prompt: string;
+          retiredAt: Date | null;
+        }>)
+      : [];
+  const questionsById = new Map([...questions, ...referenced].map((q) => [q.id, q]));
   const messageCounts = new Map<string, { count: number; lastUsedAt: Date | null }>();
   for (const message of messages) {
     if (!message.questionId) continue;

@@ -256,6 +256,44 @@ describe("GET /v1/events", () => {
   // The pre-flight "is this session frozen?" read happens before the write
   // transaction, so a rollover committing in between must still be refused —
   // this time by the database condition on the update itself.
+  // A session that ended normally before the rollover keeps its own outcome,
+  // so the guard cannot key on `installation_ended` alone: what makes it
+  // untouchable is that its era is closed.
+  it("refuses a replayed call_ended for a normally ended session in a closed era", async () => {
+    store.installations.get(DEFAULT_INSTALLATION_ID)!.endedAt = new Date("2026-01-01T00:00:00Z");
+    const settled = seedCallSession({
+      id: "11111111-1111-4111-8111-11111111000b",
+      bootId: "33333333-3333-4333-8333-33333333000b",
+      endedAt: new Date("2025-12-31T00:00:00Z"),
+      outcome: "recording_completed",
+      durationMs: 1000,
+      installationId: DEFAULT_INSTALLATION_ID,
+    });
+
+    const res = await createApp().request("/v1/events", {
+      method: "POST",
+      headers: { ...phoneHeaders, "content-type": "application/json" },
+      body: JSON.stringify({
+        events: [
+          {
+            eventId: "late-3",
+            boothId: "booth-1",
+            bootId: "33333333-3333-4333-8333-33333333000b",
+            type: "call_ended",
+            occurredAt: new Date("2026-02-01T00:00:00Z").toISOString(),
+            sessionId: settled.id,
+            payload: { outcome: "hangup_before_recording", duration_ms: 9999 },
+          },
+        ],
+      }),
+    });
+
+    expect(res.status, await res.clone().text()).toBe(200);
+    const after = store.callSessions.get(settled.id)!;
+    expect(after.outcome).toBe("recording_completed");
+    expect(after.durationMs).toBe(1000);
+  });
+
   it("refuses a straggler whose era closed after the frozen check", async () => {
     const stale = seedCallSession({
       id: "11111111-1111-4111-8111-11111111000a",

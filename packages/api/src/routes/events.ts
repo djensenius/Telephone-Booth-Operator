@@ -303,18 +303,27 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
 
       // The `frozen` check above reads before this transaction writes, so a
       // rollover committing in between would slip past it. The update is
-      // therefore also conditional in the database: a session the rollover
-      // closed carries `installation_ended`, and matching zero rows is the
-      // signal to leave the frozen era alone.
+      // therefore also conditional in the database: it only touches a session
+      // whose era is still open (and which the rollover has not already
+      // stamped), so a frozen era is safe however the timing falls.
       const updated = await tx.callSession.updateMany({
-        where: { id: init.id, NOT: { outcome: ROLLOVER_OUTCOME } },
+        where: {
+          id: init.id,
+          NOT: { outcome: ROLLOVER_OUTCOME },
+          OR: [{ installationId: null }, { installation: { is: { endedAt: null } } }],
+        },
         data: patch,
       });
       if (updated.count > 0) continue;
-      if ((await tx.callSession.count({ where: { id: init.id } })) > 0) continue;
 
-      await tx.callSession.create({
-        data: {
+      // Nothing matched: either the session is frozen, or it does not exist
+      // yet. An upsert with an empty update arm covers both without a
+      // check-then-create race — a concurrent retry that won the create is a
+      // no-op here rather than a unique violation rolling back the batch.
+      await tx.callSession.upsert({
+        where: { id: init.id },
+        update: {},
+        create: {
           id: init.id,
           boothId: init.boothId,
           bootId: init.bootId,

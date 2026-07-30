@@ -85,6 +85,11 @@ Copy-forward skips a prompt the new era already holds — prompts are unique per
 installation, and an adopted era can already contain questions the operator
 wrote before naming it.
 
+Because the rollover archives an era's questions, resolving the prompts of a
+historical message needs `GET /v1/questions?status=any` — the bare list hides
+archived rows. The console does this for you on the messages list and the
+message detail view.
+
 ## Reading history
 
 Every list and aggregate endpoint takes an optional `installationId`:

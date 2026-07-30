@@ -107,8 +107,16 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
         - name: status
           in: query
-          description: Filter to a single lifecycle state. Omit to list every non-archived question.
-          schema: { $ref: "#/components/schemas/QuestionStatus" }
+          description: |
+            Filter to a single lifecycle state. Omit to list every non-archived
+            question, or pass `any` to include archived ones — needed to resolve
+            the prompts of messages from an installation that has ended, whose
+            questions were archived by the rollover.
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/QuestionStatus"
+              - type: string
+                enum: [any]
         - name: installationId
           in: query
           description: |

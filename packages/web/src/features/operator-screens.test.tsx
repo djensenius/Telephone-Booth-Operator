@@ -741,7 +741,13 @@ describe("Messages feature", () => {
       http.get("http://localhost/v1/questions", ({ request }) => {
         questionsUrls.push(request.url);
         const url = new URL(request.url);
-        if (url.searchParams.get("installationId") === eraId) {
+        // The historical era's questions are archived at rollover, so the
+        // list handler mimics the real API: only return the question when
+        // BOTH the era scope AND status=any are supplied.
+        if (
+          url.searchParams.get("installationId") === eraId &&
+          url.searchParams.get("status") === "any"
+        ) {
           return HttpResponse.json({ items: [question], nextCursor: null });
         }
         return HttpResponse.json({ items: [], nextCursor: null });
@@ -749,15 +755,22 @@ describe("Messages feature", () => {
     );
     renderPath(`/messages?installationId=${eraId}`);
     expect(await screen.findByText("What did the city sound like today?")).toBeTruthy();
-    expect(questionsUrls.some((url) => url.includes(`installationId=${eraId}`))).toBe(true);
+    expect(
+      questionsUrls.some(
+        (url) => url.includes(`installationId=${eraId}`) && url.includes("status=any"),
+      ),
+    ).toBe(true);
   });
 
-  it("looks up the historical question with installationId=all on the detail view", async () => {
+  it("looks up the historical question with installationId=all and status=any on the detail view", async () => {
     server.use(
       http.get("http://localhost/v1/questions", ({ request }) => {
         questionsUrls.push(request.url);
         const url = new URL(request.url);
-        if (url.searchParams.get("installationId") === "all") {
+        if (
+          url.searchParams.get("installationId") === "all" &&
+          url.searchParams.get("status") === "any"
+        ) {
           return HttpResponse.json({ items: [question], nextCursor: null });
         }
         return HttpResponse.json({ items: [], nextCursor: null });
@@ -765,7 +778,9 @@ describe("Messages feature", () => {
     );
     renderPath(`/messages/${messageId}`);
     expect(await screen.findByText("What did the city sound like today?")).toBeTruthy();
-    expect(questionsUrls.some((url) => url.includes("installationId=all"))).toBe(true);
+    expect(
+      questionsUrls.some((url) => url.includes("installationId=all") && url.includes("status=any")),
+    ).toBe(true);
   });
 
   it("has no critical axe violations", async () => {

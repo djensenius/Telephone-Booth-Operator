@@ -19,7 +19,8 @@ import { requireAdmin, type AuthVariables } from "../lib/session.js";
 const listQuerySchema = z.object({
   cursor: z.guid().optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
-  status: QuestionStatusSchema.optional(),
+  // `any` includes archived questions; the bare default hides them.
+  status: z.union([QuestionStatusSchema, z.literal("any")]).optional(),
   installationId: InstallationScopeSchema.optional(),
 });
 
@@ -30,10 +31,11 @@ export const questionsRouter = new Hono<{ Variables: AuthVariables & ApiTokenVar
 questionsRouter.get("/", zValidator("query", listQuerySchema), async (c) => {
   const { cursor, limit, status, installationId } = c.req.valid("query");
   // Default management view hides archived questions but shows drafts; an
-  // explicit status filter overrides this.
+  // explicit status filter overrides this, and `any` drops the filter so a
+  // caller resolving prompts for historical messages can still find them.
   const where = {
     ...scopeWhere(await resolveInstallationScope(installationId)),
-    ...(status ? { status } : { status: { not: "archived" as const } }),
+    ...(status === "any" ? {} : status ? { status } : { status: { not: "archived" as const } }),
   };
   const questions = await db.question.findMany({
     where,
