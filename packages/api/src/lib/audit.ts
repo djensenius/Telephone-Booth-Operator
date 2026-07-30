@@ -179,9 +179,27 @@ export const sanitizeMetadata = (
 const ANON_WINDOW_MS = 60_000;
 const ANON_MAX_TRACKED_IPS = 5000;
 
+const DEFAULT_ANON_QUOTA = 20;
+
+// Parsed strictly: `0` disables the cap, so a typo that parses as a numeric
+// prefix must not be read as "unlimited".
 const anonQuota = (): number => {
-  const raw = Number.parseInt(process.env.AUDIT_LOG_ANON_LIMIT_PER_MINUTE ?? "", 10);
-  if (!Number.isFinite(raw) || raw < 0) return 20;
+  const trimmed = process.env.AUDIT_LOG_ANON_LIMIT_PER_MINUTE?.trim();
+  if (!trimmed) return DEFAULT_ANON_QUOTA;
+  const raw = Number(trimmed);
+  if (!Number.isSafeInteger(raw) || raw < 0) {
+    const seen = `AUDIT_LOG_ANON_LIMIT_PER_MINUTE=${trimmed}`;
+    if (!warnedFlags.has(seen)) {
+      warnedFlags.add(seen);
+      log.warn({
+        event: "audit.invalid_flag",
+        flag: "AUDIT_LOG_ANON_LIMIT_PER_MINUTE",
+        value: trimmed,
+        using: DEFAULT_ANON_QUOTA,
+      });
+    }
+    return DEFAULT_ANON_QUOTA;
+  }
   return raw;
 };
 

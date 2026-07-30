@@ -412,6 +412,23 @@ describe("audit log middleware", () => {
     expect(store.auditLogs[0]!.actorType).toBe("anonymous");
   });
 
+  it("keeps the default quota when the limit is a typo", async () => {
+    // "0oops" must not be read as 0, which means "no cap at all".
+    process.env.AUDIT_LOG_ANON_LIMIT_PER_MINUTE = "0oops";
+    const app = createApp();
+    const seen: number[] = [];
+    for (let i = 0; i < 22; i += 1) {
+      await app.request(
+        "/v1/messages/11111111-1111-4111-8111-111111111111/decision",
+        { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
+        { incoming: { socket: { remoteAddress: "203.0.113.44" } } },
+      );
+      seen.push(store.auditLogs.length);
+    }
+
+    expect(seen.at(-1)).toBe(20);
+  });
+
   it("keeps auditing when the enable flag is a typo", async () => {
     process.env.AUDIT_LOG_ENABLED = "treu";
     const app = createApp();

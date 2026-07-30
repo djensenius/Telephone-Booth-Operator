@@ -17,7 +17,13 @@ foreign key; `anonymous` means no usable credential was presented.
 
 Rejected writes from any caller the API did not recognize — no credential, or
 one it refused — are capped at `AUDIT_LOG_ANON_LIMIT_PER_MINUTE` rows per
-address per minute, so a loop against a real endpoint cannot fill the table. Anything over the cap is
+address per minute, so a loop against a real endpoint cannot fill the table.
+
+The counter lives in the API process, so the cap is **per instance**: an
+API scaled to three replicas admits up to three times the configured rate,
+and a restart clears the window. That is deliberate — the quota is a bound on
+table growth, not a rate limiter, and no shared state is worth adding to the
+write path of a trail that must never take the API down. Size it accordingly. Anything over the cap is
 counted, and the count appears as `suppressedSince` on the next recorded row
 for that address, so a flood is still visible. Sign-in failures are recorded
 by hand rather than by the middleware, and are held to the same cap.
