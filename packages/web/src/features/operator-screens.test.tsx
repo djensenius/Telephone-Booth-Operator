@@ -101,6 +101,7 @@ const token = {
 
 let createdQuestion = false;
 let lastQuestionsUrl = "";
+let questionsUrls: string[] = [];
 let activatedQuestionId = "";
 let deactivatedQuestionId = "";
 let deletedMessages: string[] = [];
@@ -108,6 +109,9 @@ let revokedToken = false;
 let lastCreatedTokenScope: string | undefined;
 let lastMessageUrl = "";
 let messageUrls: string[] = [];
+let sessionsUrls: string[] = [];
+let eventsUrls: string[] = [];
+let statsUrls: string[] = [];
 let lastDecision: { decision: string; notes?: string } | null = null;
 let writeTextMock: ReturnType<typeof vi.fn>;
 
@@ -145,6 +149,7 @@ const server = setupServer(
   ),
   http.get("http://localhost/v1/questions", ({ request }) => {
     lastQuestionsUrl = request.url;
+    questionsUrls.push(request.url);
     return HttpResponse.json({
       items: createdQuestion ? [questionTwo, question] : [question],
       nextCursor: null,
@@ -226,6 +231,52 @@ const server = setupServer(
     HttpResponse.json([{ date: "2026-01-04", count: 1 }]),
   ),
   http.get("http://localhost/v1/fail", () => HttpResponse.json({ error: "busy" }, { status: 503 })),
+  http.get("http://localhost/v1/installations", () =>
+    HttpResponse.json({
+      items: [
+        {
+          id: "ee111111-1111-4111-8111-111111111111",
+          name: "Spring 2026 residency",
+          notes: null,
+          location: null,
+          startedAt: "2026-01-01T00:00:00.000Z",
+          endedAt: "2026-04-01T00:00:00.000Z",
+          endedById: null,
+          summary: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          isActive: false,
+        },
+        {
+          id: "ee222222-2222-4222-8222-222222222222",
+          name: "Summer 2026 tour",
+          notes: null,
+          location: null,
+          startedAt: "2026-06-01T00:00:00.000Z",
+          endedAt: null,
+          endedById: null,
+          summary: null,
+          createdAt: "2026-06-01T00:00:00.000Z",
+          isActive: true,
+        },
+      ],
+    }),
+  ),
+  http.get("http://localhost/v1/sessions", ({ request }) => {
+    sessionsUrls.push(request.url);
+    return HttpResponse.json({ items: [] });
+  }),
+  http.get("http://localhost/v1/events", ({ request }) => {
+    eventsUrls.push(request.url);
+    return HttpResponse.json({ items: [], nextCursor: null });
+  }),
+  http.get("http://localhost/v1/stats/overview", ({ request }) => {
+    statsUrls.push(request.url);
+    return HttpResponse.json({ error: "unavailable" }, { status: 503 });
+  }),
+  http.get("http://localhost/v1/stats/summary", () =>
+    HttpResponse.json({ error: "x" }, { status: 503 }),
+  ),
+  http.get("http://localhost/v1/stats/filters", () => HttpResponse.json({ items: [] })),
 );
 
 class MemoryStorage implements Storage {
@@ -302,6 +353,7 @@ afterAll(() => server.close());
 beforeEach(() => {
   createdQuestion = false;
   lastQuestionsUrl = "";
+  questionsUrls = [];
   activatedQuestionId = "";
   deactivatedQuestionId = "";
   deletedMessages = [];
@@ -309,6 +361,9 @@ beforeEach(() => {
   lastCreatedTokenScope = undefined;
   lastMessageUrl = "";
   messageUrls = [];
+  sessionsUrls = [];
+  eventsUrls = [];
+  statsUrls = [];
   lastDecision = null;
   installBrowserStubs();
   window.localStorage.clear();
@@ -606,6 +661,44 @@ describe("Messages feature", () => {
     expect(lastDecision).toBeNull();
   });
 
+  // A past era's counters were frozen when it ended, so the API refuses a
+  // decision or a delete against it. The queue should not offer either.
+  it("offers no moderation actions while browsing an ended era", async () => {
+    renderPath("/messages?installationId=ee111111-1111-4111-8111-111111111111");
+    expect(await screen.findByText("Archived era — read-only")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+    // Reading the recording is still fine.
+    expect(screen.getByRole("link", { name: "Download" })).toBeTruthy();
+  });
+
+  // `installationId=all` lists open and closed eras side by side. The page is
+  // not frozen as a whole, but a closed era's row still is: offering Approve
+  // there would only earn a 409 from the API.
+  it("freezes only the ended era's rows in the all-installations view", async () => {
+    server.use(
+      http.get("http://localhost/v1/messages", () =>
+        HttpResponse.json({
+          items: [
+            { ...message, installationId: "ee222222-2222-4222-8222-222222222222" },
+            {
+              ...message,
+              id: "77777777-7777-4777-8777-777777777777",
+              installationId: "ee111111-1111-4111-8111-111111111111",
+            },
+          ],
+        }),
+      ),
+    );
+    renderPath("/messages?installationId=all");
+
+    await waitFor(() => expect(screen.getByText("Archived era — read-only")).toBeTruthy());
+    // Exactly one of the two rows keeps its moderation actions.
+    expect(screen.getAllByRole("button", { name: "Approve" })).toHaveLength(1);
+    expect(screen.getAllByText("Archived era — read-only")).toHaveLength(1);
+  });
+
   it("deletes a message from the queue only after confirmation", async () => {
     renderPath("/messages");
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
@@ -673,10 +766,94 @@ describe("Messages feature", () => {
     await waitFor(() => expect(lastDecision?.decision).toBe("reject"));
   });
 
+  // The detail route has no scope picker, so a row opened from a cross-era
+  // list can belong to a closed installation. Its decision controls would only
+  // earn a 409.
+  it("closes the decision controls on an archived era's message", async () => {
+    server.use(
+      http.get("http://localhost/v1/messages/:id", () =>
+        HttpResponse.json({
+          ...message,
+          installationId: "ee111111-1111-4111-8111-111111111111",
+        }),
+      ),
+    );
+    renderPath(`/messages/${messageId}`);
+    const approve = await screen.findByRole("button", { name: "Approve" });
+    await waitFor(() => expect(approve.hasAttribute("disabled")).toBe(true));
+    expect(screen.getByRole("button", { name: "Reject" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText("Archived era — read-only.")).toBeTruthy();
+    fireEvent.click(approve);
+    expect(lastDecision).toBeNull();
+  });
+
   it("persists the listened toggle", async () => {
     renderPath(`/messages/${messageId}`);
     fireEvent.click(await screen.findByLabelText("Mark as listened"));
     expect(window.localStorage.getItem(`booth.message.listened.${messageId}`)).toBe("true");
+  });
+
+  it("passes an installation scope through to the messages fetch", async () => {
+    renderPath(`/messages?installationId=ee111111-1111-4111-8111-111111111111`);
+    await waitFor(() =>
+      expect(
+        messageUrls.some((url) =>
+          url.includes("installationId=ee111111-1111-4111-8111-111111111111"),
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it("resolves prompts for a historical era's messages by looking up the exact question ids", async () => {
+    const eraId = "ee111111-1111-4111-8111-111111111111";
+    server.use(
+      http.get("http://localhost/v1/questions", ({ request }) => {
+        questionsUrls.push(request.url);
+        const url = new URL(request.url);
+        // Mimic the API: `ids` is the whole filter, ignoring installation
+        // scope and status entirely. Only return the archived historical
+        // question when the request is asking for it by id.
+        const ids = url.searchParams.get("ids")?.split(",").filter(Boolean) ?? [];
+        if (ids.includes(question.id)) {
+          return HttpResponse.json({ items: [question], nextCursor: null });
+        }
+        return HttpResponse.json({ items: [], nextCursor: null });
+      }),
+    );
+    renderPath(`/messages?installationId=${eraId}`);
+    expect(await screen.findByText("What did the city sound like today?")).toBeTruthy();
+    expect(
+      questionsUrls.some((url) => {
+        const params = new URL(url).searchParams;
+        return params.get("ids")?.split(",").includes(question.id) ?? false;
+      }),
+    ).toBe(true);
+  });
+
+  it("looks up the message detail's question by id so archived prompts still resolve", async () => {
+    server.use(
+      http.get("http://localhost/v1/questions", ({ request }) => {
+        questionsUrls.push(request.url);
+        const url = new URL(request.url);
+        const ids = url.searchParams.get("ids")?.split(",").filter(Boolean) ?? [];
+        if (ids.includes(question.id)) {
+          return HttpResponse.json({ items: [question], nextCursor: null });
+        }
+        return HttpResponse.json({ items: [], nextCursor: null });
+      }),
+    );
+    renderPath(`/messages/${messageId}`);
+    expect(await screen.findByText("What did the city sound like today?")).toBeTruthy();
+    expect(
+      questionsUrls.some((url) => {
+        const params = new URL(url).searchParams;
+        return (
+          params.get("ids")?.split(",").includes(question.id) === true &&
+          params.get("installationId") === null &&
+          params.get("status") === null
+        );
+      }),
+    ).toBe(true);
   });
 
   it("has no critical axe violations", async () => {
@@ -796,6 +973,64 @@ describe("Tokens feature", () => {
 });
 
 describe("Events feature", () => {
+  it("passes an installation scope through to the events fetch", async () => {
+    renderPath(`/events?installationId=ee111111-1111-4111-8111-111111111111`);
+    await waitFor(() =>
+      expect(
+        eventsUrls.some((url) =>
+          url.includes("installationId=ee111111-1111-4111-8111-111111111111"),
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it("re-scopes installation-scoped queries on a WS envelope while off Status", async () => {
+    // A controllable stub instead of the default QuietWebSocket so the test
+    // can dispatch a synthetic `installation` frame. The bridge is mounted in
+    // the root layout, so the invalidation must run even when the operator is
+    // parked on Sessions (or any non-Status route).
+    class ControllableWebSocket extends EventTarget {
+      static instances: ControllableWebSocket[] = [];
+      constructor(readonly url: string) {
+        super();
+        ControllableWebSocket.instances.push(this);
+      }
+      send(_data: string): void {}
+      close(): void {}
+    }
+    vi.stubGlobal("WebSocket", ControllableWebSocket);
+
+    renderPath("/sessions");
+    await waitFor(() => expect(sessionsUrls.length).toBeGreaterThan(0));
+    const before = sessionsUrls.length;
+
+    await waitFor(() => expect(ControllableWebSocket.instances.length).toBeGreaterThan(0));
+    const socket = ControllableWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Provider did not open a WebSocket.");
+    socket.dispatchEvent(new Event("open"));
+    socket.dispatchEvent(
+      new MessageEvent("message", {
+        data: JSON.stringify({
+          kind: "installation",
+          installation: {
+            id: "ee333333-3333-4333-8333-333333333333",
+            name: "Fresh era",
+            notes: null,
+            location: null,
+            startedAt: "2026-08-01T00:00:00.000Z",
+            endedAt: null,
+            endedById: null,
+            summary: null,
+            createdAt: "2026-08-01T00:00:00.000Z",
+            isActive: true,
+          },
+        }),
+      }),
+    );
+
+    await waitFor(() => expect(sessionsUrls.length).toBeGreaterThan(before));
+  });
+
   it("surfaces the payload detail for error events", async () => {
     server.use(
       http.get("http://localhost/v1/events", () =>
@@ -830,6 +1065,48 @@ describe("Events feature", () => {
     fireEvent(details as HTMLDetailsElement, new Event("toggle"));
     await waitFor(() =>
       expect(details?.querySelector("pre")?.textContent).toContain("gpio read timed out"),
+    );
+  });
+});
+
+// The default scope of every stats endpoint changed with installations — no
+// param now means "this run" rather than "everything ever" — so the scope
+// reaching the request is the compatibility guarantee worth pinning down.
+describe("Stats feature", () => {
+  it("passes an installation scope through to the overview fetch", async () => {
+    renderPath(`/stats?installationId=ee111111-1111-4111-8111-111111111111`);
+    await waitFor(() =>
+      expect(
+        statsUrls.some((url) =>
+          url.includes("installationId=ee111111-1111-4111-8111-111111111111"),
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it("preserves the all-installations escape hatch", async () => {
+    renderPath("/stats?installationId=all");
+    await waitFor(() =>
+      expect(statsUrls.some((url) => url.includes("installationId=all"))).toBe(true),
+    );
+  });
+
+  it("asks for the active installation when no scope is given", async () => {
+    renderPath("/stats");
+    await waitFor(() => expect(statsUrls.length).toBeGreaterThan(0));
+    expect(statsUrls.every((url) => !url.includes("installationId="))).toBe(true);
+  });
+});
+
+describe("Sessions feature", () => {
+  it("passes an installation scope through to the sessions fetch", async () => {
+    renderPath(`/sessions?installationId=ee111111-1111-4111-8111-111111111111`);
+    await waitFor(() =>
+      expect(
+        sessionsUrls.some((url) =>
+          url.includes("installationId=ee111111-1111-4111-8111-111111111111"),
+        ),
+      ).toBe(true),
     );
   });
 });

@@ -68,6 +68,7 @@ Sign-in is not a mutating request, so it is recorded explicitly as
 | Devices       | `device.register`, `device.update`, `device.revoke`                                                                                                                                                                                                                                                                                        |
 | Uploads       | `upload.sas.issue`                                                                                                                                                                                                                                                                                                                         |
 | Stats filters | `metricFilter.create`, `metricFilter.update`, `metricFilter.delete`                                                                                                                                                                                                                                                                        |
+| Installations | `installation.start`, `installation.end`, `installation.update`, `installation.purge`                                                                                                                                                                                                                                                      |
 | Admin         | `admin.data.import`                                                                                                                                                                                                                                                                                                                        |
 | Auth          | `auth.login`, `auth.login.denied`, `auth.login.failed`, `auth.logout`                                                                                                                                                                                                                                                                      |
 
@@ -150,10 +151,17 @@ Audit writes never fail a request. If the insert throws, the API logs
 
 The pruner deletes entries older than `AUDIT_LOG_RETENTION_DAYS` on the
 configured interval. Audit rows are included in the admin data export/import
-(`docs/runbook.md`), which is why `EXPORT_VERSION` is now `3`; archives written
-by older versions still import, they just carry no audit history. Restore is
-insert-only for audit rows: an archive may add history that is missing locally,
-but it can never rewrite an entry that already exists.
+(`docs/runbook.md`), which is why `EXPORT_VERSION` was bumped to `3`; archives
+written by older versions still import, they just carry no audit history.
+Restore is insert-only for audit rows: an archive may add history that is
+missing locally, but it can never rewrite an entry that already exists.
+
+A **scoped** archive — the per-installation export offered before a purge, see
+[Installations](installations.md) — carries no audit rows at all. The trail
+spans every era and names operators and their addresses, and a scoped archive is
+an artifact that gets handed around, so it stays out of it. A purge is also the
+one operation whose own evidence is destroyed with it: `installation.purge` in
+the trail is what remains to say the era existed.
 
 ## Related
 

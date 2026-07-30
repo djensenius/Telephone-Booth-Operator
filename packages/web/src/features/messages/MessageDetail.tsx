@@ -7,11 +7,12 @@ import {
   useDecideMessage,
   useMessage,
   useMessageTranscriptions,
-  useQuestionsList,
+  useQuestionsByIds,
   useRemoderateMessage,
   useRetranscribeMessage,
 } from "../../lib/api-client.js";
 import { FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
+import { useIsInstallationFrozen } from "../installations/InstallationScopePicker.js";
 import { transcriptionStatusView } from "./transcription-status.js";
 import { absoluteTime, relativeTime } from "../../lib/time-format.js";
 import { useNow } from "../../hooks/useNow.js";
@@ -331,6 +332,9 @@ interface DecisionCardProps {
   readonly onDecide: (decision: "approve" | "reject", notes: string) => void;
   readonly deciding: boolean;
   readonly decideError: string | null;
+  // The recording belongs to an era that has ended. Its counters were frozen
+  // on the way out, so the API refuses a decision against it.
+  readonly frozen: boolean;
 }
 
 // Human moderation control. The AI moderation result is shown here only as an
@@ -341,11 +345,12 @@ function DecisionCard({
   onDecide,
   deciding,
   decideError,
+  frozen,
 }: DecisionCardProps): JSX.Element {
   const [notes, setNotes] = useState("");
   const moderation = message.latestModeration ?? null;
   const { label, variant } = moderationVariant(moderation);
-  const decidable = message.status !== "uploading";
+  const decidable = message.status !== "uploading" && !frozen;
   const alreadyDecided = message.status === "approved" || message.status === "rejected";
   return (
     <section className="feature-card feature-card--wide">
@@ -393,7 +398,9 @@ function DecisionCard({
           {deciding ? "Saving…" : "Reject"}
         </button>
       </div>
-      {!decidable ? (
+      {frozen ? (
+        <p className="feature-empty">Archived era — read-only.</p>
+      ) : !decidable ? (
         <p className="feature-empty">Waiting for the recording to finish uploading.</p>
       ) : null}
       {decideError ? <p className="feature-error">{decideError}</p> : null}
@@ -405,15 +412,21 @@ export function MessageDetail(): JSX.Element {
   const { id } = useParams({ from: "/messages/$id" });
   const now = useNow();
   const message = useMessage(id);
-  const questions = useQuestionsList();
+  // A message can belong to any era (this route has no scope picker of its
+  // own), and questions are archived at rollover. Look up exactly this
+  // message's question by id so the prompt resolves regardless of era or
+  // archival status.
+  const questionId = message.data?.questionId ?? null;
+  const questions = useQuestionsByIds(questionId === null ? [] : [questionId]);
   const transcriptions = useMessageTranscriptions(id);
   const retranscribe = useRetranscribeMessage();
   const remoderate = useRemoderateMessage();
   const decide = useDecideMessage();
   const [listened, setListened] = useState(() => readListened(id));
-  const prompt = questions.data?.items.find(
-    (question) => question.id === message.data?.questionId,
-  )?.prompt;
+  const prompt = questions.data?.find((question) => question.id === questionId)?.prompt;
+  // This route has no scope picker: a message opened from a cross-era list can
+  // belong to a closed installation, whose decisions the API refuses.
+  const installationIsFrozen = useIsInstallationFrozen();
 
   function toggle(value: boolean): void {
     setListened(value);
@@ -504,6 +517,7 @@ export function MessageDetail(): JSX.Element {
             }}
             deciding={decide.isPending}
             decideError={decideError}
+            frozen={installationIsFrozen(message.data.installationId)}
           />
           {transcriptions.data ? <HistoryCard transcriptions={transcriptions.data.items} /> : null}
         </>

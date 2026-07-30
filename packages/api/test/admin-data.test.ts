@@ -13,6 +13,7 @@ import { createApp } from "../src/index.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { resetFakeAzure, seedBlobData, fakeBlobData } from "./support/fake-azure.js";
 import {
+  DEFAULT_INSTALLATION_ID,
   resetFakeDb,
   seedCallSession,
   seedFile,
@@ -185,6 +186,312 @@ describe("admin data export/import", () => {
     // The window starts at the report, not at the restore.
     expect(restored?.firstSeenAt.toISOString()).toBe(updatedAt);
     expect(restored?.repeatCount).toBe(1);
+  });
+
+  // The manifest arrives inside an uploaded tar, so a malformed optional field
+  // has to be an invalid_archive rather than a TypeError surfacing as a 500.
+  it("rejects a manifest whose partialInstallationIds is not a string array", async () => {
+    const app = createApp();
+    const cookie = operatorCookie();
+    const archive = createTar([
+      {
+        name: "manifest.json",
+        data: Buffer.from(
+          JSON.stringify({
+            format: EXPORT_FORMAT,
+            version: 3,
+            generatedAt: "2026-07-29T12:34:56.000Z",
+            container: "audio",
+            counts: {},
+            blobCount: 0,
+            missingBlobs: [],
+            partialInstallationIds: {},
+          }),
+          "utf8",
+        ),
+      },
+      { name: "data.json", data: Buffer.from("{}", "utf8") },
+    ]);
+
+    const res = await app.request("/v1/admin/data/import", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/x-tar" },
+      body: archive,
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe("invalid_archive");
+  });
+
+  it("adopts legacy archive rows into one idempotent restored installation", async () => {
+    const app = createApp();
+    const cookie = operatorCookie();
+    const generatedAt = "2026-07-29T12:34:56.000Z";
+    const questionAudioId = "10000000-0000-4000-8000-000000000001";
+    const messageAudioId = "10000000-0000-4000-8000-000000000002";
+    const questionId = "20000000-0000-4000-8000-000000000001";
+    const messageId = "30000000-0000-4000-8000-000000000001";
+    const sessionId = "legacy-call-1";
+    const archive = createTar([
+      {
+        name: "manifest.json",
+        data: Buffer.from(
+          JSON.stringify({
+            format: EXPORT_FORMAT,
+            version: 2,
+            generatedAt,
+            container: "audio",
+            counts: {},
+            blobCount: 0,
+            missingBlobs: [],
+          }),
+          "utf8",
+        ),
+      },
+      {
+        name: "data.json",
+        data: Buffer.from(
+          JSON.stringify({
+            file: [
+              {
+                id: questionAudioId,
+                blobContainer: "booth-recordings",
+                blobKey: "questions/legacy-question.flac",
+                sha256: "b".repeat(64),
+                sizeBytes: 10,
+                durationMs: 1000,
+                contentType: "audio/flac",
+              },
+              {
+                id: messageAudioId,
+                blobContainer: "booth-recordings",
+                blobKey: "messages/legacy-message.flac",
+                sha256: "c".repeat(64),
+                sizeBytes: 20,
+                durationMs: 2000,
+                contentType: "audio/flac",
+              },
+            ],
+            question: [
+              {
+                id: questionId,
+                prompt: "Legacy restored question?",
+                status: "active",
+                audioId: questionAudioId,
+                createdAt: generatedAt,
+                retiredAt: null,
+              },
+            ],
+            callSession: [
+              {
+                id: sessionId,
+                boothId: "booth-1",
+                bootId: "boot-1",
+                startedAt: generatedAt,
+                endedAt: null,
+                digitsDialed: null,
+                outcome: "recording_completed",
+                recordingId: null,
+                durationMs: 1234,
+                version: null,
+              },
+            ],
+            message: [
+              {
+                id: messageId,
+                status: "pending",
+                notes: null,
+                questionId,
+                audioId: messageAudioId,
+                createdAt: generatedAt,
+                receivedAt: generatedAt,
+                decidedAt: null,
+                decidedById: null,
+              },
+            ],
+            boothEvent: [
+              {
+                id: "legacy-event-row-1",
+                eventId: "legacy-event-1",
+                boothId: "booth-1",
+                bootId: "boot-1",
+                type: "call_started",
+                occurredAt: generatedAt,
+                receivedAt: generatedAt,
+                sessionId,
+                recordingId: null,
+                payload: {},
+                version: null,
+              },
+            ],
+            boothStatusSnapshot: [{ id: 42, state: "idle", updatedAt: generatedAt }],
+          }),
+          "utf8",
+        ),
+      },
+    ]);
+
+    const importOnce = async () =>
+      app.request("/v1/admin/data/import", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/x-tar" },
+        body: archive,
+      });
+
+    const first = await importOnce();
+    expect(first.status).toBe(200);
+
+    const adoptedIds = new Set([
+      store.questions.get(questionId)?.installationId,
+      store.messages.get(messageId)?.installationId,
+      store.callSessions.get(sessionId)?.installationId,
+      store.boothEvents.find((event) => event.id === "legacy-event-row-1")?.installationId,
+      store.statuses.find((status) => status.id === 42)?.installationId,
+    ]);
+    expect(adoptedIds.size).toBe(1);
+    const restoredId = [...adoptedIds][0];
+    expect(restoredId).toEqual(expect.any(String));
+    expect(restoredId).not.toBe(DEFAULT_INSTALLATION_ID);
+    const restoredInstallation = store.installations.get(restoredId as string);
+    expect(restoredInstallation?.name).toBe(`Restored ${generatedAt}`);
+    expect(restoredInstallation?.endedAt?.toISOString()).toBe(generatedAt);
+
+    // The adopted era is ended, so it must also be closed out: no message left
+    // in the moderation queue, no session left open, no question left live, and
+    // counters frozen to match.
+    expect(store.messages.get(messageId)?.status).toBe("rejected");
+    expect(store.callSessions.get(sessionId)?.endedAt?.toISOString()).toBe(generatedAt);
+    expect(store.callSessions.get(sessionId)?.outcome).toBe("installation_ended");
+    expect(store.questions.get(questionId)?.status).toBe("archived");
+    expect(restoredInstallation?.summary).toMatchObject({
+      calls: 1,
+      messages: 1,
+      messagesRejected: 1,
+      events: 1,
+      firstActivityAt: generatedAt,
+    });
+
+    const installationCount = store.installations.size;
+    const second = await importOnce();
+    expect(second.status).toBe(200);
+    expect(store.installations.size).toBe(installationCount);
+    expect(store.messages.get(messageId)?.installationId).toBe(restoredId);
+  });
+
+  // Only one era may be open at a time, enforced by a partial unique index. A
+  // v3 archive carrying its own active era therefore collides with the one the
+  // target was seeded with, unless the restore reconciles first.
+  it("reconciles the target's active installation when the archive has one", async () => {
+    const app = createApp();
+    const cookie = operatorCookie();
+    const incomingId = "44444444-4444-4444-8444-444444444444";
+    const archive = createTar([
+      {
+        name: "manifest.json",
+        data: Buffer.from(
+          JSON.stringify({
+            format: EXPORT_FORMAT,
+            version: 3,
+            generatedAt: "2026-07-29T12:34:56.000Z",
+            container: "audio",
+            counts: {},
+            blobCount: 0,
+            missingBlobs: [],
+          }),
+          "utf8",
+        ),
+      },
+      {
+        name: "data.json",
+        data: Buffer.from(
+          JSON.stringify({
+            installation: [
+              {
+                id: incomingId,
+                name: "Imported era",
+                notes: null,
+                location: null,
+                startedAt: "2026-07-01T00:00:00.000Z",
+                endedAt: null,
+                endedById: null,
+                summary: null,
+                createdAt: "2026-07-01T00:00:00.000Z",
+              },
+            ],
+          }),
+          "utf8",
+        ),
+      },
+    ]);
+
+    const res = await app.request("/v1/admin/data/import", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/x-tar" },
+      body: archive,
+    });
+
+    expect(res.status, await res.clone().text()).toBe(200);
+    // The seeded era is closed, not deleted: a replica still holding it as its
+    // cached active id would otherwise fail the next booth write's foreign key.
+    expect(store.installations.get(DEFAULT_INSTALLATION_ID)?.endedAt).toBeInstanceOf(Date);
+    const open = [...store.installations.values()].filter((row) => row.endedAt === null);
+    expect(open.map((row) => row.id)).toEqual([incomingId]);
+  });
+
+  it("closes an active installation that has data instead of discarding it", async () => {
+    const app = createApp();
+    const cookie = operatorCookie();
+    seedMessage({ id: "50000000-0000-4000-8000-000000000001", status: "approved" });
+    const incomingId = "55555555-5555-4555-8555-555555555555";
+    const archive = createTar([
+      {
+        name: "manifest.json",
+        data: Buffer.from(
+          JSON.stringify({
+            format: EXPORT_FORMAT,
+            version: 3,
+            generatedAt: "2026-07-29T12:34:56.000Z",
+            container: "audio",
+            counts: {},
+            blobCount: 0,
+            missingBlobs: [],
+          }),
+          "utf8",
+        ),
+      },
+      {
+        name: "data.json",
+        data: Buffer.from(
+          JSON.stringify({
+            installation: [
+              {
+                id: incomingId,
+                name: "Imported era",
+                notes: null,
+                location: null,
+                startedAt: "2026-07-01T00:00:00.000Z",
+                endedAt: null,
+                endedById: null,
+                summary: null,
+                createdAt: "2026-07-01T00:00:00.000Z",
+              },
+            ],
+          }),
+          "utf8",
+        ),
+      },
+    ]);
+
+    const res = await app.request("/v1/admin/data/import", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/x-tar" },
+      body: archive,
+    });
+
+    expect(res.status, await res.clone().text()).toBe(200);
+    // Nothing is orphaned: the era that held data is closed, not deleted.
+    expect(store.installations.get(DEFAULT_INSTALLATION_ID)?.endedAt).toBeInstanceOf(Date);
+    const open = [...store.installations.values()].filter((row) => row.endedAt === null);
+    expect(open.map((row) => row.id)).toEqual([incomingId]);
   });
 
   it("rejects an empty import body", async () => {

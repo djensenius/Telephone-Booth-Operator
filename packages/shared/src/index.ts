@@ -185,6 +185,9 @@ export type InstructionCreate = z.infer<typeof InstructionCreateSchema>;
 export const MessageSchema = z.object({
   id: z.guid(),
   status: MessageStatusSchema,
+  // Which era the recording belongs to. Present so a cross-era view can tell
+  // which rows are still editable without asking the API row by row.
+  installationId: z.guid().nullable().optional(),
   questionId: z.guid().nullable().optional(),
   notes: z.string().nullable().optional(),
   createdAt: z.string().datetime(),
@@ -357,10 +360,11 @@ export const BoothEventTypeSchema = z.enum([
 ]);
 export type BoothEventType = z.infer<typeof BoothEventTypeSchema>;
 
-// Mirrors the Rust `CallOutcome` enum. Operator UI uses these strings to
-// label session rows; Grafana uses them as `outcome` labels on
-// `booth_calls_total`.
-export const CallOutcomeSchema = z.enum([
+// Mirrors the Rust `CallOutcome` enum: what the API will accept from the booth.
+// `installation_ended` is deliberately absent — a client that could stamp it
+// would mark its own session as closed by a rollover, and every later update to
+// that session would then be refused as a straggler.
+export const BoothReportedCallOutcomeSchema = z.enum([
   "hung_up_before_dial",
   "hung_up_during_prompt",
   "hung_up_during_recording",
@@ -370,6 +374,15 @@ export const CallOutcomeSchema = z.enum([
   "upload_failed",
   "operator_error",
   "aborted",
+]);
+export type BoothReportedCallOutcome = z.infer<typeof BoothReportedCallOutcomeSchema>;
+
+// What can appear on a session in an API response: everything the booth
+// reports, plus the outcome the rollover writes on calls the booth never
+// closed itself.
+export const CallOutcomeSchema = z.enum([
+  ...BoothReportedCallOutcomeSchema.options,
+  "installation_ended",
 ]);
 export type CallOutcome = z.infer<typeof CallOutcomeSchema>;
 
@@ -583,6 +596,105 @@ export const BoothSystemSnapshotEnvelopeSchema = z.object({
 });
 export type BoothSystemSnapshotEnvelope = z.infer<typeof BoothSystemSnapshotEnvelopeSchema>;
 
+// -----------------------------------------------------------------------------
+// Installations. An installation is a named era of the booth — one run of the
+// art piece. At most one is "active" (`endedAt === null`) at a time — none
+// between an era ending and the next booth write — and every booth write is
+// tagged with it. Ending an installation freezes a `summary` so
+// the history list renders without re-aggregating the event table per row.
+//
+// Read endpoints accept an `installationId` scope: omitted means the active
+// installation, a uuid selects a historical one, and "all" spans every era.
+// -----------------------------------------------------------------------------
+
+// The literal used to opt out of installation scoping on read endpoints.
+export const INSTALLATION_SCOPE_ALL = "all";
+
+export const InstallationScopeSchema = z.union([z.guid(), z.literal(INSTALLATION_SCOPE_ALL)]);
+export type InstallationScope = z.infer<typeof InstallationScopeSchema>;
+
+// Counters frozen when an installation ends. Deliberately a small, stable
+// subset of `StatsOverview` — this is persisted to a JSON column, so it must
+// stay cheap to compute and safe to read back from old rows.
+export const InstallationSummarySchema = z.object({
+  calls: z.number().int().nonnegative(),
+  messages: z.number().int().nonnegative(),
+  messagesApproved: z.number().int().nonnegative(),
+  messagesRejected: z.number().int().nonnegative(),
+  questions: z.number().int().nonnegative(),
+  events: z.number().int().nonnegative(),
+  recordedMs: z.number().int().nonnegative(),
+  // Bounds of the era's *booth event* stream, which is what the booth emits
+  // continuously while it is running. Null when the era recorded no events —
+  // an era can still hold messages or questions in that case, so read these as
+  // "when the booth was live", not as "whether anything happened".
+  firstActivityAt: z.string().datetime().nullable(),
+  lastActivityAt: z.string().datetime().nullable(),
+});
+export type InstallationSummary = z.infer<typeof InstallationSummarySchema>;
+
+export const InstallationSchema = z.object({
+  id: z.guid(),
+  name: z.string(),
+  notes: z.string().nullable(),
+  location: z.string().nullable(),
+  startedAt: z.string().datetime(),
+  endedAt: z.string().datetime().nullable(),
+  endedById: z.string().nullable(),
+  // Frozen at end time. Null while the installation is still active — live
+  // numbers come from `/v1/stats/*` scoped to this installation instead.
+  summary: InstallationSummarySchema.nullable(),
+  createdAt: z.string().datetime(),
+  // Convenience flag so clients don't have to re-derive `endedAt === null`.
+  isActive: z.boolean(),
+});
+export type Installation = z.infer<typeof InstallationSchema>;
+
+const installationMetadataFields = {
+  name: z.string().trim().min(1).max(120),
+  notes: z.string().trim().max(2000).nullable().optional(),
+  location: z.string().trim().max(200).nullable().optional(),
+};
+
+export const InstallationCreateSchema = z.object({
+  ...installationMetadataFields,
+  // Copy the previous installation's active questions into the new one,
+  // re-using the same audio `File` rows so nothing is re-uploaded. Defaults to
+  // false: a new installation is a blank slate unless asked otherwise.
+  copyQuestions: z.boolean().default(false),
+});
+export type InstallationCreate = z.infer<typeof InstallationCreateSchema>;
+
+export const InstallationUpdateSchema = z.object(installationMetadataFields).partial();
+export type InstallationUpdate = z.infer<typeof InstallationUpdateSchema>;
+
+export const InstallationEndSchema = z.object({
+  // Optional annotation edits applied as part of closing the books, so the
+  // operator can record where the booth stood and how it went without a
+  // second request. Renaming is not part of this contract — use PATCH.
+  notes: z.string().trim().max(2000).nullable().optional(),
+  location: z.string().trim().max(200).nullable().optional(),
+});
+export type InstallationEnd = z.infer<typeof InstallationEndSchema>;
+
+// Hard purge is irreversible, so the caller must echo the installation's exact
+// name back. This is a deliberate speed bump, not a security control.
+export const InstallationPurgeSchema = z.object({
+  confirmName: z.string(),
+});
+export type InstallationPurge = z.infer<typeof InstallationPurgeSchema>;
+
+export const InstallationPurgeResultSchema = z.object({
+  installationId: z.guid(),
+  rows: z.record(z.string(), z.number().int().nonnegative()),
+  blobsDeleted: z.number().int().nonnegative(),
+  // Blobs still referenced by a surviving File row (e.g. questions copied
+  // forward into a later installation) are kept, not orphaned.
+  blobsRetained: z.number().int().nonnegative(),
+  blobFailures: z.array(z.string()),
+});
+export type InstallationPurgeResult = z.infer<typeof InstallationPurgeResultSchema>;
+
 // Discriminated union for the `/v1/ws/status` socket. The legacy payload
 // shape (a bare `BoothStatus`) is migrated to `{ kind: "status", status }`
 // in the `op-api` PR.
@@ -611,6 +723,12 @@ export const WsEnvelopeSchema = z.discriminatedUnion("kind", [
     kind: z.literal("work"),
     messageId: z.string(),
     needs: z.array(z.enum(["transcription", "translation", "moderation"])).min(1),
+  }),
+  // Emitted when an installation starts or ends. Clients use it to re-scope
+  // their queries to the new active era without waiting for a reload.
+  z.object({
+    kind: z.literal("installation"),
+    installation: InstallationSchema,
   }),
 ]);
 export type WsEnvelope = z.infer<typeof WsEnvelopeSchema>;

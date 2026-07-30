@@ -25,9 +25,18 @@ vi.mock("../src/lib/require-api-token.js", () => ({
 
 import { randomUUID } from "node:crypto";
 import { createApp } from "../src/index.js";
+import { resetInstallationCacheForTests } from "../src/lib/installation.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { resetFakeAzure } from "./support/fake-azure.js";
-import { resetFakeDb, store } from "./support/fake-db.js";
+import {
+  DEFAULT_INSTALLATION_ID,
+  fakeDb,
+  resetFakeDb,
+  seedBoothEvent,
+  seedCallSession,
+  seedInstallation,
+  store,
+} from "./support/fake-db.js";
 import { operatorCookie, phoneHeaders } from "./support/http.js";
 
 const setup = () => {
@@ -36,6 +45,7 @@ const setup = () => {
   resetSessionCryptoForTests();
   resetFakeDb();
   resetFakeAzure();
+  resetInstallationCacheForTests();
 };
 
 const sampleEvent = (overrides: Record<string, unknown> = {}) => ({
@@ -128,6 +138,32 @@ describe("POST /v1/events", () => {
     const startEvent = store.boothEvents.find((event) => event.eventId === "evt-start");
     expect(startEvent?.version).toBe("0.3.2");
   });
+
+  // `installation_ended` is the rollover's own outcome. A client that could
+  // stamp it would mark its session as closed by an era that never ended, and
+  // every later update to that session would be refused as a straggler.
+  it("ignores an outcome only the rollover is allowed to write", async () => {
+    const app = createApp();
+    const sessionId = "aaaaaaaa-0000-4000-8000-0000000000cc";
+    const res = await app.request("/v1/events", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({
+        events: [
+          sampleEvent({
+            eventId: "evt-forged",
+            sessionId,
+            type: "call_ended",
+            occurredAt: new Date().toISOString(),
+            payload: { outcome: "installation_ended" },
+          }),
+        ],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(store.callSessions.get(sessionId)?.outcome).toBeNull();
+  });
 });
 
 describe("GET /v1/events", () => {
@@ -199,5 +235,167 @@ describe("GET /v1/events", () => {
       nextCursor: string | null;
     };
     expect(secondJson.items).toHaveLength(1);
+  });
+
+  // The cursor's tie-break half only bites when a page boundary lands on rows
+  // whose ids sort against the page above them, which random ids and a busy
+  // clock reach only sometimes. Pinned ids and timestamps make the boundary
+  // deterministic: the newest row sorts lowest by id, so a cursor that lost its
+  // timestamp equality would drag it back onto the second page.
+  it("does not repeat a row when the cursor's id sorts below an earlier page", async () => {
+    const base = Date.parse("2026-05-01T00:00:00.000Z");
+    const seeded = [
+      { id: "aaaaaaaa-0000-4000-8000-000000000001", at: new Date(base + 2000) },
+      { id: "cccccccc-0000-4000-8000-000000000003", at: new Date(base + 1000) },
+      { id: "bbbbbbbb-0000-4000-8000-000000000002", at: new Date(base) },
+    ];
+    for (const row of seeded) {
+      seedBoothEvent({ id: row.id, occurredAt: row.at, receivedAt: row.at });
+    }
+
+    const cookie = operatorCookie();
+    const firstPage = await createApp().request("/v1/events?limit=2", { headers: { cookie } });
+    const firstJson = (await firstPage.json()) as {
+      items: Array<{ id: string }>;
+      nextCursor: string | null;
+    };
+    expect(firstJson.items.map((event) => event.id)).toEqual([seeded[0]!.id, seeded[1]!.id]);
+
+    const secondPage = await createApp().request(
+      `/v1/events?limit=2&cursor=${encodeURIComponent(firstJson.nextCursor!)}`,
+      { headers: { cookie } },
+    );
+    const secondJson = (await secondPage.json()) as { items: Array<{ id: string }> };
+    expect(secondJson.items.map((event) => event.id)).toEqual([seeded[2]!.id]);
+  });
+
+  // A booth can report a `call_ended` after an admin has already closed the
+  // era. The rollover's close-out is terminal: the straggler must not rewrite
+  // the frozen session, or the ended era's summary stops matching its own
+  // drill-down.
+  it("does not let a late call_ended rewrite a session frozen by a rollover", async () => {
+    const nextEra = "22222222-2222-4222-8222-222222222222";
+    seedInstallation({ id: nextEra });
+    store.installations.get(DEFAULT_INSTALLATION_ID)!.endedAt = new Date("2026-01-01T00:00:00Z");
+    const frozen = seedCallSession({
+      id: "11111111-1111-4111-8111-111111111111",
+      bootId: "33333333-3333-4333-8333-333333333333",
+      endedAt: new Date("2026-01-01T00:00:00Z"),
+      outcome: "installation_ended",
+      installationId: DEFAULT_INSTALLATION_ID,
+    });
+
+    const res = await createApp().request("/v1/events", {
+      method: "POST",
+      headers: { ...phoneHeaders, "content-type": "application/json" },
+      body: JSON.stringify({
+        events: [
+          {
+            eventId: "late-1",
+            boothId: "booth-1",
+            bootId: "33333333-3333-4333-8333-333333333333",
+            type: "call_ended",
+            occurredAt: new Date("2026-02-01T00:00:00Z").toISOString(),
+            sessionId: frozen.id,
+            payload: { outcome: "completed", duration_ms: 4242 },
+          },
+        ],
+      }),
+    });
+
+    expect(res.status, await res.clone().text()).toBe(200);
+    const after = store.callSessions.get(frozen.id)!;
+    expect(after.outcome).toBe("installation_ended");
+    expect(after.durationMs).toBeNull();
+    expect(after.installationId).toBe(DEFAULT_INSTALLATION_ID);
+    // The event travels with its session rather than with whatever era is open.
+    const event = store.boothEvents.find((row) => row.eventId === "late-1");
+    expect(event?.installationId).toBe(DEFAULT_INSTALLATION_ID);
+  });
+
+  // The pre-flight "is this session frozen?" read happens before the write
+  // transaction, so a rollover committing in between must still be refused —
+  // this time by the database condition on the update itself.
+  // A session that ended normally before the rollover keeps its own outcome,
+  // so the guard cannot key on `installation_ended` alone: what makes it
+  // untouchable is that its era is closed.
+  it("refuses a replayed call_ended for a normally ended session in a closed era", async () => {
+    store.installations.get(DEFAULT_INSTALLATION_ID)!.endedAt = new Date("2026-01-01T00:00:00Z");
+    const settled = seedCallSession({
+      id: "11111111-1111-4111-8111-11111111000b",
+      bootId: "33333333-3333-4333-8333-33333333000b",
+      endedAt: new Date("2025-12-31T00:00:00Z"),
+      outcome: "recording_completed",
+      durationMs: 1000,
+      installationId: DEFAULT_INSTALLATION_ID,
+    });
+
+    const res = await createApp().request("/v1/events", {
+      method: "POST",
+      headers: { ...phoneHeaders, "content-type": "application/json" },
+      body: JSON.stringify({
+        events: [
+          {
+            eventId: "late-3",
+            boothId: "booth-1",
+            bootId: "33333333-3333-4333-8333-33333333000b",
+            type: "call_ended",
+            occurredAt: new Date("2026-02-01T00:00:00Z").toISOString(),
+            sessionId: settled.id,
+            payload: { outcome: "hangup_before_recording", duration_ms: 9999 },
+          },
+        ],
+      }),
+    });
+
+    expect(res.status, await res.clone().text()).toBe(200);
+    const after = store.callSessions.get(settled.id)!;
+    expect(after.outcome).toBe("recording_completed");
+    expect(after.durationMs).toBe(1000);
+  });
+
+  // The pre-flight read that decides whether a session is frozen happens before
+  // the transaction writes, so a rollover committing in between would slip past
+  // it. The update is therefore also conditional in the database on the era
+  // still being open. Standing in for that window: the era is closed in the
+  // store, but the pre-flight lookup is made to report it as open.
+  it("refuses a straggler whose era closed after the frozen check", async () => {
+    const nextEra = "22222222-2222-4222-8222-22222222000a";
+    seedInstallation({ id: nextEra });
+    store.installations.get(DEFAULT_INSTALLATION_ID)!.endedAt = new Date("2026-01-01T00:00:00Z");
+    const stale = seedCallSession({
+      id: "11111111-1111-4111-8111-11111111000a",
+      bootId: "33333333-3333-4333-8333-33333333000a",
+      // An ordinary open session: nothing about the row itself says frozen, so
+      // only the era predicate can refuse this write.
+      endedAt: null,
+      outcome: null,
+      installationId: DEFAULT_INSTALLATION_ID,
+    });
+    vi.spyOn(fakeDb.installation, "findMany").mockImplementationOnce(async () => []);
+
+    const res = await createApp().request("/v1/events", {
+      method: "POST",
+      headers: { ...phoneHeaders, "content-type": "application/json" },
+      body: JSON.stringify({
+        events: [
+          {
+            eventId: "late-2",
+            boothId: "booth-1",
+            bootId: "33333333-3333-4333-8333-33333333000a",
+            type: "call_ended",
+            occurredAt: new Date("2026-02-01T00:00:00Z").toISOString(),
+            sessionId: stale.id,
+            payload: { outcome: "completed", duration_ms: 4242 },
+          },
+        ],
+      }),
+    });
+
+    expect(res.status, await res.clone().text()).toBe(200);
+    const after = store.callSessions.get(stale.id)!;
+    expect(after.outcome).toBeNull();
+    expect(after.endedAt).toBeNull();
+    expect(after.durationMs).toBeNull();
   });
 });

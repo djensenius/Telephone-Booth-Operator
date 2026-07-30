@@ -1,8 +1,10 @@
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
+import { InstallationScopeSchema } from "@telephone-booth-operator/shared";
 import { decodeCursor, encodeCursor } from "../lib/cursor.js";
 import { db } from "../lib/db.js";
+import { resolveInstallationScope, scopeWhere } from "../lib/installation.js";
 import { serializeBoothEvent, serializeCallSession } from "../lib/serializers.js";
 import { requireOperator, type AuthVariables } from "../lib/session.js";
 
@@ -10,13 +12,14 @@ const listQuerySchema = z.object({
   boothId: z.string().min(1).optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(500).default(100),
+  installationId: InstallationScopeSchema.optional(),
 });
 
 const sessionsRouter = new Hono<{ Variables: AuthVariables }>();
 
 sessionsRouter.get("/", requireOperator(), zValidator("query", listQuerySchema), async (c) => {
-  const { boothId, cursor, limit } = c.req.valid("query");
-  const where: Record<string, unknown> = {};
+  const { boothId, cursor, limit, installationId } = c.req.valid("query");
+  const where: Record<string, unknown> = scopeWhere(await resolveInstallationScope(installationId));
   if (boothId) where.boothId = boothId;
   if (cursor) {
     const decoded = decodeCursor(cursor);

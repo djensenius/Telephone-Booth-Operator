@@ -123,6 +123,28 @@ const { fakeDb, openidMocks, store, FakeChallengeError } = vi.hoisted(() => {
           return question;
         }),
       },
+      // Question creation tags the row with the active installation and then
+      // re-reads it to confirm the era did not close underneath the insert, so
+      // this minimal mock needs both lookups.
+      installation: {
+        findFirst: vi.fn(async () => ({
+          id: "00000000-0000-4000-8000-0000000000ff",
+          name: "Installation 1",
+          notes: null,
+          location: null,
+          startedAt: new Date(),
+          endedAt: null,
+          endedById: null,
+          summary: null,
+          createdAt: new Date(),
+        })),
+        findUnique: vi.fn(async () => ({ endedAt: null })),
+        count: vi.fn(async () => 1),
+      },
+      // The insert holds the era row for the length of a transaction, so the
+      // mock needs the transaction wrapper and the raw lock it takes.
+      $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(fakeDb),
+      $queryRaw: async () => [{ endedAt: null }],
     },
   };
 });

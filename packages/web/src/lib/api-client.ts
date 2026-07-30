@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { z } from "zod";
 import {
   ApiTokenCreatedSchema,
@@ -11,6 +12,12 @@ import {
   CallSessionDetailSchema,
   CallSessionListSchema,
   CreateApiTokenRequestSchema,
+  InstallationCreateSchema,
+  InstallationEndSchema,
+  InstallationPurgeResultSchema,
+  InstallationPurgeSchema,
+  InstallationSchema,
+  InstallationUpdateSchema,
   InstructionCreateSchema,
   InstructionSchema,
   InstructionStatusSchema,
@@ -42,6 +49,12 @@ import type {
   CallSessionDetail,
   CallSessionList,
   CreateApiTokenRequest,
+  Installation,
+  InstallationCreate,
+  InstallationEnd,
+  InstallationPurgeResult,
+  InstallationScope,
+  InstallationUpdate,
   Instruction,
   InstructionCreate,
   InstructionStatus,
@@ -90,6 +103,23 @@ const InstructionListSchema = z.object({
   nextCursor: z.guid().nullable(),
 });
 const MessageListSchema = z.object({ items: z.array(MessageSchema) });
+const InstallationListSchema = z.object({ items: z.array(InstallationSchema) });
+// The `/v1/stats/summary` response is an API-internal shape (not exported from
+// `shared`), so we parse the small subset the UI actually reads. Unknown keys
+// (booth snapshot, realtime) are dropped by Zod's default strip behaviour.
+const StatsSummarySchema = z.object({
+  messages: z.object({
+    pending: z.number().int().nonnegative(),
+    awaitingModeration: z.number().int().nonnegative(),
+    receivedToday: z.number().int().nonnegative(),
+    latestId: z.string().nullable(),
+  }),
+  calls: z.object({
+    today: z.number().int().nonnegative(),
+    inProgress: z.number().int().nonnegative(),
+  }),
+  generatedAt: z.string(),
+});
 const ApiTokenListSchema = z.array(ApiTokenSchema);
 const ApiTokenUsageListSchema = z.array(ApiTokenUsageBucketSchema);
 
@@ -97,6 +127,8 @@ export type StatusHistory = z.infer<typeof StatusHistorySchema>;
 export type QuestionList = z.infer<typeof QuestionListSchema>;
 export type InstructionList = z.infer<typeof InstructionListSchema>;
 export type MessageList = z.infer<typeof MessageListSchema>;
+export type InstallationList = z.infer<typeof InstallationListSchema>;
+export type StatsSummary = z.infer<typeof StatsSummarySchema>;
 
 const rawApiBaseUrl =
   typeof import.meta.env.VITE_API_BASE_URL === "string" ? import.meta.env.VITE_API_BASE_URL : "";
@@ -228,13 +260,21 @@ export const questions = {
     params: {
       readonly cursor?: string;
       readonly limit?: number;
-      readonly status?: QuestionStatus;
+      readonly status?: QuestionStatus | "any";
+      readonly installationId?: InstallationScope;
     } = {},
   ) =>
     apiFetch<QuestionList>(
-      `/v1/questions${query({ cursor: params.cursor, limit: params.limit ?? 50, status: params.status })}`,
+      `/v1/questions${query({ cursor: params.cursor, limit: params.limit ?? 50, status: params.status, installationId: params.installationId })}`,
       { schema: QuestionListSchema },
     ),
+  // The id list is the whole filter, so ask for as many rows back as ids sent —
+  // the endpoint's default page size is smaller than a batch and would silently
+  // drop the tail.
+  listByIds: (ids: readonly string[]) =>
+    apiFetch<QuestionList>(`/v1/questions${query({ ids: ids.join(","), limit: ids.length })}`, {
+      schema: QuestionListSchema,
+    }),
   create: (input: QuestionCreate) =>
     apiFetch<Question>("/v1/questions", {
       method: "POST",
@@ -288,10 +328,11 @@ export const messages = {
       readonly status?: MessageStatus;
       readonly since?: string;
       readonly limit?: number;
+      readonly installationId?: InstallationScope;
     } = {},
   ) =>
     apiFetch<MessageList>(
-      `/v1/messages${query({ status: params.status, since: params.since, limit: params.limit ?? 50 })}`,
+      `/v1/messages${query({ status: params.status, since: params.since, limit: params.limit ?? 50, installationId: params.installationId })}`,
       { schema: MessageListSchema },
     ),
   get: (id: string) => apiFetch<Message>(`/v1/messages/${id}`, { schema: MessageSchema }),
@@ -352,6 +393,7 @@ export interface EventsListParams {
   readonly sessionId?: string;
   readonly cursor?: string;
   readonly limit?: number;
+  readonly installationId?: InstallationScope;
 }
 
 const buildEventsQuery = (params: EventsListParams): string => {
@@ -361,6 +403,7 @@ const buildEventsQuery = (params: EventsListParams): string => {
   if (params.until) search.set("until", params.until);
   if (params.sessionId) search.set("sessionId", params.sessionId);
   if (params.cursor) search.set("cursor", params.cursor);
+  if (params.installationId) search.set("installationId", params.installationId);
   search.set("limit", String(params.limit ?? 100));
   for (const type of params.type ?? []) search.append("type", type);
   const text = search.toString();
@@ -376,10 +419,15 @@ export const events = {
 
 export const sessions = {
   list: (
-    params: { readonly boothId?: string; readonly cursor?: string; readonly limit?: number } = {},
+    params: {
+      readonly boothId?: string;
+      readonly cursor?: string;
+      readonly limit?: number;
+      readonly installationId?: InstallationScope;
+    } = {},
   ) =>
     apiFetch<CallSessionList>(
-      `/v1/sessions${query({ boothId: params.boothId, cursor: params.cursor, limit: params.limit ?? 100 })}`,
+      `/v1/sessions${query({ boothId: params.boothId, cursor: params.cursor, limit: params.limit ?? 100, installationId: params.installationId })}`,
       {
         schema: CallSessionListSchema,
       },
@@ -446,20 +494,24 @@ export type StatsRangeSelection =
   | { readonly kind: "preset"; readonly window: StatsWindow }
   | { readonly kind: "custom"; readonly start: string | null; readonly end: string | null };
 
-const statsOverviewQuery = (selection: StatsRangeSelection): string => {
-  if (selection.kind === "preset") return query({ window: selection.window });
-  return query({
-    start: selection.start ?? undefined,
-    end: selection.end ?? "now",
-  });
+const statsOverviewQuery = (selection: StatsRangeSelection, scope?: InstallationScope): string => {
+  const base =
+    selection.kind === "preset"
+      ? { window: selection.window }
+      : { start: selection.start ?? undefined, end: selection.end ?? "now" };
+  return query({ ...base, installationId: scope });
 };
 
 const MetricFilterListSchema = z.object({ items: z.array(MetricFilterSchema) });
 
 export const stats = {
-  overview: (selection: StatsRangeSelection) =>
-    apiFetch<StatsOverview>(`/v1/stats/overview${statsOverviewQuery(selection)}`, {
+  overview: (selection: StatsRangeSelection, scope?: InstallationScope) =>
+    apiFetch<StatsOverview>(`/v1/stats/overview${statsOverviewQuery(selection, scope)}`, {
       schema: StatsOverviewSchema,
+    }),
+  summary: (scope?: InstallationScope) =>
+    apiFetch<StatsSummary>(`/v1/stats/summary${query({ installationId: scope })}`, {
+      schema: StatsSummarySchema,
     }),
 };
 
@@ -507,27 +559,80 @@ export const adminData = {
     }),
 };
 
+export const installations = {
+  list: () => apiFetch<InstallationList>("/v1/installations", { schema: InstallationListSchema }),
+  current: () =>
+    apiFetch<Installation>("/v1/installations/current", { schema: InstallationSchema }),
+  get: (id: string) =>
+    apiFetch<Installation>(`/v1/installations/${id}`, { schema: InstallationSchema }),
+  create: (input: InstallationCreate) =>
+    apiFetch<Installation>("/v1/installations", {
+      method: "POST",
+      body: InstallationCreateSchema.parse(input),
+      schema: InstallationSchema,
+    }),
+  update: (id: string, input: InstallationUpdate) =>
+    apiFetch<Installation>(`/v1/installations/${id}`, {
+      method: "PATCH",
+      body: InstallationUpdateSchema.parse(input),
+      schema: InstallationSchema,
+    }),
+  end: (id: string, input: InstallationEnd) =>
+    apiFetch<Installation>(`/v1/installations/${id}/end`, {
+      method: "POST",
+      body: InstallationEndSchema.parse(input),
+      schema: InstallationSchema,
+    }),
+  purge: (id: string, confirmName: string) =>
+    apiFetch<InstallationPurgeResult>(`/v1/installations/${id}`, {
+      method: "DELETE",
+      body: InstallationPurgeSchema.parse({ confirmName }),
+      schema: InstallationPurgeResultSchema,
+    }),
+  // Per-era archive download. Mirrors `adminData.export`: a raw fetch so the
+  // tar archive streams as a Blob for a browser download.
+  exportArchive: async (id: string): Promise<{ blob: Blob; filename: string }> => {
+    const response = await fetch(apiUrlFor(`/v1/installations/${id}/export`), {
+      credentials: "include",
+    });
+    if (!response.ok) {
+      throw new ApiError(response.status, `export failed (HTTP ${response.status})`);
+    }
+    const disposition = response.headers.get("content-disposition") ?? "";
+    const match = /filename="([^"]+)"/.exec(disposition);
+    return { blob: await response.blob(), filename: match?.[1] ?? "installation-export.tar" };
+  },
+};
+
 export const apiQueryKeys = {
   me: ["auth", "me"] as const,
   status: ["status", "current"] as const,
   statusHistory: ["status", "history"] as const,
-  questions: (filter?: QuestionStatus | "all") => ["questions", "list", filter ?? "all"] as const,
+  questions: (filter?: QuestionStatus | "all" | "any", scope?: InstallationScope) =>
+    ["questions", "list", filter ?? "all", scope ?? null] as const,
   instructions: (filter?: InstructionStatus | "all") =>
     ["instructions", "list", filter ?? "all"] as const,
-  messages: (filter?: MessageStatus | "all") => ["messages", "list", filter ?? "all"] as const,
+  messages: (filter?: MessageStatus | "all", scope?: InstallationScope) =>
+    ["messages", "list", filter ?? "all", scope ?? null] as const,
   message: (id: string) => ["messages", id] as const,
   transcriptions: (id: string) => ["messages", id, "transcriptions"] as const,
   tokens: ["api-tokens", "list"] as const,
   tokenUsage: (id: string) => ["api-tokens", id, "usage"] as const,
   events: (params: EventsListParams) => ["events", "list", params] as const,
-  sessions: (boothId?: string) => ["sessions", "list", boothId ?? null] as const,
+  sessions: (boothId?: string, scope?: InstallationScope) =>
+    ["sessions", "list", boothId ?? null, scope ?? null] as const,
   session: (id: string) => ["sessions", id] as const,
   system: (boothId: string) => ["system", boothId] as const,
-  statsOverview: (selection: StatsRangeSelection) => ["stats", "overview", selection] as const,
+  statsOverview: (selection: StatsRangeSelection, scope?: InstallationScope) =>
+    ["stats", "overview", selection, scope ?? null] as const,
+  statsSummary: (scope?: InstallationScope) => ["stats", "summary", scope ?? null] as const,
   metricFilters: ["stats", "filters"] as const,
   auditLogs: (params: AuditLogListParams) => ["audit-logs", "list", params] as const,
   auditLogTarget: (targetType: string, targetId: string, params: AuditLogTargetParams = {}) =>
     ["audit-logs", "target", targetType, targetId, params] as const,
+  installations: ["installations", "list"] as const,
+  installationCurrent: ["installations", "current"] as const,
+  installation: (id: string) => ["installations", id] as const,
 };
 
 export function useAuditLogs(params: AuditLogListParams = {}) {
@@ -561,10 +666,15 @@ export function useEventsList(params: EventsListParams = {}) {
   });
 }
 
-export function useSessionsList(boothId?: string) {
+export function useSessionsList(boothId?: string, scope?: InstallationScope) {
   return useQuery({
-    queryKey: apiQueryKeys.sessions(boothId),
-    queryFn: () => sessions.list({ ...(boothId ? { boothId } : {}), limit: 100 }),
+    queryKey: apiQueryKeys.sessions(boothId, scope),
+    queryFn: () =>
+      sessions.list({
+        ...(boothId ? { boothId } : {}),
+        ...(scope ? { installationId: scope } : {}),
+        limit: 100,
+      }),
     refetchInterval: 10_000,
   });
 }
@@ -586,16 +696,24 @@ export function useSystemCurrent(boothId: string | undefined) {
   });
 }
 
-export function useStatsOverview(selection: StatsRangeSelection) {
+export function useStatsOverview(selection: StatsRangeSelection, scope?: InstallationScope) {
   // A custom range with a fixed end never changes, so polling it just reruns
   // the (deliberately un-cached) server aggregation. Only keep refetching while
   // the selection is "live": a preset window, or a custom range ending at "now"
   // (end === null).
   const isLive = selection.kind !== "custom" || selection.end === null;
   return useQuery({
-    queryKey: apiQueryKeys.statsOverview(selection),
-    queryFn: () => stats.overview(selection),
+    queryKey: apiQueryKeys.statsOverview(selection, scope),
+    queryFn: () => stats.overview(selection, scope),
     refetchInterval: isLive ? 30_000 : false,
+  });
+}
+
+export function useStatsSummary(scope?: InstallationScope) {
+  return useQuery({
+    queryKey: apiQueryKeys.statsSummary(scope),
+    queryFn: () => stats.summary(scope),
+    refetchInterval: 30_000,
   });
 }
 
@@ -647,17 +765,50 @@ export function useStatusHistory(options?: { paused?: boolean }) {
   });
 }
 
-export function useQuestionsList(filter: QuestionStatus | "all" = "all") {
-  const statusFilter = QuestionStatusSchema.safeParse(filter).success
-    ? (filter as QuestionStatus)
-    : undefined;
+export function useQuestionsList(
+  filter: QuestionStatus | "all" | "any" = "all",
+  options: { readonly installationId?: InstallationScope } = {},
+) {
+  const statusParam: QuestionStatus | "any" | undefined =
+    filter === "any"
+      ? "any"
+      : QuestionStatusSchema.safeParse(filter).success
+        ? (filter as QuestionStatus)
+        : undefined;
   return useQuery({
-    queryKey: apiQueryKeys.questions(filter),
+    queryKey: apiQueryKeys.questions(filter, options.installationId),
     queryFn: () =>
       questions.list({
-        ...(statusFilter === undefined ? {} : { status: statusFilter }),
+        ...(statusParam === undefined ? {} : { status: statusParam }),
+        ...(options.installationId ? { installationId: options.installationId } : {}),
         limit: 100,
       }),
+  });
+}
+
+const QUESTIONS_BY_IDS_BATCH = 200;
+
+// Resolve a specific set of question ids regardless of installation scope or
+// status. `GET /v1/questions?ids=…` is the documented lookup for
+// cross-era/archived questions; without it, historical prompts render as raw
+// UUIDs because `list` hides archived rows and is scoped to the active era.
+export function useQuestionsByIds(ids: readonly string[]) {
+  const sortedIds = useMemo(
+    () => Array.from(new Set(ids.filter((id) => id.length > 0))).sort(),
+    [ids],
+  );
+  return useQuery({
+    queryKey: ["questions", "by-ids", sortedIds] as const,
+    queryFn: async () => {
+      if (sortedIds.length === 0) return [] as Question[];
+      const batches: string[][] = [];
+      for (let i = 0; i < sortedIds.length; i += QUESTIONS_BY_IDS_BATCH) {
+        batches.push(sortedIds.slice(i, i + QUESTIONS_BY_IDS_BATCH));
+      }
+      const responses = await Promise.all(batches.map((batch) => questions.listByIds(batch)));
+      return responses.flatMap((response) => response.items);
+    },
+    enabled: sortedIds.length > 0,
   });
 }
 
@@ -742,6 +893,7 @@ export function useDeactivateInstruction() {
 export interface MessagesListOptions {
   readonly limit?: number;
   readonly enabled?: boolean;
+  readonly installationId?: InstallationScope;
 }
 
 export function useMessagesList(filter: MessageStatus | "all", options: MessagesListOptions = {}) {
@@ -750,10 +902,11 @@ export function useMessagesList(filter: MessageStatus | "all", options: Messages
     ? (filter as MessageStatus)
     : undefined;
   return useQuery({
-    queryKey: [...apiQueryKeys.messages(filter), limit],
+    queryKey: [...apiQueryKeys.messages(filter, options.installationId), limit],
     queryFn: () =>
       messages.list({
         ...(statusFilter === undefined ? {} : { status: statusFilter }),
+        ...(options.installationId ? { installationId: options.installationId } : {}),
         limit,
       }),
     enabled: options.enabled ?? true,
@@ -849,4 +1002,67 @@ export function useApiTokenUsage(id: string) {
 
 export function useAuthMeQuery() {
   return useQuery({ queryKey: apiQueryKeys.me, queryFn: auth.me, retry: false });
+}
+
+export function useInstallationsList() {
+  return useQuery({ queryKey: apiQueryKeys.installations, queryFn: installations.list });
+}
+
+// After a rollover (start/end) every era-scoped read is stale: the active
+// installation moved, frozen summaries changed, and live stats now belong to a
+// different era. Invalidate broadly so the whole console re-scopes.
+export function invalidateInstallationScopedQueries(
+  queryClient: ReturnType<typeof useQueryClient>,
+): void {
+  void queryClient.invalidateQueries({ queryKey: ["installations"] });
+  void queryClient.invalidateQueries({ queryKey: ["stats"] });
+  // Whole prefixes, not just the lists: a rollover rejects queued messages and
+  // closes open sessions, and a detail view has no polling of its own, so an
+  // operator sitting on one would otherwise keep seeing the pre-rollover row.
+  void queryClient.invalidateQueries({ queryKey: ["messages"] });
+  void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+  void queryClient.invalidateQueries({ queryKey: ["events"] });
+  void queryClient.invalidateQueries({ queryKey: ["questions"] });
+}
+
+export function useCreateInstallation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: InstallationCreate) => installations.create(input),
+    onSuccess: () => invalidateInstallationScopedQueries(queryClient),
+  });
+}
+
+export function useEndInstallation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { readonly id: string; readonly input: InstallationEnd }) =>
+      installations.end(id, input),
+    onSuccess: () => invalidateInstallationScopedQueries(queryClient),
+  });
+}
+
+// Renaming (or re-noting/re-locating) the active installation. Only the
+// installation row itself changes — no scoped counts move — so this
+// invalidates just the installations list and the touched detail.
+export function useUpdateInstallation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { readonly id: string; readonly input: InstallationUpdate }) =>
+      installations.update(id, input),
+    onSuccess: (_data, { id }) => {
+      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.installations });
+      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.installation(id) });
+      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.installationCurrent });
+    },
+  });
+}
+
+export function usePurgeInstallation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, confirmName }: { readonly id: string; readonly confirmName: string }) =>
+      installations.purge(id, confirmName),
+    onSuccess: () => invalidateInstallationScopedQueries(queryClient),
+  });
 }

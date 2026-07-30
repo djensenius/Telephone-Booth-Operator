@@ -4,9 +4,19 @@ import type { JSX } from "react";
 // (all in UTC) and we reformat for the local operator here.
 
 import { useMemo, useState } from "react";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { STATS_WINDOW_VALUES } from "@telephone-booth-operator/shared";
-import type { MetricFilter, StatsOverview, StatsWindow } from "@telephone-booth-operator/shared";
+import type {
+  InstallationScope,
+  MetricFilter,
+  StatsOverview,
+  StatsWindow,
+} from "@telephone-booth-operator/shared";
 import { GlassPanel } from "../../components/booth/index.js";
+import {
+  InstallationScopePicker,
+  parseInstallationScopeParam,
+} from "../installations/InstallationScopePicker.js";
 import {
   useCreateMetricFilter,
   useDeleteMetricFilter,
@@ -605,12 +615,23 @@ function StatsControls({
 }
 
 export function StatsScreen(): JSX.Element {
+  const search = useSearch({ strict: false });
+  const navigate = useNavigate();
+  const scope = parseInstallationScopeParam(search.installationId);
   const [selection, setSelection] = useState<StatsRangeSelection>({
     kind: "preset",
     window: "7d",
   });
-  const query = useStatsOverview(selection);
+  const query = useStatsOverview(selection, scope);
   const overview = query.data ?? null;
+
+  const handleScopeChange = (next: InstallationScope | undefined): void => {
+    void navigate({
+      to: "/stats",
+      search: next === undefined ? {} : { installationId: next },
+      replace: true,
+    });
+  };
 
   const generatedAt = useMemo(
     () => (overview ? new Date(overview.generatedAt).toLocaleString() : null),
@@ -618,7 +639,7 @@ export function StatsScreen(): JSX.Element {
   );
 
   return (
-    <article className="stats-screen" aria-labelledby="stats-title">
+    <GlassPanel title="Usage statistics" className="feature-screen stats-screen">
       <header className="stats-screen__header">
         <div>
           <span className="screen-kicker">Operator console</span>
@@ -627,6 +648,7 @@ export function StatsScreen(): JSX.Element {
             {selectionLabel(selection)}
             {generatedAt === null ? null : ` · refreshed ${generatedAt}`}
           </p>
+          <InstallationScopePicker scope={scope} onChange={handleScopeChange} />
         </div>
         <StatsControls selection={selection} onChange={setSelection} />
       </header>
@@ -646,6 +668,6 @@ export function StatsScreen(): JSX.Element {
           <BoothBreakdownSection overview={overview} />
         </div>
       )}
-    </article>
+    </GlassPanel>
   );
 }

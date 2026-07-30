@@ -1,26 +1,15 @@
 import type { JSX } from "react";
-import { useEffect, useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { WsEnvelopeSchema, BoothStatusSchema } from "@telephone-booth-operator/shared";
-import type {
-  BoothState,
-  BoothStatus,
-  BoothSystemSnapshot,
-} from "@telephone-booth-operator/shared";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { BoothState, BoothStatus } from "@telephone-booth-operator/shared";
 import { GlassPanel, useBoothStatus } from "../../components/booth/index.js";
-import {
-  apiQueryKeys,
-  apiWebSocketUrlFor,
-  useStatusCurrent,
-  useStatusHistory,
-} from "../../lib/api-client.js";
+import { useStatusCurrent, useStatusHistory } from "../../lib/api-client.js";
+import { useBoothWebSocket } from "../../lib/booth-websocket.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
 import {
   STATUS_HISTORY_DISPLAY_LIMIT,
   collapseStatusHistory,
   firstSeenAtOf,
   isNewerThan,
-  mergeLiveStatus,
   repeatCountOf,
 } from "../../lib/status-history.js";
 
@@ -54,97 +43,57 @@ function boothDisplay(state: BoothState): "idle" | "playing" | "recording" | "er
   return "idle";
 }
 
-function wsUrl(): string {
-  return apiWebSocketUrlFor("/v1/ws/status");
-}
-
 export function StatusScreen(): JSX.Element {
-  const { setConnectionStatus, setLastError, setLastStatusAt, setRuntimeMode, setStatus } =
-    useBoothStatus();
-  const queryClient = useQueryClient();
+  const { setLastStatusAt, setRuntimeMode, setStatus } = useBoothStatus();
+  const ws = useBoothWebSocket();
   const [liveStatus, setLiveStatus] = useState<BoothStatus | null>(null);
-  const [wsState, setWsState] = useState("polling");
+  const wsState = ws.state;
   const statusQuery = useStatusCurrent({ paused: wsState === "live" });
   const historyQuery = useStatusHistory({ paused: wsState === "live" });
 
+  const latestStatusRef = useRef<BoothStatus | null>(null);
   useEffect(() => {
-    setLiveStatus(statusQuery.data ?? null);
-    if (statusQuery.data?.updatedAt) {
-      setLastStatusAt(new Date(statusQuery.data.updatedAt));
+    const polled = statusQuery.data ?? null;
+    // A poll can be in flight while the socket connects and resolve after a
+    // newer frame has already landed. Rewinding the reference to that older
+    // snapshot would let the next out-of-order frame through, so the poll is
+    // held to the same ordering rule as the socket.
+    if (polled !== null && !isNewerThan(polled, latestStatusRef.current)) return;
+    setLiveStatus(polled);
+    latestStatusRef.current = polled;
+    if (polled?.updatedAt) {
+      setLastStatusAt(new Date(polled.updatedAt));
     }
   }, [statusQuery.data, setLastStatusAt]);
 
+  // Subscribe to the shared /v1/ws/status stream for this screen's own
+  // presentation state. Every cache write lives in `BoothEnvelopeBridge`, which
+  // is mounted app-wide, so a console on another route sees pushed messages and
+  // rollovers too.
   useEffect(() => {
-    if (typeof WebSocket === "undefined") return undefined;
-    const socket = new WebSocket(wsUrl());
-    setWsState("connecting");
-    socket.addEventListener("open", () => {
-      setWsState("live");
-      setConnectionStatus("connected");
-      setLastError(null);
+    const offEnvelope = ws.subscribe((envelope) => {
+      if (envelope.kind !== "status") return;
+      // Frames can arrive out of order, so an older one is recorded in the
+      // history but never becomes the displayed current status. Tracked in a
+      // ref rather than read back from the cache, which the bridge is writing
+      // to from the same envelope.
+      const status = envelope.status;
+      if (!isNewerThan(status, latestStatusRef.current)) return;
+      latestStatusRef.current = status;
+      setLiveStatus(status);
+      setLastStatusAt(new Date(status.updatedAt));
     });
-    socket.addEventListener("message", (event) => {
-      let raw: unknown;
-      try {
-        raw = JSON.parse(String(event.data));
-      } catch {
-        return;
-      }
-      const envelope = WsEnvelopeSchema.safeParse(raw);
-      if (envelope.success) {
-        if (envelope.data.kind === "status") {
-          const status = envelope.data.status;
-          // Frames can arrive out of order, so an older one is recorded in the
-          // history but never becomes the displayed current status.
-          const cached = queryClient.getQueryData<BoothStatus>(apiQueryKeys.status) ?? null;
-          if (isNewerThan(status, cached)) {
-            setLiveStatus(status);
-            setLastStatusAt(new Date(status.updatedAt));
-            queryClient.setQueryData(apiQueryKeys.status, status);
-          }
-          queryClient.setQueryData(
-            apiQueryKeys.statusHistory,
-            (current: { readonly items: readonly BoothStatus[] } | undefined) => ({
-              items: mergeLiveStatus(current?.items ?? [], status),
-            }),
-          );
-        } else if (envelope.data.kind === "system") {
-          queryClient.setQueryData<{
-            boothId: string;
-            snapshot: BoothSystemSnapshot;
-            receivedAt: string;
-            version: string | null;
-          }>(["system", envelope.data.boothId], {
-            boothId: envelope.data.boothId,
-            snapshot: envelope.data.snapshot,
-            receivedAt: envelope.data.receivedAt,
-            version: envelope.data.version ?? null,
-          });
-        } else if (envelope.data.kind === "message") {
-          const message = envelope.data.message;
-          queryClient.setQueryData(apiQueryKeys.message(message.id), message);
-          void queryClient.invalidateQueries({ queryKey: ["messages", "list"] });
-          void queryClient.invalidateQueries({ queryKey: apiQueryKeys.transcriptions(message.id) });
-        }
-        return;
-      }
-      // Back-compat: tolerate the legacy bare-status frame from older API
-      // builds. The op-api PR migrated the wire to a discriminated envelope.
-      const legacy = BoothStatusSchema.safeParse(raw);
-      if (legacy.success) {
-        setLiveStatus(legacy.data);
-        setLastStatusAt(new Date(legacy.data.updatedAt));
-        queryClient.setQueryData(apiQueryKeys.status, legacy.data);
-      }
+    const offLegacy = ws.subscribeLegacyStatus((status) => {
+      if (!isNewerThan(status, latestStatusRef.current)) return;
+      latestStatusRef.current = status;
+      setLiveStatus(status);
+      setLastStatusAt(new Date(status.updatedAt));
     });
-    socket.addEventListener("error", () => {
-      setWsState("polling");
-      setConnectionStatus("disconnected");
-      setLastError("Live status socket is busy; polling every five seconds.");
-    });
-    socket.addEventListener("close", () => setWsState("polling"));
-    return () => socket.close();
-  }, [queryClient, setConnectionStatus, setLastError, setLastStatusAt]);
+    return () => {
+      offEnvelope();
+      offLegacy();
+    };
+  }, [ws, setLastStatusAt]);
 
   useEffect(() => {
     if (liveStatus) setStatus(boothDisplay(liveStatus.state));

@@ -33,6 +33,16 @@ If you skip the order and revoke first, the booth goes offline until you
 restart it with the new token. See [`api-tokens.md`](api-tokens.md) for
 the full token lifecycle and storage model.
 
+## Rolling over to a new installation
+
+Tearing the booth down and setting it up somewhere new? End the current
+installation and start the next one instead of deleting anything — stats reset,
+history stays browsable, and tokens/operators/instructions carry over. The full
+checklist is in [installations](installations.md).
+
+If you genuinely need the data gone (a demo run, a test dataset), the
+irreversible hard purge lives in the Settings admin panel. Export first.
+
 ## Restoring Postgres
 
 The operator DB is small (KB to a few MB). A nightly `pg_dump` is plenty:

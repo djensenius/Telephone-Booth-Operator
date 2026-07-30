@@ -8,9 +8,15 @@ import {
   useDecideMessage,
   useDeleteMessage,
   useMessagesList,
-  useQuestionsList,
+  useQuestionsByIds,
   useRetranscribeMessage,
 } from "../../lib/api-client.js";
+import {
+  InstallationScopePicker,
+  parseInstallationScopeParam,
+  useIsInstallationFrozen,
+  useScopeIsFrozen,
+} from "../installations/InstallationScopePicker.js";
 import {
   MESSAGE_ROUTE_FILTERS,
   isMessageFilter,
@@ -81,11 +87,39 @@ export function MessagesScreen(): JSX.Element {
   const navigate = useNavigate();
   const now = useNow();
   const filter: MessageRouteFilter = isMessageFilter(search.status) ? search.status : "all";
+  const scope = parseInstallationScopeParam(search.installationId);
+  // Browsing a past era is read-only: its counters were frozen when it ended,
+  // and the API refuses a decision or a delete against it.
+  const frozen = useScopeIsFrozen(scope);
+  // `installationId=all` spans open and closed eras at once, so the page as a
+  // whole is not frozen but individual rows are.
+  const installationIsFrozen = useIsInstallationFrozen();
   const needsReview = filter === "needs-review";
-  const listed = useMessagesList(backendFilter(filter), { enabled: !needsReview });
-  const received = useMessagesList("received", { enabled: needsReview });
-  const pending = useMessagesList("pending", { enabled: needsReview });
-  const questions = useQuestionsList();
+  const listed = useMessagesList(backendFilter(filter), {
+    enabled: !needsReview,
+    ...(scope === undefined ? {} : { installationId: scope }),
+  });
+  const received = useMessagesList("received", {
+    enabled: needsReview,
+    ...(scope === undefined ? {} : { installationId: scope }),
+  });
+  const pending = useMessagesList("pending", {
+    enabled: needsReview,
+    ...(scope === undefined ? {} : { installationId: scope }),
+  });
+  const questionIds = useMemo(() => {
+    const rowsForIds = needsReview
+      ? [...(received.data?.items ?? []), ...(pending.data?.items ?? [])]
+      : (listed.data?.items ?? []);
+    const ids = new Set<string>();
+    for (const item of rowsForIds) {
+      if (typeof item.questionId === "string" && item.questionId.length > 0) {
+        ids.add(item.questionId);
+      }
+    }
+    return Array.from(ids);
+  }, [needsReview, listed.data?.items, received.data?.items, pending.data?.items]);
+  const questions = useQuestionsByIds(questionIds);
   const deleteMessage = useDeleteMessage();
   const decideMessage = useDecideMessage();
   const retranscribe = useRetranscribeMessage();
@@ -106,8 +140,8 @@ export function MessagesScreen(): JSX.Element {
   }, [needsReview, listed.data?.items, received.data?.items, pending.data?.items]);
 
   const promptById = useMemo(
-    () => new Map((questions.data?.items ?? []).map((question) => [question.id, question.prompt])),
-    [questions.data?.items],
+    () => new Map((questions.data ?? []).map((question) => [question.id, question.prompt])),
+    [questions.data],
   );
 
   const closeConfirm = useCallback(() => {
@@ -153,7 +187,10 @@ export function MessagesScreen(): JSX.Element {
             onClick={() =>
               void navigate({
                 to: "/messages",
-                search: option === "all" ? {} : { status: option },
+                search: {
+                  ...(option === "all" ? {} : { status: option }),
+                  ...(scope === undefined ? {} : { installationId: scope }),
+                },
               })
             }
           >
@@ -161,6 +198,19 @@ export function MessagesScreen(): JSX.Element {
           </button>
         ))}
       </div>
+      <InstallationScopePicker
+        scope={scope}
+        onChange={(next) =>
+          void navigate({
+            to: "/messages",
+            search: {
+              ...(filter === "all" ? {} : { status: filter }),
+              ...(next === undefined ? {} : { installationId: next }),
+            },
+            replace: true,
+          })
+        }
+      />
       {actionError ? (
         <p className="feature-error" role="alert">
           {actionMessage(actionError)}
@@ -184,6 +234,7 @@ export function MessagesScreen(): JSX.Element {
                 }
                 busy={busyIds.has(message.id)}
                 now={now}
+                frozen={frozen || installationIsFrozen(message.installationId)}
                 onDecide={(id, decision) => {
                   setBusyIds((previous) => new Set(previous).add(id));
                   decideMessage.mutate(

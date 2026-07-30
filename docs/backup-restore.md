@@ -32,23 +32,53 @@ only their Argon2id **hash** is stored — never a plaintext token.
 `manifest.json` carries a numeric `version`. A server restores its own version
 and anything older, and rejects anything newer than it understands.
 
-| Version | Change                                                                                                                               |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| 1       | Original shape.                                                                                                                      |
-| 2       | Booth status snapshots carry `firstSeenAt`/`repeatCount`. Version 1 snapshots restore with their window starting at the report time. |
-| 3       | Includes the [audit log](audit-log.md). Older archives restore with no audit history.                                                |
+| Version | Change                                                                                                                                                                                                                 |
+| ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1       | Original shape.                                                                                                                                                                                                        |
+| 2       | Booth status snapshots carry `firstSeenAt`/`repeatCount`. Version 1 snapshots restore with their window starting at the report time.                                                                                   |
+| 3       | Includes the [audit log](audit-log.md). Older archives restore with no audit history.                                                                                                                                  |
+| 4       | Installations are exported, and scoped rows carry `installationId`. Older archives restore untagged rows into an ended `Restored <generatedAt>` installation so they remain browsable without becoming the active era. |
 
 ## Endpoints
 
 ```text
-GET  /v1/admin/data/export   → application/x-tar download
-POST /v1/admin/data/import   ← raw tar body (application/x-tar)
+GET  /v1/admin/data/export        → application/x-tar download (everything)
+GET  /v1/installations/:id/export → application/x-tar download (one era)
+POST /v1/admin/data/import        ← raw tar body (application/x-tar)
 ```
+
+The scoped export contains only the rows belonging to that installation, plus
+the blobs they reference — download one before purging an era if you want a
+copy to keep. See [installations](installations.md).
+
+A per-era archive deliberately withholds the instance's credentials: **API
+tokens, mobile devices, and metric filters are omitted entirely**, and operator
+accounts are narrowed to the ones the era's own rows point at (who ended it,
+who moderated a message, who requested a transcription). Instructions travel
+whole, because they are booth configuration and their audio would otherwise
+dangle. Use the full `/v1/admin/data/export` when you want a restorable copy of
+the instance.
+
+> **These archives still contain personal data.** The operator accounts that do
+> come along are exported whole — subject identifier, email, name, groups,
+> picture, last login — and the recordings themselves are people's voices.
+> Narrowing which accounts appear reduces the exposure; it does not make an
+> archive safe to publish. Treat one like a database dump.
 
 Import is **idempotent**: rows are upserted by id, and each audio blob is
 uploaded only when the target storage does not already hold it (dedupe by
 `blobKey`). Every blob's bytes are re-hashed and checked against the
 archived `sha256` before upload, so a corrupted archive is rejected.
+
+Only one installation may be open at a time. If the archive carries an active
+era and the target already has one, the target's yields: it is closed out, so
+nothing becomes unreachable and no replica is left holding a deleted era as its
+active one. An era with nothing recorded against it is closed too, and shows up
+in the history list as an empty run. That close-out is the same operation `POST /:id/end`
+performs — open sessions are ended, the moderation queue is emptied, live
+questions are retired and the summary is frozen — so a restored instance never
+inherits an era that is ended in name only while its pending messages keep
+feeding the moderation badge.
 
 ## CLI wrapper
 

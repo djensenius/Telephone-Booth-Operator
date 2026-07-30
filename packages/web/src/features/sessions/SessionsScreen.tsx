@@ -1,9 +1,13 @@
 import type { JSX } from "react";
 import { useMemo } from "react";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { GlassPanel } from "../../components/booth/index.js";
 import { useSession, useSessionsList } from "../../lib/api-client.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
+import {
+  InstallationScopePicker,
+  parseInstallationScopeParam,
+} from "../installations/InstallationScopePicker.js";
 
 function fmtDuration(ms: number | null | undefined): string {
   if (typeof ms !== "number") return "—";
@@ -12,7 +16,10 @@ function fmtDuration(ms: number | null | undefined): string {
 }
 
 export function SessionsScreen(): JSX.Element {
-  const query = useSessionsList();
+  const search = useSearch({ strict: false });
+  const navigate = useNavigate();
+  const scope = parseInstallationScopeParam(search.installationId);
+  const query = useSessionsList(undefined, scope);
   const items = useMemo(() => query.data?.items ?? [], [query.data]);
 
   return (
@@ -20,6 +27,16 @@ export function SessionsScreen(): JSX.Element {
       <p className="screen-kicker">Observability</p>
       <h1>Sessions</h1>
       <p>Each pickup-to-hangup is grouped into a session with its outcome and dialed digits.</p>
+      <InstallationScopePicker
+        scope={scope}
+        onChange={(next) =>
+          void navigate({
+            to: "/sessions",
+            search: next === undefined ? {} : { installationId: next },
+            replace: true,
+          })
+        }
+      />
 
       {query.isLoading && items.length === 0 ? (
         <FeatureSkeleton label="Sorting the cords…" />

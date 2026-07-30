@@ -53,6 +53,11 @@ async function upsertPlaceholderFile(blobKey: string, sizeBytes: number, duratio
 }
 
 async function main(): Promise<void> {
+  // Questions belong to an installation, so seeding needs one to hang them on.
+  const installation =
+    (await prisma.installation.findFirst({ where: { endedAt: null } })) ??
+    (await prisma.installation.create({ data: { name: "Installation 1" } }));
+
   const instructionsFile = await upsertPlaceholderFile(
     "system/operator-instructions-placeholder.flac",
     96_000,
@@ -68,7 +73,7 @@ async function main(): Promise<void> {
     );
 
     await prisma.question.upsert({
-      where: { prompt },
+      where: { installationId_prompt: { installationId: installation.id, prompt } },
       update: {
         audioId: audio.id,
         status: "active",
@@ -78,6 +83,7 @@ async function main(): Promise<void> {
         prompt,
         audioId: audio.id,
         status: "active",
+        installationId: installation.id,
       },
     });
   }

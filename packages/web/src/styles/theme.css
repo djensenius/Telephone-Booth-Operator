@@ -1319,10 +1319,26 @@ textarea:focus-visible,
   box-shadow: 0 12px 28px color-mix(in srgb, var(--accent-red) 24%, transparent);
 }
 
+/* This list used to end in a dangling comma, so it swallowed whatever rule
+   followed it instead of standing on its own. It matches the disabled styling
+   the other button groups already use. */
 .feature-primary-button:disabled,
 .feature-toolbar button:disabled,
 .feature-table button:disabled,
-.feature-dialog button:disabled,
+.feature-dialog button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+/* Stands in for the actions an ended era does not offer, so the row does not
+   silently lose its buttons with nothing said. */
+.message-card__frozen {
+  align-self: center;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-style: italic;
+}
+
 /* The shared action-row rule above is more specific than the variant classes,
    so restate them here to keep Approve green and Reject red. */
 .message-card__actions button.feature-button--approve {
@@ -2081,4 +2097,66 @@ textarea:focus-visible,
   font-size: 0.78rem;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Installations feature: era history, live/frozen summaries, and the
+   destructive rollover/purge controls. Colours reference theme tokens only. */
+.installations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.installations-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.installations-card__meta {
+  margin: 0.15rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.installations-card__notes {
+  margin: 0.25rem 0 0;
+  color: var(--text-secondary, var(--text-primary));
+}
+
+.installations-summary {
+  margin-top: 0.75rem;
+}
+
+.installations-hint {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.installations-end-form {
+  width: 100%;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.75rem;
+}
+
+.installations-danger {
+  border-color: var(--accent-red);
+  color: var(--accent-red-strong);
+}
+
+.installations-danger:disabled {
+  opacity: 0.55;
+}
+
+.stats-scope-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
 }

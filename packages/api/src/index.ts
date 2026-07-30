@@ -29,6 +29,7 @@ import { auditRouter } from "./routes/audit.js";
 import { authRoutes } from "./routes/auth.js";
 import { devicesRouter } from "./routes/devices.js";
 import { eventsRouter } from "./routes/events.js";
+import { installationsRouter } from "./routes/installations.js";
 import { instructionsRouter } from "./routes/instructions.js";
 import { workerRouter } from "./routes/worker.js";
 import { messagesRouter } from "./routes/messages.js";
@@ -81,6 +82,7 @@ export const createApp = (): Hono<{ Variables: AuthVariables & AuditVariables }>
   // Operator backend resource routes. Keep token-management mounts separate;
   // the operator-token-mgmt sibling task owns /v1/api-tokens.
   app.route("/v1/questions", questionsRouter);
+  app.route("/v1/installations", installationsRouter);
   app.route("/v1/instructions", instructionsRouter);
   app.route("/v1/messages", messagesRouter);
   app.route("/v1/status", statusRouter);

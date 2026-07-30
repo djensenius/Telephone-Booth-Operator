@@ -1,6 +1,7 @@
 import { zValidator } from "@hono/zod-validator";
 import { Prisma } from "../generated/prisma/client.js";
 import {
+  InstallationScopeSchema,
   MessageCreateSchema,
   MessageDecisionSchema,
   MessageStatusSchema,
@@ -23,6 +24,13 @@ import { fanOutNotification } from "../lib/apns.js";
 import { generateSasUrl, headBlob } from "../lib/azure-blob.js";
 import { wsBroadcaster } from "../lib/broadcaster.js";
 import { db } from "../lib/db.js";
+import {
+  lockInstallationForWrite,
+  runWithOpenEra,
+  requireActiveInstallation,
+  resolveInstallationScope,
+  scopeWhere,
+} from "../lib/installation.js";
 import { countMessagesAwaitingModeration } from "../lib/moderation-badge.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 import {
@@ -36,18 +44,52 @@ const listQuerySchema = z.object({
   status: MessageStatusSchema.optional(),
   since: z.string().datetime().optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
+  installationId: InstallationScopeSchema.optional(),
 });
 
 const idParamSchema = z.object({ id: z.guid() });
 
 const messageBlobName = (sha256: string): string => `messages/${sha256.slice(0, 2)}/${sha256}.flac`;
 
+/**
+ * A question the booth may still record an answer for.
+ *
+ * `active` is the normal case. The exception is the rollover straggler: an
+ * operator ends an era while a caller is midway through answering, the era's
+ * live questions are archived with `retiredAt = endedAt`, and the recording
+ * lands afterwards. Bouncing that with a 404 would throw away a real recording
+ * over admin bookkeeping, which is precisely what this feature is meant to
+ * tolerate, so a question retired *by a rollover* stays answerable. A question
+ * an operator retired by hand does not: that is a deliberate withdrawal.
+ *
+ * The straggler's message is still attributed to the open era rather than the
+ * closed one. The closed era's moderation queue was drained and its summary
+ * frozen on the way out, so filing it there would leave it pending in a scope
+ * nobody is watching -- visible-and-moderatable beats chronologically tidy.
+ */
+async function questionIsAnswerable(question: {
+  status: string;
+  retiredAt: Date | null;
+  installationId: string | null;
+}): Promise<boolean> {
+  if (question.status === "active") return true;
+  if (question.status !== "archived" || question.retiredAt === null) return false;
+  if (question.installationId === null) return false;
+  const era = await db.installation.findUnique({
+    where: { id: question.installationId },
+    select: { endedAt: true },
+  });
+  return era?.endedAt?.getTime() === question.retiredAt.getTime();
+}
+
 export const messagesRouter = new Hono<{ Variables: AuthVariables & ApiTokenVariables }>();
 
 messagesRouter.get("/", zValidator("query", listQuerySchema), async (c) => {
-  const { status, since, limit } = c.req.valid("query");
+  const { status, since, limit, installationId } = c.req.valid("query");
+  const scope = await resolveInstallationScope(installationId);
   const messages = await db.message.findMany({
     where: {
+      ...scopeWhere(scope),
       ...(status ? { status } : {}),
       ...(since ? { createdAt: { gte: new Date(since) } } : {}),
     },
@@ -92,12 +134,40 @@ messagesRouter.get("/:id", zValidator("param", idParamSchema), async (c) => {
   return c.json(serializeMessage(message as never));
 });
 
+// An ended era's counters are frozen at close-out, so anything that would
+// change what they counted — a moderation decision, a deletion — is refused
+// once the era is closed. Transcribing or translating an old recording is
+// still allowed: it adds text without contradicting a frozen number.
+//
+// The check has to hold for the length of the write, or a rollover committing
+// between the two puts the change on the wrong side of the freeze. Holding the
+// era row shared is what makes the two queue instead of overlapping.
+export class InstallationEndedError extends Error {}
+
+const withOpenEra = async <T>(
+  installationId: string | null,
+  write: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> =>
+  db.$transaction(async (tx) => {
+    if (installationId !== null && !(await lockInstallationForWrite(tx, installationId))) {
+      throw new InstallationEndedError();
+    }
+    return write(tx);
+  });
+
 messagesRouter.delete("/:id", zValidator("param", idParamSchema), async (c) => {
   const { id } = c.req.valid("param");
   recordAudit(c, { action: "message.delete", targetType: "message", targetId: id });
   const existing = await db.message.findUnique({ where: { id } });
   if (!existing) return c.json({ error: "not_found" }, 404);
-  await db.message.delete({ where: { id } });
+  try {
+    await withOpenEra(existing.installationId, (tx) => tx.message.delete({ where: { id } }));
+  } catch (error) {
+    if (error instanceof InstallationEndedError) {
+      return c.json({ error: "installation_ended" }, 409);
+    }
+    throw error;
+  }
   recordAudit(c, { metadata: { previousStatus: existing.status } });
   return c.body(null, 204);
 });
@@ -137,7 +207,7 @@ messagesRouter.post("/", requireApiToken(), zValidator("json", MessageCreateSche
 
   if (body.questionId) {
     const question = await db.question.findUnique({ where: { id: body.questionId } });
-    if (!question || question.status !== "active")
+    if (!question || !(await questionIsAnswerable(question)))
       return c.json({ error: "question_not_found" }, 404);
   }
   if (existingFile && existingFile.blobKey !== blobName) {
@@ -172,6 +242,7 @@ messagesRouter.post("/", requireApiToken(), zValidator("json", MessageCreateSche
         status: "uploading",
         questionId: body.questionId ?? null,
         audioId: file.id,
+        installationId: await requireActiveInstallation(),
       },
     });
   } catch (err) {
@@ -184,6 +255,34 @@ messagesRouter.post("/", requireApiToken(), zValidator("json", MessageCreateSche
         return uploadSlot(raced.id);
       }
       return c.json({ error: "message_already_exists" }, 409);
+    }
+    // A hard purge collects files its era owned that nothing else references,
+    // and this content-addressed row can become one of them between the upsert
+    // above and this insert — the purge saw no referrer because this message
+    // did not exist yet. Re-create the file and try once more rather than
+    // failing a booth recording over an admin's housekeeping.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2003") {
+      const replacement = await db.file.upsert({
+        where: { sha256: body.sha256 },
+        create: {
+          blobContainer: process.env.AZURE_BLOB_CONTAINER?.trim() || "booth-recordings",
+          blobKey: blobName,
+          sha256: body.sha256,
+          sizeBytes: 0,
+          durationMs: body.durationMs,
+          contentType: "audio/flac",
+        },
+        update: {},
+      });
+      message = await db.message.create({
+        data: {
+          status: "uploading",
+          questionId: body.questionId ?? null,
+          audioId: replacement.id,
+          installationId: await requireActiveInstallation(),
+        },
+      });
+      return uploadSlot(message.id);
     }
     throw err;
   }
@@ -227,10 +326,33 @@ messagesRouter.post(
     // Transcription app (see docs/transcription-providers.md), so it must
     // never gate whether an operator can see and decide a message.
     const receivedAt = new Date();
-    const { count } = await db.message.updateMany({
-      where: { id, status: "uploading" },
-      data: { status: "pending", receivedAt },
-    });
+    // A recording that was in flight when the operator ended an era belongs in
+    // the open one: that era's queue was drained and its summary frozen on the
+    // way out, so leaving it there would file a real recording where nobody is
+    // looking. The promotion holds the destination era row shared for its whole
+    // transaction, so it cannot commit into an era whose close-out is underway
+    // but not yet visible — the rollover waits for it, or it waits for the
+    // rollover and re-files.
+    // The recording's own era is only a hint: it may have ended while the
+    // upload was in flight, in which case another is resolved — or opened —
+    // outside the transaction and the promotion retried.
+    // A retry of a completion that already landed must stay a no-op. Resolving
+    // an era for it would open a blank one on the way to an update that
+    // matches nothing, so the already-promoted case never gets that far.
+    const alreadyLanded = message.status !== "uploading";
+    const { count } = alreadyLanded
+      ? { count: 0 }
+      : await runWithOpenEra(message.installationId ?? undefined, async (tx, era) => {
+          const refiled = era === message.installationId ? null : era;
+          return tx.message.updateMany({
+            where: { id, status: "uploading" },
+            data: {
+              status: "pending",
+              receivedAt,
+              ...(refiled ? { installationId: refiled } : {}),
+            },
+          });
+        });
 
     if (count === 0) {
       const current = await db.message.findUnique({ where: { id } });
@@ -444,7 +566,7 @@ messagesRouter.post(
     });
     const existing = await db.message.findUnique({
       where: { id },
-      select: { id: true, status: true },
+      select: { id: true, status: true, installationId: true },
     });
     if (!existing) return c.json({ error: "not_found" }, 404);
     if (existing.status === "uploading") {
@@ -452,15 +574,24 @@ messagesRouter.post(
     }
     recordAudit(c, { metadata: { previousStatus: existing.status } });
     const user = c.get("user") as { id: string } | undefined;
-    await db.message.update({
-      where: { id },
-      data: {
-        status: decision === "approve" ? "approved" : "rejected",
-        decidedAt: new Date(),
-        decidedById: user?.id ?? null,
-        ...(notes !== undefined ? { notes } : {}),
-      },
-    });
+    try {
+      await withOpenEra(existing.installationId, (tx) =>
+        tx.message.update({
+          where: { id },
+          data: {
+            status: decision === "approve" ? "approved" : "rejected",
+            decidedAt: new Date(),
+            decidedById: user?.id ?? null,
+            ...(notes !== undefined ? { notes } : {}),
+          },
+        }),
+      );
+    } catch (error) {
+      if (error instanceof InstallationEndedError) {
+        return c.json({ error: "installation_ended" }, 409);
+      }
+      throw error;
+    }
     const message = await db.message.findUnique({ where: { id }, include: messageWithAi });
     if (!message) return c.json({ error: "not_found" }, 404);
     wsBroadcaster.broadcast({ kind: "message", message: serializeMessage(message) });

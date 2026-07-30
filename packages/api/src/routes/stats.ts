@@ -6,6 +6,7 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
 import {
+  InstallationScopeSchema,
   MetricFilterCreateSchema,
   MetricFilterUpdateSchema,
   StatsWindowSchema,
@@ -18,6 +19,12 @@ import { recordAudit } from "../lib/audit.js";
 import { wsBroadcaster } from "../lib/broadcaster.js";
 import { db } from "../lib/db.js";
 import { countMessagesAwaitingModeration } from "../lib/moderation-badge.js";
+import {
+  resolveInstallationScope,
+  scopeCacheKey,
+  scopeWhere,
+  type InstallationScopeFilter,
+} from "../lib/installation.js";
 import { defaultStatus, serializeStatus } from "../lib/serializers.js";
 import { requireOperator, type AuthVariables } from "../lib/session.js";
 
@@ -45,11 +52,14 @@ type StatsSummary = {
   generatedAt: string;
 };
 
-let cached: { value: StatsSummary; expiresAt: number } | null = null;
+// Keyed by installation scope so a rollover doesn't serve the previous era's
+// numbers for the rest of the cache TTL.
+const summaryCache = new Map<string, { value: StatsSummary; expiresAt: number }>();
 
-const computeStatsSummary = async (): Promise<StatsSummary> => {
+const computeStatsSummary = async (scope: InstallationScopeFilter): Promise<StatsSummary> => {
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
+  const scoped = scopeWhere(scope);
 
   const [
     latestStatus,
@@ -62,13 +72,20 @@ const computeStatsSummary = async (): Promise<StatsSummary> => {
   ] = await Promise.all([
     // Same tie-break as `/v1/status` so both report the same current row when
     // two booth-supplied timestamps collide.
-    db.boothStatusSnapshot.findFirst({ orderBy: [{ updatedAt: "desc" }, { id: "desc" }] }),
-    db.message.count({ where: { status: "pending" } }),
-    countMessagesAwaitingModeration(),
-    db.message.count({ where: { createdAt: { gte: startOfDay } } }),
-    db.message.findFirst({ orderBy: { createdAt: "desc" }, select: { id: true } }),
-    db.callSession.count({ where: { startedAt: { gte: startOfDay } } }),
-    db.callSession.count({ where: { endedAt: null } }),
+    db.boothStatusSnapshot.findFirst({
+      where: scoped,
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+    }),
+    db.message.count({ where: { ...scoped, status: "pending" } }),
+    countMessagesAwaitingModeration(scoped),
+    db.message.count({ where: { ...scoped, createdAt: { gte: startOfDay } } }),
+    db.message.findFirst({
+      where: scoped,
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    }),
+    db.callSession.count({ where: { ...scoped, startedAt: { gte: startOfDay } } }),
+    db.callSession.count({ where: { ...scoped, endedAt: null } }),
   ]);
 
   return {
@@ -90,16 +107,58 @@ const computeStatsSummary = async (): Promise<StatsSummary> => {
   };
 };
 
-const getCachedSummary = async (): Promise<StatsSummary> => {
+// The cache key carries a caller-supplied installation id, so an operator
+// asking for era after era would otherwise grow these maps without bound. Drop
+// expired entries on write, and cap what is left: they are a latency
+// optimisation for the handful of scopes a console actually looks at.
+const CACHE_MAX_ENTRIES = 64;
+
+const cachePut = <T>(
+  cache: Map<string, { value: T; expiresAt: number }>,
+  key: string,
+  value: T,
+  ttlMs: number,
+): void => {
   const now = Date.now();
-  if (cached && cached.expiresAt > now) return cached.value;
-  const value = await computeStatsSummary();
-  cached = { value, expiresAt: now + STATS_CACHE_TTL_MS };
+  for (const [existing, entry] of cache) {
+    if (entry.expiresAt <= now) cache.delete(existing);
+  }
+  cache.set(key, { value, expiresAt: now + ttlMs });
+  // Insertion order: the oldest live entry goes first.
+  while (cache.size > CACHE_MAX_ENTRIES) {
+    const oldest = cache.keys().next();
+    if (oldest.done) break;
+    cache.delete(oldest.value);
+  }
+};
+
+const getCachedSummary = async (scope: InstallationScopeFilter): Promise<StatsSummary> => {
+  const now = Date.now();
+  const key = scopeCacheKey(scope);
+  const entry = summaryCache.get(key);
+  if (entry && entry.expiresAt > now) return entry.value;
+  const value = await computeStatsSummary(scope);
+  cachePut(summaryCache, key, value, STATS_CACHE_TTL_MS);
   return value;
 };
 
+// Cache occupancy, so a test can prove the bound actually holds.
+export const statsCacheSizesForTests = (): { summary: number; overview: number } => ({
+  summary: summaryCache.size,
+  overview: overviewCache.size,
+});
+
+// Ending or purging an era rewrites the rows both caches aggregate. Their keys
+// carry the scope, and an `all`-scoped entry covers every era, so the only
+// correct answer is to drop everything cached rather than guess which keys the
+// change touched.
+export const invalidateStatsCaches = (): void => {
+  summaryCache.clear();
+  overviewCache.clear();
+};
+
 export const resetStatsCacheForTests = (): void => {
-  cached = null;
+  summaryCache.clear();
   overviewCache.clear();
 };
 
@@ -259,7 +318,11 @@ const findBusiest = (
   return { hour, dayOfWeek };
 };
 
-const computeStatsOverview = async (range: ResolvedRange): Promise<StatsOverview> => {
+const computeStatsOverview = async (
+  range: ResolvedRange,
+  scope: InstallationScopeFilter,
+): Promise<StatsOverview> => {
+  const scoped = scopeWhere(scope);
   const generatedAt = new Date();
   const { window, rangeStart, rangeEnd } = range;
   // Inclusive bounds. Presets have rangeEnd == now, so the upper bound is a
@@ -279,34 +342,35 @@ const computeStatsOverview = async (range: ResolvedRange): Promise<StatsOverview
     questions,
   ] = await Promise.all([
     db.callSession.findMany({
-      where: { startedAt: bounds },
+      where: { ...scoped, startedAt: bounds },
     }) as unknown as Promise<CallSessionRow[]>,
     db.callSession.findMany({
-      where: { endedAt: bounds, outcome: { not: null } },
+      where: { ...scoped, endedAt: bounds, outcome: { not: null } },
     }) as unknown as Promise<CallSessionRow[]>,
     // Used for the pickup/hangup panel — counts sessions whose endedAt fell
     // inside the window regardless of outcome, so the panel reconciles with
     // calls.* at window boundaries (a call that started before the window
     // but hung up inside it still counts as one hangup here).
     db.callSession.count({
-      where: { endedAt: bounds },
+      where: { ...scoped, endedAt: bounds },
     }),
-    db.callSession.count({ where: { endedAt: null } }),
+    db.callSession.count({ where: { ...scoped, endedAt: null } }),
     db.message.findMany({
-      where: { createdAt: bounds },
+      where: { ...scoped, createdAt: bounds },
       include: { audio: true },
       take: MAX_MESSAGES_PER_OVERVIEW,
     }) as unknown as Promise<MessageRow[]>,
     db.boothEvent.findMany({
-      where: { type: "state_transition", occurredAt: bounds },
+      where: { ...scoped, type: "state_transition", occurredAt: bounds },
     }) as unknown as Promise<BoothEventRow[]>,
     db.boothEvent.findMany({
-      where: { type: { in: ["upload_completed", "upload_failed"] }, occurredAt: bounds },
+      where: { ...scoped, type: { in: ["upload_completed", "upload_failed"] }, occurredAt: bounds },
     }) as unknown as Promise<BoothEventRow[]>,
     db.boothEvent.findFirst({
+      where: scoped,
       orderBy: [{ receivedAt: "desc" }],
     }) as unknown as Promise<{ receivedAt: Date } | null>,
-    db.question.findMany({}) as unknown as Promise<
+    db.question.findMany({ where: scoped }) as unknown as Promise<
       Array<{ id: string; prompt: string; retiredAt: Date | null }>
     >,
   ]);
@@ -354,7 +418,29 @@ const computeStatsOverview = async (range: ResolvedRange): Promise<StatsOverview
   const uploadFailureRate = uploadTotal > 0 ? uploadFailed / uploadTotal : null;
 
   // top questions
-  const questionsById = new Map(questions.map((q) => [q.id, q]));
+  //
+  // A straggler recording is filed in the era that was open when it landed
+  // while its question stays in the era that issued it, so resolving prompts
+  // from the scoped questions alone would label those "(deleted question)".
+  // Anything the scoped messages reference is looked up by id as well.
+  const referencedQuestionIds = [
+    ...new Set(
+      messages
+        .map((message) => message.questionId)
+        .filter((id): id is string => typeof id === "string"),
+    ),
+  ].filter((id) => !questions.some((question) => question.id === id));
+  const referenced =
+    referencedQuestionIds.length > 0
+      ? ((await db.question.findMany({
+          where: { id: { in: referencedQuestionIds } },
+        })) as unknown as Array<{
+          id: string;
+          prompt: string;
+          retiredAt: Date | null;
+        }>)
+      : [];
+  const questionsById = new Map([...questions, ...referenced].map((q) => [q.id, q]));
   const messageCounts = new Map<string, { count: number; lastUsedAt: Date | null }>();
   for (const message of messages) {
     if (!message.questionId) continue;
@@ -464,12 +550,16 @@ const presetRange = (window: StatsWindow): ResolvedRange => {
   return { window, rangeStart, rangeEnd };
 };
 
-const getCachedOverview = async (window: StatsWindow): Promise<StatsOverview> => {
+const getCachedOverview = async (
+  window: StatsWindow,
+  scope: InstallationScopeFilter,
+): Promise<StatsOverview> => {
   const now = Date.now();
-  const cachedEntry = overviewCache.get(window);
+  const key = `${window}:${scopeCacheKey(scope)}`;
+  const cachedEntry = overviewCache.get(key);
   if (cachedEntry && cachedEntry.expiresAt > now) return cachedEntry.value;
-  const value = await computeStatsOverview(presetRange(window));
-  overviewCache.set(window, { value, expiresAt: now + OVERVIEW_CACHE_TTL_MS });
+  const value = await computeStatsOverview(presetRange(window), scope);
+  cachePut(overviewCache, key, value, OVERVIEW_CACHE_TTL_MS);
   return value;
 };
 
@@ -481,6 +571,7 @@ const overviewQuerySchema = z
     window: StatsWindowSchema.optional(),
     start: z.string().datetime().optional(),
     end: z.union([z.literal("now"), z.string().datetime()]).optional(),
+    installationId: InstallationScopeSchema.optional(),
   })
   .refine(
     (v) => (v.start && v.end && v.end !== "now" ? new Date(v.start) <= new Date(v.end) : true),
@@ -527,8 +618,11 @@ const idParamSchema = z.object({ id: z.guid() });
 
 export const statsRouter = new Hono<{ Variables: AuthVariables }>();
 
-statsRouter.get("/summary", requireOperator(), async (c) => {
-  const summary = await getCachedSummary();
+const scopeQuerySchema = z.object({ installationId: InstallationScopeSchema.optional() });
+
+statsRouter.get("/summary", requireOperator(), zValidator("query", scopeQuerySchema), async (c) => {
+  const scope = await resolveInstallationScope(c.req.valid("query").installationId);
+  const summary = await getCachedSummary(scope);
   return c.json(summary);
 });
 
@@ -539,12 +633,13 @@ statsRouter.get(
   async (c) => {
     const query = c.req.valid("query");
     const range = resolveOverviewRange(query);
+    const scope = await resolveInstallationScope(query.installationId);
     // Preset windows are cached; custom ranges (which may end at a live "now")
     // are computed fresh so the numbers are always current.
     const overview =
       range.window === "custom"
-        ? await computeStatsOverview(range)
-        : await getCachedOverview(range.window);
+        ? await computeStatsOverview(range, scope)
+        : await getCachedOverview(range.window, scope);
     return c.json(overview);
   },
 );

@@ -24,6 +24,7 @@ rebuilds it from the filesystem; CI fails if it drifts.
 - [Push notifications](push-notifications.md) — APNs setup, badge pipeline, sandbox vs production
 - [Audit log](audit-log.md) — who did what, from where, and when
 - [UI routing](ui-routing.md) — digit shortcuts, keyboard nav, reduced motion
+- [Installations](installations.md) — ending a run, starting fresh, browsing history, hard purge
 
 ## Running it
 
@@ -48,3 +49,4 @@ rebuilds it from the filesystem; CI fails if it drifts.
 - [0010 — Collapse repeated booth status reports](adr/0010-collapse-repeated-booth-status-reports.md)
 - [0011 — Audit trail for write actions](adr/0011-audit-trail-for-write-actions.md)
 - [0012 — Refresh-token rotation across API replicas](adr/0012-refresh-token-rotation-race.md)
+- [0013 — Installations as the data scope](adr/0013-installations-as-data-scope.md)

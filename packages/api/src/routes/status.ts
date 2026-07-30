@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { wsBroadcaster } from "../lib/broadcaster.js";
 import { db } from "../lib/db.js";
+import { requireActiveInstallation } from "../lib/installation.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 import { defaultStatus, serializeStatus } from "../lib/serializers.js";
 import { requireOperatorOrApiToken, type AuthVariables } from "../lib/session.js";
@@ -32,9 +33,13 @@ const historyQuerySchema = z.object({
 // authoritative `call_ended` persisted concurrently wins the race and is not
 // overwritten by an `aborted` reconciliation. The `startedAt <= idleTime` guard
 // avoids closing a newer session started after a delayed idle report.
-async function reconcileStaleSessionsOnIdle(idleTime: Date): Promise<void> {
+// The era is part of the predicate as well: a session left open in an era that
+// has since been closed belongs to a frozen summary, and rewriting it to
+// `aborted` afterwards would make that summary disagree with its own
+// drill-down.
+async function reconcileStaleSessionsOnIdle(idleTime: Date, installationId: string): Promise<void> {
   await db.callSession.updateMany({
-    where: { endedAt: null, startedAt: { lte: idleTime } },
+    where: { endedAt: null, startedAt: { lte: idleTime }, installationId },
     data: {
       endedAt: idleTime,
       outcome: "aborted",
@@ -80,13 +85,14 @@ statusRouter.get("/", requireOperatorOrApiToken(), async (c) => {
 statusRouter.put("/", requireApiToken(), zValidator("json", StatusUpdateSchema), async (c) => {
   const update = c.req.valid("json");
   const reportedAt = update.updatedAt ? new Date(update.updatedAt) : new Date();
+  const installationId = await requireActiveInstallation();
   // The run the report belongs to. That is normally the newest row, but a
   // delayed report belongs to the run that was current at its own timestamp —
   // the booth supplies `updatedAt`, so `id` breaks ties and keeps the choice
   // deterministic when two rows share a millisecond.
   const [enclosing, successor] = await Promise.all([
     db.boothStatusSnapshot.findFirst({
-      where: { firstSeenAt: { lte: reportedAt } },
+      where: { installationId, firstSeenAt: { lte: reportedAt } },
       orderBy: [{ firstSeenAt: "desc" }, { id: "desc" }],
     }),
     // The run that started next. A report can fall in the gap between the run
@@ -96,7 +102,7 @@ statusRouter.put("/", requireApiToken(), zValidator("json", StatusUpdateSchema),
     // two identical ones. This is also the fallback for a report that predates
     // every stored snapshot.
     db.boothStatusSnapshot.findFirst({
-      where: { firstSeenAt: { gt: reportedAt } },
+      where: { installationId, firstSeenAt: { gt: reportedAt } },
       orderBy: [{ firstSeenAt: "asc" }, { id: "asc" }],
     }),
   ]);
@@ -133,10 +139,11 @@ statusRouter.put("/", requireApiToken(), zValidator("json", StatusUpdateSchema),
           runtimeMode: update.runtimeMode ?? null,
           firstSeenAt: reportedAt,
           updatedAt: reportedAt,
+          installationId,
         },
       });
   if (update.state === "idle") {
-    await reconcileStaleSessionsOnIdle(snapshot.updatedAt);
+    await reconcileStaleSessionsOnIdle(snapshot.updatedAt, installationId);
   }
   wsBroadcaster.broadcast({ kind: "status", status: serializeStatus(snapshot) });
   return c.body(null, 204);
