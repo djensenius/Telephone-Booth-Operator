@@ -78,6 +78,14 @@ describe("audit metadata bounds", () => {
     expect(overflowing?.error).toBe("metadata_too_large");
   });
 
+  it("truncates the key names it reports when a row is too large", () => {
+    const marker = sanitizeMetadata({ ["k".repeat(50_000)]: "value", other: "z".repeat(9000) });
+    expect(marker?.error).toBe("metadata_too_large");
+    const keys = marker?.keys as string[];
+    expect(keys[0]?.length).toBeLessThanOrEqual(120);
+    expect(JSON.stringify(marker).length).toBeLessThan(5000);
+  });
+
   it("breaks a cycle instead of failing the row", () => {
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;

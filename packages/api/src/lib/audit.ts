@@ -95,6 +95,9 @@ export const isTelemetryWrite = (method: string, routePath: string): boolean =>
 
 const MAX_METADATA_DEPTH = 3;
 const MAX_METADATA_KEYS = 32;
+// The marker lists key names, so they need their own (much smaller) bound —
+// a single megabyte-long key would otherwise defeat the size cap it replaces.
+const MAX_METADATA_MARKER_KEY_LENGTH = 120;
 const MAX_METADATA_ITEMS = 20;
 const MAX_METADATA_BYTES = 8000;
 
@@ -144,7 +147,9 @@ export const sanitizeMetadata = (
   if (Buffer.byteLength(serialized, "utf8") > MAX_METADATA_BYTES) {
     return {
       error: "metadata_too_large",
-      keys: Object.keys(sanitized).slice(0, MAX_METADATA_KEYS),
+      keys: Object.keys(sanitized)
+        .slice(0, MAX_METADATA_KEYS)
+        .map((key) => truncate(key, MAX_METADATA_MARKER_KEY_LENGTH)),
     };
   }
   return sanitized;

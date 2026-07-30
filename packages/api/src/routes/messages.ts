@@ -268,7 +268,7 @@ messagesRouter.get("/:id/transcriptions", zValidator("param", idParamSchema), as
 
 messagesRouter.post("/:id/transcribe", zValidator("param", idParamSchema), async (c) => {
   const { id } = c.req.valid("param");
-  recordAudit(c, { action: "message.transcribe.request", targetType: "message", targetId: id });
+  recordAudit(c, { action: "message.transcription.request", targetType: "message", targetId: id });
   const message = await db.message.findUnique({ where: { id }, select: { id: true } });
   if (!message) return c.json({ error: "not_found" }, 404);
   const user = c.get("user") as { id: string } | undefined;
@@ -295,7 +295,7 @@ messagesRouter.post("/:id/transcribe", zValidator("param", idParamSchema), async
 
 messagesRouter.post("/:id/moderate", zValidator("param", idParamSchema), async (c) => {
   const { id } = c.req.valid("param");
-  recordAudit(c, { action: "message.moderate.request", targetType: "message", targetId: id });
+  recordAudit(c, { action: "message.moderation.request", targetType: "message", targetId: id });
   const message = await db.message.findUnique({ where: { id }, select: { id: true } });
   if (!message) return c.json({ error: "not_found" }, 404);
   const user = c.get("user") as { id: string } | undefined;
