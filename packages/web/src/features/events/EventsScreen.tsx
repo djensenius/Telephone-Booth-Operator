@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import type { BoothEventType } from "@telephone-booth-operator/shared";
 import { GlassPanel } from "../../components/booth/index.js";
@@ -83,6 +83,14 @@ export function EventsScreen(): JSX.Element {
   const scope = parseInstallationScopeParam(search.installationId);
   const [type, setType] = useState<BoothEventType | "">("");
   const [cursor, setCursor] = useState<string | undefined>(undefined);
+  // A cursor only means something within the era it was issued for. Browser
+  // history can change the scope without going through the picker, so reset
+  // on the parsed value rather than on the interaction.
+  const scopeRef = useRef(scope);
+  if (scopeRef.current !== scope) {
+    scopeRef.current = scope;
+    if (cursor !== undefined) setCursor(undefined);
+  }
   const query = useEventsList({
     ...(type ? { type: [type] as readonly BoothEventType[] } : {}),
     ...(cursor ? { cursor } : {}),
@@ -101,7 +109,6 @@ export function EventsScreen(): JSX.Element {
       <InstallationScopePicker
         scope={scope}
         onChange={(next) => {
-          setCursor(undefined);
           void navigate({
             to: "/events",
             search: next === undefined ? {} : { installationId: next },

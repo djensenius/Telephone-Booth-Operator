@@ -8,12 +8,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { Prisma } from "../generated/prisma/client.js";
 import { db } from "../lib/db.js";
-import {
-  lockOpenInstallation,
-  requireActiveInstallation,
-  resolveInstallationScope,
-  scopeWhere,
-} from "../lib/installation.js";
+import { lockOpenInstallation, resolveInstallationScope, scopeWhere } from "../lib/installation.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 import { serializeQuestion } from "../lib/serializers.js";
 import { requireAdmin, type AuthVariables } from "../lib/session.js";
@@ -162,9 +157,12 @@ questionsRouter.get("/random", requireApiToken(), async (c) => {
   // The booth only ever plays questions from the installation it is currently
   // part of; ending an era archives its questions, but scoping here keeps that
   // true even if one is un-archived after the fact.
+  // Resolved as a read, not a write: a poll that arrives between an era
+  // ending and the booth's next event must answer "nothing to play" rather
+  // than open an era of its own.
   const where = {
     status: "active" as const,
-    installationId: await requireActiveInstallation(),
+    ...scopeWhere(await resolveInstallationScope(undefined)),
   };
   const count = await db.question.count({ where });
   if (count === 0) return c.json({ error: "no_questions_available" }, 404);

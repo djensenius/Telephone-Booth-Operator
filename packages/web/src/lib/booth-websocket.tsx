@@ -63,7 +63,7 @@ export function BoothWebSocketProvider({
     // remounts it after a server restart or a network blip. Without a retry a
     // single dropped socket would cost every later envelope, so reconnect with
     // a bounded backoff for as long as the provider is mounted.
-    let socket: WebSocket;
+    let socket: WebSocket | undefined;
     let retry: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
     let closed = false;
@@ -79,15 +79,28 @@ export function BoothWebSocketProvider({
     };
 
     function connect(): void {
-      socket = new WebSocket(apiWebSocketUrlFor("/v1/ws/status"));
+      const current = new WebSocket(apiWebSocketUrlFor("/v1/ws/status"));
+      socket = current;
       setState("connecting");
-      socket.addEventListener("open", () => {
+
+      // Only the socket we are still holding gets to schedule a retry. A
+      // failed socket's `close` can land after its replacement is already
+      // open, and acting on it would leave two live connections duplicating
+      // every envelope.
+      const retire = (): void => {
+        if (socket !== current) return;
+        socket = undefined;
+        setState("polling");
+        reconnect();
+      };
+
+      current.addEventListener("open", () => {
         attempt = 0;
         setState("live");
         boothStatusRef.current.setConnectionStatus("connected");
         boothStatusRef.current.setLastError(null);
       });
-      socket.addEventListener("message", (event) => {
+      current.addEventListener("message", (event) => {
         let raw: unknown;
         try {
           raw = JSON.parse(String(event.data));
@@ -108,25 +121,24 @@ export function BoothWebSocketProvider({
           for (const listener of Array.from(legacyRef.current)) listener(legacy.data);
         }
       });
-      socket.addEventListener("error", () => {
-        setState("polling");
-        reconnect();
+      current.addEventListener("error", () => {
+        if (socket !== current) return;
         boothStatusRef.current.setConnectionStatus("disconnected");
         boothStatusRef.current.setLastError(
           "Live status socket is busy; polling every five seconds.",
         );
+        // Retiring happens on the `close` that always follows an error, so a
+        // socket is only ever replaced once.
+        current.close();
       });
-      socket.addEventListener("close", () => {
-        setState("polling");
-        reconnect();
-      });
+      current.addEventListener("close", retire);
     }
 
     connect();
     return () => {
       closed = true;
       if (retry !== undefined) clearTimeout(retry);
-      socket.close();
+      socket?.close();
     };
   }, [enabled]);
 

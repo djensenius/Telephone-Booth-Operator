@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   BoothNetworkStatsSchema,
   BoothStatusSchema,
+  CallSessionSchema,
   InstructionSchema,
   InstructionStatusSchema,
   QuestionSchema,
@@ -118,5 +119,27 @@ describe("QuestionStatusSchema", () => {
     expect(QuestionSchema.parse(question).status).toBe("active");
     const { status: _status, ...withoutStatus } = question;
     expect(() => QuestionSchema.parse(withoutStatus)).toThrow();
+  });
+});
+
+describe("CallSessionSchema", () => {
+  // The rollover closes out calls the booth never finished and writes an
+  // outcome of its own. It has to be part of the wire contract, or the
+  // sessions list for an era that ended mid-call fails to parse.
+  it("accepts the outcome a rollover writes", () => {
+    const parsed = CallSessionSchema.parse({
+      id: "aaaaaaaa-0000-4000-8000-000000000001",
+      boothId: "booth-1",
+      bootId: "bbbbbbbb-0000-4000-8000-000000000001",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      endedAt: "2026-01-01T00:05:00.000Z",
+      digitsDialed: null,
+      outcome: "installation_ended",
+      recordingId: null,
+      durationMs: null,
+      version: null,
+    });
+
+    expect(parsed.outcome).toBe("installation_ended");
   });
 });

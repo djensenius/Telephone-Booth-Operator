@@ -336,9 +336,10 @@ export const BoothEventTypeSchema = z.enum([
 ]);
 export type BoothEventType = z.infer<typeof BoothEventTypeSchema>;
 
-// Mirrors the Rust `CallOutcome` enum. Operator UI uses these strings to
-// label session rows; Grafana uses them as `outcome` labels on
-// `booth_calls_total`.
+// Mirrors the Rust `CallOutcome` enum, plus `installation_ended`, which only
+// the API writes: it closes out calls that were still open when an era ended
+// and the booth never reported on. Operator UI uses these strings to label
+// session rows; Grafana uses them as `outcome` labels on `booth_calls_total`.
 export const CallOutcomeSchema = z.enum([
   "hung_up_before_dial",
   "hung_up_during_prompt",
@@ -349,6 +350,7 @@ export const CallOutcomeSchema = z.enum([
   "upload_failed",
   "operator_error",
   "aborted",
+  "installation_ended",
 ]);
 export type CallOutcome = z.infer<typeof CallOutcomeSchema>;
 

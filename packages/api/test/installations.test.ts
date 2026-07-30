@@ -401,6 +401,24 @@ describe("installations", () => {
       expect(store.questions.get(created.id)?.installationId).toBe(openId);
     });
 
+    // Between an era ending and the booth's next event there is deliberately
+    // no open era. A read arriving in that gap must answer "nothing to play"
+    // rather than conjure up an era nobody named.
+    it("answers no prompt without opening an era after a rollover", async () => {
+      seedQuestion({ status: "active" });
+      const app = createApp();
+      expect((await endDefault(app)).status).toBe(200);
+      const before = store.installations.size;
+
+      const res = await app.request("/v1/questions/random", { headers: phoneHeaders });
+
+      expect(res.status).toBe(404);
+      expect(store.installations.size).toBe(before);
+      expect([...store.installations.values()].filter((row) => row.endedAt === null)).toHaveLength(
+        0,
+      );
+    });
+
     it("still refuses a question an operator retired by hand", async () => {
       const question = seedQuestion({ status: "archived", retiredAt: new Date() });
       const app = createApp();

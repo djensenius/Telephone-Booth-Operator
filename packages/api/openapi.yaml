@@ -1970,6 +1970,7 @@ components:
         - upload_failed
         - operator_error
         - aborted
+        - installation_ended
     BoothEvent:
       type: object
       required: [eventId, boothId, bootId, type, occurredAt]
