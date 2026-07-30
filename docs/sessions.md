@@ -25,9 +25,10 @@ on plain HTTP. Production only accepts the `__Host-booth_session` cookie.
 `SESSION_TTL_SECONDS` (default 30 days) is an **idle** window, not a fixed
 deadline. Every authenticated request slides `expiresAt` forward and re-sends
 the cookie with the new expiry, so an operator who uses the console regularly is
-never asked to log in again. To keep the cost down, the renewal only happens
-once the session has burned through a tenth of its idle window, capped at one
-renewal per hour.
+never asked to log in again. To keep the cost down, a request only renews once
+the session has burned through a tenth of its idle window — and that interval is
+itself capped at an hour, so even a very long window is renewed at least hourly
+while the console is in use.
 
 `SESSION_ABSOLUTE_TTL_SECONDS` (default 90 days) is a hard ceiling measured from
 login that activity cannot extend. It is enforced on every session read, so
@@ -70,6 +71,10 @@ nothing about the refresh token, so the session and its tokens stay intact and
 the refresh is retried on the next request. While the access token is stale the
 periodic IdP re-check is skipped, because calling userinfo with an expired token
 would look like a revoked account.
+
+Retries are held behind a per-session backoff (15 s, doubling to a 5-minute
+ceiling, cleared on success) so a provider outage or a `429` is not amplified
+into a refresh storm by a console that fires many concurrent queries.
 
 The practical upper bound on "remember me" is therefore the provider's
 refresh-token validity: if it is shorter than `SESSION_TTL_SECONDS`, operators

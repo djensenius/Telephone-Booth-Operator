@@ -138,7 +138,10 @@ vi.mock("openid-client", () => ({
 import { app } from "../src/index.js";
 import { resetAuthConfigForTests } from "../src/lib/config.js";
 import { resetOidcForTests } from "../src/lib/oidc.js";
-import { resetSessionCryptoForTests } from "../src/lib/session.js";
+import {
+  resetSessionCryptoForTests,
+  resetSessionRefreshStateForTests,
+} from "../src/lib/session.js";
 import { resetAuthRouteStateForTests } from "../src/routes/auth.js";
 
 const cookieFrom = (res: Response): string => {
@@ -207,6 +210,7 @@ const configure = (overrides: Record<string, string> = {}): void => {
   resetOidcForTests();
   resetAuthRouteStateForTests();
   resetSessionCryptoForTests();
+  resetSessionRefreshStateForTests();
 };
 
 describe("sliding operator session lifetime", () => {
@@ -386,7 +390,7 @@ describe("token refresh failures", () => {
     expect(store.sessions.size).toBe(0);
   });
 
-  it("retries the refresh on the next request after a transient failure", async () => {
+  it("does not hammer the provider while it is failing", async () => {
     const cookie = await login();
     expireAccessToken();
     openidMocks.refreshTokenGrant.mockRejectedValueOnce(new TypeError("fetch failed"));
@@ -394,9 +398,29 @@ describe("token refresh failures", () => {
     await app.request("/v1/auth/me", { headers: { cookie } });
     const second = await app.request("/v1/auth/me", { headers: { cookie } });
 
+    // The second request is still inside the backoff, so it serves the session
+    // with its stale access token instead of starting another grant.
     expect(second.status).toBe(200);
-    expect(openidMocks.refreshTokenGrant).toHaveBeenCalledTimes(2);
-    expect(onlySession().accessTokenExpiresAt).toBeInstanceOf(Date);
-    expect((onlySession().accessTokenExpiresAt as Date).getTime()).toBeGreaterThan(Date.now());
+    expect(openidMocks.refreshTokenGrant).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries the refresh once the backoff lapses", async () => {
+    const cookie = await login();
+    expireAccessToken();
+    openidMocks.refreshTokenGrant.mockRejectedValueOnce(new TypeError("fetch failed"));
+    await app.request("/v1/auth/me", { headers: { cookie } });
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      vi.setSystemTime(new Date(Date.now() + 60_000));
+      const second = await app.request("/v1/auth/me", { headers: { cookie } });
+
+      expect(second.status).toBe(200);
+      expect(openidMocks.refreshTokenGrant).toHaveBeenCalledTimes(2);
+      expect(onlySession().accessTokenExpiresAt).toBeInstanceOf(Date);
+      expect((onlySession().accessTokenExpiresAt as Date).getTime()).toBeGreaterThan(Date.now());
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

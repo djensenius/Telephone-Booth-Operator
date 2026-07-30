@@ -348,6 +348,7 @@ export const destroySession = async (c: Context): Promise<SessionUser | null> =>
   const session = await readSession(c);
   clearSessionCookie(c);
   if (session) {
+    clearRefreshBackoff(session.id);
     await db.operatorSession.delete({ where: { id: session.id } }).catch(() => undefined);
   }
   return session;
@@ -373,6 +374,42 @@ const logRefreshFailure = (error: unknown, outcome: "rejected" | "transient"): v
 // revalidation call that would read as a rejection.
 type RefreshResult = { session: SessionUser; accessTokenStale: boolean };
 
+// Without a cooldown, every request from a session with an expired access token
+// starts another refresh grant for as long as the provider is failing — and the
+// web client fires many concurrent queries. Back off per session instead, so an
+// outage (or a 429) is not amplified into a refresh storm.
+const REFRESH_BACKOFF_BASE_MS = 15_000;
+const REFRESH_BACKOFF_MAX_MS = 300_000;
+const refreshBackoffs = new Map<string, { failures: number; retryAt: number }>();
+
+const noteRefreshFailure = (sessionId: string): void => {
+  const failures = (refreshBackoffs.get(sessionId)?.failures ?? 0) + 1;
+  const delay = Math.min(REFRESH_BACKOFF_BASE_MS * 2 ** (failures - 1), REFRESH_BACKOFF_MAX_MS);
+  if (refreshBackoffs.size >= 1_000) {
+    const now = Date.now();
+    for (const [id, entry] of refreshBackoffs) {
+      if (entry.retryAt <= now) refreshBackoffs.delete(id);
+    }
+  }
+  refreshBackoffs.set(sessionId, { failures, retryAt: Date.now() + delay });
+};
+
+// Kept after the window lapses so repeated failures keep escalating; cleared
+// once a refresh succeeds or the session ends.
+const refreshIsCoolingDown = (sessionId: string): boolean => {
+  const entry = refreshBackoffs.get(sessionId);
+  return entry !== undefined && entry.retryAt > Date.now();
+};
+
+const clearRefreshBackoff = (sessionId: string): void => {
+  refreshBackoffs.delete(sessionId);
+};
+
+export const resetSessionRefreshStateForTests = (): void => {
+  refreshBackoffs.clear();
+  pendingRefreshes.clear();
+};
+
 const accessTokenIsFresh = (session: Pick<OperatorSession, "accessTokenExpiresAt">): boolean =>
   !session.accessTokenExpiresAt || session.accessTokenExpiresAt.getTime() > Date.now() + 60_000;
 
@@ -393,6 +430,7 @@ const refreshAccessToken = async (
       },
       include: { user: true },
     });
+    clearRefreshBackoff(session.id);
     return { session: updated, accessTokenStale: false };
   } catch (error) {
     const rejected = error instanceof TokenRefreshError && error.rejected;
@@ -405,6 +443,7 @@ const refreshAccessToken = async (
       .findUnique({ where: { id: session.id }, include: { user: true } })
       .catch(() => null);
     if (current && !sessionIsExpired(current) && accessTokenIsFresh(current)) {
+      clearRefreshBackoff(session.id);
       return { session: current, accessTokenStale: false };
     }
 
@@ -413,8 +452,9 @@ const refreshAccessToken = async (
     if (rejected || !current || sessionIsExpired(current)) return null;
 
     // Transient failure (provider 5xx, network fault). Keep the session and
-    // retry on the next request rather than logging the operator out over a
-    // blip they had nothing to do with.
+    // retry once the backoff lapses rather than logging the operator out over
+    // a blip they had nothing to do with.
+    noteRefreshFailure(session.id);
     return { session: current, accessTokenStale: true };
   }
 };
@@ -424,6 +464,7 @@ const refreshIfAccessTokenExpired = async (
   session: SessionUser,
 ): Promise<RefreshResult | null> => {
   if (accessTokenIsFresh(session)) {
+    clearRefreshBackoff(session.id);
     return { session, accessTokenStale: false };
   }
 
@@ -431,6 +472,12 @@ const refreshIfAccessTokenExpired = async (
   if (!refreshToken) {
     await destroySession(c);
     return null;
+  }
+
+  // Still inside the backoff from an earlier transient failure: serve the
+  // session with its stale access token instead of hammering the provider.
+  if (!pendingRefreshes.has(session.id) && refreshIsCoolingDown(session.id)) {
+    return { session, accessTokenStale: true };
   }
 
   const refresh =
