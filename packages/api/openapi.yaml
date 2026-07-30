@@ -1434,24 +1434,23 @@ components:
       properties:
         id: { type: string, format: uuid }
         action: { type: string, example: message.approve }
-        targetType: { type: string, nullable: true, example: message }
-        targetId: { type: string, nullable: true }
+        targetType: { type: [string, "null"], example: message }
+        targetId: { type: [string, "null"] }
         actorType: { type: string, enum: [operator, apiToken, anonymous, system] }
-        actorUserId: { type: string, nullable: true }
-        actorTokenId: { type: string, nullable: true }
+        actorUserId: { type: [string, "null"] }
+        actorTokenId: { type: [string, "null"] }
         actorLabel:
           type: string
           description: |
             Human-readable actor snapshot taken at write time (operator email,
             or `token:<name>`). Survives deletion of the referenced row.
-        ip: { type: string, nullable: true }
-        userAgent: { type: string, nullable: true }
+        ip: { type: [string, "null"] }
+        userAgent: { type: [string, "null"] }
         method: { type: string, example: POST }
         path: { type: string, example: "/v1/messages/{id}/decision" }
         statusCode: { type: integer }
         metadata:
-          type: object
-          nullable: true
+          type: [object, "null"]
           additionalProperties: true
           description: Action-specific detail. Never contains secrets or SAS URLs.
         createdAt: { type: string, format: date-time }
@@ -1462,7 +1461,7 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/AuditLogEntry" }
-        nextCursor: { type: string, nullable: true }
+        nextCursor: { type: [string, "null"] }
     Health:
       type: object
       required: [status, version]
