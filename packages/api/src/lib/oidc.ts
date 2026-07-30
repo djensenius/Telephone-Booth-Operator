@@ -122,10 +122,10 @@ export const exchangeCode = async (
 };
 
 // Thrown by `refreshTokens`. `rejected` distinguishes a refresh token the IdP
-// will never accept again (expired, rotated away, or revoked — an OAuth error
-// response in the 4xx range) from a transient failure (provider 5xx, network
-// fault) where the token is still good and the caller should keep the session
-// and retry rather than forcing a fresh login.
+// will never accept again from a failure that says nothing about the token
+// itself (provider 5xx, rate limiting, client-auth problems, network faults),
+// where the caller should keep the session and retry rather than forcing a
+// fresh login.
 export class TokenRefreshError extends Error {
   override name = "TokenRefreshError";
   readonly rejected: boolean;
@@ -139,12 +139,11 @@ export const refreshTokens = async (refreshToken: string): Promise<TokenSet> => 
   try {
     return await oidc.refreshTokenGrant(await getOidcClient(), refreshToken);
   } catch (error) {
-    // A 4xx OAuth error body (typically `invalid_grant`) is the provider
-    // definitively refusing this refresh token. Anything else — provider 5xx,
-    // DNS/TLS/network faults, malformed responses — may succeed on retry.
-    const rejected =
-      error instanceof oidc.WWWAuthenticateChallengeError ||
-      (error instanceof oidc.ResponseBodyError && error.status >= 400 && error.status < 500);
+    // Only `invalid_grant` is the provider definitively refusing this refresh
+    // token (expired, rotated away, or revoked). Every other outcome — 429
+    // rate limiting, `invalid_client`, provider 5xx, DNS/TLS/network faults —
+    // may succeed on retry, so the session must survive it.
+    const rejected = error instanceof oidc.ResponseBodyError && error.error === "invalid_grant";
     throw new TokenRefreshError(
       error instanceof Error ? error.message : "token refresh request failed",
       rejected,

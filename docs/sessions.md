@@ -30,7 +30,9 @@ once the session has burned through a tenth of its idle window, capped at one
 renewal per hour.
 
 `SESSION_ABSOLUTE_TTL_SECONDS` (default 90 days) is a hard ceiling measured from
-login that activity cannot extend. Set it to `0` to disable it, which leaves the
+login that activity cannot extend. It is enforced on every session read, so
+enabling or lowering it immediately bounds sessions whose stored expiry was
+written under a longer one. Set it to `0` to disable it, which leaves the
 provider's refresh-token validity as the only bound.
 
 Two other things end a session earlier regardless of these values: the provider
@@ -60,14 +62,14 @@ refresh token to rotate tokens and updates the session. Parallel requests for
 the same session share one refresh so providers that rotate refresh tokens, such
 as Authentik, do not invalidate the session accidentally.
 
-A failed refresh is classified before anything is destroyed. A 4xx OAuth error
-from the token endpoint (typically `invalid_grant`) means the refresh token is
-gone for good — expired, rotated away, or revoked — so the local session is
-destroyed and the operator logs in again. A transient failure (provider 5xx,
-network fault) leaves the session and its tokens intact and retries on the next
-request; while the access token is stale the periodic IdP re-check is skipped,
-because calling userinfo with an expired token would look like a revoked
-account.
+A failed refresh is classified before anything is destroyed. Only `invalid_grant`
+from the token endpoint means the refresh token is gone for good — expired,
+rotated away, or revoked — and destroys the local session. Everything else
+(provider 5xx, `429` rate limiting, `invalid_client`, network faults) says
+nothing about the refresh token, so the session and its tokens stay intact and
+the refresh is retried on the next request. While the access token is stale the
+periodic IdP re-check is skipped, because calling userinfo with an expired token
+would look like a revoked account.
 
 The practical upper bound on "remember me" is therefore the provider's
 refresh-token validity: if it is shorter than `SESSION_TTL_SECONDS`, operators

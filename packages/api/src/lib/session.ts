@@ -333,8 +333,16 @@ export const readSessionFromCookieHeader = async (
 export const readSession = async (c: Context): Promise<SessionUser | null> =>
   readSessionFromCookieHeader(c.req.header("cookie"));
 
-export const sessionIsExpired = (session: Pick<OperatorSession, "expiresAt">): boolean =>
-  session.expiresAt.getTime() <= Date.now();
+export const sessionIsExpired = (
+  session: Pick<OperatorSession, "expiresAt" | "createdAt">,
+): boolean => {
+  if (session.expiresAt.getTime() <= Date.now()) return true;
+  // Enforced on every read rather than only when sliding, so enabling or
+  // lowering the ceiling immediately bounds sessions whose stored expiry was
+  // written under a longer (or absent) one.
+  const absolute = absoluteTtlSeconds();
+  return absolute > 0 && session.createdAt.getTime() + absolute * 1000 <= Date.now();
+};
 
 export const destroySession = async (c: Context): Promise<SessionUser | null> => {
   const session = await readSession(c);

@@ -10,9 +10,11 @@ const { fakeDb, openidMocks, store, FakeChallengeError, FakeResponseBodyError } 
   }
   class FakeResponseBodyError extends Error {
     override name = "ResponseBodyError";
+    error: string;
     status: number;
-    constructor(message: string, status: number) {
-      super(message);
+    constructor(error: string, status: number) {
+      super(error);
+      this.error = error;
       this.status = status;
     }
   }
@@ -269,6 +271,21 @@ describe("sliding operator session lifetime", () => {
     expect(me.status).toBe(401);
     expect(store.sessions.size).toBe(0);
   });
+
+  it("enforces an absolute deadline that a stored expiry outlives", async () => {
+    // A session created before the ceiling was enabled (or under a longer one)
+    // still carries a future `expiresAt`; the ceiling must bind anyway.
+    const cookie = await login();
+    const session = onlySession();
+    session.createdAt = new Date(Date.now() - 8000 * 1000);
+    session.expiresAt = new Date(Date.now() + 86400 * 1000);
+    configure({ SESSION_ABSOLUTE_TTL_SECONDS: "7200" });
+
+    const me = await app.request("/v1/auth/me", { headers: { cookie } });
+
+    expect(me.status).toBe(401);
+    expect(store.sessions.size).toBe(0);
+  });
 });
 
 describe("token refresh failures", () => {
@@ -326,6 +343,34 @@ describe("token refresh failures", () => {
 
     expect(me.status).toBe(200);
     expect(openidMocks.fetchUserInfo).not.toHaveBeenCalled();
+  });
+
+  it("keeps the session when the provider rate limits the refresh", async () => {
+    const cookie = await login();
+    expireAccessToken();
+    openidMocks.refreshTokenGrant.mockRejectedValueOnce(
+      new FakeResponseBodyError("temporarily_unavailable", 429),
+    );
+
+    const me = await app.request("/v1/auth/me", { headers: { cookie } });
+
+    expect(me.status).toBe(200);
+    expect(store.sessions.size).toBe(1);
+  });
+
+  it("keeps the session on a 4xx that is not about the refresh token", async () => {
+    const cookie = await login();
+    expireAccessToken();
+    // `invalid_client` is a client-credentials problem: the refresh token may
+    // still be perfectly good once the misconfiguration is resolved.
+    openidMocks.refreshTokenGrant.mockRejectedValueOnce(
+      new FakeResponseBodyError("invalid_client", 401),
+    );
+
+    const me = await app.request("/v1/auth/me", { headers: { cookie } });
+
+    expect(me.status).toBe(200);
+    expect(store.sessions.size).toBe(1);
   });
 
   it("signs out when the provider rejects the refresh token", async () => {
