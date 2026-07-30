@@ -446,8 +446,9 @@ function StartInstallationForm(): JSX.Element {
           Copy the current questions into the new installation
         </label>
         <p className="installations-hint">
-          Leave this unchecked to start the new era with no questions. When checked, the active
-          questions are carried forward without re-uploading their audio.
+          Leave this unchecked to start the new era with no questions. When checked, the questions
+          that were live when the last era ended come across as active and its drafts come across as
+          drafts, all without re-uploading any audio.
         </p>
         {createInstallation.isError ? (
           <p className="settings-status settings-status--error" role="status">

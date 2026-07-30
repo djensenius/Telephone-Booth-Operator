@@ -81,7 +81,16 @@ arm — the update is conditional in the database on the session's era still
 being open, so a rollover committing between the check and the write is still
 refused, and booth events are tagged with the era of the session they belong to
 rather than whichever era is open. An ended era therefore always agrees with
-its own drill-down.
+its own drill-down for anything the operator acts on: sessions, the moderation
+queue, and questions.
+
+The frozen `summary.events` count is the one exception. A straggler event for a
+closed era's session is filed with that session, so the era's event drill-down
+can gain a row after its counters were frozen. We keep it that way: the
+alternative is either misattributing the event to an era the booth was not
+recording into, or recomputing a frozen summary, which would defeat the point
+of freezing it. The drift is bounded by the seconds-long window around a
+rollover and only affects a raw event tally.
 
 ### Reads never open an era
 

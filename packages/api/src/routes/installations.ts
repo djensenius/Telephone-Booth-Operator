@@ -36,6 +36,10 @@ import { requireAdmin, requireOperator, type AuthVariables } from "../lib/sessio
 // How many blob deletions a purge has in flight at once.
 const PURGE_BLOB_CONCURRENCY = 8;
 
+// Rollover and purge both touch every row of an era, which a long booth run can
+// make far larger than Prisma's five-second interactive default allows for.
+const BULK_TRANSACTION = { timeout: 120_000, maxWait: 10_000 };
+
 export const installationsRouter = new Hono<{ Variables: AuthVariables }>();
 
 const idParamSchema = z.object({ id: z.guid() });
@@ -147,16 +151,18 @@ installationsRouter.post(
           // naming it. Prompts are unique per era, so re-creating one would
           // trip the constraint and fail the whole start over a duplicate the
           // operator already has.
-          const existingPrompts = new Set(
-            (
-              await tx.question.findMany({
-                where: { installationId: installation.id },
-                select: { prompt: true },
-              })
-            ).map((row) => row.prompt),
-          );
+          const existing = await tx.question.findMany({
+            where: { installationId: installation.id },
+            select: { prompt: true, audioId: true },
+          });
+          const existingPrompts = new Set(existing.map((row) => row.prompt));
+          // Audio is unique per era too, so an adopted era that already reuses
+          // one of these recordings under a different prompt would trip that
+          // constraint instead.
+          const existingAudio = new Set(existing.map((row) => row.audioId));
           for (const question of source) {
             if (existingPrompts.has(question.prompt)) continue;
+            if (existingAudio.has(question.audioId)) continue;
             await tx.question.create({
               data: {
                 prompt: question.prompt,
@@ -167,6 +173,8 @@ installationsRouter.post(
                 installationId: installation.id,
               },
             });
+            existingPrompts.add(question.prompt);
+            existingAudio.add(question.audioId);
           }
         }
 
@@ -263,7 +271,7 @@ installationsRouter.post(
           ...(body.location !== undefined ? { location: body.location } : {}),
         },
       });
-    });
+    }, BULK_TRANSACTION);
 
     // Lost the claim: another admin ended this era first.
     if (!ended) return c.json({ error: "installation_already_ended" }, 409);
@@ -338,7 +346,7 @@ installationsRouter.delete(
         questions: questions.count,
         snapshots: snapshots.count,
       };
-    });
+    }, BULK_TRANSACTION);
 
     // A File row is shared: a question copied forward into a later era points
     // at the same row as the original. So a file is only orphaned once nothing

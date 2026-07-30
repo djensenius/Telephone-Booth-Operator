@@ -90,6 +90,9 @@ ALTER TABLE "BoothStatusSnapshot" ADD CONSTRAINT "BoothStatusSnapshot_installati
 -- File, so `audioId` can no longer be globally unique.
 DROP INDEX "Question_audioId_key";
 CREATE INDEX "Question_audioId_idx" ON "Question"("audioId");
+-- Uniqueness is kept per era instead: sharing a File is for copying a question
+-- forward, not for two prompts in one era playing the same recording.
+CREATE UNIQUE INDEX "Question_installationId_audioId_key" ON "Question"("installationId", "audioId");
 
 -- Prompts are unique within an installation rather than globally, so the same
 -- question can run in more than one era.

@@ -506,6 +506,36 @@ describe("installations", () => {
         .map((row) => row.prompt);
       expect(prompts).toEqual(["Shared prompt"]);
     });
+
+    // Audio is unique per era as well, so a recording the adopted era already
+    // uses under a different prompt would trip that constraint instead.
+    it("skips a question whose audio the adopted era already uses", async () => {
+      const app = createApp();
+      const shared = seedFile();
+      seedQuestion({ status: "active", prompt: "Original prompt", audioId: shared.id });
+      expect((await endDefault(app)).status).toBe(200);
+
+      const active = await requireActiveInstallation();
+      seedQuestion({
+        id: "cccccccc-0000-4000-8000-0000000000b2",
+        status: "draft",
+        prompt: "Rewritten prompt",
+        audioId: shared.id,
+        installationId: active,
+      });
+
+      const res = await app.request("/v1/installations", {
+        method: "POST",
+        headers: jsonHeaders(adminHeaders()),
+        body: JSON.stringify({ name: "Fourth run", copyQuestions: true }),
+      });
+
+      expect(res.status, await res.clone().text()).toBe(201);
+      const audioIds = [...store.questions.values()]
+        .filter((row) => row.installationId === active)
+        .map((row) => row.audioId);
+      expect(audioIds).toEqual([shared.id]);
+    });
   });
 
   describe("scoped reads", () => {

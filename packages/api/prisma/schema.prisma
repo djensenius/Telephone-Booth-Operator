@@ -110,6 +110,10 @@ model Question {
   installation   Installation?  @relation(fields: [installationId], references: [id])
 
   @@unique([installationId, prompt])
+  // One question per audio file per era: sharing exists so a question can be
+  // copied *forward*, not so two prompts in the same era can play the same
+  // recording. This replaces the global uniqueness the column used to carry.
+  @@unique([installationId, audioId])
   @@index([status, createdAt])
   @@index([installationId, status, createdAt])
   @@index([audioId])

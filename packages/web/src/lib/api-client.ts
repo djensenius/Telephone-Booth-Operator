@@ -266,8 +266,11 @@ export const questions = {
       `/v1/questions${query({ cursor: params.cursor, limit: params.limit ?? 50, status: params.status, installationId: params.installationId })}`,
       { schema: QuestionListSchema },
     ),
+  // The id list is the whole filter, so ask for as many rows back as ids sent —
+  // the endpoint's default page size is smaller than a batch and would silently
+  // drop the tail.
   listByIds: (ids: readonly string[]) =>
-    apiFetch<QuestionList>(`/v1/questions${query({ ids: ids.join(",") })}`, {
+    apiFetch<QuestionList>(`/v1/questions${query({ ids: ids.join(","), limit: ids.length })}`, {
       schema: QuestionListSchema,
     }),
   create: (input: QuestionCreate) =>
