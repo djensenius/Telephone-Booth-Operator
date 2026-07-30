@@ -260,7 +260,13 @@ export const restoreImportArchive = async (archive: Buffer): Promise<ImportSumma
             // An archive is operator-supplied data: bound it exactly as a
             // live write is bounded, so a crafted file cannot smuggle an
             // oversized or malformed row into the trail.
-            const create = boundAuditFields(row);
+            const { metadata, ...bounded } = boundAuditFields(row);
+            // Prisma rejects a plain `null` for a nullable Json column, so an
+            // exported row without metadata has to omit the field entirely.
+            const create = {
+              ...bounded,
+              ...(metadata ? { metadata: metadata as Prisma.InputJsonValue } : {}),
+            };
             await client.upsert({ where: { id: row.id }, create, update: {} });
           } else {
             await client.upsert({ where: { id: row.id }, create: row, update: row });

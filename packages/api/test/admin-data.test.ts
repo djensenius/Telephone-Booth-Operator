@@ -333,8 +333,10 @@ describe("admin data export/import", () => {
     expect(restored?.actorLabel.length).toBe(320);
     expect(restored?.userAgent?.length).toBe(512);
     expect(restored?.path.length).toBe(512);
-    // An array is not a metadata object; the trail's own schema wins.
-    expect(restored?.metadata).toBeNull();
+    // An array is not a metadata object; the trail's own schema wins. Prisma
+    // rejects a plain `null` for a nullable Json column, so the field is left
+    // off entirely rather than nulled.
+    expect(restored && "metadata" in restored).toBe(false);
   });
 
   it("rejects a non-archive import body", async () => {
