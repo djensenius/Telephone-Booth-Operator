@@ -427,9 +427,12 @@ const adoptLegacyRows = async (
 // differs from the target's: the target was seeded with its own active row by
 // the migration (or lazily by a booth write) and the insert would collide.
 //
-// The archive is authoritative for a restore, so the target's era yields. An
-// era with nothing recorded against it is bookkeeping noise and is removed; one
-// with real data is closed out instead, so nothing becomes unreachable.
+// The archive is authoritative for a restore, so the target's era yields: it is
+// closed out rather than deleted, even when nothing was recorded against it.
+// Deleting it would strand any replica whose cached active id still names it —
+// the next booth write there would fail its foreign key, and a booth write must
+// never fail on bookkeeping. An empty ended era is cheap; a dropped recording
+// is not.
 const reconcileActiveInstallation = async (
   tx: Prisma.TransactionClient,
   dump: Record<string, Row[]>,
@@ -439,20 +442,6 @@ const reconcileActiveInstallation = async (
 
   const existing = await tx.installation.findFirst({ where: { endedAt: null } });
   if (!existing || existing.id === incoming.id) return;
-
-  const where = { installationId: existing.id };
-  const [calls, messages, events, snapshots, questions] = await Promise.all([
-    tx.callSession.count({ where }),
-    tx.message.count({ where }),
-    tx.boothEvent.count({ where }),
-    tx.boothStatusSnapshot.count({ where }),
-    tx.question.count({ where }),
-  ]);
-
-  if (calls + messages + events + snapshots + questions === 0) {
-    await tx.installation.delete({ where: { id: existing.id } });
-    return;
-  }
 
   // Not just a timestamp: the era gets the same treatment the rollover gives
   // it, so the restored instance never inherits open sessions, a moderation

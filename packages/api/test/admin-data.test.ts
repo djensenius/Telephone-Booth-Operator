@@ -396,9 +396,9 @@ describe("admin data export/import", () => {
     });
 
     expect(res.status, await res.clone().text()).toBe(200);
-    // The seeded era had nothing recorded against it, so it is discarded
-    // rather than left behind as a second, empty era.
-    expect(store.installations.has(DEFAULT_INSTALLATION_ID)).toBe(false);
+    // The seeded era is closed, not deleted: a replica still holding it as its
+    // cached active id would otherwise fail the next booth write's foreign key.
+    expect(store.installations.get(DEFAULT_INSTALLATION_ID)?.endedAt).toBeInstanceOf(Date);
     const open = [...store.installations.values()].filter((row) => row.endedAt === null);
     expect(open.map((row) => row.id)).toEqual([incomingId]);
   });

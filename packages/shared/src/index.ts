@@ -336,11 +336,11 @@ export const BoothEventTypeSchema = z.enum([
 ]);
 export type BoothEventType = z.infer<typeof BoothEventTypeSchema>;
 
-// Mirrors the Rust `CallOutcome` enum, plus `installation_ended`, which only
-// the API writes: it closes out calls that were still open when an era ended
-// and the booth never reported on. Operator UI uses these strings to label
-// session rows; Grafana uses them as `outcome` labels on `booth_calls_total`.
-export const CallOutcomeSchema = z.enum([
+// Mirrors the Rust `CallOutcome` enum: what the API will accept from the booth.
+// `installation_ended` is deliberately absent — a client that could stamp it
+// would mark its own session as closed by a rollover, and every later update to
+// that session would then be refused as a straggler.
+export const BoothReportedCallOutcomeSchema = z.enum([
   "hung_up_before_dial",
   "hung_up_during_prompt",
   "hung_up_during_recording",
@@ -350,6 +350,14 @@ export const CallOutcomeSchema = z.enum([
   "upload_failed",
   "operator_error",
   "aborted",
+]);
+export type BoothReportedCallOutcome = z.infer<typeof BoothReportedCallOutcomeSchema>;
+
+// What can appear on a session in an API response: everything the booth
+// reports, plus the outcome the rollover writes on calls the booth never
+// closed itself.
+export const CallOutcomeSchema = z.enum([
+  ...BoothReportedCallOutcomeSchema.options,
   "installation_ended",
 ]);
 export type CallOutcome = z.infer<typeof CallOutcomeSchema>;

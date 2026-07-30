@@ -137,6 +137,32 @@ describe("POST /v1/events", () => {
     const startEvent = store.boothEvents.find((event) => event.eventId === "evt-start");
     expect(startEvent?.version).toBe("0.3.2");
   });
+
+  // `installation_ended` is the rollover's own outcome. A client that could
+  // stamp it would mark its session as closed by an era that never ended, and
+  // every later update to that session would be refused as a straggler.
+  it("ignores an outcome only the rollover is allowed to write", async () => {
+    const app = createApp();
+    const sessionId = "aaaaaaaa-0000-4000-8000-0000000000cc";
+    const res = await app.request("/v1/events", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({
+        events: [
+          sampleEvent({
+            eventId: "evt-forged",
+            sessionId,
+            type: "call_ended",
+            occurredAt: new Date().toISOString(),
+            payload: { outcome: "installation_ended" },
+          }),
+        ],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(store.callSessions.get(sessionId)?.outcome).toBeNull();
+  });
 });
 
 describe("GET /v1/events", () => {

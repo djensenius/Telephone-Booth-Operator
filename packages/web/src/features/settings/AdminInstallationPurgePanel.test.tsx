@@ -158,6 +158,48 @@ describe("AdminInstallationPurgePanel", () => {
     });
   });
 
+  // An archive started next to a running purge reads rows the purge is
+  // deleting, and whichever finishes last overwrites the other's result.
+  it("locks the panel while a purge is in flight", async () => {
+    let release: (() => void) | undefined;
+    server.use(
+      http.delete("http://localhost/v1/installations/:id", async () => {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return HttpResponse.json({
+          installationId: endedId,
+          rows: {},
+          blobsDeleted: 0,
+          blobsRetained: 0,
+          blobFailures: [],
+        });
+      }),
+    );
+    renderPanel();
+
+    const select = await screen.findByLabelText("Installation");
+    await screen.findByRole("option", { name: /Spring 2026 residency — started .+ \(/ });
+    fireEvent.change(select, { target: { value: endedId } });
+    fireEvent.click(screen.getByRole("button", { name: "Download archive (required)" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Download archive again" })).toBeTruthy(),
+    );
+    fireEvent.change(screen.getByLabelText(/to confirm/), {
+      target: { value: "Spring 2026 residency" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Permanently delete installation" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Purging…" })).toBeTruthy());
+    expect(
+      screen.getByRole("button", { name: "Download archive again" }).hasAttribute("disabled"),
+    ).toBe(true);
+    expect(select.hasAttribute("disabled")).toBe(true);
+
+    release?.();
+    await waitFor(() => expect(screen.getByText(/Purged installation/)).toBeTruthy());
+  });
+
   it("reports a backend confirmation mismatch without deleting", async () => {
     server.use(
       http.delete("http://localhost/v1/installations/:id", () =>

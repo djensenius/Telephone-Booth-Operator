@@ -11,7 +11,7 @@ import {
   BOOTH_EVENT_BATCH_MAX,
   BoothEventBatchSchema,
   BoothEventTypeSchema,
-  CallOutcomeSchema,
+  BoothReportedCallOutcomeSchema,
   InstallationScopeSchema,
   type BoothEvent,
   type BoothEventRecord,
@@ -178,7 +178,7 @@ function callEndedData(event: BoothEvent): Partial<StoredCallSession> | null {
   const payload = (event.payload ?? {}) as Record<string, unknown>;
   const outcomeRaw = payload.outcome ?? payload.call_outcome;
   const outcome =
-    typeof outcomeRaw === "string" && CallOutcomeSchema.safeParse(outcomeRaw).success
+    typeof outcomeRaw === "string" && BoothReportedCallOutcomeSchema.safeParse(outcomeRaw).success
       ? outcomeRaw
       : null;
   const durationMs = typeof payload.duration_ms === "number" ? payload.duration_ms : null;
@@ -297,6 +297,19 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
     const locked = await lockOpenInstallation(tx, installationId);
     if (!locked) throw new Error("no open installation to record into");
     eraForNewRows = locked;
+
+    // Waiting for that lock takes time, and a concurrent batch can create one
+    // of our sessions while we wait. Re-read the ones we did not already know
+    // about, so their events follow the session rather than being filed under
+    // the era this request happened to resolve.
+    const unknown = referencedSessionIds.filter((id) => !sessionEra.has(id));
+    if (unknown.length > 0) {
+      const late = await tx.callSession.findMany({
+        where: { id: { in: unknown } },
+        select: { id: true, installationId: true, endedAt: true },
+      });
+      for (const row of late) sessionEra.set(row.id, row);
+    }
 
     for (const init of sessionInits.values()) {
       if (!init.id || !init.boothId || !init.bootId) continue;

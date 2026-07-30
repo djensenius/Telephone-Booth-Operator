@@ -55,16 +55,22 @@ export function AdminInstallationPurgePanel(): JSX.Element {
   const selected = endable.find((installation) => installation.id === selectedId) ?? null;
   const archived = selectedId.length > 0 && archivedIds.has(selectedId);
   const nameMatches = selected !== null && confirmName === selected.name;
-  const canPurge = selected !== null && archived && nameMatches && status.kind !== "purging";
+  // One destructive workflow at a time. An archive running alongside a purge
+  // reads rows the purge is deleting, and whichever request lands last
+  // overwrites the other's result — including a purge's report of what it
+  // actually removed.
+  const busy = status.kind === "archiving" || status.kind === "purging";
+  const canPurge = selected !== null && archived && nameMatches && !busy;
 
   const handleSelect = (id: string): void => {
+    if (busy) return;
     setSelectedId(id);
     setConfirmName("");
     setStatus({ kind: "idle" });
   };
 
   const handleArchive = async (): Promise<void> => {
-    if (selected === null) return;
+    if (selected === null || busy) return;
     setStatus({ kind: "archiving" });
     try {
       const { blob, filename } = await installationsApi.exportArchive(selected.id);
@@ -113,7 +119,11 @@ export function AdminInstallationPurgePanel(): JSX.Element {
       <div className="settings-list">
         <label>
           Installation
-          <select value={selectedId} onChange={(event) => handleSelect(event.currentTarget.value)}>
+          <select
+            value={selectedId}
+            disabled={busy}
+            onChange={(event) => handleSelect(event.currentTarget.value)}
+          >
             <option value="">Choose an ended installation…</option>
             {endable.map((installation) => (
               <option key={installation.id} value={installation.id}>
@@ -124,11 +134,7 @@ export function AdminInstallationPurgePanel(): JSX.Element {
         </label>
         {selected === null ? null : (
           <>
-            <button
-              type="button"
-              onClick={() => void handleArchive()}
-              disabled={status.kind === "archiving"}
-            >
+            <button type="button" onClick={() => void handleArchive()} disabled={busy}>
               {status.kind === "archiving"
                 ? "Preparing archive…"
                 : archived

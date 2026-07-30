@@ -1960,6 +1960,10 @@ components:
         - system_sample
     CallOutcome:
       type: string
+      description: >-
+        What the booth reported, or `installation_ended`, which the API writes
+        on calls that were still open when an installation ended. Booth clients
+        cannot send `installation_ended`.
       enum:
         - hung_up_before_dial
         - hung_up_during_prompt
