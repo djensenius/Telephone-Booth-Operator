@@ -400,6 +400,22 @@ describe("audit log middleware", () => {
     expect(store.auditLogs[0]!.actorType).toBe("anonymous");
   });
 
+  it("keeps auditing when the enable flag is a typo", async () => {
+    process.env.AUDIT_LOG_ENABLED = "treu";
+    const app = createApp();
+    const file = seedFile();
+    const message = seedMessage({ audioId: file.id, status: "pending" });
+
+    const response = await app.request(`/v1/messages/${message.id}/decision`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: operatorCookie() },
+      body: JSON.stringify({ decision: "approve" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(store.auditLogs).toHaveLength(1);
+  });
+
   it("can be disabled entirely", async () => {
     process.env.AUDIT_LOG_ENABLED = "false";
     const app = createApp();

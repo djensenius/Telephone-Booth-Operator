@@ -70,10 +70,19 @@ const MAX_METADATA_STRING_LENGTH = 2000;
 const truncate = (value: string, max: number): string =>
   value.length <= max ? value : `${value.slice(0, max - 1)}…`;
 
+const TRUE_VALUES: ReadonlySet<string> = new Set(["1", "true", "yes", "on"]);
+const FALSE_VALUES: ReadonlySet<string> = new Set(["0", "false", "no", "off"]);
+
+// A typo must never quietly change the trail's behaviour, so only a value we
+// recognize moves the flag off its default; anything else keeps the default
+// and says so.
 const flag = (name: string, fallback: boolean): boolean => {
   const raw = process.env[name]?.trim().toLowerCase();
   if (raw === undefined || raw === "") return fallback;
-  return raw === "1" || raw === "true" || raw === "yes";
+  if (TRUE_VALUES.has(raw)) return true;
+  if (FALSE_VALUES.has(raw)) return false;
+  log.warn({ event: "audit.invalid_flag", flag: name, value: raw, using: fallback });
+  return fallback;
 };
 
 export const auditEnabled = (): boolean => flag("AUDIT_LOG_ENABLED", true);
