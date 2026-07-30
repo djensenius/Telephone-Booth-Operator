@@ -200,7 +200,21 @@ function EndInstallationForm({
 
   if (!confirming) {
     return (
-      <button type="button" className="installations-danger" onClick={() => setConfirming(true)}>
+      <button
+        type="button"
+        className="installations-danger"
+        onClick={() => {
+          // Seed from the freshest installation data every time the form
+          // opens. The edit form can rename/renote the same active card
+          // without remounting this component, so the state set at mount
+          // could otherwise be stale — ending would silently overwrite the
+          // newer notes/location. Reseeding here also leaves an already-open
+          // form alone, so mid-typing edits are preserved.
+          setNotes(installation.notes ?? "");
+          setLocation(installation.location ?? "");
+          setConfirming(true);
+        }}
+      >
         End installation
       </button>
     );

@@ -52,6 +52,10 @@ hand is still refused — that is a deliberate withdrawal. Late `call_ended`
 events are the mirror image: they are attributed to their session's era and can
 never rewrite a closed era's outcome or frozen summary.
 
+Starting one is settled the same way: naming an auto-created era claims it, so
+two admins starting at once produce one era and one `409` rather than silently
+overwriting each other's metadata.
+
 Two admins ending the same era at once is settled inside the transaction: the
 first to claim it wins and the second gets `409`, so `retiredAt` and `endedAt`
 never drift apart.

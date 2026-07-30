@@ -252,4 +252,40 @@ describe("GET /v1/events", () => {
     const event = store.boothEvents.find((row) => row.eventId === "late-1");
     expect(event?.installationId).toBe(DEFAULT_INSTALLATION_ID);
   });
+
+  // The pre-flight "is this session frozen?" read happens before the write
+  // transaction, so a rollover committing in between must still be refused —
+  // this time by the database condition on the update itself.
+  it("refuses a straggler whose era closed after the frozen check", async () => {
+    const stale = seedCallSession({
+      id: "11111111-1111-4111-8111-11111111000a",
+      bootId: "33333333-3333-4333-8333-33333333000a",
+      // Still looks open to the pre-flight read: no endedAt, era not closed.
+      outcome: "installation_ended",
+      installationId: DEFAULT_INSTALLATION_ID,
+    });
+
+    const res = await createApp().request("/v1/events", {
+      method: "POST",
+      headers: { ...phoneHeaders, "content-type": "application/json" },
+      body: JSON.stringify({
+        events: [
+          {
+            eventId: "late-2",
+            boothId: "booth-1",
+            bootId: "33333333-3333-4333-8333-33333333000a",
+            type: "call_ended",
+            occurredAt: new Date("2026-02-01T00:00:00Z").toISOString(),
+            sessionId: stale.id,
+            payload: { outcome: "completed", duration_ms: 4242 },
+          },
+        ],
+      }),
+    });
+
+    expect(res.status, await res.clone().text()).toBe(200);
+    const after = store.callSessions.get(stale.id)!;
+    expect(after.outcome).toBe("installation_ended");
+    expect(after.durationMs).toBeNull();
+  });
 });

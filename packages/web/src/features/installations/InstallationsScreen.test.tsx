@@ -247,4 +247,47 @@ describe("InstallationsScreen", () => {
       await screen.findByText(/booth has recorded into it, so it can't be renamed automatically/i),
     ).toBeTruthy();
   });
+
+  it("reseeds the end-installation form from the latest metadata each time it opens", async () => {
+    renderScreen([activeInstallation]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit details" }));
+    const editFormEl = document.querySelector<HTMLFormElement>(".installations-edit-form");
+    if (editFormEl === null) throw new Error("Edit form did not render.");
+    const editForm = within(editFormEl);
+    fireEvent.change(editForm.getByLabelText(/Notes/), {
+      target: { value: "Fresh field notes" },
+    });
+    fireEvent.change(editForm.getByLabelText(/Location/), {
+      target: { value: "Museum atrium" },
+    });
+
+    server.use(
+      http.get("http://localhost/v1/installations", () =>
+        HttpResponse.json({
+          items: [
+            {
+              ...activeInstallation,
+              notes: "Fresh field notes",
+              location: "Museum atrium",
+            },
+          ],
+        }),
+      ),
+    );
+    fireEvent.click(editForm.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(updateCalledId).toBe(activeId));
+
+    // Wait for the refetched, updated metadata to land on the card.
+    await screen.findByText("Fresh field notes");
+
+    // Opening the end-installation form must reseed from the fresh values,
+    // not from the null notes/location captured at mount.
+    fireEvent.click(screen.getByRole("button", { name: "End installation" }));
+    const endFormEl = document.querySelector<HTMLFormElement>(".installations-end-form");
+    if (endFormEl === null) throw new Error("End form did not open.");
+    const endForm = within(endFormEl);
+    expect(endForm.getByDisplayValue("Fresh field notes")).toBeTruthy();
+    expect(endForm.getByDisplayValue("Museum atrium")).toBeTruthy();
+  });
 });

@@ -99,7 +99,7 @@ export function MessagesScreen(): JSX.Element {
     enabled: needsReview,
     ...(scope === undefined ? {} : { installationId: scope }),
   });
-  const questions = useQuestionsList();
+  const questions = useQuestionsList("all", scope === undefined ? {} : { installationId: scope });
   const deleteMessage = useDeleteMessage();
   const decideMessage = useDecideMessage();
   const retranscribe = useRetranscribeMessage();

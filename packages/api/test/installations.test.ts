@@ -31,7 +31,7 @@ import {
   requireActiveInstallation,
   resetInstallationCacheForTests,
 } from "../src/lib/installation.js";
-import { resetStatsCacheForTests } from "../src/routes/stats.js";
+import { resetStatsCacheForTests, statsCacheSizesForTests } from "../src/routes/stats.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { fakeBlobs, resetFakeAzure, seedBlobData } from "./support/fake-azure.js";
 import {
@@ -338,6 +338,31 @@ describe("installations", () => {
     });
   });
 
+  describe("concurrent adoption", () => {
+    // Adoption is an update, not a create, so the single-active index does not
+    // arbitrate it. Without a conditional claim both requests would return 201
+    // and the loser's name would quietly replace the winner's.
+    it("lets only one of two concurrent starts adopt the same era", async () => {
+      const app = createApp();
+      expect((await endDefault(app)).status).toBe(200);
+      await requireActiveInstallation();
+
+      const start = (name: string): Promise<Response> =>
+        app.request("/v1/installations", {
+          method: "POST",
+          headers: jsonHeaders(adminHeaders()),
+          body: JSON.stringify({ name }),
+        });
+      const [first, second] = await Promise.all([start("Alpha"), start("Beta")]);
+
+      const statuses = [first.status, second.status].sort((a, b) => a - b);
+      expect(statuses).toEqual([201, 409]);
+      const open = [...store.installations.values()].filter((row) => row.endedAt === null);
+      expect(open).toHaveLength(1);
+      expect(["Alpha", "Beta"]).toContain(open[0]?.name);
+    });
+  });
+
   describe("copy-forward collisions", () => {
     // Prompts are unique per era, so a prompt the operator already wrote into
     // the era being adopted must not be re-created underneath them.
@@ -607,6 +632,20 @@ describe("installations", () => {
         receivedToday: 1,
         callsToday: 0,
       });
+    });
+
+    // The cache key carries a caller-supplied uuid, so an operator paging
+    // through eras must not be able to grow the map without limit.
+    it("keeps the scoped stats cache bounded", async () => {
+      const app = createApp();
+      for (let i = 0; i < 80; i += 1) {
+        const id = `aaaaaaaa-0000-4000-8000-${i.toString().padStart(12, "0")}`;
+        const res = await app.request(`/v1/stats/summary?installationId=${id}`, {
+          headers: operatorHeaders(),
+        });
+        expect(res.status).toBe(200);
+      }
+      expect(statsCacheSizesForTests().summary).toBeLessThanOrEqual(64);
     });
 
     it("scopes the overview the same way", async () => {

@@ -1878,6 +1878,11 @@ export const fakeDb = {
       }
       return { count: matches.length };
     },
+    create: async ({ data }: { data: FakeCallSession }) => {
+      const created: FakeCallSession = { ...data };
+      store.callSessions.set(created.id, created);
+      return created;
+    },
     count: async ({ where = {} }: { where?: Record<string, unknown> } = {}) =>
       [...store.callSessions.values()].filter((session) => matchesWhere(session, where)).length,
   },
@@ -1998,17 +2003,15 @@ export const fakeDb = {
     // The end route claims the era with a conditional update, so this has to
     // honour `endedAt: null` rather than blindly matching on id.
     updateMany: async ({
-      where,
+      where = {},
       data,
     }: {
-      where: { id: string; endedAt?: null };
+      where?: Record<string, unknown>;
       data: Partial<FakeInstallation>;
     }) => {
-      const existing = store.installations.get(where.id);
-      if (!existing) return { count: 0 };
-      if (where.endedAt === null && existing.endedAt !== null) return { count: 0 };
-      store.installations.set(where.id, { ...existing, ...data });
-      return { count: 1 };
+      const matches = [...store.installations.values()].filter((row) => matchesWhere(row, where));
+      for (const row of matches) store.installations.set(row.id, { ...row, ...data });
+      return { count: matches.length };
     },
     delete: async ({ where }: { where: { id: string } }) => {
       const existing = store.installations.get(where.id);
@@ -2094,6 +2097,12 @@ const matchesWhere = (record: Record<string, unknown>, where: Record<string, unk
     if (key === "OR" && Array.isArray(raw)) {
       const ok = raw.some((branch) => matchesWhere(record, branch as Record<string, unknown>));
       if (!ok) return false;
+      continue;
+    }
+    // Top-level `NOT`, as used by the conditional call-session update that
+    // refuses to overwrite a rollover's outcome.
+    if (key === "NOT" && raw !== null && typeof raw === "object") {
+      if (matchesWhere(record, raw as Record<string, unknown>)) return false;
       continue;
     }
     const value = record[key];

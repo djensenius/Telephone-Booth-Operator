@@ -28,6 +28,7 @@ import {
   requireActiveInstallation,
   resolveInstallationScope,
   scopeWhere,
+  ROLLOVER_OUTCOME,
 } from "../lib/installation.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 import { serializeBoothEvent } from "../lib/serializers.js";
@@ -285,9 +286,35 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
       // it, or the ended era's summary stops matching its own drill-down.
       if (frozen(init.id)) continue;
       const startedAt = init.startedAt ?? new Date();
-      await tx.callSession.upsert({
-        where: { id: init.id },
-        create: {
+      const patch = {
+        // Never overwrite startedAt; never null-out fields that the event
+        // didn't carry.
+        ...(init.endedAt ? { endedAt: init.endedAt } : {}),
+        ...(init.digitsDialed !== undefined && init.digitsDialed !== null
+          ? { digitsDialed: init.digitsDialed }
+          : {}),
+        ...(init.outcome ? { outcome: init.outcome } : {}),
+        ...(init.recordingId ? { recordingId: init.recordingId } : {}),
+        ...(init.durationMs !== undefined && init.durationMs !== null
+          ? { durationMs: init.durationMs }
+          : {}),
+        ...(init.version ? { version: init.version } : {}),
+      };
+
+      // The `frozen` check above reads before this transaction writes, so a
+      // rollover committing in between would slip past it. The update is
+      // therefore also conditional in the database: a session the rollover
+      // closed carries `installation_ended`, and matching zero rows is the
+      // signal to leave the frozen era alone.
+      const updated = await tx.callSession.updateMany({
+        where: { id: init.id, NOT: { outcome: ROLLOVER_OUTCOME } },
+        data: patch,
+      });
+      if (updated.count > 0) continue;
+      if ((await tx.callSession.count({ where: { id: init.id } })) > 0) continue;
+
+      await tx.callSession.create({
+        data: {
           id: init.id,
           boothId: init.boothId,
           bootId: init.bootId,
@@ -299,20 +326,6 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
           durationMs: init.durationMs ?? null,
           version: init.version ?? null,
           installationId: eraFor(init.id),
-        },
-        update: {
-          // Never overwrite startedAt; never null-out fields that the event
-          // didn't carry.
-          ...(init.endedAt ? { endedAt: init.endedAt } : {}),
-          ...(init.digitsDialed !== undefined && init.digitsDialed !== null
-            ? { digitsDialed: init.digitsDialed }
-            : {}),
-          ...(init.outcome ? { outcome: init.outcome } : {}),
-          ...(init.recordingId ? { recordingId: init.recordingId } : {}),
-          ...(init.durationMs !== undefined && init.durationMs !== null
-            ? { durationMs: init.durationMs }
-            : {}),
-          ...(init.version ? { version: init.version } : {}),
         },
       });
     }

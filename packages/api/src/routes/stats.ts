@@ -106,15 +106,46 @@ const computeStatsSummary = async (scope: InstallationScopeFilter): Promise<Stat
   };
 };
 
+// The cache key carries a caller-supplied installation id, so an operator
+// asking for era after era would otherwise grow these maps without bound. Drop
+// expired entries on write, and cap what is left: they are a latency
+// optimisation for the handful of scopes a console actually looks at.
+const CACHE_MAX_ENTRIES = 64;
+
+const cachePut = <T>(
+  cache: Map<string, { value: T; expiresAt: number }>,
+  key: string,
+  value: T,
+  ttlMs: number,
+): void => {
+  const now = Date.now();
+  for (const [existing, entry] of cache) {
+    if (entry.expiresAt <= now) cache.delete(existing);
+  }
+  cache.set(key, { value, expiresAt: now + ttlMs });
+  // Insertion order: the oldest live entry goes first.
+  while (cache.size > CACHE_MAX_ENTRIES) {
+    const oldest = cache.keys().next();
+    if (oldest.done) break;
+    cache.delete(oldest.value);
+  }
+};
+
 const getCachedSummary = async (scope: InstallationScopeFilter): Promise<StatsSummary> => {
   const now = Date.now();
   const key = scopeCacheKey(scope);
   const entry = summaryCache.get(key);
   if (entry && entry.expiresAt > now) return entry.value;
   const value = await computeStatsSummary(scope);
-  summaryCache.set(key, { value, expiresAt: now + STATS_CACHE_TTL_MS });
+  cachePut(summaryCache, key, value, STATS_CACHE_TTL_MS);
   return value;
 };
+
+// Cache occupancy, so a test can prove the bound actually holds.
+export const statsCacheSizesForTests = (): { summary: number; overview: number } => ({
+  summary: summaryCache.size,
+  overview: overviewCache.size,
+});
 
 export const resetStatsCacheForTests = (): void => {
   summaryCache.clear();
@@ -496,7 +527,7 @@ const getCachedOverview = async (
   const cachedEntry = overviewCache.get(key);
   if (cachedEntry && cachedEntry.expiresAt > now) return cachedEntry.value;
   const value = await computeStatsOverview(presetRange(window), scope);
-  overviewCache.set(key, { value, expiresAt: now + OVERVIEW_CACHE_TTL_MS });
+  cachePut(overviewCache, key, value, OVERVIEW_CACHE_TTL_MS);
   return value;
 };
 

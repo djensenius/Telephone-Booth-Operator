@@ -101,6 +101,7 @@ const token = {
 
 let createdQuestion = false;
 let lastQuestionsUrl = "";
+let questionsUrls: string[] = [];
 let activatedQuestionId = "";
 let deactivatedQuestionId = "";
 let deletedMessages: string[] = [];
@@ -147,6 +148,7 @@ const server = setupServer(
   ),
   http.get("http://localhost/v1/questions", ({ request }) => {
     lastQuestionsUrl = request.url;
+    questionsUrls.push(request.url);
     return HttpResponse.json({
       items: createdQuestion ? [questionTwo, question] : [question],
       nextCursor: null,
@@ -342,6 +344,7 @@ afterAll(() => server.close());
 beforeEach(() => {
   createdQuestion = false;
   lastQuestionsUrl = "";
+  questionsUrls = [];
   activatedQuestionId = "";
   deactivatedQuestionId = "";
   deletedMessages = [];
@@ -730,6 +733,39 @@ describe("Messages feature", () => {
         ),
       ).toBe(true),
     );
+  });
+
+  it("resolves prompts for a historical era's messages by scoping questions the same way", async () => {
+    const eraId = "ee111111-1111-4111-8111-111111111111";
+    server.use(
+      http.get("http://localhost/v1/questions", ({ request }) => {
+        questionsUrls.push(request.url);
+        const url = new URL(request.url);
+        if (url.searchParams.get("installationId") === eraId) {
+          return HttpResponse.json({ items: [question], nextCursor: null });
+        }
+        return HttpResponse.json({ items: [], nextCursor: null });
+      }),
+    );
+    renderPath(`/messages?installationId=${eraId}`);
+    expect(await screen.findByText("What did the city sound like today?")).toBeTruthy();
+    expect(questionsUrls.some((url) => url.includes(`installationId=${eraId}`))).toBe(true);
+  });
+
+  it("looks up the historical question with installationId=all on the detail view", async () => {
+    server.use(
+      http.get("http://localhost/v1/questions", ({ request }) => {
+        questionsUrls.push(request.url);
+        const url = new URL(request.url);
+        if (url.searchParams.get("installationId") === "all") {
+          return HttpResponse.json({ items: [question], nextCursor: null });
+        }
+        return HttpResponse.json({ items: [], nextCursor: null });
+      }),
+    );
+    renderPath(`/messages/${messageId}`);
+    expect(await screen.findByText("What did the city sound like today?")).toBeTruthy();
+    expect(questionsUrls.some((url) => url.includes("installationId=all"))).toBe(true);
   });
 
   it("has no critical axe violations", async () => {

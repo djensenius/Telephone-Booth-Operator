@@ -103,12 +103,23 @@ installationsRouter.post(
           notes: body.notes ?? null,
           location: body.location ?? null,
         };
-        const installation = active
-          ? await tx.installation.update({
-              where: { id: active.id },
-              data: { ...data, startedAt: new Date() },
-            })
-          : await tx.installation.create({ data });
+        // Creating is arbitrated by the single-active index, but adopting is
+        // just an update, so two admins naming the same auto-created era would
+        // both succeed and the loser's metadata would vanish. Claim it on the
+        // name it still has: whoever renames it first wins, the other is told
+        // an era is already open.
+        let installation;
+        if (active) {
+          const claimed = await tx.installation.updateMany({
+            where: { id: active.id, endedAt: null, name: active.name },
+            data: { ...data, startedAt: new Date() },
+          });
+          if (claimed.count === 0) return null;
+          installation = await tx.installation.findUnique({ where: { id: active.id } });
+          if (!installation) return null;
+        } else {
+          installation = await tx.installation.create({ data });
+        }
 
         // Copied questions point at the *same* `File` row as the original, so
         // the audio is shared rather than re-uploaded and SHA-256 dedupe is

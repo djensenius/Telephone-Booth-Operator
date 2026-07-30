@@ -2,6 +2,7 @@ import type { JSX } from "react";
 import { useState } from "react";
 import { Link, useParams } from "@tanstack/react-router";
 import type { Message, Moderation, Transcription } from "@telephone-booth-operator/shared";
+import { INSTALLATION_SCOPE_ALL } from "@telephone-booth-operator/shared";
 import { GlassPanel } from "../../components/booth/index.js";
 import {
   useDecideMessage,
@@ -405,7 +406,11 @@ export function MessageDetail(): JSX.Element {
   const { id } = useParams({ from: "/messages/$id" });
   const now = useNow();
   const message = useMessage(id);
-  const questions = useQuestionsList();
+  // A message can belong to any era (this route has no scope picker of its
+  // own), and questions are archived at rollover. `installationId=all` is the
+  // documented escape hatch that guarantees the message's question is in the
+  // response so the prompt resolves for historical messages.
+  const questions = useQuestionsList("all", { installationId: INSTALLATION_SCOPE_ALL });
   const transcriptions = useMessageTranscriptions(id);
   const retranscribe = useRetranscribeMessage();
   const remoderate = useRemoderateMessage();
