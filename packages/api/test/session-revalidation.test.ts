@@ -120,8 +120,9 @@ const { fakeDb, openidMocks, store, FakeChallengeError } = vi.hoisted(() => {
           return question;
         }),
       },
-      // Question creation tags the row with the active installation, so this
-      // minimal mock needs an installation delegate to resolve one.
+      // Question creation tags the row with the active installation and then
+      // re-reads it to confirm the era did not close underneath the insert, so
+      // this minimal mock needs both lookups.
       installation: {
         findFirst: vi.fn(async () => ({
           id: "00000000-0000-4000-8000-0000000000ff",
@@ -134,6 +135,7 @@ const { fakeDb, openidMocks, store, FakeChallengeError } = vi.hoisted(() => {
           summary: null,
           createdAt: new Date(),
         })),
+        findUnique: vi.fn(async () => ({ endedAt: null })),
         count: vi.fn(async () => 1),
       },
     },

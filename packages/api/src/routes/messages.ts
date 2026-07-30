@@ -47,6 +47,10 @@ const idParamSchema = z.object({ id: z.guid() });
 
 const messageBlobName = (sha256: string): string => `messages/${sha256.slice(0, 2)}/${sha256}.flac`;
 
+// How many times a straggler write will chase a rollover before giving up. Each
+// pass needs a *fresh* rollover to lose to, so more than a couple is theatre.
+const ERA_REFILE_ATTEMPTS = 3;
+
 /**
  * A question the booth may still record an answer for.
  *
@@ -216,6 +220,34 @@ messagesRouter.post("/", requireApiToken(), zValidator("json", MessageCreateSche
       }
       return c.json({ error: "message_already_exists" }, 409);
     }
+    // A hard purge collects files its era owned that nothing else references,
+    // and this content-addressed row can become one of them between the upsert
+    // above and this insert — the purge saw no referrer because this message
+    // did not exist yet. Re-create the file and try once more rather than
+    // failing a booth recording over an admin's housekeeping.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2003") {
+      const replacement = await db.file.upsert({
+        where: { sha256: body.sha256 },
+        create: {
+          blobContainer: process.env.AZURE_BLOB_CONTAINER?.trim() || "booth-recordings",
+          blobKey: blobName,
+          sha256: body.sha256,
+          sizeBytes: 0,
+          durationMs: body.durationMs,
+          contentType: "audio/flac",
+        },
+        update: {},
+      });
+      message = await db.message.create({
+        data: {
+          status: "uploading",
+          questionId: body.questionId ?? null,
+          audioId: replacement.id,
+          installationId: await requireActiveInstallation(),
+        },
+      });
+      return uploadSlot(message.id);
+    }
     throw err;
   }
   return uploadSlot(message.id);
@@ -265,7 +297,7 @@ messagesRouter.post(
     const era = message.installationId
       ? await db.installation.findUnique({ where: { id: message.installationId } })
       : null;
-    const refiled = era?.endedAt ? await requireOpenInstallation() : null;
+    let refiled = era?.endedAt ? await requireOpenInstallation() : null;
     const { count } = await db.message.updateMany({
       where: { id, status: "uploading" },
       data: {
@@ -274,6 +306,30 @@ messagesRouter.post(
         ...(refiled ? { installationId: refiled } : {}),
       },
     });
+
+    // The era was read before the promotion committed, so a rollover landing in
+    // between would have drained its queue while this row was still invisible
+    // to it, leaving a pending message in a frozen era — and feeding the
+    // moderation badge, which counts every era on purpose. Re-check afterwards
+    // and re-file; a rollover that commits after this check sees the row and
+    // closes it out itself. Bounded because each pass needs a fresh rollover to
+    // lose to.
+    for (let attempt = 0; count > 0 && attempt < ERA_REFILE_ATTEMPTS; attempt += 1) {
+      const landed = refiled ?? message.installationId;
+      if (!landed) break;
+      const settled = await db.installation.findUnique({
+        where: { id: landed },
+        select: { endedAt: true },
+      });
+      if (!settled?.endedAt) break;
+      const open = await requireOpenInstallation();
+      if (open === landed) break;
+      await db.message.updateMany({
+        where: { id, installationId: landed },
+        data: { installationId: open },
+      });
+      refiled = open;
+    }
 
     if (count === 0) {
       const current = await db.message.findUnique({ where: { id } });

@@ -419,10 +419,31 @@ const purgeOrphanFiles = async (
   ]);
 
   const orphans = owned.filter((file) => !referenced.has(file.id));
-  const blobsRetained = owned.length - orphans.length;
+  // A booth upload can adopt one of these content-addressed rows between the
+  // reference check above and this delete — the SHA is shared, so the new
+  // recording reuses the very file the purge just decided was unreferenced. In
+  // that case the batch delete fails on the foreign key, so fall back to
+  // deleting one at a time and simply retain whichever row was claimed. The
+  // era's own rows are already gone; failing the whole purge (or worse,
+  // deleting a blob a live message now points at) would be the wrong trade.
+  const deleted: OwnedFile[] = [];
   if (orphans.length > 0) {
-    await db.file.deleteMany({ where: { id: { in: orphans.map((file) => file.id) } } });
+    try {
+      await db.file.deleteMany({ where: { id: { in: orphans.map((file) => file.id) } } });
+      deleted.push(...orphans);
+    } catch (error) {
+      log.warn({ err: error }, "orphan file delete failed as a batch; retrying one at a time");
+      for (const file of orphans) {
+        try {
+          await db.file.delete({ where: { id: file.id } });
+          deleted.push(file);
+        } catch (err) {
+          log.warn({ err, fileId: file.id }, "retaining file claimed during purge");
+        }
+      }
+    }
   }
+  const blobsRetained = owned.length - deleted.length;
 
   let blobsDeleted = 0;
   const blobFailures: string[] = [];
@@ -434,7 +455,7 @@ const purgeOrphanFiles = async (
   // A long installation can hold thousands of recordings, and one round trip at
   // a time would put the request in reach of a proxy timeout. A small pool
   // keeps it bounded without hammering the storage account.
-  const queue = [...orphans];
+  const queue = [...deleted];
   const worker = async (): Promise<void> => {
     for (let next = queue.pop(); next !== undefined; next = queue.pop()) {
       const { blobKey } = next;

@@ -325,6 +325,80 @@ describe("installations", () => {
       expect(store.messages.get(created.id)?.installationId).toBe(active?.id);
     });
 
+    // A session and the events that describe it must land in the same era, or
+    // the drill-down from one to the other crosses a scope boundary and comes
+    // back empty. The cached era can be a rollover behind on another replica,
+    // so both rows are resolved from a single, verified-open era.
+    it("opens a straggler session and its own events in the same era", async () => {
+      const app = createApp();
+      expect((await endDefault(app)).status).toBe(200);
+      const started = await app.request("/v1/installations", {
+        method: "POST",
+        headers: jsonHeaders(adminHeaders()),
+        body: JSON.stringify({ name: "Second era" }),
+      });
+      expect(started.status, await started.clone().text()).toBe(201);
+      const openId = ((await started.json()) as { id: string }).id;
+
+      // Pretend this replica never saw the rollover: its cache still names the
+      // era that has since been closed out.
+      resetInstallationCacheForTests(DEFAULT_INSTALLATION_ID);
+
+      const sessionId = "aaaaaaaa-0000-4000-8000-00000000fee1";
+      const res = await app.request("/v1/events", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({
+          events: [
+            {
+              eventId: "eeeeeeee-0000-4000-8000-00000000fee1",
+              boothId: "booth-1",
+              bootId: "bbbbbbbb-0000-4000-8000-00000000fee1",
+              type: "call_started",
+              occurredAt: "2026-07-29T12:00:00.000Z",
+              sessionId,
+            },
+          ],
+        }),
+      });
+      expect(res.status, await res.clone().text()).toBe(200);
+
+      const session = store.callSessions.get(sessionId);
+      const event = [...store.boothEvents.values()].find((row) => row.sessionId === sessionId);
+      expect(session?.installationId).toBe(openId);
+      expect(event?.installationId).toBe(openId);
+    });
+
+    // An admin write has no reason to tolerate the rollover race the booth
+    // does: a prompt created against an era that has since been closed out
+    // would sit live inside a frozen one, invisible to the close-out that
+    // already retired that era's questions.
+    it("re-files a prompt created against an era that has ended", async () => {
+      const app = createApp();
+      expect((await endDefault(app)).status).toBe(200);
+      const started = await app.request("/v1/installations", {
+        method: "POST",
+        headers: jsonHeaders(adminHeaders()),
+        body: JSON.stringify({ name: "Second era" }),
+      });
+      expect(started.status, await started.clone().text()).toBe(201);
+      const openId = ((await started.json()) as { id: string }).id;
+      resetInstallationCacheForTests(DEFAULT_INSTALLATION_ID);
+
+      const audio = seedFile({
+        id: "ffffffff-0000-4000-8000-0000000000c1",
+        sha256: "c1".repeat(32),
+      });
+      const res = await app.request("/v1/questions", {
+        method: "POST",
+        headers: jsonHeaders(adminHeaders()),
+        body: JSON.stringify({ prompt: "Who is still listening?", audioFileId: audio.id }),
+      });
+      expect(res.status, await res.clone().text()).toBe(201);
+      const created = (await res.json()) as { id: string };
+      expect(store.questions.get(created.id)?.installationId).toBe(openId);
+    });
+
     it("still refuses a question an operator retired by hand", async () => {
       const question = seedQuestion({ status: "archived", retiredAt: new Date() });
       const app = createApp();

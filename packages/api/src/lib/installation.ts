@@ -46,8 +46,11 @@ export const invalidateActiveInstallationCache = (): void => {
   activeIdCacheExpiresAt = 0;
 };
 
-export const resetInstallationCacheForTests = (): void => {
+// Passing an id primes the cache with a deliberately stale one, which is how a
+// test stands in for a replica that has not seen a rollover yet.
+export const resetInstallationCacheForTests = (staleId?: string): void => {
   invalidateActiveInstallationCache();
+  if (staleId) writeActiveIdCache(staleId);
 };
 
 type InstallationRow = {

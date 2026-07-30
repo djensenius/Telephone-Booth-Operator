@@ -92,6 +92,17 @@ recording into, or recomputing a frozen summary, which would defeat the point
 of freezing it. The drift is bounded by the seconds-long window around a
 rollover and only affects a raw event tally.
 
+### Admin writes do not accept the race
+
+The trade-off above is bought for the booth, which must never drop a recording.
+An admin write has no such excuse, so the paths an operator drives settle
+themselves instead. Creating a prompt re-reads its era after the insert has
+committed and moves the row if that era has since been closed out; a recording
+promoted out of `uploading` does the same. Both checks run after the commit on
+purpose: a rollover that starts later sees the row and closes it out itself,
+which is the correct outcome, while one that already committed is caught and
+corrected.
+
 ### Reads never open an era
 
 Only a booth write lazily creates an installation. Between an era ending and
