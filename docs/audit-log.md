@@ -11,6 +11,16 @@ One `AuditLog` row is written for every `POST`, `PUT`, `PATCH`, or `DELETE`
 request to `/v1`, including requests that were **rejected** — a denied write is
 exactly the sort of thing an audit trail exists to capture.
 
+Rejected writes from unauthenticated callers are capped at
+`AUDIT_LOG_ANON_LIMIT_PER_MINUTE` rows per address per minute, so a loop
+against a real endpoint cannot fill the table. Anything over the cap is
+counted, and the count appears as `suppressedSince` on the next recorded row
+for that address, so a flood is still visible.
+
+Metadata is bounded as well as sanitized: strings are truncated, nesting is
+capped at three levels, objects and arrays are capped in width, and anything
+still over ~8 KB is replaced with a `metadata_too_large` marker.
+
 Requests to paths with no handler are the one exception: they are 404s against
 a name the caller made up, so recording them would let anyone turn arbitrary
 traffic into unbounded rows with attacker-chosen paths. Rejected writes to real
@@ -109,12 +119,13 @@ Other clients read the same endpoint:
 
 ## Configuration
 
-| Variable                           | Default | Meaning                               |
-| ---------------------------------- | ------- | ------------------------------------- |
-| `AUDIT_LOG_ENABLED`                | `true`  | Master switch                         |
-| `AUDIT_LOG_TELEMETRY`              | `false` | Include booth heartbeats              |
-| `AUDIT_LOG_RETENTION_DAYS`         | `365`   | Age cutoff; `0` keeps entries forever |
-| `AUDIT_LOG_PRUNE_INTERVAL_SECONDS` | `21600` | Pruner cadence, minimum `300`         |
+| Variable                           | Default | Meaning                                                                  |
+| ---------------------------------- | ------- | ------------------------------------------------------------------------ |
+| `AUDIT_LOG_ENABLED`                | `true`  | Master switch                                                            |
+| `AUDIT_LOG_TELEMETRY`              | `false` | Include booth heartbeats                                                 |
+| `AUDIT_LOG_RETENTION_DAYS`         | `365`   | Age cutoff; `0` keeps entries forever                                    |
+| `AUDIT_LOG_PRUNE_INTERVAL_SECONDS` | `21600` | Pruner cadence, minimum `300`                                            |
+| `AUDIT_LOG_ANON_LIMIT_PER_MINUTE`  | `20`    | Cap on anonymous rejected writes per address per minute; `0` disables it |
 
 Audit writes never fail a request. If the insert throws, the API logs
 `audit.write_failed` through pino and the original response still goes out.

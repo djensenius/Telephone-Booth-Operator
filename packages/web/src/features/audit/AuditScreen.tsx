@@ -18,7 +18,7 @@ const ACTION_FILTERS: readonly { readonly value: string; readonly label: string 
   { value: "question.", label: "Questions" },
   { value: "instruction.", label: "Instructions" },
   { value: "apiToken.", label: "API tokens" },
-  { value: "auth.", label: "Sign-in" },
+  { value: "auth.login", label: "Sign-in" },
   { value: "admin.", label: "Admin data" },
 ];
 
@@ -43,15 +43,22 @@ function outcomeLabel(statusCode: number): string {
 // disclosure to keep the table scannable.
 function MetadataCell({ entry }: { readonly entry: AuditLogEntry }): JSX.Element {
   const [serialized, setSerialized] = useState<string | null>(null);
-  if (!entry.metadata || Object.keys(entry.metadata).length === 0) {
-    return <span className="audit-screen__detail">—</span>;
-  }
+  // Rejected writes often stop before a handler can name a target, so the
+  // request itself is the only thing identifying what was attempted.
+  const request = `${entry.method} ${entry.path}`;
+  const target = entry.targetType
+    ? `\n${entry.targetType}${entry.targetId ? ` ${entry.targetId}` : ""}`
+    : "";
   return (
     <details
       className="audit-screen__detail"
       onToggle={(event) => {
         if (event.currentTarget.open && serialized === null) {
-          setSerialized(JSON.stringify(entry.metadata, null, 2));
+          const metadata =
+            entry.metadata && Object.keys(entry.metadata).length > 0
+              ? `\n${JSON.stringify(entry.metadata, null, 2)}`
+              : "";
+          setSerialized(`${request}${target}${metadata}`);
         }
       }}
     >

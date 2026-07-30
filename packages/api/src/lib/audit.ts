@@ -93,21 +93,119 @@ const normalizeRoute = (method: string, routePath: string): string =>
 export const isTelemetryWrite = (method: string, routePath: string): boolean =>
   TELEMETRY_ROUTES.has(normalizeRoute(method, routePath));
 
-// Keep metadata small and free of anything sensitive. Values are shallow by
-// contract; nested objects are JSON-stringified so a caller cannot smuggle an
-// unbounded structure into the row.
-const sanitizeMetadata = (
+const MAX_METADATA_DEPTH = 3;
+const MAX_METADATA_KEYS = 32;
+const MAX_METADATA_ITEMS = 20;
+const MAX_METADATA_BYTES = 8000;
+
+// Audit rows are long-lived and queryable, so metadata is bounded rather than
+// trusted: strings are truncated, structures are capped in depth and width,
+// and anything that still serializes too large is replaced with a marker.
+const sanitizeValue = (value: unknown, depth: number): unknown => {
+  if (typeof value === "string") return truncate(value, MAX_METADATA_STRING_LENGTH);
+  if (value === null || typeof value === "number" || typeof value === "boolean") return value;
+  if (depth >= MAX_METADATA_DEPTH) return "[truncated]";
+  if (Array.isArray(value)) {
+    const items = value.slice(0, MAX_METADATA_ITEMS).map((item) => sanitizeValue(item, depth + 1));
+    if (value.length > MAX_METADATA_ITEMS) items.push("[truncated]");
+    return items;
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, nested]) => nested !== undefined)
+      .slice(0, MAX_METADATA_KEYS);
+    return Object.fromEntries(
+      entries.map(([key, nested]) => [key, sanitizeValue(nested, depth + 1)]),
+    );
+  }
+  // Functions, symbols and bigints have no place in an audit row.
+  return "[unsupported]";
+};
+
+/** Exported for tests: the bound is a contract, not an implementation detail. */
+export const sanitizeMetadata = (
   metadata: Record<string, unknown> | undefined,
 ): Record<string, unknown> | null => {
   if (!metadata) return null;
   const entries = Object.entries(metadata).filter(([, value]) => value !== undefined);
   if (entries.length === 0) return null;
-  return Object.fromEntries(
-    entries.map(([key, value]) => [
-      key,
-      typeof value === "string" ? truncate(value, MAX_METADATA_STRING_LENGTH) : value,
-    ]),
+  const sanitized = Object.fromEntries(
+    entries
+      .slice(0, MAX_METADATA_KEYS)
+      .map(([key, value]) => [key, sanitizeValue(value, 1)] as const),
   );
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(sanitized) ?? "";
+  } catch {
+    // A cycle or a throwing `toJSON` would otherwise fail the insert.
+    return { error: "unserializable_metadata" };
+  }
+  if (serialized.length > MAX_METADATA_BYTES) {
+    return {
+      error: "metadata_too_large",
+      keys: Object.keys(sanitized).slice(0, MAX_METADATA_KEYS),
+    };
+  }
+  return sanitized;
+};
+
+// Unauthenticated writes to real endpoints are recorded because a denied
+// attempt is evidence, but an anonymous caller must not be able to turn a
+// loop into unbounded rows. Each address gets a small quota per window; the
+// overflow is counted and reported on the next recorded row for that address,
+// so the evidence survives without the volume.
+const ANON_WINDOW_MS = 60_000;
+const ANON_MAX_TRACKED_IPS = 5000;
+
+const anonQuota = (): number => {
+  const raw = Number.parseInt(process.env.AUDIT_LOG_ANON_LIMIT_PER_MINUTE ?? "", 10);
+  if (!Number.isFinite(raw) || raw < 0) return 20;
+  return raw;
+};
+
+type AnonBucket = { windowStart: number; recorded: number; suppressed: number };
+
+const anonBuckets = new Map<string, AnonBucket>();
+
+/** Test seam: the quota is process-wide state. */
+export const resetAuditThrottleForTests = (): void => {
+  anonBuckets.clear();
+};
+
+const dropExpired = (now: number): void => {
+  for (const [key, bucket] of anonBuckets) {
+    if (now - bucket.windowStart >= ANON_WINDOW_MS) anonBuckets.delete(key);
+  }
+};
+
+/**
+ * Returns null when the row should be dropped, otherwise the number of rows
+ * suppressed for this address since it was last recorded.
+ */
+const anonAllowance = (ip: string | null): number | null => {
+  const quota = anonQuota();
+  if (quota === 0) return 0;
+  const key = ip ?? "unknown";
+  const now = Date.now();
+  let bucket = anonBuckets.get(key);
+  if (!bucket || now - bucket.windowStart >= ANON_WINDOW_MS) {
+    if (!bucket) {
+      if (anonBuckets.size >= ANON_MAX_TRACKED_IPS) dropExpired(now);
+      // Still full: the table is under a distributed flood, so stop adding.
+      if (anonBuckets.size >= ANON_MAX_TRACKED_IPS) return null;
+    }
+    bucket = { windowStart: now, recorded: 0, suppressed: bucket?.suppressed ?? 0 };
+    anonBuckets.set(key, bucket);
+  }
+  if (bucket.recorded >= quota) {
+    bucket.suppressed += 1;
+    return null;
+  }
+  bucket.recorded += 1;
+  const suppressed = bucket.suppressed;
+  bucket.suppressed = 0;
+  return suppressed;
 };
 
 export type AuditEntryInput = {
@@ -259,17 +357,24 @@ export const auditWrites =
       const pattern = routePattern(c);
       if (!auditTelemetry() && isTelemetryWrite(c.req.method, pattern)) return;
       const actor = resolveActor(c, draft);
+      const ip = clientIp(c);
+      let metadata = draft.metadata;
+      if (actor.actorType === "anonymous" && statusCode >= 400) {
+        const suppressed = anonAllowance(ip);
+        if (suppressed === null) return;
+        if (suppressed > 0) metadata = { ...(metadata ?? {}), suppressedSince: suppressed };
+      }
       await writeAuditEntry({
         action: draft.action ?? defaultAction(c.req.method, pattern),
         targetType: draft.targetType ?? null,
         targetId: draft.targetId ?? null,
         ...actor,
-        ip: clientIp(c),
+        ip,
         userAgent: c.req.header("user-agent") ?? null,
         method: c.req.method.toUpperCase(),
         path: new URL(c.req.url).pathname,
         statusCode,
-        metadata: sanitizeMetadata(draft.metadata),
+        metadata: sanitizeMetadata(metadata),
       });
     };
 

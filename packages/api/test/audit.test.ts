@@ -30,6 +30,7 @@ vi.mock("../src/lib/require-api-token.js", () => ({
 
 import { createApp } from "../src/index.js";
 import { pruneAuditLogs } from "../src/lib/audit-pruner.js";
+import { resetAuditThrottleForTests, sanitizeMetadata } from "../src/lib/audit.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { fakeBlobs, resetFakeAzure } from "./support/fake-azure.js";
 import { resetFakeDb, seedFile, seedMessage, store } from "./support/fake-db.js";
@@ -43,6 +44,8 @@ const setup = (): void => {
   delete process.env.AUDIT_LOG_ENABLED;
   delete process.env.AUDIT_LOG_TELEMETRY;
   delete process.env.TRUSTED_PROXIES;
+  delete process.env.AUDIT_LOG_ANON_LIMIT_PER_MINUTE;
+  resetAuditThrottleForTests();
   resetSessionCryptoForTests();
   resetFakeDb();
   resetFakeAzure();
@@ -54,6 +57,43 @@ const auditFor = (action: string) => store.auditLogs.filter((row) => row.action 
 // conninfo helper, which is how the API learns the TCP peer address.
 const fromPeer = (remoteAddress: string) => ({
   incoming: { socket: { remoteAddress, remotePort: 51234, remoteFamily: "IPv4" } },
+});
+
+describe("audit metadata bounds", () => {
+  it("caps depth, width and total size so a row cannot grow unbounded", () => {
+    expect(sanitizeMetadata({ deep: { a: { b: { c: "buried" } } } })).toEqual({
+      deep: { a: { b: "[truncated]" } },
+    });
+
+    const wide = sanitizeMetadata({ items: Array.from({ length: 25 }, (_, i) => i) });
+    expect((wide?.items as unknown[]).length).toBe(21);
+    expect((wide?.items as unknown[])[20]).toBe("[truncated]");
+
+    const huge = sanitizeMetadata({ blob: { text: "x".repeat(2000) }, more: "y".repeat(2000) });
+    expect(huge).toEqual({ blob: { text: "x".repeat(2000) }, more: "y".repeat(2000) });
+
+    const overflowing = sanitizeMetadata(
+      Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`k${i}`, "z".repeat(1500)])),
+    );
+    expect(overflowing?.error).toBe("metadata_too_large");
+  });
+
+  it("breaks a cycle instead of failing the row", () => {
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    // The depth cap cuts the loop, so this stays serializable.
+    expect(sanitizeMetadata({ cyclic })).toEqual({ cyclic: { self: { self: "[truncated]" } } });
+  });
+
+  it("strips a value that would take over serialization", () => {
+    const hostile = {
+      toJSON: () => {
+        throw new Error("nope");
+      },
+    };
+    // The copy carries data only, so a hostile `toJSON` never runs.
+    expect(sanitizeMetadata({ hostile })).toEqual({ hostile: { toJSON: "[unsupported]" } });
+  });
 });
 
 describe("audit log middleware", () => {
@@ -206,6 +246,36 @@ describe("audit log middleware", () => {
     expect(store.auditLogs).toHaveLength(1);
     expect(store.auditLogs[0]!.statusCode).toBe(401);
     expect(store.auditLogs[0]!.actorType).toBe("anonymous");
+  });
+
+  it("caps anonymous rejected writes per address and counts the overflow", async () => {
+    process.env.AUDIT_LOG_ANON_LIMIT_PER_MINUTE = "3";
+    const app = createApp();
+    const file = seedFile();
+    const message = seedMessage({ audioId: file.id, status: "pending" });
+    const send = async (): Promise<Response> =>
+      app.request(`/v1/messages/${message.id}/decision`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ decision: "approve" }),
+      });
+
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      expect((await send()).status).toBe(401);
+    }
+    expect(store.auditLogs).toHaveLength(3);
+
+    // The evidence of the flood survives the next window even though the
+    // rows themselves do not.
+    const realNow = Date.now;
+    Date.now = () => realNow() + 61_000;
+    try {
+      expect((await send()).status).toBe(401);
+    } finally {
+      Date.now = realNow;
+    }
+    expect(store.auditLogs).toHaveLength(4);
+    expect(store.auditLogs[3]!.metadata).toMatchObject({ suppressedSince: 3 });
   });
 
   it("attributes booth writes to the API token", async () => {
