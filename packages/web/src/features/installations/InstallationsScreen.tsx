@@ -506,14 +506,38 @@ function InstallationCard({ installation }: { readonly installation: Installatio
             <EndInstallationForm installation={installation} />
           </>
         ) : (
-          <button
-            type="button"
-            onClick={() =>
-              void navigate({ to: "/stats", search: { installationId: installation.id } })
-            }
-          >
-            View stats
-          </button>
+          // Every observability screen takes the scope in its URL, so the era
+          // card links straight into each rather than making the operator
+          // reconstruct the scope by hand from the picker.
+          <>
+            <button
+              type="button"
+              onClick={() =>
+                void navigate({ to: "/stats", search: { installationId: installation.id } })
+              }
+            >
+              View stats
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                void navigate({
+                  to: "/messages",
+                  search: { status: "all", installationId: installation.id },
+                })
+              }
+            >
+              View messages
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                void navigate({ to: "/sessions", search: { installationId: installation.id } })
+              }
+            >
+              View calls
+            </button>
+          </>
         )}
       </div>
     </section>

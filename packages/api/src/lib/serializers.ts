@@ -115,6 +115,7 @@ export const serializeMessage = (message: WithAudio<WithAi<Message>>): MessagePa
   return {
     id: message.id,
     status: message.status,
+    installationId: message.installationId,
     questionId: message.questionId,
     notes: message.notes,
     createdAt: iso(message.createdAt),

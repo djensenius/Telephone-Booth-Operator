@@ -62,6 +62,11 @@ export type ExportManifest = {
   counts: Record<string, number>;
   blobCount: number;
   missingBlobs: string[];
+  // Installations present only because a row of the exported era points at one
+  // of their prompts. None of their own data travels, so a restore must not
+  // treat their (deliberately emptied) counters as authoritative. Absent on
+  // archives written before this field existed.
+  partialInstallationIds?: string[];
 };
 
 export type ImportSummary = {
@@ -96,16 +101,20 @@ const collectDump = async (installationId?: string): Promise<DataDump> =>
       // an installation claiming a full run's counters with an empty
       // drill-down, so the parent arrives without counters and says why.
       if (installationId) {
-        for (const row of dump[INSTALLATION_MODEL]) {
-          if (row.id === installationId) continue;
-          row.summary = null;
-          row.notes = [
-            row.notes,
-            "Partial: included only as the source of a prompt used by another installation.",
-          ]
-            .filter((part) => part != null && part !== "")
-            .join("\n");
-        }
+        dump[INSTALLATION_MODEL] = dump[INSTALLATION_MODEL].map((row) =>
+          row.id === installationId
+            ? row
+            : {
+                ...row,
+                summary: null,
+                notes: [
+                  row.notes,
+                  "Partial: included only as the source of a prompt used by another installation.",
+                ]
+                  .filter((part) => part != null && part !== "")
+                  .join("\n"),
+              },
+        );
       }
 
       // Operators are global, but a scoped archive is a per-era artifact that
@@ -286,6 +295,11 @@ export const buildExportArchive = async (
     counts,
     blobCount: blobEntries.length,
     missingBlobs,
+    partialInstallationIds: options.installationId
+      ? dump[INSTALLATION_MODEL]
+          .filter((row) => row.id !== options.installationId)
+          .map((row) => String(row.id))
+      : [],
   };
 
   const archive = createTar([
@@ -515,6 +529,7 @@ export const restoreImportArchive = async (archive: Buffer): Promise<ImportSumma
     blobsUploaded += 1;
   }
 
+  const partialInstallations = new Set(manifest.partialInstallationIds ?? []);
   const rows: Record<string, number> = {};
   await db.$transaction(
     async (tx) => {
@@ -523,7 +538,13 @@ export const restoreImportArchive = async (archive: Buffer): Promise<ImportSumma
         const client = modelClientOf(tx, name);
         let count = 0;
         for (const row of dump[name]) {
-          await client.upsert({ where: { id: row.id }, create: row, update: row });
+          // A partial parent era carries no counters of its own (see the
+          // export side), so applying it over a real row would erase that
+          // row's frozen summary. Create it on a target that lacks it, leave
+          // it alone on a target that already knows the real thing.
+          const update =
+            name === INSTALLATION_MODEL && partialInstallations.has(String(row.id)) ? {} : row;
+          await client.upsert({ where: { id: row.id }, create: row, update });
           count += 1;
         }
         rows[name] = count;

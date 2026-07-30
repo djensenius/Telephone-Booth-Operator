@@ -133,13 +133,16 @@ export const requireOpenInstallation = async (): Promise<string> => {
 
 // Whether an era has any booth activity recorded against it. An era with none
 // is bookkeeping only: it can be adopted and renamed, or discarded outright.
-export const installationHasActivity = async (installationId: string): Promise<boolean> => {
+export const installationHasActivity = async (
+  installationId: string,
+  client: Prisma.TransactionClient | typeof db = db,
+): Promise<boolean> => {
   const where = { installationId };
   const [calls, messages, events, snapshots] = await Promise.all([
-    db.callSession.count({ where }),
-    db.message.count({ where }),
-    db.boothEvent.count({ where }),
-    db.boothStatusSnapshot.count({ where }),
+    client.callSession.count({ where }),
+    client.message.count({ where }),
+    client.boothEvent.count({ where }),
+    client.boothStatusSnapshot.count({ where }),
   ]);
   return calls + messages + events + snapshots > 0;
 };
@@ -307,6 +310,20 @@ export const lockInstallationForWrite = async (
 ): Promise<boolean> => {
   const rows = await tx.$queryRaw<{ endedAt: Date | null }[]>`
     SELECT "endedAt" FROM "Installation" WHERE "id" = ${installationId}::uuid FOR SHARE
+  `;
+  return rows.length > 0 && rows[0]?.endedAt === null;
+};
+
+// Take an era exclusively, excluding the booth writers that hold it shared.
+// Used where a decision depends on the era's *contents* rather than merely on
+// its being open — adopting an empty era, for instance, has to know no booth
+// write is about to land in it.
+export const lockInstallationExclusively = async (
+  tx: Prisma.TransactionClient,
+  installationId: string,
+): Promise<boolean> => {
+  const rows = await tx.$queryRaw<{ endedAt: Date | null }[]>`
+    SELECT "endedAt" FROM "Installation" WHERE "id" = ${installationId}::uuid FOR UPDATE
   `;
   return rows.length > 0 && rows[0]?.endedAt === null;
 };

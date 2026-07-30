@@ -2030,12 +2030,19 @@ export const fakeDb = {
     upsert: async ({
       where,
       create,
+      update,
     }: {
       where: { id: string };
       create: Record<string, unknown>;
       update: Record<string, unknown>;
     }) => {
-      const row = { ...(create as unknown as FakeInstallation), id: where.id };
+      // A restore passes `update: {}` for an era it only carries as a partial
+      // parent, which must leave the existing row alone. A fake that always
+      // applied `create` would report that as working when it does not.
+      const existing = store.installations.get(where.id);
+      const row = existing
+        ? ({ ...existing, ...reviveDates(update), id: where.id } as FakeInstallation)
+        : ({ ...reviveDates(create), id: where.id } as unknown as FakeInstallation);
       store.installations.set(where.id, row);
       return row;
     },

@@ -181,6 +181,9 @@ export type InstructionCreate = z.infer<typeof InstructionCreateSchema>;
 export const MessageSchema = z.object({
   id: z.guid(),
   status: MessageStatusSchema,
+  // Which era the recording belongs to. Present so a cross-era view can tell
+  // which rows are still editable without asking the API row by row.
+  installationId: z.guid().nullable().optional(),
   questionId: z.guid().nullable().optional(),
   notes: z.string().nullable().optional(),
   createdAt: z.string().datetime(),

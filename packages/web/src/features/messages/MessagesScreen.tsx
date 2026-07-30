@@ -14,6 +14,7 @@ import {
 import {
   InstallationScopePicker,
   parseInstallationScopeParam,
+  useIsInstallationFrozen,
   useScopeIsFrozen,
 } from "../installations/InstallationScopePicker.js";
 import {
@@ -90,6 +91,9 @@ export function MessagesScreen(): JSX.Element {
   // Browsing a past era is read-only: its counters were frozen when it ended,
   // and the API refuses a decision or a delete against it.
   const frozen = useScopeIsFrozen(scope);
+  // `installationId=all` spans open and closed eras at once, so the page as a
+  // whole is not frozen but individual rows are.
+  const installationIsFrozen = useIsInstallationFrozen();
   const needsReview = filter === "needs-review";
   const listed = useMessagesList(backendFilter(filter), {
     enabled: !needsReview,
@@ -230,7 +234,7 @@ export function MessagesScreen(): JSX.Element {
                 }
                 busy={busyIds.has(message.id)}
                 now={now}
-                frozen={frozen}
+                frozen={frozen || installationIsFrozen(message.installationId)}
                 onDecide={(id, decision) => {
                   setBusyIds((previous) => new Set(previous).add(id));
                   decideMessage.mutate(

@@ -663,6 +663,32 @@ describe("Messages feature", () => {
     expect(screen.getByRole("link", { name: "Download" })).toBeTruthy();
   });
 
+  // `installationId=all` lists open and closed eras side by side. The page is
+  // not frozen as a whole, but a closed era's row still is: offering Approve
+  // there would only earn a 409 from the API.
+  it("freezes only the ended era's rows in the all-installations view", async () => {
+    server.use(
+      http.get("http://localhost/v1/messages", () =>
+        HttpResponse.json({
+          items: [
+            { ...message, installationId: "ee222222-2222-4222-8222-222222222222" },
+            {
+              ...message,
+              id: "77777777-7777-4777-8777-777777777777",
+              installationId: "ee111111-1111-4111-8111-111111111111",
+            },
+          ],
+        }),
+      ),
+    );
+    renderPath("/messages?installationId=all");
+
+    await waitFor(() => expect(screen.getByText("Archived era — read-only")).toBeTruthy());
+    // Exactly one of the two rows keeps its moderation actions.
+    expect(screen.getAllByRole("button", { name: "Approve" })).toHaveLength(1);
+    expect(screen.getAllByText("Archived era — read-only")).toHaveLength(1);
+  });
+
   it("deletes a message from the queue only after confirmation", async () => {
     renderPath("/messages");
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));

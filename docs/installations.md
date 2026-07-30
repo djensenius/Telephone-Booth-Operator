@@ -125,6 +125,10 @@ API refuses a moderation decision or a delete on one of its recordings
 (`409 installation_ended`), and the queue hides those actions when you are
 browsing history. Playback, transcripts and exports are unaffected.
 
+`installationId=all` spans open and closed eras at once, so the queue decides
+row by row there: a recording belonging to a closed era is read-only even
+though the rest of the page is not.
+
 The same applies to a closed era's prompts: activating, deactivating or
 archiving one is refused with `409`, because a prompt's `retiredAt` is the
 marker that says it was live when the era ended, and a straggler recording is
@@ -135,7 +139,7 @@ matched against exactly that.
 > for the old behaviour.
 
 The `/installations` screen lists every era with its frozen summary and drills
-into scoped stats for any of them. Messages, Sessions, Events and Stats each
+into that era's stats, messages and calls. Messages, Sessions, Events and Stats each
 carry a scope picker that round-trips through the URL, so a scoped view can be
 linked and reloaded.
 

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.js")).fakeDb }));
@@ -1280,6 +1281,64 @@ describe("installations", () => {
       expect(dump.file?.map((row) => row.id)).toEqual(
         expect.arrayContaining([questionAudio.id, messageAudio.id]),
       );
+    });
+
+    // The archive is the safety copy taken before a purge, so it gets restored
+    // into the instance it came from. A partial parent must not overwrite the
+    // real era sitting there with the counters the export deliberately blanked.
+    it("leaves the real parent era intact when restored into its own instance", async () => {
+      const app = createApp();
+      const questionBytes = Buffer.from("question");
+      const questionAudio = seedFile({
+        id: "ffffffff-0000-4000-8000-0000000000b3",
+        sha256: createHash("sha256").update(questionBytes).digest("hex"),
+      });
+      const question = seedQuestion({
+        id: "cccccccc-0000-4000-8000-0000000000c2",
+        prompt: "Issued by the old era",
+        audioId: questionAudio.id,
+      });
+      seedBlobData(questionAudio.blobKey, questionBytes, questionAudio.sha256);
+      expect((await endDefault(app)).status).toBe(200);
+      const frozen = store.installations.get(DEFAULT_INSTALLATION_ID)?.summary;
+      expect(frozen).toBeTruthy();
+
+      const started = await app.request("/v1/installations", {
+        method: "POST",
+        headers: jsonHeaders(adminHeaders()),
+        body: JSON.stringify({ name: "Second era" }),
+      });
+      const currentEra = ((await started.json()) as { id: string }).id;
+      const messageBytes = Buffer.from("message");
+      const messageAudio = seedFile({
+        id: "ffffffff-0000-4000-8000-0000000000b4",
+        sha256: createHash("sha256").update(messageBytes).digest("hex"),
+      });
+      seedBlobData(messageAudio.blobKey, messageBytes, messageAudio.sha256);
+      seedMessage({
+        id: "aaaaaaaa-0000-4000-8000-0000000000c2",
+        status: "pending",
+        questionId: question.id,
+        audioId: messageAudio.id,
+        installationId: currentEra,
+      });
+
+      const exported = await app.request(`/v1/installations/${currentEra}/export`, {
+        headers: adminHeaders(),
+      });
+      expect(exported.status).toBe(200);
+      const archive = Buffer.from(await exported.arrayBuffer());
+
+      const restored = await app.request("/v1/admin/data/import", {
+        method: "POST",
+        headers: { ...adminHeaders(), "content-type": "application/x-tar" },
+        body: archive,
+      });
+      expect(restored.status, await restored.clone().text()).toBe(200);
+
+      const parent = store.installations.get(DEFAULT_INSTALLATION_ID);
+      expect(parent?.summary).toEqual(frozen);
+      expect(parent?.notes ?? "").not.toContain("Partial");
     });
 
     // A scoped archive is handed around (the purge flow offers it as a safety

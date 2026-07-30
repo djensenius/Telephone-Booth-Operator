@@ -26,6 +26,7 @@ import {
   closeOutInstallation,
   findActiveInstallation,
   installationHasActivity,
+  lockInstallationExclusively,
   invalidateActiveInstallationCache,
   nextInstallationName,
   serializeInstallation,
@@ -117,6 +118,12 @@ installationsRouter.post(
         // name — matching on the name alone would let the second through.
         let installation;
         if (active) {
+          // The emptiness check above ran outside this transaction, so a booth
+          // write could have committed since. Hold the era exclusively — booth
+          // writers take it shared — and ask again, or the adopted era could
+          // arrive already carrying calls it would then present as fresh.
+          if (!(await lockInstallationExclusively(tx, active.id))) return null;
+          if (await installationHasActivity(active.id, tx)) return null;
           const claimedAt = new Date(Math.max(Date.now(), active.startedAt.getTime() + 1));
           const claimed = await tx.installation.updateMany({
             where: {

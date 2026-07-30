@@ -1832,6 +1832,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         status: { $ref: "#/components/schemas/MessageStatus" }
+        installationId: { anyOf: [{ type: string, format: uuid }, { type: "null" }] }
         questionId: { anyOf: [{ type: string, format: uuid }, { type: "null" }] }
         notes: { anyOf: [{ type: string }, { type: "null" }] }
         createdAt: { type: string, format: date-time }

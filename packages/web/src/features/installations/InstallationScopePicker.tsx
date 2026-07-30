@@ -37,6 +37,22 @@ export function useScopeIsFrozen(scope: InstallationScope | undefined): boolean 
   return match !== undefined && !match.isActive;
 }
 
+// Per-row frozen state, for the views that can span eras (`installationId=all`
+// lists rows from open and closed installations at once). Offering a decision
+// on a closed era's row there would only earn a `409 installation_ended`, so a
+// caller asks this instead of assuming the whole page is writable.
+export function useIsInstallationFrozen(): (installationId?: string | null) => boolean {
+  const listQuery = useInstallationsList();
+  const endedIds = useMemo(
+    () =>
+      new Set(
+        (listQuery.data?.items ?? []).filter((item) => !item.isActive).map((item) => item.id),
+      ),
+    [listQuery.data],
+  );
+  return (installationId) => typeof installationId === "string" && endedIds.has(installationId);
+}
+
 // Shared installation-scope selector used by the observability screens
 // (messages, sessions, events) and the stats screen. Rendering "Active
 // installation" as the default matches the API's own default (no scope =

@@ -150,6 +150,34 @@ describe("InstallationsScreen", () => {
     expect(results.violations.filter((v) => v.impact === "critical")).toHaveLength(0);
   });
 
+  // The scope round-trips through the URL on every observability screen, so an
+  // era's card links into each rather than making the operator rebuild the
+  // scope by hand from the picker.
+  it("drills from an ended era into its scoped stats, messages and calls", async () => {
+    renderScreen([endedInstallation]);
+    const card = (await screen.findByText("Spring 2026 residency")).closest("section");
+    if (card === null) throw new Error("Ended installation card was not rendered.");
+    const id = (endedInstallation as { id: string }).id;
+
+    fireEvent.click(within(card).getByRole("button", { name: "View stats" }));
+    expect(navigateMock).toHaveBeenCalledWith({
+      to: "/stats",
+      search: { installationId: id },
+    });
+
+    fireEvent.click(within(card).getByRole("button", { name: "View messages" }));
+    expect(navigateMock).toHaveBeenCalledWith({
+      to: "/messages",
+      search: { status: "all", installationId: id },
+    });
+
+    fireEvent.click(within(card).getByRole("button", { name: "View calls" }));
+    expect(navigateMock).toHaveBeenCalledWith({
+      to: "/sessions",
+      search: { installationId: id },
+    });
+  });
+
   it("starts a new installation with copyQuestions defaulting to false", async () => {
     renderScreen([endedInstallation]);
 
