@@ -828,3 +828,39 @@ export type MetricFilterCreate = z.infer<typeof MetricFilterCreateSchema>;
 
 export const MetricFilterUpdateSchema = MetricFilterCreateSchema;
 export type MetricFilterUpdate = z.infer<typeof MetricFilterUpdateSchema>;
+
+// ---------------------------------------------------------------------------
+// Audit log
+// ---------------------------------------------------------------------------
+// Every write action against the operator API is recorded with the actor, the
+// client IP, and a timestamp. See docs/audit-log.md.
+
+export const AuditActorTypeSchema = z.enum(["operator", "apiToken", "anonymous", "system"]);
+export type AuditActorType = z.infer<typeof AuditActorTypeSchema>;
+
+export const AuditLogEntrySchema = z.object({
+  id: z.guid(),
+  action: z.string(),
+  targetType: z.string().nullable(),
+  targetId: z.string().nullable(),
+  actorType: AuditActorTypeSchema,
+  actorUserId: z.string().nullable(),
+  actorTokenId: z.string().nullable(),
+  // Human-readable snapshot of the actor taken at write time (operator email,
+  // or `token:<name>`). Survives the referenced row being deleted or revoked.
+  actorLabel: z.string(),
+  ip: z.string().nullable(),
+  userAgent: z.string().nullable(),
+  method: z.string(),
+  path: z.string(),
+  statusCode: z.number().int(),
+  metadata: z.record(z.string(), z.unknown()).nullable(),
+  createdAt: z.string().datetime(),
+});
+export type AuditLogEntry = z.infer<typeof AuditLogEntrySchema>;
+
+export const AuditLogPageSchema = z.object({
+  items: z.array(AuditLogEntrySchema),
+  nextCursor: z.string().nullable(),
+});
+export type AuditLogPage = z.infer<typeof AuditLogPageSchema>;

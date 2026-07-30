@@ -49,7 +49,9 @@ const loadJwks = async (issuer: string): Promise<JWTVerifyGetKey> => {
 
 export type BearerVerifyResult =
   | { ok: true; user: OperatorUser; payload: JWTPayload }
-  | { ok: false; status: 401 | 403; reason: string };
+  // `subject` is present once the signature has been verified, so a denied
+  // caller can still be named in the audit trail.
+  | { ok: false; status: 401 | 403; reason: string; subject?: string };
 
 const isInvalidTokenError = (error: unknown): boolean =>
   error instanceof joseErrors.JOSEError ||
@@ -80,10 +82,15 @@ export const verifyOperatorBearer = async (token: string): Promise<BearerVerifyR
   const claims = payload as IDTokenClaims;
   const result = await authorizeAndUpsertOperator(claims);
   if (!result.ok) {
+    const subject =
+      (typeof claims.email === "string" && claims.email) ||
+      (typeof claims.sub === "string" && claims.sub) ||
+      undefined;
     return {
       ok: false,
       status: result.status === 400 ? 401 : 403,
       reason: result.reason,
+      ...(subject ? { subject } : {}),
     };
   }
   return { ok: true, user: result.user, payload };

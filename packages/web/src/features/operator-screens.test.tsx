@@ -834,6 +834,88 @@ describe("Events feature", () => {
   });
 });
 
+describe("Audit log feature", () => {
+  const auditEntry = {
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    action: "message.approve",
+    targetType: "message",
+    targetId: messageId,
+    actorType: "operator",
+    actorUserId: "user-1",
+    actorTokenId: null,
+    actorLabel: "operator@example.com",
+    ip: "203.0.113.7",
+    userAgent: "Mozilla/5.0",
+    method: "POST",
+    path: `/v1/messages/${messageId}/decision`,
+    statusCode: 200,
+    metadata: { decision: "approve", previousStatus: "pending" },
+    createdAt: "2026-07-20T12:00:00.000Z",
+  };
+
+  it("shows who acted, from where, and lazily reveals the detail", async () => {
+    server.use(
+      http.get("http://localhost/v1/audit-logs", () =>
+        HttpResponse.json({ items: [auditEntry], nextCursor: null }),
+      ),
+    );
+    renderPath("/audit");
+    expect(await screen.findByText("operator@example.com")).toBeTruthy();
+    expect(screen.getByText("message.approve")).toBeTruthy();
+    expect(screen.getByText("203.0.113.7")).toBeTruthy();
+    expect(screen.getByText("200")).toBeTruthy();
+
+    const summary = screen.getByText("View detail");
+    const details = summary.closest("details");
+    expect(details).not.toBeNull();
+    expect(details?.querySelector("pre")?.textContent).not.toContain("previousStatus");
+    (details as HTMLDetailsElement).open = true;
+    fireEvent(details as HTMLDetailsElement, new Event("toggle"));
+    await waitFor(() =>
+      expect(details?.querySelector("pre")?.textContent).toContain("previousStatus"),
+    );
+  });
+
+  it("can walk back to newer entries after paging into history", async () => {
+    const older = {
+      ...auditEntry,
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      actorLabel: "someone.else@example.com",
+    };
+    server.use(
+      http.get("http://localhost/v1/audit-logs", ({ request }) => {
+        const cursor = new URL(request.url).searchParams.get("cursor");
+        return cursor
+          ? HttpResponse.json({ items: [older], nextCursor: null })
+          : HttpResponse.json({ items: [auditEntry], nextCursor: "cursor-1" });
+      }),
+    );
+    renderPath("/audit");
+
+    await screen.findByText("operator@example.com");
+    const newer = screen.getByRole("button", { name: "← Newer entries" });
+    expect((newer as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Older entries →" }));
+    expect(await screen.findByText("someone.else@example.com")).toBeTruthy();
+
+    // The last page must not strand the admin on old rows.
+    fireEvent.click(screen.getByRole("button", { name: "← Newer entries" }));
+    expect(await screen.findByText("operator@example.com")).toBeTruthy();
+  });
+
+  it("is admin-only", async () => {
+    server.use(
+      http.get("http://localhost/v1/auth/me", () =>
+        HttpResponse.json({ ...operator, isAdmin: false }),
+      ),
+    );
+    renderPath("/audit");
+    expect(await screen.findByRole("heading", { name: "Admin access required" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Audit log" })).toBeNull();
+  });
+});
+
 describe("Settings feature", () => {
   it("renders theme settings and phone-client connection", async () => {
     renderPath("/settings");

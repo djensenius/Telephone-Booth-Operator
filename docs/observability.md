@@ -57,6 +57,8 @@ screens accessible from the **Observability** block in the sidebar:
   links to a detail page (`/sessions/:id`) showing the full ordered
   event timeline along with outcome, dialed digits, recording id, and
   duration.
+- **Audit log** (`/audit`) — who took each write action, from which
+  address, and when. Admin-only; see [Audit log](audit-log.md).
 
-All three screens are gated by the same operator OIDC session that
-guards the rest of the console.
+These screens are gated by the same operator OIDC session that guards
+the rest of the console; the audit log additionally requires admin.

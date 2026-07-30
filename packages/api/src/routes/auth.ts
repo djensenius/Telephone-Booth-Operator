@@ -1,10 +1,20 @@
 import { randomNonce, randomPKCECodeVerifier, randomState } from "openid-client";
 import { Hono } from "hono";
+import type { Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { zValidator } from "@hono/zod-validator";
 import { OperatorMeSchema } from "@telephone-booth-operator/shared";
 import { z } from "zod";
 import { getAuthConfig } from "../lib/config.js";
+import {
+  anonAllowance,
+  auditEnabled,
+  recordAudit,
+  skipAudit,
+  writeAuditEntry,
+  type AuditActorType,
+} from "../lib/audit.js";
+import { clientIp } from "../lib/client-ip.js";
 import { verifyOperatorBearer } from "../lib/bearer-auth.js";
 import { buildAuthorizationUrl, endSessionUrl, exchangeCode, getOidcClient } from "../lib/oidc.js";
 import {
@@ -32,6 +42,81 @@ export const validateAuthorization = _validateAuthorization;
 const loginQuerySchema = z.object({
   return_to: z.string().optional(),
 });
+
+// Best-effort identity for a login attempt that never produced an operator
+// row. Claims are provider-supplied JSON, so narrow before use.
+const claimLabel = (claims: { email?: unknown; sub?: unknown }): string => {
+  if (typeof claims.email === "string" && claims.email) return claims.email;
+  if (typeof claims.sub === "string" && claims.sub) return claims.sub;
+  return "unknown";
+};
+
+// The OIDC callback is a GET, so `auditWrites()` (which only wraps mutating
+// methods) never sees it — yet establishing or denying a session is exactly
+// the kind of action the trail must contain. Record it by hand.
+const auditAuthEvent = async (
+  c: Context,
+  entry: {
+    action: string;
+    statusCode: number;
+    actorType?: AuditActorType;
+    actorUserId?: string | null;
+    actorLabel: string;
+    targetType?: string;
+    targetId?: string | null;
+    metadata?: Record<string, unknown>;
+  },
+): Promise<void> => {
+  if (!auditEnabled()) return;
+  const actorType = entry.actorType ?? "anonymous";
+  const ip = clientIp(c);
+  let metadata = entry.metadata ?? null;
+  // The callback is a GET, so `auditWrites()` never sees it and its quota
+  // never applies. Apply the same allowance here or probing the endpoint
+  // would be an unmetered way to append rows.
+  if (entry.statusCode >= 400 && !entry.actorUserId) {
+    const suppressed = anonAllowance(ip);
+    if (suppressed === null) return;
+    if (suppressed > 0) metadata = { ...(metadata ?? {}), suppressedSince: suppressed };
+  }
+  await writeAuditEntry({
+    action: entry.action,
+    targetType: entry.targetType ?? null,
+    targetId: entry.targetId ?? null,
+    actorType,
+    actorUserId: entry.actorUserId ?? null,
+    actorLabel: entry.actorLabel,
+    ip,
+    userAgent: c.req.header("user-agent") ?? null,
+    method: c.req.method.toUpperCase(),
+    path: new URL(c.req.url).pathname,
+    statusCode: entry.statusCode,
+    metadata,
+  });
+};
+
+// Every way a callback can fail is still a sign-in attempt, and an attacker
+// probing the endpoint is exactly what the trail should show. `reason` is a
+// fixed classification, never provider text.
+const auditLoginFailed = async (
+  c: Context,
+  reason: string,
+  options: {
+    label?: string;
+    statusCode?: number;
+    actorType?: AuditActorType;
+    actorUserId?: string;
+  } = {},
+): Promise<void> => {
+  await auditAuthEvent(c, {
+    action: "auth.login.failed",
+    statusCode: options.statusCode ?? 400,
+    ...(options.actorType ? { actorType: options.actorType } : {}),
+    ...(options.actorUserId ? { actorUserId: options.actorUserId } : {}),
+    actorLabel: options.label ?? "unknown",
+    metadata: { reason },
+  });
+};
 
 const callbackQuerySchema = z.object({
   code: z.string().optional(),
@@ -268,10 +353,12 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
   const query = c.req.valid("query");
   if (query.error) {
     clearLoginTxCookie(c);
+    await auditLoginFailed(c, "provider_error");
     return htmlResponse(c, "OIDC login failed", query.error_description ?? query.error, 400);
   }
   if (!query.code || !query.state) {
     clearLoginTxCookie(c);
+    await auditLoginFailed(c, "missing_code_or_state");
     return htmlResponse(c, "OIDC login failed", "Missing code or state.", 400);
   }
 
@@ -280,6 +367,7 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
   const txState = readLoginTxCookie(c.req.header("cookie"));
   clearLoginTxCookie(c);
   if (!txState || txState !== query.state) {
+    await auditLoginFailed(c, "login_tx_mismatch");
     return htmlResponse(
       c,
       "OIDC login failed",
@@ -292,22 +380,53 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
   const pending = pendingLogins.get(query.state);
   pendingLogins.delete(query.state);
   if (!pending) {
+    await auditLoginFailed(c, "login_state_expired");
     return htmlResponse(c, "OIDC login failed", "Login state expired or was not recognized.", 400);
   }
 
+  // The exchange and everything after it fail for different reasons and with
+  // different amounts known about the caller, so they are not audited alike.
+  let exchanged: Awaited<ReturnType<typeof exchangeCode>>;
   try {
-    const { tokenSet, claims } = await exchangeCode(
+    exchanged = await exchangeCode(
       new URL(c.req.url),
       pending.codeVerifier,
       query.state,
       pending.nonce,
     );
+  } catch (error) {
+    logAuthCallbackError(error);
+    await auditLoginFailed(c, "code_exchange_failed");
+    return htmlResponse(c, "OIDC login failed", "The login response could not be validated.", 400);
+  }
 
+  const { tokenSet, claims } = exchanged;
+  // The operator is persisted before the session exists, so hold on to it: if
+  // session setup then fails, the trail can still name who it was rather than
+  // recording an unattributable 500.
+  let authorized: { id: string; email: string } | null = null;
+  try {
     const result = await authorizeAndUpsertOperator(claims, { markLogin: true });
     if (!result.ok) {
       if (result.status === 403) {
+        await auditAuthEvent(c, {
+          action: "auth.login.denied",
+          statusCode: 403,
+          // Identified by verified claims, just not allowed in. `anonymous`
+          // is reserved for callers with no usable credential.
+          actorType: "operator",
+          actorLabel: claimLabel(claims),
+          metadata: { reason: result.reason },
+        });
         return htmlResponse(c, "Operator credentials required", result.reason, 403);
       }
+      await auditAuthEvent(c, {
+        action: "auth.login.failed",
+        statusCode: 400,
+        actorType: "operator",
+        actorLabel: claimLabel(claims),
+        metadata: { reason: result.reason },
+      });
       return htmlResponse(
         c,
         "OIDC login failed",
@@ -318,17 +437,54 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
       );
     }
 
-    const session = await createSession(result.user, tokenSet, c.req.raw);
+    authorized = { id: result.user.id, email: result.user.email };
+    const session = await createSession(result.user, tokenSet, c);
     setSessionCookie(c, session.id, session.expiresAt);
+    // Login creates a session — a write action in its own right. The callback
+    // is a GET, so it is recorded explicitly rather than by `auditWrites()`.
+    await auditAuthEvent(c, {
+      action: "auth.login",
+      statusCode: 302,
+      actorType: "operator",
+      actorUserId: result.user.id,
+      actorLabel: result.user.email,
+      targetType: "session",
+      targetId: session.id,
+    });
     return c.redirect(webRedirectUrl(pending.returnTo), 302);
   } catch (error) {
+    // The claims were valid, so the trail keeps the caller's name and says
+    // that the session could not be established rather than blaming the
+    // exchange.
     logAuthCallbackError(error);
-    return htmlResponse(c, "OIDC login failed", "The login response could not be validated.", 400);
+    await auditLoginFailed(c, "session_setup_failed", {
+      label: authorized?.email ?? claimLabel(claims),
+      statusCode: 500,
+      // The claims verified, so this is a known operator, not a stranger.
+      actorType: "operator",
+      ...(authorized ? { actorUserId: authorized.id } : {}),
+    });
+    return htmlResponse(c, "OIDC login failed", "The login could not be completed.", 500);
   }
 });
 
 authRoutes.post("/logout", async (c) => {
   const session = await destroySession(c);
+  // Signing out without a session is a no-op, not an action; recording it
+  // would hand anyone an unauthenticated way to append rows.
+  if (!session) skipAudit(c);
+  recordAudit(c, {
+    action: "auth.logout",
+    targetType: "session",
+    targetId: session?.id ?? null,
+    ...(session
+      ? {
+          actorType: "operator" as const,
+          actorUserId: session.userId,
+          actorLabel: session.user.email,
+        }
+      : {}),
+  });
   let redirectTo = webRedirectUrl("/login");
   const idToken = decryptSessionSecret(session?.idToken);
   if (idToken && !getAuthConfig().disabled) {

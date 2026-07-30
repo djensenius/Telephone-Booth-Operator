@@ -101,6 +101,9 @@ client is constructed with the `@prisma/adapter-pg` driver adapter in
   reports (the booth's status heartbeat) are collapsed into a single row
   spanning `firstSeenAt`..`updatedAt` with a `repeatCount`
   (see [ADR 0010](adr/0010-collapse-repeated-booth-status-reports.md)).
+- `AuditLog` — append-only record of every write action, with the actor, IP,
+  timestamp, and outcome (see [Audit log](audit-log.md) and
+  [ADR 0011](adr/0011-audit-trail-for-write-actions.md)).
 
 ## AI pipeline: transcription, translation, moderation
 

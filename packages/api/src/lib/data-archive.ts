@@ -14,14 +14,16 @@ import { createHash } from "node:crypto";
 import { Prisma } from "../generated/prisma/client.js";
 import { downloadBlob, headBlob, uploadBlob } from "./azure-blob.js";
 import { createTar, readTar } from "./archive.js";
+import { boundAuditFields } from "./audit.js";
 import { db } from "./db.js";
 
 export const EXPORT_FORMAT = "telephone-booth-export";
 // 1: original shape. 2: BoothStatusSnapshot carries `firstSeenAt`/`repeatCount`.
-// Bumped so a server that predates the collapse rejects the archive as newer
-// than supported instead of failing on unknown columns mid-restore. Version 1
-// archives still import — `withStatusWindow` fills the missing window.
-export const EXPORT_VERSION = 2;
+// 3: adds the AuditLog trail. Bumped so a server that predates a change
+// rejects the archive as newer than supported instead of failing on unknown
+// columns mid-restore. Older archives still import — `withStatusWindow` fills
+// the missing status window, and absent tables restore as empty.
+export const EXPORT_VERSION = 3;
 
 // Import order matters — parents before children so foreign keys resolve.
 const IMPORT_ORDER = [
@@ -38,6 +40,9 @@ const IMPORT_ORDER = [
   "moderation",
   "metricFilter",
   "mobileDevice",
+  // Last: rows reference OperatorUser and ApiToken. A backup that dropped the
+  // audit trail would lose the record of who did what (issue #123).
+  "auditLog",
 ] as const;
 
 type ModelName = (typeof IMPORT_ORDER)[number];
@@ -249,7 +254,23 @@ export const restoreImportArchive = async (archive: Buffer): Promise<ImportSumma
         const client = modelClientOf(tx, name);
         let count = 0;
         for (const row of dump[name]) {
-          await client.upsert({ where: { id: row.id }, create: row, update: row });
+          // The audit trail is append-only: an archive may add history that is
+          // missing locally, but it must never rewrite an entry that exists.
+          if (name === "auditLog") {
+            // An archive is operator-supplied data: bound it exactly as a
+            // live write is bounded, so a crafted file cannot smuggle an
+            // oversized or malformed row into the trail.
+            const { metadata, ...bounded } = boundAuditFields(row);
+            // Prisma rejects a plain `null` for a nullable Json column, so an
+            // exported row without metadata has to omit the field entirely.
+            const create = {
+              ...bounded,
+              ...(metadata ? { metadata: metadata as Prisma.InputJsonValue } : {}),
+            };
+            await client.upsert({ where: { id: row.id }, create, update: {} });
+          } else {
+            await client.upsert({ where: { id: row.id }, create: row, update: row });
+          }
           count += 1;
         }
         rows[name] = count;

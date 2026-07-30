@@ -36,6 +36,7 @@ and anything older, and rejects anything newer than it understands.
 | ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | 1       | Original shape.                                                                                                                      |
 | 2       | Booth status snapshots carry `firstSeenAt`/`repeatCount`. Version 1 snapshots restore with their window starting at the report time. |
+| 3       | Includes the [audit log](audit-log.md). Older archives restore with no audit history.                                                |
 
 ## Endpoints
 

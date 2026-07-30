@@ -70,6 +70,9 @@ const { fakeDb, openidMocks, store, FakeChallengeError } = vi.hoisted(() => {
       })),
     },
     fakeDb: {
+      // Audit rows are written by middleware on every write; these suites do
+      // not assert on them, they just need the delegate to exist.
+      auditLog: { create: vi.fn(async ({ data }: { data: unknown }) => data) },
       operatorUser: {
         upsert: vi.fn(async ({ where, create, update }) => {
           const existing = users.get(where.oidcSub);

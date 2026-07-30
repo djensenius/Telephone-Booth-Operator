@@ -30,6 +30,7 @@ tags:
   - name: moderations
   - name: stats
   - name: worker
+  - name: audit
 paths:
   /healthz:
     get:
@@ -760,6 +761,88 @@ paths:
         "401": { description: missing or invalid credentials }
         "404": { description: not found or not owned by the caller }
 
+  /v1/audit-logs:
+    get:
+      summary: List audit-trail entries (admin only, cursor-paginated).
+      description: |
+        Append-only record of every write action taken against the API: who
+        performed it, from which IP, when, and with what outcome. Booth
+        telemetry heartbeats are excluded unless `AUDIT_LOG_TELEMETRY=true`.
+        There is deliberately no write surface — entries are created by the
+        server and aged out by `AUDIT_LOG_RETENTION_DAYS`.
+      tags: [audit]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      parameters:
+        - name: action
+          in: query
+          description: >-
+            Action prefix. `message.` matches the whole family, `message.approve`
+            just approvals, `auth.login` also its denied and failed variants.
+          schema: { type: string }
+        - name: actorType
+          in: query
+          schema: { type: string, enum: [operator, apiToken, anonymous, system] }
+        - name: actorUserId
+          in: query
+          schema: { type: string }
+        - name: targetType
+          in: query
+          schema: { type: string }
+        - name: targetId
+          in: query
+          schema: { type: string }
+        - name: ip
+          in: query
+          schema: { type: string }
+        - name: since
+          in: query
+          schema: { type: string, format: date-time }
+        - name: until
+          in: query
+          schema: { type: string, format: date-time }
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditLogPage" }
+        "400": { description: invalid cursor }
+        "401": { description: not authenticated }
+        "403": { description: operator admin privileges required }
+  /v1/audit-logs/targets/{targetType}/{targetId}:
+    parameters:
+      - { name: targetType, in: path, required: true, schema: { type: string } }
+      - { name: targetId, in: path, required: true, schema: { type: string } }
+    get:
+      summary: Audit trail for a single target (admin only).
+      tags: [audit]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      parameters:
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditLogPage" }
+        "400": { description: invalid cursor }
+        "401": { description: not authenticated }
+        "403": { description: operator admin privileges required }
   /v1/admin/data/export:
     get:
       summary: Admin-only full data + audio export (tar archive download).
@@ -1328,6 +1411,57 @@ components:
         `OIDC_MOBILE_AUDIENCES`), and operator group / email allow-lists.
         Used by native mobile apps that authenticate via PKCE.
   schemas:
+    AuditLogEntry:
+      type: object
+      required:
+        [
+          id,
+          action,
+          targetType,
+          targetId,
+          actorType,
+          actorUserId,
+          actorTokenId,
+          actorLabel,
+          ip,
+          userAgent,
+          method,
+          path,
+          statusCode,
+          metadata,
+          createdAt,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        action: { type: string, example: message.approve }
+        targetType: { type: [string, "null"], example: message }
+        targetId: { type: [string, "null"] }
+        actorType: { type: string, enum: [operator, apiToken, anonymous, system] }
+        actorUserId: { type: [string, "null"] }
+        actorTokenId: { type: [string, "null"] }
+        actorLabel:
+          type: string
+          description: |
+            Human-readable actor snapshot taken at write time (operator email,
+            or `token:<name>`). Survives deletion of the referenced row.
+        ip: { type: [string, "null"] }
+        userAgent: { type: [string, "null"] }
+        method: { type: string, example: POST }
+        path: { type: string, example: "/v1/messages/{id}/decision" }
+        statusCode: { type: integer }
+        metadata:
+          type: [object, "null"]
+          additionalProperties: true
+          description: Action-specific detail. Never contains secrets or SAS URLs.
+        createdAt: { type: string, format: date-time }
+    AuditLogPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AuditLogEntry" }
+        nextCursor: { type: [string, "null"] }
     Health:
       type: object
       required: [status, version]

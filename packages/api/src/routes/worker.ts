@@ -15,6 +15,7 @@
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
+import { recordAudit } from "../lib/audit.js";
 import { db } from "../lib/db.js";
 import {
   advanceMessageAfterModeration,
@@ -147,6 +148,18 @@ workerRouter.post(
   async (c) => {
     const { id } = c.req.valid("param");
     const data = c.req.valid("json");
+    // Transcript text stays in the Transcription row; the trail records that a
+    // transcription landed, by whom, and from where — not the content itself.
+    recordAudit(c, {
+      action: "message.transcription.push",
+      targetType: "message",
+      targetId: id,
+      metadata: {
+        model: data.model ?? null,
+        language: data.language ?? null,
+        textLength: data.text.length,
+      },
+    });
     const result = await recordTranscriptionResult({
       messageId: id,
       text: data.text,
@@ -167,6 +180,17 @@ workerRouter.post(
   async (c) => {
     const { id } = c.req.valid("param");
     const data = c.req.valid("json");
+    recordAudit(c, {
+      action: "message.translation.push",
+      targetType: "message",
+      targetId: id,
+      metadata: {
+        transcriptionId: data.transcriptionId,
+        model: data.model ?? null,
+        targetLanguage: data.targetLanguage ?? "en",
+        translatedTextLength: data.translatedText.length,
+      },
+    });
     const existing = await db.transcription.findUnique({
       where: { id: data.transcriptionId },
     });
@@ -212,6 +236,18 @@ workerRouter.post(
   async (c) => {
     const { id } = c.req.valid("param");
     const data = c.req.valid("json");
+    recordAudit(c, {
+      action: "message.moderation.push",
+      targetType: "message",
+      targetId: id,
+      metadata: {
+        transcriptionId: data.transcriptionId ?? null,
+        model: data.model ?? null,
+        flagged: data.flagged,
+        recommendation: data.recommendation,
+        maxScore: data.maxScore,
+      },
+    });
     const message = await db.message.findUnique({ where: { id }, select: { id: true } });
     if (!message) return c.json({ error: "not_found" }, 404);
 
