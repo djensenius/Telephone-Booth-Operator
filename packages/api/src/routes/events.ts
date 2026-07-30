@@ -25,8 +25,8 @@ import { Broadcaster } from "../lib/broadcaster.js";
 import { decodeCursor, encodeCursor } from "../lib/cursor.js";
 import { db } from "../lib/db.js";
 import {
+  lockOpenInstallation,
   requireActiveInstallation,
-  requireOpenInstallation,
   resolveInstallationScope,
   scopeWhere,
   ROLLOVER_OUTCOME,
@@ -261,45 +261,43 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
       known !== undefined && known.installationId !== null && endedEras.has(known.installationId)
     );
   };
-  // The era every row without a known session is written to. A `call_started`
-  // that resolved the era just before a rollover committed — or on a replica
-  // whose cache is still a few seconds stale — would otherwise open a session
-  // inside a frozen era, and its later `call_ended` would be refused as a
-  // straggler, leaving it open forever. Resolving once, up front, also keeps a
-  // new session and the events that describe it in the same era: splitting
-  // them would break the scoped drill-down from one to the other.
-  const eraForNewRows = await (async (): Promise<string> => {
-    if (!endedEras.has(installationId)) {
-      const era = await db.installation.findUnique({
-        where: { id: installationId },
-        select: { endedAt: true },
-      });
-      if (!era?.endedAt) return installationId;
-      endedEras.add(installationId);
-    }
-    return requireOpenInstallation();
-  })();
+  // The era every row without a known session is written to. It is resolved
+  // once, before either the session or its events are built, so a call and the
+  // events describing it can never straddle a rollover — that would break the
+  // scoped drill-down from one to the other. The row is then held shared for
+  // the length of the write transaction below, so a session cannot be opened
+  // inside an era whose close-out is underway: it would never be closed, and
+  // its own `call_ended` would afterwards be refused as a straggler.
+  let eraForNewRows = installationId;
 
   const eraFor = (sessionId: string | null | undefined): string =>
     (sessionId ? sessionEra.get(sessionId)?.installationId : null) ?? eraForNewRows;
 
-  const rows = events.map((event) => ({
-    eventId: event.eventId,
-    boothId: event.boothId,
-    bootId: event.bootId,
-    type: event.type,
-    occurredAt: new Date(event.occurredAt),
-    sessionId: event.sessionId ?? null,
-    recordingId: event.recordingId ?? null,
-    payload: event.payload ?? {},
-    version: event.version ?? null,
-    installationId: eraFor(event.sessionId),
-  }));
+  const buildRows = () =>
+    events.map((event) => ({
+      eventId: event.eventId,
+      boothId: event.boothId,
+      bootId: event.bootId,
+      type: event.type,
+      occurredAt: new Date(event.occurredAt),
+      sessionId: event.sessionId ?? null,
+      recordingId: event.recordingId ?? null,
+      payload: event.payload ?? {},
+      version: event.version ?? null,
+      installationId: eraFor(event.sessionId),
+    }));
 
   // 2. Atomically upsert sessions and insert events in a single transaction.
   //    If either step fails the entire batch is rolled back — no orphan
   //    sessions without source events.
   const inserted = await db.$transaction(async (tx) => {
+    // Hold the era open for the length of this transaction. If it has ended,
+    // resolve one that has not — a booth write must never fail on bookkeeping,
+    // but it must not land in a frozen era either.
+    const locked = await lockOpenInstallation(tx, installationId);
+    if (!locked) throw new Error("no open installation to record into");
+    eraForNewRows = locked;
+
     for (const init of sessionInits.values()) {
       if (!init.id || !init.boothId || !init.bootId) continue;
       // The rollover's close-out is terminal; a straggler event must not undo
@@ -363,7 +361,7 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
     }
 
     return tx.boothEvent.createMany({
-      data: rows,
+      data: buildRows(),
       skipDuplicates: true,
     });
   });

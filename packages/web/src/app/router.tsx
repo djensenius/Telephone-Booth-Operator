@@ -29,7 +29,7 @@ import { LiveSystemPanel } from "../features/system/LiveSystemPanel.js";
 import { SystemVitalsStrip } from "../features/system/SystemVitalsStrip.js";
 import { TokensScreen } from "../features/tokens/TokensScreen.js";
 import { useNumericNavigation } from "../hooks/useNumericNavigation.js";
-import { BoothWebSocketProvider, InstallationRolloverBridge } from "../lib/booth-websocket.js";
+import { BoothEnvelopeBridge, BoothWebSocketProvider } from "../lib/booth-websocket.js";
 import { DIGIT_ROUTES, isMessageFilter } from "../lib/navigation.js";
 
 // Each field falls back on its own. A stale `status` in a bookmarked URL must
@@ -82,7 +82,7 @@ function AppLayout(): JSX.Element {
   useNumericNavigation(isAuthenticated, isAdmin);
   return (
     <BoothWebSocketProvider enabled={isAuthenticated}>
-      <InstallationRolloverBridge />
+      <BoothEnvelopeBridge />
       <BoothFrame>
         <a className="skip-link" href="#main-content">
           Skip to content

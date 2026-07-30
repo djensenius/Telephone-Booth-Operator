@@ -92,16 +92,41 @@ recording into, or recomputing a frozen summary, which would defeat the point
 of freezing it. The drift is bounded by the seconds-long window around a
 rollover and only affects a raw event tally.
 
-### Admin writes do not accept the race
+### Writes are serialised against the rollover by the era row itself
 
-The trade-off above is bought for the booth, which must never drop a recording.
-An admin write has no such excuse, so the paths an operator drives settle
-themselves instead. Creating a prompt re-reads its era after the insert has
-committed and moves the row if that era has since been closed out; a recording
-promoted out of `uploading` does the same. Both checks run after the commit on
-purpose: a rollover that starts later sees the row and closes it out itself,
-which is the correct outcome, while one that already committed is caught and
-corrected.
+Re-reading the era is not enough on its own. Under Postgres MVCC a reader
+cannot see a rollover that has run its close-out but has not yet committed, so
+a write can always slip in behind one that is mid-flight. The fix is the era
+row: a write takes `SELECT … FOR SHARE` on its `Installation` for the length of
+its transaction, and the close-out takes `FOR UPDATE`. Shared locks do not
+conflict with each other, so ordinary concurrent writes are unaffected; only in
+the moment an era is actually ending do the two queue up. Whichever arrives
+second sees the other's committed work, and a writer that finds its era closed
+resolves the open one and takes its lock instead.
+
+This covers the three paths where the ordering matters: creating a prompt,
+promoting a finished upload out of `uploading`, and opening a call session.
+The last one matters most — a session created inside an era that is being
+frozen would never be closed, and its own `call_ended` would afterwards be
+refused as a straggler.
+
+What the lock does _not_ do is change which era a write belongs to. A recording
+that commits before the close-out is drained by it, exactly as it should be;
+one that arrives afterwards lands in the era that is open.
+
+### Accepted: a purged blob key can be reused mid-purge
+
+A hard purge deletes the `File` rows an era owned that nothing else references,
+then deletes their blobs. Recordings are content-addressed, so a booth upload
+of identical audio can recreate a row for a key the purge is still working
+through. The purge re-checks each key immediately before deleting its blob and
+leaves a resurrected one alone, which closes all but the window between that
+check and the storage call.
+
+Closing that last window needs a tombstone or lease on the blob key that the
+upload path honours — a storage-layer protocol, not a query. It is not worth it
+here: a purge is admin-gated, rare, and explicitly destructive, and the residual
+failure is one recording whose blob has to be re-uploaded.
 
 ### Reads never open an era
 

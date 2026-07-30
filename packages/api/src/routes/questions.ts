@@ -6,16 +6,16 @@ import {
 } from "@telephone-booth-operator/shared";
 import { Hono } from "hono";
 import { z } from "zod";
-import type { Question } from "../generated/prisma/client.js";
+import { Prisma } from "../generated/prisma/client.js";
 import { db } from "../lib/db.js";
 import {
+  lockOpenInstallation,
   requireActiveInstallation,
-  requireOpenInstallation,
   resolveInstallationScope,
   scopeWhere,
 } from "../lib/installation.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
-import { serializeQuestion, type WithAudio } from "../lib/serializers.js";
+import { serializeQuestion } from "../lib/serializers.js";
 import { requireAdmin, type AuthVariables } from "../lib/session.js";
 
 const listQuerySchema = z.object({
@@ -36,32 +36,9 @@ const listQuerySchema = z.object({
 
 const idParamSchema = z.object({ id: z.guid() });
 
-type CreatedQuestion = WithAudio<Question>;
-
-// Creating a prompt races the rollover: the era resolved for the insert can be
-// closed out before the row lands, and the close-out only retires the prompts
-// it can see, so the new one would be stranded live inside a frozen era. This
-// runs after the insert has committed — a rollover that commits later sees the
-// row and retires it properly — and moves a stranded prompt into the era that
-// is actually open. Unlike a booth recording, an admin write has no reason to
-// tolerate the drift. A prompt that collides in its new home is deleted rather
-// than left behind, so the caller's 409 is the whole truth.
-const settleEra = async (question: CreatedQuestion, era: string): Promise<CreatedQuestion> => {
-  const row = await db.installation.findUnique({ where: { id: era }, select: { endedAt: true } });
-  if (!row?.endedAt) return question;
-  const open = await requireOpenInstallation();
-  if (open === era) return question;
-  try {
-    return await db.question.update({
-      where: { id: question.id },
-      data: { installationId: open },
-      include: { audio: true },
-    });
-  } catch (err) {
-    await db.question.delete({ where: { id: question.id } });
-    throw err;
-  }
-};
+// No era is open and one could not be resolved. Distinct from a conflict: the
+// caller's request was fine, the installation bookkeeping was not.
+class EraUnavailableError extends Error {}
 
 export const questionsRouter = new Hono<{ Variables: AuthVariables & ApiTokenVariables }>();
 
@@ -101,20 +78,35 @@ questionsRouter.post("/", requireAdmin(), zValidator("json", QuestionCreateSchem
   const audio = await db.file.findUnique({ where: { id: body.audioFileId } });
   if (!audio) return c.json({ error: "audio_file_not_found" }, 404);
 
+  // A prompt must not land in an era that is being closed out: the close-out
+  // retires the questions it can see, and one inserted behind its back would
+  // stay live inside a frozen era. Holding the era row shared for the length of
+  // the insert makes the two queue instead of overlapping — unlike a booth
+  // recording, an admin write has no reason to accept that race.
   try {
-    const era = await requireActiveInstallation();
-    const question = await db.question.create({
-      data: {
-        prompt: body.prompt,
-        audioId: body.audioFileId,
-        status: body.status ?? "draft",
-        installationId: era,
-      },
-      include: { audio: true },
+    const question = await db.$transaction(async (tx) => {
+      const era = await lockOpenInstallation(tx);
+      if (!era) throw new EraUnavailableError();
+      return tx.question.create({
+        data: {
+          prompt: body.prompt,
+          audioId: body.audioFileId,
+          status: body.status ?? "draft",
+          installationId: era,
+        },
+        include: { audio: true },
+      });
     });
-    return c.json(serializeQuestion(await settleEra(question, era)), 201);
-  } catch {
-    return c.json({ error: "question_conflict" }, 409);
+    return c.json(serializeQuestion(question), 201);
+  } catch (err) {
+    if (err instanceof EraUnavailableError) return c.json({ error: "no_open_installation" }, 503);
+    // Only a genuine uniqueness collision is the caller's problem. Anything
+    // else is ours, and reporting it as a conflict would send the operator
+    // round a retry loop that cannot succeed.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return c.json({ error: "question_conflict" }, 409);
+    }
+    throw err;
   }
 });
 

@@ -161,6 +161,7 @@ paths:
               schema: { $ref: "#/components/schemas/Question" }
         "404": { description: audio file not found }
         "409": { description: duplicate prompt or audio already attached }
+        "503": { description: no installation was open to file the prompt under }
 
   /v1/questions/random:
     get:

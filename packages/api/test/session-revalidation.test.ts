@@ -138,6 +138,10 @@ const { fakeDb, openidMocks, store, FakeChallengeError } = vi.hoisted(() => {
         findUnique: vi.fn(async () => ({ endedAt: null })),
         count: vi.fn(async () => 1),
       },
+      // The insert holds the era row for the length of a transaction, so the
+      // mock needs the transaction wrapper and the raw lock it takes.
+      $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(fakeDb),
+      $queryRaw: async () => [{ endedAt: null }],
     },
   };
 });

@@ -4,7 +4,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { BoothStatusSchema, WsEnvelopeSchema } from "@telephone-booth-operator/shared";
 import type { BoothStatus, WsEnvelope } from "@telephone-booth-operator/shared";
 import { useBoothStatus } from "../components/booth/BoothStatusContext.js";
-import { apiWebSocketUrlFor, invalidateInstallationScopedQueries } from "./api-client.js";
+import {
+  apiQueryKeys,
+  apiWebSocketUrlFor,
+  invalidateInstallationScopedQueries,
+} from "./api-client.js";
+import { isNewerThan, mergeLiveStatus } from "./status-history.js";
 
 // One shared `/v1/ws/status` connection for the whole authenticated app. The
 // socket must live above the router so envelopes (installation rollovers,
@@ -160,17 +165,48 @@ export function useBoothWebSocket(): BoothWebSocketApi {
   return useContext(BoothWebSocketContext) ?? INERT_API;
 }
 
-// Always-mounted bridge: converts the shared `installation` envelope into the
-// same query-cache invalidation a local start/end mutation triggers, so a
-// console sitting on any authenticated route (not just Status) re-scopes when
-// a rollover happens on another console.
-export function InstallationRolloverBridge(): null {
+// Always-mounted bridge: every envelope that belongs in the query cache is
+// applied here rather than on the screen that happens to render it. A console
+// parked on Messages must still see a pushed recording, and one on any route
+// must re-scope when a rollover happens on another console. Screens subscribe
+// only for their own presentation state.
+export function BoothEnvelopeBridge(): null {
   const ws = useBoothWebSocket();
   const queryClient = useQueryClient();
   useEffect(() => {
     return ws.subscribe((envelope) => {
       if (envelope.kind === "installation") {
         invalidateInstallationScopedQueries(queryClient);
+        return;
+      }
+      if (envelope.kind === "status") {
+        const status = envelope.status;
+        // Frames can arrive out of order, so an older one joins the history but
+        // never becomes the current status.
+        const cached = queryClient.getQueryData<BoothStatus>(apiQueryKeys.status) ?? null;
+        if (isNewerThan(status, cached)) queryClient.setQueryData(apiQueryKeys.status, status);
+        queryClient.setQueryData(
+          apiQueryKeys.statusHistory,
+          (current: { readonly items: readonly BoothStatus[] } | undefined) => ({
+            items: mergeLiveStatus(current?.items ?? [], status),
+          }),
+        );
+        return;
+      }
+      if (envelope.kind === "system") {
+        queryClient.setQueryData(apiQueryKeys.system(envelope.boothId), {
+          boothId: envelope.boothId,
+          snapshot: envelope.snapshot,
+          receivedAt: envelope.receivedAt,
+          version: envelope.version ?? null,
+        });
+        return;
+      }
+      if (envelope.kind === "message") {
+        const message = envelope.message;
+        queryClient.setQueryData(apiQueryKeys.message(message.id), message);
+        void queryClient.invalidateQueries({ queryKey: ["messages", "list"] });
+        void queryClient.invalidateQueries({ queryKey: apiQueryKeys.transcriptions(message.id) });
       }
     });
   }, [ws, queryClient]);

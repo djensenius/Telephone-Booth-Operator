@@ -22,10 +22,9 @@ import { generateSasUrl, headBlob } from "../lib/azure-blob.js";
 import { wsBroadcaster } from "../lib/broadcaster.js";
 import { db } from "../lib/db.js";
 import {
+  lockOpenInstallation,
   requireActiveInstallation,
-  requireOpenInstallation,
   resolveInstallationScope,
-  ROLLOVER_MESSAGE_NOTE,
   scopeWhere,
 } from "../lib/installation.js";
 import { countMessagesAwaitingModeration } from "../lib/moderation-badge.js";
@@ -47,10 +46,6 @@ const listQuerySchema = z.object({
 const idParamSchema = z.object({ id: z.guid() });
 
 const messageBlobName = (sha256: string): string => `messages/${sha256.slice(0, 2)}/${sha256}.flac`;
-
-// How many times a straggler write will chase a rollover before giving up. Each
-// pass needs a *fresh* rollover to lose to, so more than a couple is theatre.
-const ERA_REFILE_ATTEMPTS = 3;
 
 /**
  * A question the booth may still record an answer for.
@@ -291,55 +286,25 @@ messagesRouter.post(
     // never gate whether an operator can see and decide a message.
     const receivedAt = new Date();
     // A recording that was in flight when the operator ended an era belongs in
-    // the open one. Its own era's queue was drained and its summary frozen on
-    // the way out, so leaving it there would file a real recording where nobody
-    // is looking — the same reasoning as a straggler recording started after
-    // the rollover.
-    const era = message.installationId
-      ? await db.installation.findUnique({ where: { id: message.installationId } })
-      : null;
-    let refiled = era?.endedAt ? await requireOpenInstallation() : null;
-    const { count } = await db.message.updateMany({
-      where: { id, status: "uploading" },
-      data: {
-        status: "pending",
-        receivedAt,
-        ...(refiled ? { installationId: refiled } : {}),
-      },
+    // the open one: that era's queue was drained and its summary frozen on the
+    // way out, so leaving it there would file a real recording where nobody is
+    // looking. The promotion holds the destination era row shared for its whole
+    // transaction, so it cannot commit into an era whose close-out is underway
+    // but not yet visible — the rollover waits for it, or it waits for the
+    // rollover and re-files.
+    const { count } = await db.$transaction(async (tx) => {
+      const era = await lockOpenInstallation(tx, message.installationId ?? undefined);
+      if (!era) throw new Error("no open installation to complete into");
+      const refiled = era === message.installationId ? null : era;
+      return tx.message.updateMany({
+        where: { id, status: "uploading" },
+        data: {
+          status: "pending",
+          receivedAt,
+          ...(refiled ? { installationId: refiled } : {}),
+        },
+      });
     });
-
-    // The era was read before the promotion committed, so a rollover landing in
-    // between would have drained its queue while this row was still invisible
-    // to it, leaving a pending message in a frozen era — and feeding the
-    // moderation badge, which counts every era on purpose. Re-check afterwards
-    // and re-file; a rollover that commits after this check sees the row and
-    // closes it out itself. Bounded because each pass needs a fresh rollover to
-    // lose to.
-    for (let attempt = 0; count > 0 && attempt < ERA_REFILE_ATTEMPTS; attempt += 1) {
-      const landed = refiled ?? message.installationId;
-      if (!landed) break;
-      const settled = await db.installation.findUnique({
-        where: { id: landed },
-        select: { endedAt: true },
-      });
-      if (!settled?.endedAt) break;
-      const open = await requireOpenInstallation();
-      if (open === landed) break;
-      await db.message.updateMany({
-        where: { id, installationId: landed },
-        data: { installationId: open },
-      });
-      // The close-out drains its era's queue, so a rollover landing in that
-      // window will have rejected this recording on its way past. That is
-      // bookkeeping, not a decision, and the recording did arrive — restore it
-      // to the queue as it moves. An operator's own verdict in the same window
-      // names itself differently and is left alone.
-      await db.message.updateMany({
-        where: { id, status: "rejected", notes: ROLLOVER_MESSAGE_NOTE },
-        data: { status: "pending", notes: null, decidedAt: null, receivedAt },
-      });
-      refiled = open;
-    }
 
     if (count === 0) {
       const current = await db.message.findUnique({ where: { id } });

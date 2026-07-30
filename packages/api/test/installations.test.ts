@@ -1008,10 +1008,13 @@ describe("installations", () => {
       expect(landed?.installationId).toBe(currentEra);
     });
 
-    // The nastier ordering: the rollover commits *after* the recording is
-    // promoted, so the close-out drains it out of the queue as a rejection. It
-    // is a finished recording nobody decided on, so re-filing restores it.
-    it("restores a recording the rollover rejected as it landed", async () => {
+    // The nastier ordering: a rollover that reaches the queue drain while the
+    // recording is still landing. The promotion holds the era row shared for
+    // its whole transaction, so the two cannot interleave — whichever arrives
+    // second sees the other's committed work. Here the era is already closed,
+    // so the lock sends the recording to the open one instead of promoting it
+    // into a frozen queue.
+    it("promotes into an open era when the lock finds its own era closed", async () => {
       const app = createApp();
       const sha256 = "f".repeat(64);
       const initiated = await app.request("/v1/messages", {
@@ -1027,36 +1030,21 @@ describe("installations", () => {
         sha256,
       });
 
-      // Stand in for a rollover that commits between the promotion and the
-      // recheck: the era still reads as open when `/complete` looks, and is
-      // closed out — rejection and all — immediately after the promotion lands.
-      const promote = fakeDb.message.updateMany;
-      let raced = false;
-      vi.spyOn(fakeDb.message, "updateMany").mockImplementation(async (args) => {
-        const result = await promote(args);
-        if (!raced) {
-          raced = true;
-          store.installations.get(DEFAULT_INSTALLATION_ID)!.endedAt = new Date();
-          const row = store.messages.get(slot.id)!;
-          row.status = "rejected";
-          row.notes = "Closed out when the installation ended.";
-          row.decidedAt = new Date();
-          seedInstallation({ id: "aaaaaaaa-0000-4000-8000-0000000000e2", name: "Second era" });
-        }
-        return result;
-      });
+      // Closed in the database but not through the API, so nothing the request
+      // reads before taking the lock knows about it.
+      store.installations.get(DEFAULT_INSTALLATION_ID)!.endedAt = new Date();
+      const nextEra = "aaaaaaaa-0000-4000-8000-0000000000e2";
+      seedInstallation({ id: nextEra, name: "Second era" });
 
       const completed = await app.request(`/v1/messages/${slot.id}/complete`, {
         method: "POST",
         headers: phoneHeaders,
       });
       expect(completed.status, await completed.clone().text()).toBe(200);
-      vi.restoreAllMocks();
 
       const landed = store.messages.get(slot.id);
       expect(landed?.status).toBe("pending");
-      expect(landed?.notes).toBeNull();
-      expect(landed?.installationId).toBe("aaaaaaaa-0000-4000-8000-0000000000e2");
+      expect(landed?.installationId).toBe(nextEra);
     });
   });
 

@@ -1211,7 +1211,7 @@ export const fakeDb = {
       where = {},
     }: {
       where?: {
-        status?: string | { in: string[] };
+        status?: string | { in?: string[]; not?: string };
         createdAt?: { gte: Date };
         installationId?: ScopeFilter;
       };
@@ -1227,6 +1227,9 @@ export const fakeDb = {
         if (typeof status === "object" && Array.isArray(status.in)) {
           const allowed = new Set(status.in);
           messages = messages.filter((message) => allowed.has(message.status));
+        } else if (typeof status === "object" && typeof status.not === "string") {
+          // The frozen summary excludes in-flight uploads this way.
+          messages = messages.filter((message) => message.status !== status.not);
         } else {
           messages = messages.filter((message) => message.status === status);
         }
@@ -2046,6 +2049,18 @@ export const fakeDb = {
     }) => create,
   },
   $transaction: async <T>(fn: (tx: typeof fakeDb) => Promise<T>): Promise<T> => fn(fakeDb),
+  // The era row is locked with raw SQL — `FOR SHARE` for a writer, `FOR UPDATE`
+  // for the close-out — because Prisma has no first-class row lock. There is no
+  // concurrency to serialise in a test, so the fake only has to answer the
+  // question the lock asks: is this era still open?
+  $queryRaw: async (
+    _strings: TemplateStringsArray,
+    ...values: unknown[]
+  ): Promise<{ endedAt: Date | null }[]> => {
+    const id = values.find((value) => typeof value === "string");
+    const era = typeof id === "string" ? store.installations.get(id) : undefined;
+    return era ? [{ endedAt: era.endedAt }] : [];
+  },
 };
 
 // A scoped export filters files through their owning rows. Those are relation

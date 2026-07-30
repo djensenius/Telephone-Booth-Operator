@@ -222,6 +222,11 @@ export const computeInstallationSummary = async (
   installationId: string,
 ): Promise<InstallationSummary> => {
   const where = { installationId };
+  // An `uploading` row is a recording in flight, not a message: the close-out
+  // deliberately leaves it alone and `/messages/:id/complete` files it into
+  // whichever era is open when it lands. Counting it here would freeze a total
+  // this era's own drill-down cannot account for.
+  const landedMessages = { ...where, status: { not: "uploading" as const } };
 
   const [
     calls,
@@ -235,12 +240,15 @@ export const computeInstallationSummary = async (
     lastEvent,
   ] = await Promise.all([
     client.callSession.count({ where }),
-    client.message.count({ where }),
+    client.message.count({ where: landedMessages }),
     client.message.count({ where: { ...where, status: "approved" } }),
     client.message.count({ where: { ...where, status: "rejected" } }),
     client.question.count({ where }),
     client.boothEvent.count({ where }),
-    client.message.findMany({ where, select: { audio: { select: { durationMs: true } } } }),
+    client.message.findMany({
+      where: landedMessages,
+      select: { audio: { select: { durationMs: true } } },
+    }),
     client.boothEvent.findFirst({
       where,
       orderBy: { occurredAt: "asc" },
@@ -275,9 +283,8 @@ export const computeInstallationSummary = async (
 // `CallSession.outcome` written to sessions the booth never ended itself.
 export const ROLLOVER_OUTCOME = "installation_ended";
 
-// Stamped on messages the close-out drains from the queue. It is bookkeeping
-// rather than a moderation decision, and naming it lets a straggler re-filed
-// into the open era tell the two apart and restore its queue state.
+// Stamped on messages the close-out drains from the queue, so a reader can tell
+// the rollover's bookkeeping apart from a moderation decision an operator made.
 export const ROLLOVER_MESSAGE_NOTE = "Closed out when the installation ended.";
 
 // Bring an era to a consistent terminal state: no session left open, no message
@@ -287,11 +294,55 @@ export const ROLLOVER_MESSAGE_NOTE = "Closed out when the installation ended.";
 // out whatever era the target instance had open. Doing it in one place keeps a
 // restored instance from inheriting an era that is "ended" in name only, with
 // pending messages still feeding the moderation badge.
+// Postgres MVCC means a reader cannot see a rollover that has run its close-out
+// but not yet committed, so no amount of re-reading makes a write safe on its
+// own. These two helpers put the era row itself between them: a writer holds it
+// shared for the length of its transaction, the rollover takes it exclusively,
+// and the two therefore queue rather than overlap. Shared locks do not conflict
+// with each other, so concurrent writes are unaffected except in the moment an
+// era is actually ending.
+export const lockInstallationForWrite = async (
+  tx: Prisma.TransactionClient,
+  installationId: string,
+): Promise<boolean> => {
+  const rows = await tx.$queryRaw<{ endedAt: Date | null }[]>`
+    SELECT "endedAt" FROM "Installation" WHERE "id" = ${installationId}::uuid FOR SHARE
+  `;
+  return rows.length > 0 && rows[0]?.endedAt === null;
+};
+
+// How many times a write will chase a rollover before giving up. Each pass has
+// to lose to a *different* rollover, so a third is already generous.
+export const ERA_LOCK_ATTEMPTS = 3;
+
+// Resolve an era that is open and hold it that way for the rest of `tx`.
+// Returns null only if eras keep ending underneath the caller, which in
+// practice means something is wrong rather than merely busy.
+export const lockOpenInstallation = async (
+  tx: Prisma.TransactionClient,
+  preferred?: string,
+): Promise<string | null> => {
+  let candidate = preferred ?? (await requireActiveInstallation());
+  for (let attempt = 0; attempt < ERA_LOCK_ATTEMPTS; attempt += 1) {
+    if (await lockInstallationForWrite(tx, candidate)) return candidate;
+    const next = await requireOpenInstallation();
+    if (next === candidate) return null;
+    candidate = next;
+  }
+  return null;
+};
+
 export const closeOutInstallation = async (
   tx: Prisma.TransactionClient,
   installationId: string,
   endedAt: Date,
 ): Promise<InstallationSummary> => {
+  // Take the era row exclusively before touching anything it owns. Writers hold
+  // it shared, so this waits for the ones already in flight and makes any that
+  // arrive mid-close-out wait for it — closing the window where a write commits
+  // into an era whose draining was underway but invisible.
+  await tx.$queryRaw`SELECT "id" FROM "Installation" WHERE "id" = ${installationId}::uuid FOR UPDATE`;
+
   // Close sessions the booth never ended (power cut, crash mid-call).
   await tx.callSession.updateMany({
     where: { installationId, endedAt: null },

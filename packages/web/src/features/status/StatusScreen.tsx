@@ -1,11 +1,7 @@
 import type { JSX } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type {
-  BoothState,
-  BoothStatus,
-  BoothSystemSnapshot,
-} from "@telephone-booth-operator/shared";
+import type { BoothState, BoothStatus } from "@telephone-booth-operator/shared";
 import { GlassPanel, useBoothStatus } from "../../components/booth/index.js";
 import { apiQueryKeys, useStatusCurrent, useStatusHistory } from "../../lib/api-client.js";
 import { useBoothWebSocket } from "../../lib/booth-websocket.js";
@@ -15,7 +11,6 @@ import {
   collapseStatusHistory,
   firstSeenAtOf,
   isNewerThan,
-  mergeLiveStatus,
   repeatCountOf,
 } from "../../lib/status-history.js";
 
@@ -58,55 +53,34 @@ export function StatusScreen(): JSX.Element {
   const statusQuery = useStatusCurrent({ paused: wsState === "live" });
   const historyQuery = useStatusHistory({ paused: wsState === "live" });
 
+  const latestStatusRef = useRef<BoothStatus | null>(null);
   useEffect(() => {
     setLiveStatus(statusQuery.data ?? null);
+    latestStatusRef.current = statusQuery.data ?? null;
     if (statusQuery.data?.updatedAt) {
       setLastStatusAt(new Date(statusQuery.data.updatedAt));
     }
   }, [statusQuery.data, setLastStatusAt]);
 
-  // Subscribe to the shared /v1/ws/status stream for the envelopes this
-  // screen renders (status/system/message). Installation-rollover handling
-  // is bridged app-wide in `InstallationRolloverBridge` so a console on any
-  // route re-scopes without a reload.
+  // Subscribe to the shared /v1/ws/status stream for this screen's own
+  // presentation state. Every cache write lives in `BoothEnvelopeBridge`, which
+  // is mounted app-wide, so a console on another route sees pushed messages and
+  // rollovers too.
   useEffect(() => {
     const offEnvelope = ws.subscribe((envelope) => {
-      if (envelope.kind === "status") {
-        const status = envelope.status;
-        // Frames can arrive out of order, so an older one is recorded in the
-        // history but never becomes the displayed current status.
-        const cached = queryClient.getQueryData<BoothStatus>(apiQueryKeys.status) ?? null;
-        if (isNewerThan(status, cached)) {
-          setLiveStatus(status);
-          setLastStatusAt(new Date(status.updatedAt));
-          queryClient.setQueryData(apiQueryKeys.status, status);
-        }
-        queryClient.setQueryData(
-          apiQueryKeys.statusHistory,
-          (current: { readonly items: readonly BoothStatus[] } | undefined) => ({
-            items: mergeLiveStatus(current?.items ?? [], status),
-          }),
-        );
-      } else if (envelope.kind === "system") {
-        queryClient.setQueryData<{
-          boothId: string;
-          snapshot: BoothSystemSnapshot;
-          receivedAt: string;
-          version: string | null;
-        }>(["system", envelope.boothId], {
-          boothId: envelope.boothId,
-          snapshot: envelope.snapshot,
-          receivedAt: envelope.receivedAt,
-          version: envelope.version ?? null,
-        });
-      } else if (envelope.kind === "message") {
-        const message = envelope.message;
-        queryClient.setQueryData(apiQueryKeys.message(message.id), message);
-        void queryClient.invalidateQueries({ queryKey: ["messages", "list"] });
-        void queryClient.invalidateQueries({ queryKey: apiQueryKeys.transcriptions(message.id) });
-      }
+      if (envelope.kind !== "status") return;
+      // Frames can arrive out of order, so an older one is recorded in the
+      // history but never becomes the displayed current status. Tracked in a
+      // ref rather than read back from the cache, which the bridge is writing
+      // to from the same envelope.
+      const status = envelope.status;
+      if (!isNewerThan(status, latestStatusRef.current)) return;
+      latestStatusRef.current = status;
+      setLiveStatus(status);
+      setLastStatusAt(new Date(status.updatedAt));
     });
     const offLegacy = ws.subscribeLegacyStatus((status) => {
+      latestStatusRef.current = status;
       setLiveStatus(status);
       setLastStatusAt(new Date(status.updatedAt));
       queryClient.setQueryData(apiQueryKeys.status, status);
