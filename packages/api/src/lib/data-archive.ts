@@ -157,12 +157,25 @@ const SCOPED_MODELS = new Set<ModelName>([
 // walks models generically, so `findMany` is otherwise reached through an
 // untyped client and a wrong relation name would only surface as a Prisma
 // validation error at runtime, on the export path, in production.
+// A straggler recording is filed in the era that was open when it landed while
+// its question stays with the era that issued it, so a scoped export cannot
+// filter questions on their own era alone: leaving the referenced row out makes
+// the archive fail its own foreign key on restore.
+const questionScopeArgs = (installationId: string): Prisma.QuestionFindManyArgs => ({
+  where: {
+    OR: [{ installationId }, { messages: { some: { installationId } } }],
+  },
+});
+
 const fileScopeArgs = (installationId: string): Prisma.FileFindManyArgs => ({
   where: {
     OR: [
       // A file can back several questions once an era copies them forward,
       // so this is a list filter, not a to-one one.
       { questions: { some: { installationId } } },
+      // ...and the audio of a question only reachable through a straggler
+      // message has to travel too, for the same reason.
+      { questions: { some: { messages: { some: { installationId } } } } },
       { message: { installationId } },
       // Instructions are global, but their audio must travel with any
       // archive or a restore would leave dangling references.
@@ -191,6 +204,7 @@ const EXCLUDED_FROM_SCOPED_EXPORT = new Set<ModelName>([
 
 const scopedFindArgs = (name: ModelName, installationId: string): unknown => {
   if (name === INSTALLATION_MODEL) return { where: { id: installationId } };
+  if (name === "question") return questionScopeArgs(installationId);
   if (SCOPED_MODELS.has(name)) return { where: { installationId } };
   if (name === "transcription") return transcriptionScopeArgs(installationId);
   if (name === "moderation") return moderationScopeArgs(installationId);

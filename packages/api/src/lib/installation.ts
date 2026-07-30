@@ -279,8 +279,14 @@ export const closeOutInstallation = async (
   // Empty the moderation queue so the next era starts clean. The audio and
   // transcripts are untouched and stay visible under this installation's
   // scope; only the queue-visible statuses move to a terminal one.
+  //
+  // `uploading` is deliberately left alone: a caller can be midway through
+  // sending a recording when the operator ends the era, and rejecting the row
+  // here would strand the finished audio in a terminal state nobody reviews.
+  // `POST /messages/:id/complete` re-files such a straggler into the open era,
+  // the same way a recording started after the rollover is handled.
   await tx.message.updateMany({
-    where: { installationId, status: { in: ["uploading", "received", "pending"] } },
+    where: { installationId, status: { in: ["received", "pending"] } },
     data: {
       status: "rejected",
       notes: "Closed out when the installation ended.",

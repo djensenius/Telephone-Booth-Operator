@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { useMemo } from "react";
 import { INSTALLATION_SCOPE_ALL, InstallationScopeSchema } from "@telephone-booth-operator/shared";
-import type { InstallationScope } from "@telephone-booth-operator/shared";
+import type { Installation, InstallationScope } from "@telephone-booth-operator/shared";
 import { useInstallationsList } from "../../lib/api-client.js";
 
 // Parse an `installationId=…` search-param value into an `InstallationScope`,
@@ -11,6 +11,18 @@ export function parseInstallationScopeParam(raw: unknown): InstallationScope | u
   if (typeof raw !== "string" || raw.length === 0) return undefined;
   const parsed = InstallationScopeSchema.safeParse(raw);
   return parsed.success ? parsed.data : undefined;
+}
+
+// Names are not unique — two runs of the same festival can share one — so an
+// option carries the era's start date as a discriminator. The active era says
+// so instead, since there is only ever one of those.
+function optionLabel(installation: Installation): string {
+  if (installation.isActive) return `${installation.name} (active)`;
+  const started = new Date(installation.startedAt);
+  const stamp = Number.isNaN(started.getTime())
+    ? installation.startedAt
+    : started.toLocaleDateString();
+  return `${installation.name} — started ${stamp}`;
 }
 
 // Shared installation-scope selector used by the observability screens
@@ -52,8 +64,7 @@ export function InstallationScopePicker({
         <option value="">Active installation</option>
         {installations.map((installation) => (
           <option key={installation.id} value={installation.id}>
-            {installation.name}
-            {installation.isActive ? " (active)" : ""}
+            {optionLabel(installation)}
           </option>
         ))}
         <option value={INSTALLATION_SCOPE_ALL}>All installations</option>

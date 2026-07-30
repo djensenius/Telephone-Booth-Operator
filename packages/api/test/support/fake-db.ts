@@ -862,7 +862,7 @@ export const fakeDb = {
     ) => {
       const { cursor, where = {}, skip = 0, take, include, select } = params;
       let questions = [...store.questions.values()]
-        .filter((question) => matchesWhere(question, where))
+        .filter((question) => matchesQuestionWhere(question, where))
         .sort(byCreatedDesc);
       if (cursor) {
         const index = questions.findIndex((question) => question.id === cursor.id);
@@ -2048,15 +2048,47 @@ export const fakeDb = {
 // filters, which the generic matcher does not understand, so resolve them
 // against the store here — otherwise a scoped export looks correct in tests
 // while Prisma rejects the query outright.
+// A scoped export pulls in questions a straggler message points at, which is a
+// to-many relation filter the generic matcher does not understand. Resolving it
+// here keeps the fake honest: Prisma would accept the query, and a fake that
+// silently ignored the branch would hide whether the export is self-consistent.
+const questionHasMessageIn = (question: FakeQuestion, filter: unknown): boolean => {
+  const some = ((filter ?? {}) as { some?: { installationId?: string } }).some ?? {};
+  return [...store.messages.values()].some(
+    (message) =>
+      message.questionId === question.id &&
+      (some.installationId === undefined || message.installationId === some.installationId),
+  );
+};
+
+const matchesQuestionWhere = (question: FakeQuestion, where: Record<string, unknown>): boolean => {
+  const scalar: Record<string, unknown> = {};
+  for (const [key, raw] of Object.entries(where)) {
+    if (key === "OR" && Array.isArray(raw)) {
+      const ok = raw.some((branch) =>
+        matchesQuestionWhere(question, branch as Record<string, unknown>),
+      );
+      if (!ok) return false;
+      continue;
+    }
+    if (key === "messages") {
+      if (!questionHasMessageIn(question, raw)) return false;
+      continue;
+    }
+    scalar[key] = raw;
+  }
+  return matchesWhere(question, scalar);
+};
+
 const matchesFileRelation = (file: FakeFile, key: string, filter: unknown): boolean => {
   const cond = (filter ?? {}) as Record<string, unknown>;
   if (key === "questions") {
-    const some = (cond.some ?? {}) as { installationId?: string };
-    return [...store.questions.values()].some(
-      (question) =>
-        question.audioId === file.id &&
-        (some.installationId === undefined || question.installationId === some.installationId),
-    );
+    const some = (cond.some ?? {}) as { installationId?: string; messages?: unknown };
+    return [...store.questions.values()].some((question) => {
+      if (question.audioId !== file.id) return false;
+      if (some.messages !== undefined) return questionHasMessageIn(question, some.messages);
+      return some.installationId === undefined || question.installationId === some.installationId;
+    });
   }
   if (key === "message") {
     const where = cond as { installationId?: string; isNot?: unknown };

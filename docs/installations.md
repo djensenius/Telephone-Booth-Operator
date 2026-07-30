@@ -82,6 +82,12 @@ never be dropped over admin bookkeeping. Starting a named installation
 therefore **adopts** an active era that has no activity in it yet, rather than
 failing. An era the booth has actually recorded into still returns `409`.
 
+A recording that was already uploading when the era ended is left alone by the
+close-out and re-filed into the open era when the booth calls
+`POST /v1/messages/{id}/complete` — the same reasoning as a straggler recording
+started after the rollover, and for the same reason: a finished recording must
+not end up in a queue nobody is watching.
+
 Copy-forward skips a prompt the new era already holds — prompts are unique per
 installation, and an adopted era can already contain questions the operator
 wrote before naming it.

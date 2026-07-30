@@ -865,6 +865,51 @@ describe("installations", () => {
     });
   });
 
+  describe("in-flight uploads", () => {
+    // A caller can be midway through sending a recording when the operator ends
+    // the era. Rejecting that row on the way out would strand finished audio in
+    // a terminal state nobody reviews, so the upload survives the rollover and
+    // completes into the era that is now open.
+    it("completes a recording that was in flight when the era ended", async () => {
+      const app = createApp();
+      const sha256 = "e".repeat(64);
+      const initiated = await app.request("/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ durationMs: 3000, sha256 }),
+      });
+      expect(initiated.status, await initiated.clone().text()).toBe(201);
+      const slot = (await initiated.json()) as { id: string; blobName: string };
+      fakeBlobs.set(slot.blobName, {
+        exists: true,
+        sizeBytes: 4242,
+        contentType: "audio/flac",
+        sha256,
+      });
+
+      expect((await endDefault(app)).status).toBe(200);
+      expect(store.messages.get(slot.id)?.status).toBe("uploading");
+
+      const started = await app.request("/v1/installations", {
+        method: "POST",
+        headers: jsonHeaders(adminHeaders()),
+        body: JSON.stringify({ name: "Second era" }),
+      });
+      expect(started.status, await started.clone().text()).toBe(201);
+      const currentEra = ((await started.json()) as { id: string }).id;
+
+      const completed = await app.request(`/v1/messages/${slot.id}/complete`, {
+        method: "POST",
+        headers: phoneHeaders,
+      });
+      expect(completed.status, await completed.clone().text()).toBe(200);
+
+      const landed = store.messages.get(slot.id);
+      expect(landed?.status).toBe("pending");
+      expect(landed?.installationId).toBe(currentEra);
+    });
+  });
+
   describe("scoped export", () => {
     // A file can back several questions once an era copies them forward, so the
     // export filters files through the to-many `questions` relation. Getting
@@ -902,6 +947,58 @@ describe("installations", () => {
       ) as { file?: { id: string }[]; question?: { id: string }[] };
       expect(dump.file?.map((row) => row.id)).toEqual([mine.id]);
       expect(dump.question?.map((row) => row.id)).toEqual(["cccccccc-0000-4000-8000-0000000000a1"]);
+    });
+
+    // A straggler message is filed in the open era while its question stays
+    // with the era that issued it. Leaving that question out would make the
+    // archive fail its own foreign key on restore.
+    it("carries a question its era only reaches through a straggler message", async () => {
+      const app = createApp();
+      const questionAudio = seedFile({
+        id: "ffffffff-0000-4000-8000-0000000000b1",
+        sha256: "c".repeat(64),
+      });
+      const question = seedQuestion({
+        id: "cccccccc-0000-4000-8000-0000000000c1",
+        prompt: "Issued by the old era",
+        audioId: questionAudio.id,
+      });
+      seedBlobData(questionAudio.blobKey, Buffer.from("question"));
+      expect((await endDefault(app)).status).toBe(200);
+
+      const started = await app.request("/v1/installations", {
+        method: "POST",
+        headers: jsonHeaders(adminHeaders()),
+        body: JSON.stringify({ name: "Second era" }),
+      });
+      expect(started.status, await started.clone().text()).toBe(201);
+      const currentEra = ((await started.json()) as { id: string }).id;
+
+      const messageAudio = seedFile({
+        id: "ffffffff-0000-4000-8000-0000000000b2",
+        sha256: "d".repeat(64),
+      });
+      seedBlobData(messageAudio.blobKey, Buffer.from("message"));
+      seedMessage({
+        id: "aaaaaaaa-0000-4000-8000-0000000000c1",
+        status: "pending",
+        questionId: question.id,
+        audioId: messageAudio.id,
+        installationId: currentEra,
+      });
+
+      const res = await app.request(`/v1/installations/${currentEra}/export`, {
+        headers: adminHeaders(),
+      });
+      expect(res.status, await res.clone().text()).toBe(200);
+      const entries = readTar(Buffer.from(await res.arrayBuffer()));
+      const dump = JSON.parse(
+        entries.find((entry) => entry.name === "data.json")?.data.toString("utf8") ?? "{}",
+      ) as { file?: { id: string }[]; question?: { id: string }[] };
+      expect(dump.question?.map((row) => row.id)).toContain(question.id);
+      expect(dump.file?.map((row) => row.id)).toEqual(
+        expect.arrayContaining([questionAudio.id, messageAudio.id]),
+      );
     });
 
     // A scoped archive is handed around (the purge flow offers it as a safety

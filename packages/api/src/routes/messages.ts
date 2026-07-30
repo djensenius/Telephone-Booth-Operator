@@ -256,9 +256,22 @@ messagesRouter.post(
     // Transcription app (see docs/transcription-providers.md), so it must
     // never gate whether an operator can see and decide a message.
     const receivedAt = new Date();
+    // A recording that was in flight when the operator ended an era belongs in
+    // the open one. Its own era's queue was drained and its summary frozen on
+    // the way out, so leaving it there would file a real recording where nobody
+    // is looking — the same reasoning as a straggler recording started after
+    // the rollover.
+    const era = message.installationId
+      ? await db.installation.findUnique({ where: { id: message.installationId } })
+      : null;
+    const refiled = era?.endedAt ? await requireActiveInstallation() : null;
     const { count } = await db.message.updateMany({
       where: { id, status: "uploading" },
-      data: { status: "pending", receivedAt },
+      data: {
+        status: "pending",
+        receivedAt,
+        ...(refiled ? { installationId: refiled } : {}),
+      },
     });
 
     if (count === 0) {

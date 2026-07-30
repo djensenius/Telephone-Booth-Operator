@@ -25,6 +25,11 @@ export interface BoothWebSocketApi {
 
 const BoothWebSocketContext = createContext<BoothWebSocketApi | null>(null);
 
+// Reconnect backoff bounds. Short enough that a server restart costs a few
+// seconds of polling, long enough that a down API is not hammered.
+const RECONNECT_BASE_MS = 1_000;
+const RECONNECT_MAX_MS = 30_000;
+
 export function BoothWebSocketProvider({
   enabled,
   children,
@@ -48,43 +53,76 @@ export function BoothWebSocketProvider({
   useEffect(() => {
     if (!enabled) return undefined;
     if (typeof WebSocket === "undefined") return undefined;
-    const socket = new WebSocket(apiWebSocketUrlFor("/v1/ws/status"));
-    setState("connecting");
-    socket.addEventListener("open", () => {
-      setState("live");
-      boothStatusRef.current.setConnectionStatus("connected");
-      boothStatusRef.current.setLastError(null);
-    });
-    socket.addEventListener("message", (event) => {
-      let raw: unknown;
-      try {
-        raw = JSON.parse(String(event.data));
-      } catch {
-        return;
-      }
-      const envelope = WsEnvelopeSchema.safeParse(raw);
-      if (envelope.success) {
-        // Iterate a snapshot: listeners may unsubscribe themselves during
-        // dispatch (React 19 StrictMode double-invokes cleanups).
-        for (const listener of Array.from(listenersRef.current)) listener(envelope.data);
-        return;
-      }
-      // Back-compat: tolerate the legacy bare-status frame from older API
-      // builds. The op-api PR migrated the wire to a discriminated envelope.
-      const legacy = BoothStatusSchema.safeParse(raw);
-      if (legacy.success) {
-        for (const listener of Array.from(legacyRef.current)) listener(legacy.data);
-      }
-    });
-    socket.addEventListener("error", () => {
-      setState("polling");
-      boothStatusRef.current.setConnectionStatus("disconnected");
-      boothStatusRef.current.setLastError(
-        "Live status socket is busy; polling every five seconds.",
-      );
-    });
-    socket.addEventListener("close", () => setState("polling"));
-    return () => socket.close();
+
+    // The provider lives for the whole authenticated session now, so nothing
+    // remounts it after a server restart or a network blip. Without a retry a
+    // single dropped socket would cost every later envelope, so reconnect with
+    // a bounded backoff for as long as the provider is mounted.
+    let socket: WebSocket;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let attempt = 0;
+    let closed = false;
+
+    const reconnect = (): void => {
+      if (closed || retry !== undefined) return;
+      const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** attempt);
+      attempt += 1;
+      retry = setTimeout(() => {
+        retry = undefined;
+        if (!closed) connect();
+      }, delay);
+    };
+
+    function connect(): void {
+      socket = new WebSocket(apiWebSocketUrlFor("/v1/ws/status"));
+      setState("connecting");
+      socket.addEventListener("open", () => {
+        attempt = 0;
+        setState("live");
+        boothStatusRef.current.setConnectionStatus("connected");
+        boothStatusRef.current.setLastError(null);
+      });
+      socket.addEventListener("message", (event) => {
+        let raw: unknown;
+        try {
+          raw = JSON.parse(String(event.data));
+        } catch {
+          return;
+        }
+        const envelope = WsEnvelopeSchema.safeParse(raw);
+        if (envelope.success) {
+          // Iterate a snapshot: listeners may unsubscribe themselves during
+          // dispatch (React 19 StrictMode double-invokes cleanups).
+          for (const listener of Array.from(listenersRef.current)) listener(envelope.data);
+          return;
+        }
+        // Back-compat: tolerate the legacy bare-status frame from older API
+        // builds. The op-api PR migrated the wire to a discriminated envelope.
+        const legacy = BoothStatusSchema.safeParse(raw);
+        if (legacy.success) {
+          for (const listener of Array.from(legacyRef.current)) listener(legacy.data);
+        }
+      });
+      socket.addEventListener("error", () => {
+        setState("polling");
+        reconnect();
+        boothStatusRef.current.setConnectionStatus("disconnected");
+        boothStatusRef.current.setLastError(
+          "Live status socket is busy; polling every five seconds.",
+        );
+      });
+      socket.addEventListener("close", () => {
+        setState("polling");
+        reconnect();
+      });
+    }
+
+    connect();
+    return () => {
+      closed = true;
+      if (retry !== undefined) clearTimeout(retry);
+      socket.close();
+    };
   }, [enabled]);
 
   const api = useMemo<BoothWebSocketApi>(
