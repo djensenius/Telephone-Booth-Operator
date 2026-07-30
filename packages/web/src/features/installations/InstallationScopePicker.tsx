@@ -22,7 +22,9 @@ function optionLabel(installation: Installation): string {
   const stamp = Number.isNaN(started.getTime())
     ? installation.startedAt
     : started.toLocaleDateString();
-  return `${installation.name} — started ${stamp}`;
+  // The date alone is not enough: two runs of the same name can start on the
+  // same day, so the head of the id is what actually makes the option unique.
+  return `${installation.name} — started ${stamp} (${installation.id.slice(0, 8)})`;
 }
 
 // Shared installation-scope selector used by the observability screens

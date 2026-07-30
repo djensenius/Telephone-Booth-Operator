@@ -2154,6 +2154,20 @@ const matchesWhere = (record: Record<string, unknown>, where: Record<string, unk
     // `installation: { is: { … } }` — the era a row belongs to, resolved
     // through `installationId`. The conditional session update depends on
     // this, so the fake has to model it rather than ignore it.
+    // `questions: { some: { … } }` on an installation — the scoped export uses
+    // it to carry a question a straggler message still points at. Without this
+    // the generic matcher falls through and answers "true" for every row.
+    if (key === "questions" && raw !== null && typeof raw === "object" && "some" in raw) {
+      const some = (raw as { some: Record<string, unknown> }).some;
+      const id = record.id;
+      const ok = [...store.questions.values()].some(
+        (question) =>
+          question.installationId === id &&
+          matchesQuestionWhere(question, some as Record<string, unknown>),
+      );
+      if (!ok) return false;
+      continue;
+    }
     if (key === "installation" && raw !== null && typeof raw === "object" && "is" in raw) {
       const id = record.installationId;
       const era = typeof id === "string" ? store.installations.get(id) : undefined;

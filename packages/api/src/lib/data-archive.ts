@@ -202,8 +202,20 @@ const EXCLUDED_FROM_SCOPED_EXPORT = new Set<ModelName>([
   "metricFilter",
 ]);
 
+// The era being exported, plus any era a carried-over question still belongs
+// to. Without the parent row the archive would reference an installation it
+// does not contain, and the restore would fail that foreign key.
+const installationScopeArgs = (installationId: string): Prisma.InstallationFindManyArgs => ({
+  where: {
+    OR: [
+      { id: installationId },
+      { questions: { some: { messages: { some: { installationId } } } } },
+    ],
+  },
+});
+
 const scopedFindArgs = (name: ModelName, installationId: string): unknown => {
-  if (name === INSTALLATION_MODEL) return { where: { id: installationId } };
+  if (name === INSTALLATION_MODEL) return installationScopeArgs(installationId);
   if (name === "question") return questionScopeArgs(installationId);
   if (SCOPED_MODELS.has(name)) return { where: { installationId } };
   if (name === "transcription") return transcriptionScopeArgs(installationId);

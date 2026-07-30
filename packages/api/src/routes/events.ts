@@ -26,6 +26,7 @@ import { decodeCursor, encodeCursor } from "../lib/cursor.js";
 import { db } from "../lib/db.js";
 import {
   requireActiveInstallation,
+  requireOpenInstallation,
   resolveInstallationScope,
   scopeWhere,
   ROLLOVER_OUTCOME,
@@ -263,6 +264,25 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
   const eraFor = (sessionId: string | null | undefined): string =>
     (sessionId ? sessionEra.get(sessionId)?.installationId : null) ?? installationId;
 
+  // Creating a session is the one place the cached active id must be checked.
+  // A `call_started` that resolved the era just before a rollover committed —
+  // or on a replica whose cache is still a few seconds stale — would otherwise
+  // open a session inside a frozen era, and its later `call_ended` would be
+  // refused as a straggler, leaving it open forever.
+  const eraForNewSession = async (sessionId: string): Promise<string> => {
+    const known = sessionEra.get(sessionId)?.installationId;
+    if (known) return known;
+    if (!endedEras.has(installationId)) {
+      const era = await db.installation.findUnique({
+        where: { id: installationId },
+        select: { endedAt: true },
+      });
+      if (!era?.endedAt) return installationId;
+      endedEras.add(installationId);
+    }
+    return requireOpenInstallation();
+  };
+
   const rows = events.map((event) => ({
     eventId: event.eventId,
     boothId: event.boothId,
@@ -309,8 +329,11 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
       const updated = await tx.callSession.updateMany({
         where: {
           id: init.id,
-          NOT: { outcome: ROLLOVER_OUTCOME },
-          OR: [{ installationId: null }, { installation: { is: { endedAt: null } } }],
+          // Spelled out rather than a bare `NOT`: `outcome` is nullable, and in
+          // SQL `NOT (outcome = '…')` is unknown — not true — for a NULL, which
+          // would exclude every ordinary open session from this update.
+          OR: [{ outcome: null }, { NOT: { outcome: ROLLOVER_OUTCOME } }],
+          AND: [{ OR: [{ installationId: null }, { installation: { is: { endedAt: null } } }] }],
         },
         data: patch,
       });
@@ -334,7 +357,7 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
           recordingId: init.recordingId ?? null,
           durationMs: init.durationMs ?? null,
           version: init.version ?? null,
-          installationId: eraFor(init.id),
+          installationId: await eraForNewSession(init.id),
         },
       });
     }

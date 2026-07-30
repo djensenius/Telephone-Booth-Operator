@@ -114,6 +114,20 @@ export const requireActiveInstallation = async (): Promise<string> => {
   }
 };
 
+// Resolve an installation that is *provably* open right now.
+//
+// `requireActiveInstallation` answers from a per-replica cache with a short
+// TTL, which is the right trade for the hot write path: a row landing in an era
+// that ended microseconds ago is the accepted rollover race. It is the wrong
+// answer when the caller already knows it is dealing with a straggler — filing
+// a re-homed row into an era that has also ended would put it somewhere nobody
+// is looking, and could create a session that can never be closed. Those paths
+// pay for a fresh read instead.
+export const requireOpenInstallation = async (): Promise<string> => {
+  invalidateActiveInstallationCache();
+  return requireActiveInstallation();
+};
+
 // Whether an era has any booth activity recorded against it. An era with none
 // is bookkeeping only: it can be adopted and renamed, or discarded outright.
 export const installationHasActivity = async (installationId: string): Promise<boolean> => {

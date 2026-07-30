@@ -23,6 +23,7 @@ import { wsBroadcaster } from "../lib/broadcaster.js";
 import { db } from "../lib/db.js";
 import {
   requireActiveInstallation,
+  requireOpenInstallation,
   resolveInstallationScope,
   scopeWhere,
 } from "../lib/installation.js";
@@ -264,7 +265,7 @@ messagesRouter.post(
     const era = message.installationId
       ? await db.installation.findUnique({ where: { id: message.installationId } })
       : null;
-    const refiled = era?.endedAt ? await requireActiveInstallation() : null;
+    const refiled = era?.endedAt ? await requireOpenInstallation() : null;
     const { count } = await db.message.updateMany({
       where: { id, status: "uploading" },
       data: {

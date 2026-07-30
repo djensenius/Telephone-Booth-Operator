@@ -987,6 +987,19 @@ describe("installations", () => {
         installationId: currentEra,
       });
 
+      // An unrelated era, to prove the archive carries only what it references.
+      store.installations.set("33333333-3333-4333-8333-333333333333", {
+        id: "33333333-3333-4333-8333-333333333333",
+        name: "Unrelated",
+        notes: null,
+        location: null,
+        startedAt: new Date("2020-01-01T00:00:00.000Z"),
+        endedAt: new Date("2020-01-02T00:00:00.000Z"),
+        endedById: null,
+        summary: null,
+        createdAt: new Date("2020-01-01T00:00:00.000Z"),
+      });
+
       const res = await app.request(`/v1/installations/${currentEra}/export`, {
         headers: adminHeaders(),
       });
@@ -994,8 +1007,17 @@ describe("installations", () => {
       const entries = readTar(Buffer.from(await res.arrayBuffer()));
       const dump = JSON.parse(
         entries.find((entry) => entry.name === "data.json")?.data.toString("utf8") ?? "{}",
-      ) as { file?: { id: string }[]; question?: { id: string }[] };
+      ) as {
+        file?: { id: string }[];
+        question?: { id: string }[];
+        installation?: { id: string }[];
+      };
       expect(dump.question?.map((row) => row.id)).toContain(question.id);
+      // The question's own era travels too, or the archive would reference an
+      // installation it does not contain.
+      expect(dump.installation?.map((row) => row.id).sort()).toEqual(
+        [currentEra, DEFAULT_INSTALLATION_ID].sort(),
+      );
       expect(dump.file?.map((row) => row.id)).toEqual(
         expect.arrayContaining([questionAudio.id, messageAudio.id]),
       );
