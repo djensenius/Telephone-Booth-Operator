@@ -56,9 +56,17 @@ OIDC nonces, or `code_verifier` values.
 ### Client IP
 
 The IP is the TCP peer address unless that peer matches one of the reverse
-proxies in `TRUSTED_PROXIES` (bare addresses or CIDR, IPv4 or IPv6), in which
-case the first `X-Forwarded-For` entry is used instead. A client that can reach
-the API directly therefore cannot forge its own address by sending the header.
+proxies in `TRUSTED_PROXIES` — bare addresses, CIDR, IPv4 or IPv6, plus the
+shorthand `azure-container-apps`, which expands to the private ranges a
+Container Apps ingress connects from. A client that can reach the API directly
+cannot forge its own address by sending the header.
+
+When the peer _is_ a trusted proxy, `X-Forwarded-For` is read **right to
+left**, and the first entry that is not itself a configured proxy wins. This
+matters because nginx's `$proxy_add_x_forwarded_for` appends to whatever the
+caller sent, so the leftmost entry is attacker-controlled. If every entry is a
+known proxy, the socket peer is used.
+
 IPv4-mapped IPv6 addresses (`::ffff:203.0.113.7`) are normalized. The same
 helper backs `OperatorSession.ip`, so sessions and audit rows always agree.
 

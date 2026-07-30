@@ -18,6 +18,25 @@ const csv = (input: string | undefined): string[] =>
 
 export const trustedProxies = (): string[] => csv(process.env.TRUSTED_PROXIES);
 
+// Named shorthands for platforms whose ingress peer address is not knowable in
+// advance. Azure Container Apps fronts the container with an ingress proxy on
+// the environment's internal network, so the peer is always a private address
+// — but which one varies per revision. Expanding the name to the private
+// ranges keeps `docs/azure-deployment.md` working without accepting a public
+// peer's forwarding headers.
+const NAMED_PROXY_RULES: Record<string, readonly string[]> = {
+  "azure-container-apps": [
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "100.64.0.0/10",
+    "127.0.0.0/8",
+    "::1/128",
+    "fc00::/7",
+    "fe80::/10",
+  ],
+};
+
 // `::ffff:203.0.113.7` is an IPv4-mapped IPv6 address; store the plain IPv4
 // form so audit rows and session rows are comparable across transports.
 const normalize = (value: string | null | undefined): string | null => {
@@ -75,6 +94,9 @@ const toBytes = (address: string): Uint8Array | null => {
 // Whether `address` falls inside `rule`, which is either a bare address (exact
 // match) or CIDR notation.
 export const matchesProxyRule = (address: string, rule: string): boolean => {
+  const named = NAMED_PROXY_RULES[rule.toLowerCase()];
+  if (named) return named.some((expanded) => matchesProxyRule(address, expanded));
+
   const [network, prefix] = rule.split("/");
   const ruleBytes = toBytes(network ?? "");
   const addressBytes = toBytes(address);
@@ -120,8 +142,25 @@ export const isTrustedPeer = (peer: string | null): boolean => {
   return trustedProxies().some((rule) => matchesProxyRule(peer, rule));
 };
 
-export const forwardedClientIp = (headers: Headers): string | null =>
-  normalize(headers.get("x-forwarded-for")?.split(",")[0]);
+// The client address from `X-Forwarded-For`, read right to left.
+//
+// Only the entries a trusted proxy appended can be believed, and nginx's
+// `$proxy_add_x_forwarded_for` *appends to* whatever the caller sent — so the
+// leftmost entry is attacker-controlled. Walking from the right and stopping
+// at the first address that is not itself a configured proxy yields the
+// nearest hop we have a reason to trust. Returns null when every entry is a
+// known proxy, leaving the caller to fall back to the socket peer.
+export const forwardedClientIp = (headers: Headers): string | null => {
+  const chain = csv(headers.get("x-forwarded-for") ?? undefined);
+  const proxies = trustedProxies();
+  for (let index = chain.length - 1; index >= 0; index -= 1) {
+    const candidate = normalize(chain[index]);
+    if (!candidate || !toBytes(candidate)) continue;
+    if (proxies.some((rule) => matchesProxyRule(candidate, rule))) continue;
+    return candidate;
+  }
+  return null;
+};
 
 export const clientIp = (c: Context): string | null => {
   const peer = peerAddress(c);
