@@ -66,14 +66,20 @@ Starting an installation therefore adopts an active era with no activity in it
 instead of returning `409`. Only an era the booth has actually recorded into is
 treated as a genuine conflict.
 
-### Accepted: writes are not serialised against the rollover
+### Accepted: two write paths stay unserialised
 
-Ending an era is not locked against booth writes. A write that resolves the
-active era microseconds before the rollover commits will insert afterwards, and
-that row lands in the era that genuinely was current when the booth recorded
-it. Attributing it to an era that had not started yet would be worse, and
-taking a shared lock on every booth write — the path that must never drop a
-recording — is too high a price for a sub-second window on a counter.
+The paths that decide where a _durable, operator-visible_ row lives take the
+era lock described below: booth events and the sessions they open, prompt
+creation, and promoting a finished recording out of `uploading`. Two do not.
+
+A booth status snapshot resolves the active era without a lock. It is a
+sample of a live signal, and one landing on either side of a rollover changes
+nothing an operator acts on.
+
+A recording row created at the start of an upload is likewise unlocked, because
+its era is not settled yet: `POST /v1/messages/{id}/complete` takes the lock and
+files the finished recording into an era that is definitely open. Locking the
+row twice would buy nothing.
 
 What is _not_ accepted is a straggler mutating an era after it was frozen. A
 `call_ended` for a session the rollover already closed does not take the update

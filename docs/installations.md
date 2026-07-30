@@ -5,7 +5,9 @@ and a set of metadata (name, notes, location). It exists so the booth can be
 torn down and set up again without last year's numbers polluting this year's
 stats — and without throwing last year's numbers away.
 
-Exactly one installation is active at a time.
+At most one installation is active at a time — never two. There is briefly
+none between ending an era and the booth's next write, which is normal rather
+than a fault; see [Reading history](#reading-history).
 
 > Why it works this way, and what was rejected:
 > [ADR 0011](adr/0011-installations-as-data-scope.md).

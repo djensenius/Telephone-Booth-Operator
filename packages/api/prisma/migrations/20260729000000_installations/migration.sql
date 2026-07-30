@@ -2,10 +2,13 @@
 -- `installationId` so ending an installation is a scope change rather than a
 -- delete, and past runs stay browsable live.
 --
--- `installationId` is nullable in the column so this migration never rewrites
--- a large existing table; the API always populates it at write time via
--- `requireActiveInstallation()`. The backfill below assigns every pre-existing
--- row to a seeded initial installation.
+-- `installationId` is nullable in the column so adding it is a metadata-only
+-- change rather than a table rewrite, and so the backfill can run at all. The
+-- API always populates it at write time via `requireActiveInstallation()`.
+-- The backfill below does write every pre-existing row, which on a large table
+-- takes a row-exclusive lock and produces WAL proportional to the table size.
+-- Run it during a quiet window, or split it into batches, if these tables have
+-- grown large.
 
 -- CreateTable
 CREATE TABLE "Installation" (
