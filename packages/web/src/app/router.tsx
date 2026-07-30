@@ -2,6 +2,7 @@ import type { JSX } from "react";
 import { Link, Outlet, createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
 import type { RouterHistory } from "@tanstack/react-router";
 import { z } from "zod";
+import { InstallationScopeSchema } from "@telephone-booth-operator/shared";
 import {
   BoothStatusBadge,
   BoothFrame,
@@ -32,6 +33,11 @@ import { useNumericNavigation } from "../hooks/useNumericNavigation.js";
 import { BoothEnvelopeBridge, BoothWebSocketProvider } from "../lib/booth-websocket.js";
 import { DIGIT_ROUTES, isMessageFilter } from "../lib/navigation.js";
 
+// The scope is validated here rather than only in the picker, so a typo'd or
+// tampered `?installationId=` never lingers in router state looking like it
+// applies while every screen quietly ignores it.
+const installationScopeSearch = InstallationScopeSchema.optional().catch(undefined);
+
 // Each field falls back on its own. A stale `status` in a bookmarked URL must
 // not take a valid `installationId` down with it, or the operator silently
 // lands on the active era instead of the run they linked to.
@@ -40,19 +46,19 @@ const messagesSearchSchema = z.object({
     .enum(["all", "needs-review", "approved", "rejected", "uploading"])
     .optional()
     .catch(undefined),
-  installationId: z.string().optional().catch(undefined),
+  installationId: installationScopeSearch,
 });
 
 const statsSearchSchema = z.object({
-  installationId: z.string().optional().catch(undefined),
+  installationId: installationScopeSearch,
 });
 
 const sessionsSearchSchema = z.object({
-  installationId: z.string().optional().catch(undefined),
+  installationId: installationScopeSearch,
 });
 
 const eventsSearchSchema = z.object({
-  installationId: z.string().optional().catch(undefined),
+  installationId: installationScopeSearch,
 });
 
 const loginSearchSchema = z.object({

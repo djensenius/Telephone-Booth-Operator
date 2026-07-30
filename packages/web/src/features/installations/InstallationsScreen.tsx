@@ -144,7 +144,9 @@ function DownloadArchiveButton({
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
-      URL.revokeObjectURL(url);
+      // Safari has not necessarily started fetching the blob by the time the
+      // click handler returns, and revoking under it kills the download.
+      setTimeout(() => URL.revokeObjectURL(url), 0);
       setState({ kind: "done", message: `Downloaded ${filename}` });
     } catch (error) {
       setState({ kind: "error", message: errorMessage(error, "Archive download failed.") });

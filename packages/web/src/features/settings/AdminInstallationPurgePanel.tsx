@@ -87,7 +87,9 @@ export function AdminInstallationPurgePanel(): JSX.Element {
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
-      URL.revokeObjectURL(url);
+      // Safari has not necessarily started fetching the blob by the time the
+      // click handler returns, and revoking under it kills the download.
+      setTimeout(() => URL.revokeObjectURL(url), 0);
       setArchivedIds((prev) => new Set(prev).add(selected.id));
       setStatus({ kind: "archived", message: `Downloaded ${filename}` });
     } catch (error) {
