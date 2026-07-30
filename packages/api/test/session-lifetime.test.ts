@@ -390,6 +390,26 @@ describe("token refresh failures", () => {
     expect(store.sessions.size).toBe(0);
   });
 
+  it("keeps the session when a sibling replica wins the rotation", async () => {
+    // Refresh-token rotation across replicas: another replica spent the same
+    // stored token first, so this one is refused. Its rotated pair lands just
+    // after our immediate reread — the delayed second reread must find it
+    // rather than destroying a session that is about to be healthy.
+    const cookie = await login();
+    expireAccessToken();
+    openidMocks.refreshTokenGrant.mockImplementationOnce(async () => {
+      setTimeout(() => {
+        onlySession().accessTokenExpiresAt = new Date(Date.now() + 300 * 1000);
+      }, 50);
+      throw new FakeResponseBodyError("invalid_grant", 400);
+    });
+
+    const me = await app.request("/v1/auth/me", { headers: { cookie } });
+
+    expect(me.status).toBe(200);
+    expect(store.sessions.size).toBe(1);
+  });
+
   it("does not hammer the provider while it is failing", async () => {
     const cookie = await login();
     expireAccessToken();
