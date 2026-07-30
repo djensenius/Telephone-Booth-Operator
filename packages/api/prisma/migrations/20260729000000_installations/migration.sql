@@ -101,3 +101,33 @@ CREATE UNIQUE INDEX "Question_installationId_audioId_key" ON "Question"("install
 -- question can run in more than one era.
 DROP INDEX "Question_prompt_key";
 CREATE UNIQUE INDEX "Question_installationId_prompt_key" ON "Question"("installationId", "prompt");
+
+-- The migration runs before the new API rolls out, and the previous revision
+-- knows nothing about installations: every row it writes in the meantime would
+-- land with a NULL era and then vanish from the new default-scoped reads. A
+-- trigger stamps those rows with whichever era is open, so a rollout needs no
+-- second backfill and no write is lost in the window. It stays afterwards as a
+-- backstop: the application always supplies the column, and when it does the
+-- trigger does nothing.
+CREATE OR REPLACE FUNCTION "installation_default_scope"() RETURNS trigger AS $$
+BEGIN
+    IF NEW."installationId" IS NULL THEN
+        NEW."installationId" := (
+            SELECT "id" FROM "Installation" WHERE "endedAt" IS NULL
+            ORDER BY "startedAt" DESC LIMIT 1
+        );
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER "Question_installation_default" BEFORE INSERT ON "Question"
+    FOR EACH ROW EXECUTE FUNCTION "installation_default_scope"();
+CREATE TRIGGER "Message_installation_default" BEFORE INSERT ON "Message"
+    FOR EACH ROW EXECUTE FUNCTION "installation_default_scope"();
+CREATE TRIGGER "CallSession_installation_default" BEFORE INSERT ON "CallSession"
+    FOR EACH ROW EXECUTE FUNCTION "installation_default_scope"();
+CREATE TRIGGER "BoothEvent_installation_default" BEFORE INSERT ON "BoothEvent"
+    FOR EACH ROW EXECUTE FUNCTION "installation_default_scope"();
+CREATE TRIGGER "BoothStatusSnapshot_installation_default" BEFORE INSERT ON "BoothStatusSnapshot"
+    FOR EACH ROW EXECUTE FUNCTION "installation_default_scope"();

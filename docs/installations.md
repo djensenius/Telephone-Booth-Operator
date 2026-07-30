@@ -148,6 +148,13 @@ belong to, not with whatever era happens to be open. A `call_ended` that lands
 after the rollover already closed its session leaves that session untouched: a
 frozen era's summary always agrees with its own drill-down.
 
+Every row is stamped with its era by the API, and by a database trigger if the
+API somehow does not: an insert that arrives with no `installationId` — the
+previous release still serving during a rollout, or a hand-written statement —
+is filed into whichever era is open. Without it, writes made in the window
+between running the migration and rolling out the new image would sit outside
+every default-scoped read.
+
 The active era's id is cached for a few seconds on each API replica. A start or
 end invalidates the replica that served it immediately; other replicas pick up
 the change when the cache lapses.

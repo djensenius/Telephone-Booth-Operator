@@ -25,7 +25,7 @@ import { Broadcaster } from "../lib/broadcaster.js";
 import { decodeCursor, encodeCursor } from "../lib/cursor.js";
 import { db } from "../lib/db.js";
 import {
-  lockOpenInstallation,
+  runWithOpenEra,
   requireActiveInstallation,
   resolveInstallationScope,
   scopeWhere,
@@ -290,12 +290,11 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
   // 2. Atomically upsert sessions and insert events in a single transaction.
   //    If either step fails the entire batch is rolled back — no orphan
   //    sessions without source events.
-  const inserted = await db.$transaction(async (tx) => {
-    // Hold the era open for the length of this transaction. If it has ended,
-    // resolve one that has not — a booth write must never fail on bookkeeping,
-    // but it must not land in a frozen era either.
-    const locked = await lockOpenInstallation(tx, installationId);
-    if (!locked) throw new Error("no open installation to record into");
+  // Hold the era open for the length of this transaction. If the cached one has
+  // ended, `runWithOpenEra` resolves — and if the booth is first past the
+  // rollover, opens — another and retries: a booth write must never fail on
+  // bookkeeping, but it must not land in a frozen era either.
+  const inserted = await runWithOpenEra(installationId, async (tx, locked) => {
     eraForNewRows = locked;
 
     // Waiting for that lock takes time, and a concurrent batch can create one

@@ -160,6 +160,15 @@ full table rewrite on a non-empty production database during the migration; the
 backfill then assigns every existing row. Making it `NOT NULL` later is a
 follow-up that costs a lock we did not want to take during a run.
 
+A nullable column that every read filters on has one sharp edge: migrations run
+before the new image rolls out, so the previous release keeps writing rows with
+no era for a few minutes, and those rows would then be invisible to every
+default-scoped read. The migration installs a `BEFORE INSERT` trigger on each
+scoped table that fills a missing `installationId` from whichever era is open.
+It makes the rollout window safe without a second backfill, and it stays as a
+backstop afterwards — when the API supplies the column, which it always does,
+the trigger is a no-op.
+
 ### Deliberately global: `BoothEvent` idempotency
 
 `BoothEvent` keeps its global `@@unique([boothId, eventId])` rather than scoping

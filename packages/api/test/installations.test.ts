@@ -372,6 +372,75 @@ describe("installations", () => {
       expect(event?.installationId).toBe(openId);
     });
 
+    // The gap between ending an era and the next one opening is real: nothing
+    // is active until a booth write arrives. That write has to open the era it
+    // needs rather than fail, even when this replica's cache still names the
+    // era that ended.
+    it("opens an era for a booth batch that arrives with none active", async () => {
+      const app = createApp();
+      expect((await endDefault(app)).status).toBe(200);
+      resetInstallationCacheForTests(DEFAULT_INSTALLATION_ID);
+      expect([...store.installations.values()].filter((row) => row.endedAt === null)).toHaveLength(
+        0,
+      );
+
+      const sessionId = "aaaaaaaa-0000-4000-8000-00000000fee2";
+      const res = await app.request("/v1/events", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({
+          events: [
+            {
+              eventId: "eeeeeeee-0000-4000-8000-00000000fee2",
+              boothId: "booth-1",
+              bootId: "bbbbbbbb-0000-4000-8000-00000000fee2",
+              type: "call_started",
+              occurredAt: "2026-07-29T12:00:00.000Z",
+              sessionId,
+            },
+          ],
+        }),
+      });
+      expect(res.status, await res.clone().text()).toBe(200);
+
+      const opened = [...store.installations.values()].filter((row) => row.endedAt === null);
+      expect(opened).toHaveLength(1);
+      expect(store.callSessions.get(sessionId)?.installationId).toBe(opened[0]?.id);
+    });
+
+    // The same gap, on the other booth write that has an era of its own to
+    // prefer: a recording still uploading when the era ended.
+    it("opens an era for an upload completing with none active", async () => {
+      const app = createApp();
+      const sha256 = "2b".repeat(32);
+      const initiated = await app.request("/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ durationMs: 3000, sha256 }),
+      });
+      const slot = (await initiated.json()) as { id: string; blobName: string };
+      fakeBlobs.set(slot.blobName, {
+        exists: true,
+        sizeBytes: 4242,
+        contentType: "audio/flac",
+        sha256,
+      });
+
+      expect((await endDefault(app)).status).toBe(200);
+      resetInstallationCacheForTests(DEFAULT_INSTALLATION_ID);
+
+      const completed = await app.request(`/v1/messages/${slot.id}/complete`, {
+        method: "POST",
+        headers: phoneHeaders,
+      });
+      expect(completed.status, await completed.clone().text()).toBe(200);
+
+      const opened = [...store.installations.values()].filter((row) => row.endedAt === null);
+      expect(opened).toHaveLength(1);
+      expect(store.messages.get(slot.id)?.installationId).toBe(opened[0]?.id);
+      expect(store.messages.get(slot.id)?.status).toBe("pending");
+    });
+
     // An admin write has no reason to tolerate the rollover race the booth
     // does: a prompt created against an era that has since been closed out
     // would sit live inside a frozen one, invisible to the close-out that

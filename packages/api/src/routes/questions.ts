@@ -10,7 +10,8 @@ import { Prisma } from "../generated/prisma/client.js";
 import { db } from "../lib/db.js";
 import {
   lockInstallationForWrite,
-  lockOpenInstallation,
+  NoOpenEraError,
+  runWithOpenEra,
   requireActiveInstallation,
   resolveInstallationScope,
   scopeWhere,
@@ -39,7 +40,6 @@ const idParamSchema = z.object({ id: z.guid() });
 
 // No era is open and one could not be resolved. Distinct from a conflict: the
 // caller's request was fine, the installation bookkeeping was not.
-class EraUnavailableError extends Error {}
 
 export const questionsRouter = new Hono<{ Variables: AuthVariables & ApiTokenVariables }>();
 
@@ -89,9 +89,7 @@ questionsRouter.post("/", requireAdmin(), zValidator("json", QuestionCreateSchem
     // era on a fresh database, and it must not run while holding a pooled
     // connection of its own.
     const preferredEra = await requireActiveInstallation();
-    const question = await db.$transaction(async (tx) => {
-      const era = await lockOpenInstallation(tx, preferredEra);
-      if (!era) throw new EraUnavailableError();
+    const question = await runWithOpenEra(preferredEra, async (tx, era) => {
       return tx.question.create({
         data: {
           prompt: body.prompt,
@@ -104,7 +102,9 @@ questionsRouter.post("/", requireAdmin(), zValidator("json", QuestionCreateSchem
     });
     return c.json(serializeQuestion(question), 201);
   } catch (err) {
-    if (err instanceof EraUnavailableError) return c.json({ error: "no_open_installation" }, 503);
+    // Every era ending underneath the retry: bookkeeping is in a state the
+    // operator has to resolve, not something to report as a conflict.
+    if (err instanceof NoOpenEraError) return c.json({ error: "no_open_installation" }, 503);
     // Only a genuine uniqueness collision is the caller's problem. Anything
     // else is ours, and reporting it as a conflict would send the operator
     // round a retry loop that cannot succeed.

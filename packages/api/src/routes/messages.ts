@@ -23,9 +23,8 @@ import { wsBroadcaster } from "../lib/broadcaster.js";
 import { db } from "../lib/db.js";
 import {
   lockInstallationForWrite,
-  lockOpenInstallation,
+  runWithOpenEra,
   requireActiveInstallation,
-  requireOpenInstallation,
   resolveInstallationScope,
   scopeWhere,
 } from "../lib/installation.js";
@@ -322,12 +321,10 @@ messagesRouter.post(
     // transaction, so it cannot commit into an era whose close-out is underway
     // but not yet visible — the rollover waits for it, or it waits for the
     // rollover and re-files.
-    // Resolved outside the transaction: a straggler whose era is unknown needs
-    // the lazy open, which must not run while the callback holds a connection.
-    const preferredEra = message.installationId ?? (await requireOpenInstallation());
-    const { count } = await db.$transaction(async (tx) => {
-      const era = await lockOpenInstallation(tx, preferredEra);
-      if (!era) throw new Error("no open installation to complete into");
+    // The recording's own era is only a hint: it may have ended while the
+    // upload was in flight, in which case another is resolved — or opened —
+    // outside the transaction and the promotion retried.
+    const { count } = await runWithOpenEra(message.installationId ?? undefined, async (tx, era) => {
       const refiled = era === message.installationId ? null : era;
       return tx.message.updateMany({
         where: { id, status: "uploading" },

@@ -139,6 +139,13 @@ docker compose -f docker-compose.prod.yml run --rm api \
 For Azure Container Apps, run the same command from a one-off job. See
 [`azure-deployment.md`](azure-deployment.md).
 
+Because migrations run ahead of the new image, the old revision keeps serving
+booth writes for a few minutes against the new schema. The installations
+migration handles that with a database trigger: a row inserted without an
+`installationId` is stamped with whichever era is open, so nothing written
+during a rollout falls outside the default scope and no follow-up backfill is
+needed. See [`installations.md`](installations.md).
+
 ## Secrets management
 
 - `SESSION_SECRET`: rotate annually; rotating logs everyone out (see

@@ -365,6 +365,42 @@ export const lockOpenInstallation = async (
   return null;
 };
 
+export class NoOpenEraError extends Error {
+  constructor() {
+    super("no open installation to write into");
+    this.name = "NoOpenEraError";
+  }
+}
+
+// Run a write inside a transaction that holds an open era for its duration.
+//
+// The candidate era comes from the caller — normally the per-replica cache,
+// which is the right trade for the hot write path. That cache can name an era
+// another replica has just ended, and nothing may have reopened one yet, so a
+// first attempt that finds no open era is retried once against a freshly
+// resolved (and, if the booth is first past the rollover, freshly created)
+// era. Both of those lookups happen outside the transaction: the callback
+// already holds a pooled connection and must not ask for a second.
+export const runWithOpenEra = async <T>(
+  preferred: string | undefined,
+  write: (tx: Prisma.TransactionClient, era: string) => Promise<T>,
+  options?: { timeout?: number; maxWait?: number },
+): Promise<T> => {
+  let candidate = preferred;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await db.$transaction(async (tx) => {
+        const era = await lockOpenInstallation(tx, candidate);
+        if (era === null) throw new NoOpenEraError();
+        return write(tx, era);
+      }, options);
+    } catch (err) {
+      if (attempt > 0 || !(err instanceof NoOpenEraError)) throw err;
+      candidate = await requireOpenInstallation();
+    }
+  }
+};
+
 export const closeOutInstallation = async (
   tx: Prisma.TransactionClient,
   installationId: string,
