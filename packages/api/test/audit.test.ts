@@ -372,6 +372,79 @@ describe("GET /v1/audit-logs", () => {
     throw new Error("cursor never terminated");
   };
 
+  it("matches the action filter as a prefix so families stay together", async () => {
+    const app = createApp();
+    const targetId = "44444444-4444-4444-8444-444444444444";
+    seedAtSameInstant(1, targetId);
+    store.auditLogs.push(
+      {
+        id: "10000000-0000-4000-8000-000000000001",
+        action: "auth.login",
+        targetType: null,
+        targetId: null,
+        actorType: "operator",
+        actorUserId: null,
+        actorTokenId: null,
+        actorLabel: "operator@example.com",
+        ip: null,
+        userAgent: null,
+        method: "GET",
+        path: "/v1/auth/callback",
+        statusCode: 302,
+        metadata: null,
+        createdAt: new Date("2026-07-20T12:00:00.000Z"),
+      },
+      {
+        id: "10000000-0000-4000-8000-000000000002",
+        action: "auth.login.denied",
+        targetType: null,
+        targetId: null,
+        actorType: "anonymous",
+        actorUserId: null,
+        actorTokenId: null,
+        actorLabel: "anonymous",
+        ip: null,
+        userAgent: null,
+        method: "GET",
+        path: "/v1/auth/callback",
+        statusCode: 403,
+        metadata: null,
+        createdAt: new Date("2026-07-20T12:00:00.000Z"),
+      },
+      {
+        id: "10000000-0000-4000-8000-000000000003",
+        action: "auth.logout",
+        targetType: null,
+        targetId: null,
+        actorType: "operator",
+        actorUserId: null,
+        actorTokenId: null,
+        actorLabel: "operator@example.com",
+        ip: null,
+        userAgent: null,
+        method: "POST",
+        path: "/v1/auth/logout",
+        statusCode: 204,
+        metadata: null,
+        createdAt: new Date("2026-07-20T12:00:00.000Z"),
+      },
+    );
+
+    const read = async (action: string): Promise<string[]> => {
+      const response = await app.request(`/v1/audit-logs?action=${encodeURIComponent(action)}`, {
+        headers: { cookie: operatorCookie({ isAdmin: true }) },
+      });
+      expect(response.status).toBe(200);
+      return (await response.json()).items.map((item: { action: string }) => item.action);
+    };
+
+    // A sign-in filter has to include the rejected attempts without also
+    // sweeping up sign-outs.
+    expect((await read("auth.login")).sort()).toEqual(["auth.login", "auth.login.denied"]);
+    expect(await read("message.approve")).toEqual(["message.approve"]);
+    expect((await read("auth.")).length).toBe(3);
+  });
+
   it("pages over rows sharing a timestamp without duplicates or gaps", async () => {
     const app = createApp();
     seedAtSameInstant(5, "22222222-2222-4222-8222-222222222222");

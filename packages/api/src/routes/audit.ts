@@ -34,7 +34,8 @@ const keysetFromCursor = (raw: string): Record<string, unknown>[] | null => {
 };
 
 const listQuerySchema = z.object({
-  // Exact action (`message.approve`) or dotted prefix (`message.`).
+  // Action prefix: `message.` is the whole family, `message.approve` just
+  // approvals, `auth.login` logins including the denied and failed variants.
   action: z.string().min(1).max(128).optional(),
   actorType: AuditActorTypeSchema.optional(),
   actorUserId: z.string().min(1).max(255).optional(),
@@ -54,8 +55,11 @@ auditRouter.get("/", requireAdmin(), zValidator("query", listQuerySchema), async
     c.req.valid("query");
 
   const where: Record<string, unknown> = {};
-  // A trailing dot means "this family of actions"; anything else is exact.
-  if (action) where.action = action.endsWith(".") ? { startsWith: action } : action;
+  // Always a prefix. Action names are hierarchical, so this is what callers
+  // mean: `auth.login` should include `auth.login.denied` without also
+  // dragging in `auth.logout`, which an exact match cannot express and a
+  // trailing-dot-only rule gets wrong.
+  if (action) where.action = { startsWith: action };
   if (actorType) where.actorType = actorType;
   if (actorUserId) where.actorUserId = actorUserId;
   if (targetType) where.targetType = targetType;

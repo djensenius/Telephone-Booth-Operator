@@ -736,7 +736,9 @@ paths:
       parameters:
         - name: action
           in: query
-          description: Exact action, or a dotted prefix such as `message.`.
+          description: >-
+            Action prefix. `message.` matches the whole family, `message.approve`
+            just approvals, `auth.login` also its denied and failed variants.
           schema: { type: string }
         - name: actorType
           in: query

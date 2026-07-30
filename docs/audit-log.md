@@ -86,8 +86,9 @@ GET /v1/audit-logs?action=message.&actorType=operator&limit=50
 GET /v1/audit-logs/targets/message/<id>
 ```
 
-`action` is a prefix match, so `message.` returns the whole family and
-`message.approve` returns just approvals. Both endpoints are newest-first with
+`action` is always a prefix match: `message.` returns the whole family,
+`message.approve` just approvals, and `auth.login` logins including the
+`auth.login.denied` and `auth.login.failed` variants but not `auth.logout`. Both endpoints are newest-first with
 `(createdAt, id)` keyset pagination via `nextCursor`, which stays correct when
 several entries share a timestamp.
 
