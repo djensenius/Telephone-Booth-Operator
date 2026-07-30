@@ -380,17 +380,40 @@ type RefreshResult = { session: SessionUser; accessTokenStale: boolean };
 // outage (or a 429) is not amplified into a refresh storm.
 const REFRESH_BACKOFF_BASE_MS = 15_000;
 const REFRESH_BACKOFF_MAX_MS = 300_000;
+const REFRESH_BACKOFF_MAX_ENTRIES = 1_000;
 const refreshBackoffs = new Map<string, { failures: number; retryAt: number }>();
 
-const noteRefreshFailure = (sessionId: string): void => {
-  const failures = (refreshBackoffs.get(sessionId)?.failures ?? 0) + 1;
-  const delay = Math.min(REFRESH_BACKOFF_BASE_MS * 2 ** (failures - 1), REFRESH_BACKOFF_MAX_MS);
-  if (refreshBackoffs.size >= 1_000) {
-    const now = Date.now();
-    for (const [id, entry] of refreshBackoffs) {
-      if (entry.retryAt <= now) refreshBackoffs.delete(id);
-    }
+// Reclaim lapsed windows before adding a session the map has not seen before.
+// Sweeping alone is not a bound — during a sustained outage every entry can
+// still be live — so if the map is full of live entries, drop the one closest
+// to lapsing. That costs at most one early retry for that session.
+const boundRefreshBackoffs = (): void => {
+  if (refreshBackoffs.size < REFRESH_BACKOFF_MAX_ENTRIES) return;
+
+  const now = Date.now();
+  for (const [id, entry] of refreshBackoffs) {
+    if (entry.retryAt <= now) refreshBackoffs.delete(id);
   }
+
+  while (refreshBackoffs.size >= REFRESH_BACKOFF_MAX_ENTRIES) {
+    let soonest: string | undefined;
+    let soonestRetryAt = Number.POSITIVE_INFINITY;
+    for (const [id, entry] of refreshBackoffs) {
+      if (entry.retryAt < soonestRetryAt) {
+        soonestRetryAt = entry.retryAt;
+        soonest = id;
+      }
+    }
+    if (soonest === undefined) return;
+    refreshBackoffs.delete(soonest);
+  }
+};
+
+const noteRefreshFailure = (sessionId: string): void => {
+  const previous = refreshBackoffs.get(sessionId);
+  const failures = (previous?.failures ?? 0) + 1;
+  const delay = Math.min(REFRESH_BACKOFF_BASE_MS * 2 ** (failures - 1), REFRESH_BACKOFF_MAX_MS);
+  if (!previous) boundRefreshBackoffs();
   refreshBackoffs.set(sessionId, { failures, retryAt: Date.now() + delay });
 };
 
