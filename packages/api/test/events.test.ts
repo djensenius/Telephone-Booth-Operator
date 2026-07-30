@@ -32,6 +32,7 @@ import {
   DEFAULT_INSTALLATION_ID,
   fakeDb,
   resetFakeDb,
+  seedBoothEvent,
   seedCallSession,
   seedInstallation,
   store,
@@ -234,6 +235,38 @@ describe("GET /v1/events", () => {
       nextCursor: string | null;
     };
     expect(secondJson.items).toHaveLength(1);
+  });
+
+  // The cursor's tie-break half only bites when a page boundary lands on rows
+  // whose ids sort against the page above them, which random ids and a busy
+  // clock reach only sometimes. Pinned ids and timestamps make the boundary
+  // deterministic: the newest row sorts lowest by id, so a cursor that lost its
+  // timestamp equality would drag it back onto the second page.
+  it("does not repeat a row when the cursor's id sorts below an earlier page", async () => {
+    const base = Date.parse("2026-05-01T00:00:00.000Z");
+    const seeded = [
+      { id: "aaaaaaaa-0000-4000-8000-000000000001", at: new Date(base + 2000) },
+      { id: "cccccccc-0000-4000-8000-000000000003", at: new Date(base + 1000) },
+      { id: "bbbbbbbb-0000-4000-8000-000000000002", at: new Date(base) },
+    ];
+    for (const row of seeded) {
+      seedBoothEvent({ id: row.id, occurredAt: row.at, receivedAt: row.at });
+    }
+
+    const cookie = operatorCookie();
+    const firstPage = await createApp().request("/v1/events?limit=2", { headers: { cookie } });
+    const firstJson = (await firstPage.json()) as {
+      items: Array<{ id: string }>;
+      nextCursor: string | null;
+    };
+    expect(firstJson.items.map((event) => event.id)).toEqual([seeded[0]!.id, seeded[1]!.id]);
+
+    const secondPage = await createApp().request(
+      `/v1/events?limit=2&cursor=${encodeURIComponent(firstJson.nextCursor!)}`,
+      { headers: { cookie } },
+    );
+    const secondJson = (await secondPage.json()) as { items: Array<{ id: string }> };
+    expect(secondJson.items.map((event) => event.id)).toEqual([seeded[2]!.id]);
   });
 
   // A booth can report a `call_ended` after an admin has already closed the

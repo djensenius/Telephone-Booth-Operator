@@ -2221,6 +2221,19 @@ const matchesWhere = (record: Record<string, unknown>, where: Record<string, unk
       if (value !== undefined) return false;
       continue;
     }
+    // A Date is an object, so without this it fell into the operator branch
+    // below, matched none of the operator keys, and answered "true" for every
+    // row — silently deleting the equality half of a cursor's tie-break.
+    if (raw instanceof Date) {
+      const stamp =
+        value instanceof Date
+          ? value.getTime()
+          : typeof value === "string"
+            ? Date.parse(value)
+            : NaN;
+      if (stamp !== raw.getTime()) return false;
+      continue;
+    }
     if (typeof raw === "object") {
       const filter = raw as Record<string, unknown>;
       if ("in" in filter) {
