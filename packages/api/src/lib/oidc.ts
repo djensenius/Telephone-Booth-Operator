@@ -121,8 +121,35 @@ export const exchangeCode = async (
   return { tokenSet: tokens, claims };
 };
 
-export const refreshTokens = async (refreshToken: string): Promise<TokenSet> =>
-  oidc.refreshTokenGrant(await getOidcClient(), refreshToken);
+// Thrown by `refreshTokens`. `rejected` distinguishes a refresh token the IdP
+// will never accept again from a failure that says nothing about the token
+// itself (provider 5xx, rate limiting, client-auth problems, network faults),
+// where the caller should keep the session and retry rather than forcing a
+// fresh login.
+export class TokenRefreshError extends Error {
+  override name = "TokenRefreshError";
+  readonly rejected: boolean;
+  constructor(message: string, rejected: boolean) {
+    super(message);
+    this.rejected = rejected;
+  }
+}
+
+export const refreshTokens = async (refreshToken: string): Promise<TokenSet> => {
+  try {
+    return await oidc.refreshTokenGrant(await getOidcClient(), refreshToken);
+  } catch (error) {
+    // Only `invalid_grant` is the provider definitively refusing this refresh
+    // token (expired, rotated away, or revoked). Every other outcome — 429
+    // rate limiting, `invalid_client`, provider 5xx, DNS/TLS/network faults —
+    // may succeed on retry, so the session must survive it.
+    const rejected = error instanceof oidc.ResponseBodyError && error.error === "invalid_grant";
+    throw new TokenRefreshError(
+      error instanceof Error ? error.message : "token refresh request failed",
+      rejected,
+    );
+  }
+};
 
 // Thrown by `fetchOperatorUserInfo`. `rejected` distinguishes an active
 // rejection by the IdP (the userinfo endpoint returned 401/403 — i.e. the
