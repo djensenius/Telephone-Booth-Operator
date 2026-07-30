@@ -111,6 +111,7 @@ let lastMessageUrl = "";
 let messageUrls: string[] = [];
 let sessionsUrls: string[] = [];
 let eventsUrls: string[] = [];
+let statsUrls: string[] = [];
 let lastDecision: { decision: string; notes?: string } | null = null;
 let writeTextMock: ReturnType<typeof vi.fn>;
 
@@ -268,6 +269,14 @@ const server = setupServer(
     eventsUrls.push(request.url);
     return HttpResponse.json({ items: [], nextCursor: null });
   }),
+  http.get("http://localhost/v1/stats/overview", ({ request }) => {
+    statsUrls.push(request.url);
+    return HttpResponse.json({ error: "unavailable" }, { status: 503 });
+  }),
+  http.get("http://localhost/v1/stats/summary", () =>
+    HttpResponse.json({ error: "x" }, { status: 503 }),
+  ),
+  http.get("http://localhost/v1/stats/filters", () => HttpResponse.json({ items: [] })),
 );
 
 class MemoryStorage implements Storage {
@@ -354,6 +363,7 @@ beforeEach(() => {
   messageUrls = [];
   sessionsUrls = [];
   eventsUrls = [];
+  statsUrls = [];
   lastDecision = null;
   installBrowserStubs();
   window.localStorage.clear();
@@ -756,6 +766,27 @@ describe("Messages feature", () => {
     await waitFor(() => expect(lastDecision?.decision).toBe("reject"));
   });
 
+  // The detail route has no scope picker, so a row opened from a cross-era
+  // list can belong to a closed installation. Its decision controls would only
+  // earn a 409.
+  it("closes the decision controls on an archived era's message", async () => {
+    server.use(
+      http.get("http://localhost/v1/messages/:id", () =>
+        HttpResponse.json({
+          ...message,
+          installationId: "ee111111-1111-4111-8111-111111111111",
+        }),
+      ),
+    );
+    renderPath(`/messages/${messageId}`);
+    const approve = await screen.findByRole("button", { name: "Approve" });
+    await waitFor(() => expect(approve.hasAttribute("disabled")).toBe(true));
+    expect(screen.getByRole("button", { name: "Reject" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText("Archived era — read-only.")).toBeTruthy();
+    fireEvent.click(approve);
+    expect(lastDecision).toBeNull();
+  });
+
   it("persists the listened toggle", async () => {
     renderPath(`/messages/${messageId}`);
     fireEvent.click(await screen.findByLabelText("Mark as listened"));
@@ -1035,6 +1066,35 @@ describe("Events feature", () => {
     await waitFor(() =>
       expect(details?.querySelector("pre")?.textContent).toContain("gpio read timed out"),
     );
+  });
+});
+
+// The default scope of every stats endpoint changed with installations — no
+// param now means "this run" rather than "everything ever" — so the scope
+// reaching the request is the compatibility guarantee worth pinning down.
+describe("Stats feature", () => {
+  it("passes an installation scope through to the overview fetch", async () => {
+    renderPath(`/stats?installationId=ee111111-1111-4111-8111-111111111111`);
+    await waitFor(() =>
+      expect(
+        statsUrls.some((url) =>
+          url.includes("installationId=ee111111-1111-4111-8111-111111111111"),
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it("preserves the all-installations escape hatch", async () => {
+    renderPath("/stats?installationId=all");
+    await waitFor(() =>
+      expect(statsUrls.some((url) => url.includes("installationId=all"))).toBe(true),
+    );
+  });
+
+  it("asks for the active installation when no scope is given", async () => {
+    renderPath("/stats");
+    await waitFor(() => expect(statsUrls.length).toBeGreaterThan(0));
+    expect(statsUrls.every((url) => !url.includes("installationId="))).toBe(true);
   });
 });
 

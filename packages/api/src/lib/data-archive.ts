@@ -348,6 +348,17 @@ const parseArchive = (
   if (manifest.version > EXPORT_VERSION) {
     throw new ImportFormatError(`archive version ${manifest.version} is newer than supported`);
   }
+  // The manifest is attacker-controlled input like the rest of the tar, so the
+  // optional field is checked rather than trusted: a malformed one must be a
+  // 400 invalid_archive, not a TypeError surfacing as a 500.
+  const partial: unknown = manifest.partialInstallationIds;
+  if (
+    partial !== undefined &&
+    (!Array.isArray(partial) || partial.some((id) => typeof id !== "string"))
+  ) {
+    throw new ImportFormatError("manifest.json partialInstallationIds is not an array of strings");
+  }
+
   const dumpValue = parseJson(dataRaw, "data.json");
   if (typeof dumpValue !== "object" || dumpValue === null) {
     throw new ImportFormatError("data.json is not an object");

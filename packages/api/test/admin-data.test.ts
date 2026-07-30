@@ -188,6 +188,40 @@ describe("admin data export/import", () => {
     expect(restored?.repeatCount).toBe(1);
   });
 
+  // The manifest arrives inside an uploaded tar, so a malformed optional field
+  // has to be an invalid_archive rather than a TypeError surfacing as a 500.
+  it("rejects a manifest whose partialInstallationIds is not a string array", async () => {
+    const app = createApp();
+    const cookie = operatorCookie();
+    const archive = createTar([
+      {
+        name: "manifest.json",
+        data: Buffer.from(
+          JSON.stringify({
+            format: EXPORT_FORMAT,
+            version: 3,
+            generatedAt: "2026-07-29T12:34:56.000Z",
+            container: "audio",
+            counts: {},
+            blobCount: 0,
+            missingBlobs: [],
+            partialInstallationIds: {},
+          }),
+          "utf8",
+        ),
+      },
+      { name: "data.json", data: Buffer.from("{}", "utf8") },
+    ]);
+
+    const res = await app.request("/v1/admin/data/import", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/x-tar" },
+      body: archive,
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe("invalid_archive");
+  });
+
   it("adopts legacy archive rows into one idempotent restored installation", async () => {
     const app = createApp();
     const cookie = operatorCookie();

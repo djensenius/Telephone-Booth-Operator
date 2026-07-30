@@ -34,7 +34,11 @@ export function useScopeIsFrozen(scope: InstallationScope | undefined): boolean 
   const listQuery = useInstallationsList();
   if (scope === undefined || scope === INSTALLATION_SCOPE_ALL) return false;
   const match = (listQuery.data?.items ?? []).find((item) => item.id === scope);
-  return match !== undefined && !match.isActive;
+  // Until the era list answers, an explicit scope is assumed frozen. Messages
+  // can load first, and the alternative is offering a decision on an era that
+  // turns out to be closed, which the API only answers with a 409.
+  if (match === undefined) return true;
+  return !match.isActive;
 }
 
 // Per-row frozen state, for the views that can span eras (`installationId=all`
@@ -43,14 +47,16 @@ export function useScopeIsFrozen(scope: InstallationScope | undefined): boolean 
 // caller asks this instead of assuming the whole page is writable.
 export function useIsInstallationFrozen(): (installationId?: string | null) => boolean {
   const listQuery = useInstallationsList();
-  const endedIds = useMemo(
+  const activeIds = useMemo(
     () =>
-      new Set(
-        (listQuery.data?.items ?? []).filter((item) => !item.isActive).map((item) => item.id),
-      ),
+      new Set((listQuery.data?.items ?? []).filter((item) => item.isActive).map((item) => item.id)),
     [listQuery.data],
   );
-  return (installationId) => typeof installationId === "string" && endedIds.has(installationId);
+  // Phrased against the *active* eras, so a row whose era is not known to be
+  // open — the list is still loading, or failed outright — reads as frozen
+  // rather than as writable. A row with no era at all predates installations
+  // and is left to the page-level scope to judge.
+  return (installationId) => typeof installationId === "string" && !activeIds.has(installationId);
 }
 
 // Shared installation-scope selector used by the observability screens

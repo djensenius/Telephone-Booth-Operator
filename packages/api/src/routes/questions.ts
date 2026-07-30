@@ -11,6 +11,7 @@ import { db } from "../lib/db.js";
 import {
   lockInstallationForWrite,
   lockOpenInstallation,
+  requireActiveInstallation,
   resolveInstallationScope,
   scopeWhere,
 } from "../lib/installation.js";
@@ -84,8 +85,12 @@ questionsRouter.post("/", requireAdmin(), zValidator("json", QuestionCreateSchem
   // the insert makes the two queue instead of overlapping — unlike a booth
   // recording, an admin write has no reason to accept that race.
   try {
+    // Resolved before the transaction: this is the call that lazily opens an
+    // era on a fresh database, and it must not run while holding a pooled
+    // connection of its own.
+    const preferredEra = await requireActiveInstallation();
     const question = await db.$transaction(async (tx) => {
-      const era = await lockOpenInstallation(tx);
+      const era = await lockOpenInstallation(tx, preferredEra);
       if (!era) throw new EraUnavailableError();
       return tx.question.create({
         data: {

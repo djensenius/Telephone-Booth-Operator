@@ -333,16 +333,32 @@ export const lockInstallationExclusively = async (
 export const ERA_LOCK_ATTEMPTS = 3;
 
 // Resolve an era that is open and hold it that way for the rest of `tx`.
-// Returns null only if eras keep ending underneath the caller, which in
-// practice means something is wrong rather than merely busy.
+// Returns null when no era is open, or when eras keep ending underneath the
+// caller — in practice something is wrong rather than merely busy.
+//
+// Every read here goes through `tx`. The callback already holds a pooled
+// connection, so reaching for the global client to re-resolve a candidate
+// would ask the pool for a second one while holding the first: enough
+// concurrent writers arriving just after a rollover would take every
+// connection and then wait on each other. Creating a missing era is left to
+// the caller, outside its transaction, for the same reason.
 export const lockOpenInstallation = async (
   tx: Prisma.TransactionClient,
   preferred?: string,
 ): Promise<string | null> => {
-  let candidate = preferred ?? (await requireActiveInstallation());
-  for (let attempt = 0; attempt < ERA_LOCK_ATTEMPTS; attempt += 1) {
+  const openEra = async (): Promise<string | null> => {
+    const row = await tx.installation.findFirst({
+      where: { endedAt: null },
+      orderBy: { startedAt: "desc" },
+      select: { id: true },
+    });
+    return row?.id ?? null;
+  };
+
+  let candidate = preferred ?? (await openEra());
+  for (let attempt = 0; attempt < ERA_LOCK_ATTEMPTS && candidate !== null; attempt += 1) {
     if (await lockInstallationForWrite(tx, candidate)) return candidate;
-    const next = await requireOpenInstallation();
+    const next = await openEra();
     if (next === candidate) return null;
     candidate = next;
   }

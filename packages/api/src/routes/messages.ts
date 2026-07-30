@@ -25,6 +25,7 @@ import {
   lockInstallationForWrite,
   lockOpenInstallation,
   requireActiveInstallation,
+  requireOpenInstallation,
   resolveInstallationScope,
   scopeWhere,
 } from "../lib/installation.js";
@@ -321,8 +322,11 @@ messagesRouter.post(
     // transaction, so it cannot commit into an era whose close-out is underway
     // but not yet visible — the rollover waits for it, or it waits for the
     // rollover and re-files.
+    // Resolved outside the transaction: a straggler whose era is unknown needs
+    // the lazy open, which must not run while the callback holds a connection.
+    const preferredEra = message.installationId ?? (await requireOpenInstallation());
     const { count } = await db.$transaction(async (tx) => {
-      const era = await lockOpenInstallation(tx, message.installationId ?? undefined);
+      const era = await lockOpenInstallation(tx, preferredEra);
       if (!era) throw new Error("no open installation to complete into");
       const refiled = era === message.installationId ? null : era;
       return tx.message.updateMany({
