@@ -2215,11 +2215,11 @@ components:
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
-        notes: { type: string, nullable: true }
-        location: { type: string, nullable: true }
+        notes: { type: [string, "null"] }
+        location: { type: [string, "null"] }
         startedAt: { type: string, format: date-time }
-        endedAt: { type: string, format: date-time, nullable: true }
-        endedById: { type: string, nullable: true }
+        endedAt: { type: [string, "null"], format: date-time }
+        endedById: { type: [string, "null"] }
         summary:
           oneOf:
             - $ref: "#/components/schemas/InstallationSummary"
@@ -2251,8 +2251,8 @@ components:
         questions: { type: integer, minimum: 0 }
         events: { type: integer, minimum: 0 }
         recordedMs: { type: integer, minimum: 0 }
-        firstActivityAt: { type: string, format: date-time, nullable: true }
-        lastActivityAt: { type: string, format: date-time, nullable: true }
+        firstActivityAt: { type: [string, "null"], format: date-time }
+        lastActivityAt: { type: [string, "null"], format: date-time }
 
     InstallationList:
       type: object
@@ -2267,8 +2267,8 @@ components:
       required: [name]
       properties:
         name: { type: string, minLength: 1, maxLength: 120 }
-        notes: { type: string, maxLength: 2000, nullable: true }
-        location: { type: string, maxLength: 200, nullable: true }
+        notes: { type: [string, "null"], maxLength: 2000 }
+        location: { type: [string, "null"], maxLength: 200 }
         copyQuestions:
           type: boolean
           default: false
@@ -2280,15 +2280,15 @@ components:
       type: object
       properties:
         name: { type: string, minLength: 1, maxLength: 120 }
-        notes: { type: string, maxLength: 2000, nullable: true }
-        location: { type: string, maxLength: 200, nullable: true }
+        notes: { type: [string, "null"], maxLength: 2000 }
+        location: { type: [string, "null"], maxLength: 200 }
 
     InstallationEnd:
       type: object
       description: Optional metadata edits applied while closing the books.
       properties:
-        notes: { type: string, maxLength: 2000, nullable: true }
-        location: { type: string, maxLength: 200, nullable: true }
+        notes: { type: [string, "null"], maxLength: 2000 }
+        location: { type: [string, "null"], maxLength: 200 }
 
     InstallationPurge:
       type: object
