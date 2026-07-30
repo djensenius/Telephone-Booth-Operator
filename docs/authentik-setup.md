@@ -56,9 +56,12 @@ management and export/import are unavailable to everyone.
 | Scopes                     | `openid` `profile` `email` `offline_access`                                                        |
 
 Provider access tokens may stay short-lived; the operator API refreshes them
-without shortening the browser session. Make sure **Refresh token validity** is
-at least as long as the desired operator session lifetime (`SESSION_TTL_SECONDS`,
-12 hours by default). Leave refresh-token rotation enabled.
+without shortening the browser session. **Refresh token validity** is the real
+ceiling on how long operators stay signed in: set it at least as long as the
+desired operator session lifetime (`SESSION_TTL_SECONDS`, 30 days by default),
+otherwise operators are signed out when it lapses no matter how long the local
+session is allowed to live. Authentik's default is `days=30`. Leave
+refresh-token rotation enabled.
 
 Save. Make sure the provider includes a scope mapping that emits a
 `groups` claim in both the ID token and access token. Authentik's default
@@ -157,14 +160,15 @@ so users should also be logged out before rotation.
 
 ## 7. Troubleshooting
 
-| Symptom                                | Likely cause                                                                                        |
-| -------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `invalid_redirect_uri`                 | Missing entry in step 2; redirect must match exactly                                                |
-| `missing groups claim`                 | Provider isn't including the default `profile` group mapping, or the custom mapping isn't attached  |
-| `Operator credentials required` screen | User isn't in `telephone-booth-operators`                                                           |
-| `iat` / clock-skew errors              | Pi/server clocks differ; install `chrony` or `systemd-timesyncd`                                    |
-| Cookies missing in prod                | Operator UI not served over HTTPS; `Secure` cookies are dropped                                     |
-| Operators log out after a few minutes  | `offline_access` is missing, refresh tokens are disabled/too short, or `SESSION_TTL_SECONDS` is low |
+| Symptom                                | Likely cause                                                                                                                                                                 |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invalid_redirect_uri`                 | Missing entry in step 2; redirect must match exactly                                                                                                                         |
+| `missing groups claim`                 | Provider isn't including the default `profile` group mapping, or the custom mapping isn't attached                                                                           |
+| `Operator credentials required` screen | User isn't in `telephone-booth-operators`                                                                                                                                    |
+| `iat` / clock-skew errors              | Pi/server clocks differ; install `chrony` or `systemd-timesyncd`                                                                                                             |
+| Cookies missing in prod                | Operator UI not served over HTTPS; `Secure` cookies are dropped                                                                                                              |
+| Operators log out after a few minutes  | `offline_access` is missing, refresh tokens are disabled/too short, or `SESSION_TTL_SECONDS` is low                                                                          |
+| Operators log out every few hours/days | **Refresh token validity** is shorter than `SESSION_TTL_SECONDS`, or `SESSION_ABSOLUTE_TTL_SECONDS` is being hit; look for `auth_refresh_failed` with `"outcome":"rejected"` |
 
 If you've ruled out the above, set `LOG_LEVEL=debug` in the API container
 and look at the auth callback handler's structured logs.

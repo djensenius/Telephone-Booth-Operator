@@ -121,8 +121,36 @@ export const exchangeCode = async (
   return { tokenSet: tokens, claims };
 };
 
-export const refreshTokens = async (refreshToken: string): Promise<TokenSet> =>
-  oidc.refreshTokenGrant(await getOidcClient(), refreshToken);
+// Thrown by `refreshTokens`. `rejected` distinguishes a refresh token the IdP
+// will never accept again (expired, rotated away, or revoked — an OAuth error
+// response in the 4xx range) from a transient failure (provider 5xx, network
+// fault) where the token is still good and the caller should keep the session
+// and retry rather than forcing a fresh login.
+export class TokenRefreshError extends Error {
+  override name = "TokenRefreshError";
+  readonly rejected: boolean;
+  constructor(message: string, rejected: boolean) {
+    super(message);
+    this.rejected = rejected;
+  }
+}
+
+export const refreshTokens = async (refreshToken: string): Promise<TokenSet> => {
+  try {
+    return await oidc.refreshTokenGrant(await getOidcClient(), refreshToken);
+  } catch (error) {
+    // A 4xx OAuth error body (typically `invalid_grant`) is the provider
+    // definitively refusing this refresh token. Anything else — provider 5xx,
+    // DNS/TLS/network faults, malformed responses — may succeed on retry.
+    const rejected =
+      error instanceof oidc.WWWAuthenticateChallengeError ||
+      (error instanceof oidc.ResponseBodyError && error.status >= 400 && error.status < 500);
+    throw new TokenRefreshError(
+      error instanceof Error ? error.message : "token refresh request failed",
+      rejected,
+    );
+  }
+};
 
 // Thrown by `fetchOperatorUserInfo`. `rejected` distinguishes an active
 // rejection by the IdP (the userinfo endpoint returned 401/403 — i.e. the

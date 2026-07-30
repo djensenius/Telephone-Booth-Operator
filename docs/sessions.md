@@ -12,12 +12,31 @@ successful callback, the API stores an `OperatorSession` row and sends an opaque
   works in modern browsers.
 - `Path=/` and no `Domain`, matching the `__Host-` cookie prefix rules.
 - Expires at the local operator-session lifetime (`SESSION_TTL_SECONDS`, default
-  12 hours), not at the provider's short access-token lifetime.
+  30 days), not at the provider's short access-token lifetime. The expiry slides
+  forward as the session is used — see [Lifetime](#lifetime).
 - HMAC-signed with `SESSION_SECRET`; rotating this secret logs everyone out.
 
 In non-production localhost development, the API also sets a signed
 `booth_session` fallback cookie because some browsers reject `__Host-` cookies
 on plain HTTP. Production only accepts the `__Host-booth_session` cookie.
+
+## Lifetime
+
+`SESSION_TTL_SECONDS` (default 30 days) is an **idle** window, not a fixed
+deadline. Every authenticated request slides `expiresAt` forward and re-sends
+the cookie with the new expiry, so an operator who uses the console regularly is
+never asked to log in again. To keep the cost down, the renewal only happens
+once the session has burned through a tenth of its idle window, capped at one
+renewal per hour.
+
+`SESSION_ABSOLUTE_TTL_SECONDS` (default 90 days) is a hard ceiling measured from
+login that activity cannot extend. Set it to `0` to disable it, which leaves the
+provider's refresh-token validity as the only bound.
+
+Two other things end a session earlier regardless of these values: the provider
+rejecting the refresh token (see below), and the periodic IdP re-check
+(`SESSION_REVALIDATE_SECONDS`) finding the account deleted or removed from the
+operator group.
 
 ## Database model
 
@@ -39,8 +58,21 @@ with a warning; in production, startup refuses to run without it.
 When an access token expires, the operator HTTP middleware uses the encrypted
 refresh token to rotate tokens and updates the session. Parallel requests for
 the same session share one refresh so providers that rotate refresh tokens, such
-as Authentik, do not invalidate the session accidentally. If refresh fails, the
-local session is destroyed and the user must log in again.
+as Authentik, do not invalidate the session accidentally.
+
+A failed refresh is classified before anything is destroyed. A 4xx OAuth error
+from the token endpoint (typically `invalid_grant`) means the refresh token is
+gone for good — expired, rotated away, or revoked — so the local session is
+destroyed and the operator logs in again. A transient failure (provider 5xx,
+network fault) leaves the session and its tokens intact and retries on the next
+request; while the access token is stale the periodic IdP re-check is skipped,
+because calling userinfo with an expired token would look like a revoked
+account.
+
+The practical upper bound on "remember me" is therefore the provider's
+refresh-token validity: if it is shorter than `SESSION_TTL_SECONDS`, operators
+are signed out when it lapses. See
+[Authentik setup](authentik-setup.md).
 
 The status WebSocket validates the local session when the socket connects, but
 it cannot send refreshed cookies during the upgrade. HTTP requests remain the

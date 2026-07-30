@@ -13,6 +13,7 @@ import { db } from "./db.js";
 import {
   fetchOperatorUserInfo,
   refreshTokens,
+  TokenRefreshError,
   UserRevalidationError,
   type TokenSet,
 } from "./oidc.js";
@@ -42,7 +43,7 @@ let warnedCookieSecret = false;
 let generatedEncryptionKey: Buffer | null = null;
 let warnedEncryptionKey = false;
 let cachedEncryptionKey: { raw: string; key: Buffer } | null = null;
-const pendingRefreshes = new Map<string, Promise<SessionUser | null>>();
+const pendingRefreshes = new Map<string, Promise<RefreshResult | null>>();
 
 const warn = (message: string): void => {
   if (process.env.NODE_ENV !== "test") {
@@ -237,8 +238,47 @@ const ttlSecondsFromEnv = (name: string, fallback: number): number => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const sessionExpiresAt = (): Date =>
-  new Date(Date.now() + Math.max(ttlSecondsFromEnv("SESSION_TTL_SECONDS", 43_200), 300) * 1000);
+// Idle window: how long a session survives without being used. Every
+// authenticated request slides it forward, so an operator who visits the
+// console regularly is never asked to log in again.
+const idleTtlSeconds = (): number =>
+  Math.max(ttlSecondsFromEnv("SESSION_TTL_SECONDS", 2_592_000), 300);
+
+// Hard ceiling measured from session creation, regardless of activity. `0`
+// disables it, leaving the IdP's refresh-token validity as the only bound.
+const absoluteTtlSeconds = (): number =>
+  Math.max(ttlSecondsFromEnv("SESSION_ABSOLUTE_TTL_SECONDS", 7_776_000), 0);
+
+const sessionExpiresAt = (createdAt: Date): Date => {
+  const idleDeadline = Date.now() + idleTtlSeconds() * 1000;
+  const absolute = absoluteTtlSeconds();
+  if (absolute === 0) return new Date(idleDeadline);
+  return new Date(Math.min(idleDeadline, createdAt.getTime() + absolute * 1000));
+};
+
+// Sliding the expiry costs a row update and a `Set-Cookie` on the response, so
+// only do it once the session has burned through a slice of its idle window
+// (capped at an hour so short TTLs still slide often enough to be useful).
+const renewalIntervalMs = (): number => Math.min((idleTtlSeconds() * 1000) / 10, 3_600_000);
+
+const extendSessionLifetime = async (c: Context, session: SessionUser): Promise<SessionUser> => {
+  const next = sessionExpiresAt(session.createdAt);
+  if (next.getTime() - session.expiresAt.getTime() < renewalIntervalMs()) return session;
+
+  try {
+    const updated = await db.operatorSession.update({
+      where: { id: session.id },
+      data: { expiresAt: next },
+      include: { user: true },
+    });
+    setSessionCookie(c, updated.id, updated.expiresAt);
+    return updated;
+  } catch {
+    // Losing a renewal is not fatal: the session still has most of its idle
+    // window left and the next request retries.
+    return session;
+  }
+};
 
 const accessTokenExpiresAt = (tokens: TokenInput): Date | null => {
   const ttlSeconds = tokens.expires_in ?? tokens.expiresIn?.();
@@ -260,7 +300,7 @@ export const createSession = async (
       accessToken: encryptSessionSecret(tokens.access_token),
       refreshToken: encryptSessionSecret(tokens.refresh_token),
       accessTokenExpiresAt: accessTokenExpiresAt(tokens),
-      expiresAt: sessionExpiresAt(),
+      expiresAt: sessionExpiresAt(new Date()),
       lastValidatedAt: new Date(),
       ip: requestIp(request),
       userAgent: request.headers.get("user-agent"),
@@ -308,30 +348,33 @@ export const destroySession = async (c: Context): Promise<SessionUser | null> =>
 const unauthorized = (c: Context) =>
   c.json({ error: "unauthenticated", login_url: "/v1/auth/login" }, 401);
 
-const logRefreshFailure = (error: unknown): void => {
+const logRefreshFailure = (error: unknown, outcome: "rejected" | "transient"): void => {
+  const base = {
+    level: outcome === "rejected" ? "info" : "warn",
+    event: "auth_refresh_failed",
+    outcome,
+  };
   const payload =
-    error instanceof Error
-      ? {
-          level: "warn",
-          event: "auth_refresh_failed",
-          error: error.name,
-          message: error.message,
-        }
-      : {
-          level: "warn",
-          event: "auth_refresh_failed",
-          error: "UnknownError",
-        };
+    error instanceof Error ? { ...base, error: error.name, message: error.message } : base;
   console.error(JSON.stringify(payload));
 };
+
+// A session whose access token could not be refreshed because of a transient
+// provider failure. The refresh token is still believed good, so the session
+// survives — but the access token is stale, so it must not be spent on an IdP
+// revalidation call that would read as a rejection.
+type RefreshResult = { session: SessionUser; accessTokenStale: boolean };
+
+const accessTokenIsFresh = (session: Pick<OperatorSession, "accessTokenExpiresAt">): boolean =>
+  !session.accessTokenExpiresAt || session.accessTokenExpiresAt.getTime() > Date.now() + 60_000;
 
 const refreshAccessToken = async (
   session: SessionUser,
   refreshToken: string,
-): Promise<SessionUser | null> => {
+): Promise<RefreshResult | null> => {
   try {
     const tokens = await refreshTokens(refreshToken);
-    return await db.operatorSession.update({
+    const updated = await db.operatorSession.update({
       where: { id: session.id },
       data: {
         accessToken: encryptSessionSecret(tokens.access_token) ?? session.accessToken,
@@ -342,33 +385,38 @@ const refreshAccessToken = async (
       },
       include: { user: true },
     });
+    return { session: updated, accessTokenStale: false };
   } catch (error) {
-    logRefreshFailure(error);
-    const current = await db.operatorSession.findUnique({
-      where: { id: session.id },
-      include: { user: true },
-    });
-    if (
-      current &&
-      !sessionIsExpired(current) &&
-      (!current.accessTokenExpiresAt ||
-        current.accessTokenExpiresAt.getTime() > Date.now() + 60_000)
-    ) {
-      return current;
+    const rejected = error instanceof TokenRefreshError && error.rejected;
+    logRefreshFailure(error, rejected ? "rejected" : "transient");
+
+    // Another request (or another instance) may have rotated the tokens while
+    // this refresh was in flight; if the stored session now looks healthy,
+    // prefer it over our own failure.
+    const current = await db.operatorSession
+      .findUnique({ where: { id: session.id }, include: { user: true } })
+      .catch(() => null);
+    if (current && !sessionIsExpired(current) && accessTokenIsFresh(current)) {
+      return { session: current, accessTokenStale: false };
     }
-    return null;
+
+    // The provider definitively refused the refresh token: it expired, was
+    // rotated away, or was revoked. Nothing short of a fresh login recovers.
+    if (rejected || !current || sessionIsExpired(current)) return null;
+
+    // Transient failure (provider 5xx, network fault). Keep the session and
+    // retry on the next request rather than logging the operator out over a
+    // blip they had nothing to do with.
+    return { session: current, accessTokenStale: true };
   }
 };
 
 const refreshIfAccessTokenExpired = async (
   c: Context,
   session: SessionUser,
-): Promise<SessionUser | null> => {
-  if (
-    !session.accessTokenExpiresAt ||
-    session.accessTokenExpiresAt.getTime() > Date.now() + 60_000
-  ) {
-    return session;
+): Promise<RefreshResult | null> => {
+  if (accessTokenIsFresh(session)) {
+    return { session, accessTokenStale: false };
   }
 
   const refreshToken = decryptSessionSecret(session.refreshToken);
@@ -384,7 +432,7 @@ const refreshIfAccessTokenExpired = async (
 
   const updated = await refresh;
   if (updated) {
-    setSessionCookie(c, updated.id, updated.expiresAt);
+    setSessionCookie(c, updated.session.id, updated.session.expiresAt);
     return updated;
   }
 
@@ -494,7 +542,15 @@ export const readValidSession = async (c: Context): Promise<SessionUser | null> 
   }
   const refreshed = await refreshIfAccessTokenExpired(c, session);
   if (!refreshed) return null;
-  return revalidateSessionAgainstIdp(c, refreshed);
+
+  // With a stale access token the userinfo call would 401 and read as a
+  // revoked account, so skip revalidation until a refresh succeeds.
+  const validated = refreshed.accessTokenStale
+    ? refreshed.session
+    : await revalidateSessionAgainstIdp(c, refreshed.session);
+  if (!validated) return null;
+
+  return extendSessionLifetime(c, validated);
 };
 
 const publicV1Route = (path: string, method: string): boolean => {
