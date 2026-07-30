@@ -5,11 +5,7 @@ import type { JSX } from "react";
 
 import { useMemo, useState } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import {
-  INSTALLATION_SCOPE_ALL,
-  InstallationScopeSchema,
-  STATS_WINDOW_VALUES,
-} from "@telephone-booth-operator/shared";
+import { STATS_WINDOW_VALUES } from "@telephone-booth-operator/shared";
 import type {
   InstallationScope,
   MetricFilter,
@@ -18,9 +14,12 @@ import type {
 } from "@telephone-booth-operator/shared";
 import { GlassPanel } from "../../components/booth/index.js";
 import {
+  InstallationScopePicker,
+  parseInstallationScopeParam,
+} from "../installations/InstallationScopePicker.js";
+import {
   useCreateMetricFilter,
   useDeleteMetricFilter,
-  useInstallationsList,
   useMetricFilters,
   useStatsOverview,
   type StatsRangeSelection,
@@ -615,54 +614,10 @@ function StatsControls({
   );
 }
 
-function InstallationScopePicker({
-  scope,
-  onChange,
-}: {
-  scope: InstallationScope | undefined;
-  onChange: (next: InstallationScope | undefined) => void;
-}): JSX.Element {
-  const listQuery = useInstallationsList();
-  const installations = useMemo(() => {
-    const items = listQuery.data?.items ?? [];
-    return [...items].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
-  }, [listQuery.data]);
-
-  const value = scope ?? "";
-
-  return (
-    <label className="stats-scope-picker">
-      <span>Installation</span>
-      <select
-        value={value}
-        onChange={(event) => {
-          const next = event.currentTarget.value;
-          if (next === "") return onChange(undefined);
-          if (next === INSTALLATION_SCOPE_ALL) return onChange(INSTALLATION_SCOPE_ALL);
-          onChange(next);
-        }}
-      >
-        <option value="">Active installation</option>
-        {installations.map((installation) => (
-          <option key={installation.id} value={installation.id}>
-            {installation.name}
-            {installation.isActive ? " (active)" : ""}
-          </option>
-        ))}
-        <option value={INSTALLATION_SCOPE_ALL}>All installations</option>
-      </select>
-    </label>
-  );
-}
-
 export function StatsScreen(): JSX.Element {
   const search = useSearch({ strict: false });
   const navigate = useNavigate();
-  const scope = useMemo<InstallationScope | undefined>(() => {
-    if (search.installationId === undefined) return undefined;
-    const parsed = InstallationScopeSchema.safeParse(search.installationId);
-    return parsed.success ? parsed.data : undefined;
-  }, [search.installationId]);
+  const scope = parseInstallationScopeParam(search.installationId);
   const [selection, setSelection] = useState<StatsRangeSelection>({
     kind: "preset",
     window: "7d",

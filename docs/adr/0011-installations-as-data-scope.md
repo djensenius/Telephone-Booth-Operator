@@ -124,6 +124,16 @@ failure is reported in the response rather than rolled back — an orphaned blob
 is wasteful but harmless, whereas rolling back an already-committed row delete
 is not possible.
 
+The purge deletes children before the era row, which is not atomic against a
+straggler write. A booth event or recording that lands between a table's delete
+and the parent delete survives with its `installationId` nulled by the
+`ON DELETE SET NULL` foreign key, and its audio is not considered for blob
+cleanup. We accept that: purging is an explicit, name-confirmed admin act on an
+era that ended, so a booth still writing into it is already a misconfiguration,
+and the residue is a handful of unscoped rows rather than a corrupt state.
+Closing the window properly needs writer-side locking on the era, which is a
+cost every call would pay for a case that should not happen.
+
 ## Alternatives considered
 
 - **Delete on reset.** Simplest, and what was originally asked for. Rejected
