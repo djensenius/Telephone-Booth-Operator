@@ -300,6 +300,21 @@ describe("audit log middleware", () => {
     expect(store.auditLogs[0]!.actorType).toBe("anonymous");
   });
 
+  it("names the endpoint a denied write was aimed at", async () => {
+    const app = createApp();
+    const file = seedFile();
+    const message = seedMessage({ audioId: file.id, status: "pending" });
+    const response = await app.request(`/v1/messages/${message.id}/decision`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision: "approve" }),
+    });
+    expect(response.status).toBe(401);
+    // Not `http.post /v1/*`: an action filter has to be able to tell these
+    // attempts apart.
+    expect(store.auditLogs[0]!.action).toBe("http.post /v1/messages/:id/decision");
+  });
+
   it("caps anonymous rejected writes per address and counts the overflow", async () => {
     process.env.AUDIT_LOG_ANON_LIMIT_PER_MINUTE = "3";
     const app = createApp();

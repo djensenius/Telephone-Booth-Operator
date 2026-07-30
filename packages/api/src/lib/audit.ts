@@ -141,7 +141,7 @@ export const sanitizeMetadata = (
     // A cycle or a throwing `toJSON` would otherwise fail the insert.
     return { error: "unserializable_metadata" };
   }
-  if (serialized.length > MAX_METADATA_BYTES) {
+  if (Buffer.byteLength(serialized, "utf8") > MAX_METADATA_BYTES) {
     return {
       error: "metadata_too_large",
       keys: Object.keys(sanitized).slice(0, MAX_METADATA_KEYS),
@@ -395,9 +395,14 @@ const matchedAHandler = (c: Context): boolean =>
   c.req.matchedRoutes.some((route) => !route.path.endsWith("*"));
 
 const routePattern = (c: Context): string => {
+  // When a guard short-circuits, `routePath` is still the middleware's own
+  // pattern, so the handler route is read from the match instead. Without
+  // this a denied write collapses to `http.post /v1/*`, which no action
+  // filter can tell apart.
+  const matched = c.req.matchedRoutes.filter((route) => !route.path.endsWith("*"));
+  const handler = matched[matched.length - 1]?.path;
+  if (handler) return handler;
   const pattern = c.req.routePath;
-  // Unmatched routes report the catch-all pattern; the real path is more
-  // useful there.
   if (isCatchAll(pattern)) return new URL(c.req.url).pathname;
   return pattern;
 };
@@ -427,7 +432,10 @@ export const auditWrites =
       const actor = resolveActor(c, draft);
       const ip = clientIp(c);
       let metadata = draft.metadata;
-      if (actor.actorType === "anonymous" && statusCode >= 400) {
+      // Anything without a persisted actor is a caller the API refused to
+      // recognize, whatever it called itself, so the quota covers all of
+      // them: a token from the issuer must not buy unmetered rows.
+      if (statusCode >= 400 && !actor.actorUserId && !actor.actorTokenId) {
         const suppressed = anonAllowance(ip);
         if (suppressed === null) return;
         if (suppressed > 0) metadata = { ...(metadata ?? {}), suppressedSince: suppressed };

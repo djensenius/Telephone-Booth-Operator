@@ -15,9 +15,9 @@ A caller whose credential verified but who was refused by the allow-list is
 still recorded as an `operator` with the claimed identity and a null user
 foreign key; `anonymous` means no usable credential was presented.
 
-Rejected writes from unauthenticated callers are capped at
-`AUDIT_LOG_ANON_LIMIT_PER_MINUTE` rows per address per minute, so a loop
-against a real endpoint cannot fill the table. Anything over the cap is
+Rejected writes from any caller the API did not recognize — no credential, or
+one it refused — are capped at `AUDIT_LOG_ANON_LIMIT_PER_MINUTE` rows per
+address per minute, so a loop against a real endpoint cannot fill the table. Anything over the cap is
 counted, and the count appears as `suppressedSince` on the next recorded row
 for that address, so a flood is still visible. Sign-in failures are recorded
 by hand rather than by the middleware, and are held to the same cap.
@@ -126,13 +126,13 @@ Other clients read the same endpoint:
 
 ## Configuration
 
-| Variable                           | Default | Meaning                                                                  |
-| ---------------------------------- | ------- | ------------------------------------------------------------------------ |
-| `AUDIT_LOG_ENABLED`                | `true`  | Master switch                                                            |
-| `AUDIT_LOG_TELEMETRY`              | `false` | Include booth heartbeats                                                 |
-| `AUDIT_LOG_RETENTION_DAYS`         | `365`   | Age cutoff; `0` keeps entries forever                                    |
-| `AUDIT_LOG_PRUNE_INTERVAL_SECONDS` | `21600` | Pruner cadence, minimum `300`                                            |
-| `AUDIT_LOG_ANON_LIMIT_PER_MINUTE`  | `20`    | Cap on anonymous rejected writes per address per minute; `0` disables it |
+| Variable                           | Default | Meaning                                                                              |
+| ---------------------------------- | ------- | ------------------------------------------------------------------------------------ |
+| `AUDIT_LOG_ENABLED`                | `true`  | Master switch                                                                        |
+| `AUDIT_LOG_TELEMETRY`              | `false` | Include booth heartbeats                                                             |
+| `AUDIT_LOG_RETENTION_DAYS`         | `365`   | Age cutoff; `0` keeps entries forever                                                |
+| `AUDIT_LOG_PRUNE_INTERVAL_SECONDS` | `21600` | Pruner cadence, minimum `300`                                                        |
+| `AUDIT_LOG_ANON_LIMIT_PER_MINUTE`  | `20`    | Cap on unrecognized callers' rejected writes per address per minute; `0` disables it |
 
 Audit writes never fail a request. If the insert throws, the API logs
 `audit.write_failed` through pino and the original response still goes out.

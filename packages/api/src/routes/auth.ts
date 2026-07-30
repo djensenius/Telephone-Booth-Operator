@@ -74,7 +74,7 @@ const auditAuthEvent = async (
   // The callback is a GET, so `auditWrites()` never sees it and its quota
   // never applies. Apply the same allowance here or probing the endpoint
   // would be an unmetered way to append rows.
-  if (actorType === "anonymous" && entry.statusCode >= 400) {
+  if (entry.statusCode >= 400 && !entry.actorUserId) {
     const suppressed = anonAllowance(ip);
     if (suppressed === null) return;
     if (suppressed > 0) metadata = { ...(metadata ?? {}), suppressedSince: suppressed };
