@@ -34,6 +34,9 @@ CREATE INDEX "AuditLog_targetType_targetId_createdAt_idx" ON "AuditLog"("targetT
 -- CreateIndex
 CREATE INDEX "AuditLog_action_createdAt_idx" ON "AuditLog"("action", "createdAt" DESC);
 
+-- CreateIndex
+CREATE INDEX "AuditLog_ip_createdAt_idx" ON "AuditLog"("ip", "createdAt" DESC);
+
 -- AddForeignKey
 ALTER TABLE "AuditLog" ADD CONSTRAINT "AuditLog_actorUserId_fkey" FOREIGN KEY ("actorUserId") REFERENCES "OperatorUser"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 

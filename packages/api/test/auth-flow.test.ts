@@ -236,6 +236,34 @@ describe("auth flow", () => {
     expect(store.sessions.size).toBe(0);
   });
 
+  it("records a successful sign-in with the operator, session and address", async () => {
+    const login = await app.request("/v1/auth/login");
+    const callback = await app.request(
+      "http://127.0.0.1/v1/auth/callback?code=code-1&state=state-1",
+      { headers: { cookie: loginTxCookieFrom(login) } },
+      { incoming: { socket: { remoteAddress: "203.0.113.9" } } },
+    );
+
+    expect(callback.status).toBe(302);
+    const session = onlySession();
+    const written = fakeDb.auditLog.create.mock.calls.map(
+      ([call]: [{ data: Record<string, unknown> }]) => call.data,
+    );
+    // The callback is a GET, so the write middleware never sees it — this row
+    // exists only because the route writes it by hand.
+    expect(written).toContainEqual(
+      expect.objectContaining({
+        action: "auth.login",
+        actorType: "operator",
+        actorLabel: "operator@example.com",
+        targetType: "session",
+        targetId: session.id,
+        ip: "203.0.113.9",
+        statusCode: 302,
+      }),
+    );
+  });
+
   it("sends logged-out operators back to the web login screen", async () => {
     const logout = await app.request("/v1/auth/logout", { method: "POST" });
 
