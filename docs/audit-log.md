@@ -11,11 +11,16 @@ One `AuditLog` row is written for every `POST`, `PUT`, `PATCH`, or `DELETE`
 request to `/v1`, including requests that were **rejected** — a denied write is
 exactly the sort of thing an audit trail exists to capture.
 
+A caller whose credential verified but who was refused by the allow-list is
+still recorded as an `operator` with the claimed identity and a null user
+foreign key; `anonymous` means no usable credential was presented.
+
 Rejected writes from unauthenticated callers are capped at
 `AUDIT_LOG_ANON_LIMIT_PER_MINUTE` rows per address per minute, so a loop
 against a real endpoint cannot fill the table. Anything over the cap is
 counted, and the count appears as `suppressedSince` on the next recorded row
-for that address, so a flood is still visible.
+for that address, so a flood is still visible. Sign-in failures are recorded
+by hand rather than by the middleware, and are held to the same cap.
 
 Metadata is bounded as well as sanitized: strings are truncated, nesting is
 capped at three levels, objects and arrays are capped in width, and anything

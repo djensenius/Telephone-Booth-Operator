@@ -534,7 +534,9 @@ const authenticateOperator: MiddlewareHandler<{ Variables: AuthVariables }> = as
       // The signature checked out; only the allow-list refused. Name the
       // caller so the denied write is attributable.
       if (result.subject) {
-        recordAudit(c, { actorType: "anonymous", actorLabel: result.subject });
+        // The signature verified, so this is a known identity that the
+        // allow-list refused, not an anonymous caller.
+        recordAudit(c, { actorType: "operator", actorLabel: result.subject });
       }
       return c.json({ error: result.reason }, result.status);
     }

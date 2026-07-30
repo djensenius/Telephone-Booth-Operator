@@ -267,6 +267,17 @@ describe("audit log middleware", () => {
     expect(store.auditLogs).toHaveLength(0);
   });
 
+  it("caps anonymous sign-in failures the same way as anonymous writes", async () => {
+    process.env.AUDIT_LOG_ANON_LIMIT_PER_MINUTE = "2";
+    const app = createApp();
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const response = await app.request("/v1/auth/callback?error=access_denied");
+      expect(response.status).toBe(400);
+    }
+    // The callback is a GET, so the middleware quota never sees it.
+    expect(auditFor("auth.login.failed")).toHaveLength(2);
+  });
+
   it("does not record a sign-out that had no session to end", async () => {
     const app = createApp();
     const response = await app.request("/v1/auth/logout", { method: "POST" });

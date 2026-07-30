@@ -7,6 +7,7 @@ import { OperatorMeSchema } from "@telephone-booth-operator/shared";
 import { z } from "zod";
 import { getAuthConfig } from "../lib/config.js";
 import {
+  anonAllowance,
   auditEnabled,
   recordAudit,
   skipAudit,
@@ -67,30 +68,46 @@ const auditAuthEvent = async (
   },
 ): Promise<void> => {
   if (!auditEnabled()) return;
+  const actorType = entry.actorType ?? "anonymous";
+  const ip = clientIp(c);
+  let metadata = entry.metadata ?? null;
+  // The callback is a GET, so `auditWrites()` never sees it and its quota
+  // never applies. Apply the same allowance here or probing the endpoint
+  // would be an unmetered way to append rows.
+  if (actorType === "anonymous" && entry.statusCode >= 400) {
+    const suppressed = anonAllowance(ip);
+    if (suppressed === null) return;
+    if (suppressed > 0) metadata = { ...(metadata ?? {}), suppressedSince: suppressed };
+  }
   await writeAuditEntry({
     action: entry.action,
     targetType: entry.targetType ?? null,
     targetId: entry.targetId ?? null,
-    actorType: entry.actorType ?? "anonymous",
+    actorType,
     actorUserId: entry.actorUserId ?? null,
     actorLabel: entry.actorLabel,
-    ip: clientIp(c),
+    ip,
     userAgent: c.req.header("user-agent") ?? null,
     method: c.req.method.toUpperCase(),
     path: new URL(c.req.url).pathname,
     statusCode: entry.statusCode,
-    metadata: entry.metadata ?? null,
+    metadata,
   });
 };
 
 // Every way a callback can fail is still a sign-in attempt, and an attacker
 // probing the endpoint is exactly what the trail should show. `reason` is a
 // fixed classification, never provider text.
-const auditLoginFailed = async (c: Context, reason: string, label?: string): Promise<void> => {
+const auditLoginFailed = async (
+  c: Context,
+  reason: string,
+  options: { label?: string; statusCode?: number; actorType?: AuditActorType } = {},
+): Promise<void> => {
   await auditAuthEvent(c, {
     action: "auth.login.failed",
-    statusCode: 400,
-    actorLabel: label ?? "unknown",
+    statusCode: options.statusCode ?? 400,
+    ...(options.actorType ? { actorType: options.actorType } : {}),
+    actorLabel: options.label ?? "unknown",
     metadata: { reason },
   });
 };
@@ -385,6 +402,9 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
         await auditAuthEvent(c, {
           action: "auth.login.denied",
           statusCode: 403,
+          // Identified by verified claims, just not allowed in. `anonymous`
+          // is reserved for callers with no usable credential.
+          actorType: "operator",
           actorLabel: claimLabel(claims),
           metadata: { reason: result.reason },
         });
@@ -393,6 +413,7 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
       await auditAuthEvent(c, {
         action: "auth.login.failed",
         statusCode: 400,
+        actorType: "operator",
         actorLabel: claimLabel(claims),
         metadata: { reason: result.reason },
       });
@@ -425,7 +446,12 @@ authRoutes.get("/callback", zValidator("query", callbackQuerySchema), async (c) 
     // that the session could not be established rather than blaming the
     // exchange.
     logAuthCallbackError(error);
-    await auditLoginFailed(c, "session_setup_failed", claimLabel(claims));
+    await auditLoginFailed(c, "session_setup_failed", {
+      label: claimLabel(claims),
+      statusCode: 500,
+      // The claims verified, so this is a known operator, not a stranger.
+      actorType: "operator",
+    });
     return htmlResponse(c, "OIDC login failed", "The login could not be completed.", 500);
   }
 });

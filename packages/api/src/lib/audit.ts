@@ -181,9 +181,10 @@ const dropExpired = (now: number): void => {
 
 /**
  * Returns null when the row should be dropped, otherwise the number of rows
- * suppressed for this address since it was last recorded.
+ * suppressed for this address since it was last recorded. Exported so the
+ * hand-written auth events are bounded the same way the middleware is.
  */
-const anonAllowance = (ip: string | null): number | null => {
+export const anonAllowance = (ip: string | null): number | null => {
   const quota = anonQuota();
   if (quota === 0) return 0;
   const key = ip ?? "unknown";
