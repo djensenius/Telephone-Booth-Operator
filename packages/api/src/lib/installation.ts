@@ -275,6 +275,11 @@ export const computeInstallationSummary = async (
 // `CallSession.outcome` written to sessions the booth never ended itself.
 export const ROLLOVER_OUTCOME = "installation_ended";
 
+// Stamped on messages the close-out drains from the queue. It is bookkeeping
+// rather than a moderation decision, and naming it lets a straggler re-filed
+// into the open era tell the two apart and restore its queue state.
+export const ROLLOVER_MESSAGE_NOTE = "Closed out when the installation ended.";
+
 // Bring an era to a consistent terminal state: no session left open, no message
 // left in the moderation queue, no question left live, and the counters frozen.
 //
@@ -306,7 +311,7 @@ export const closeOutInstallation = async (
     where: { installationId, status: { in: ["received", "pending"] } },
     data: {
       status: "rejected",
-      notes: "Closed out when the installation ended.",
+      notes: ROLLOVER_MESSAGE_NOTE,
       decidedAt: endedAt,
     },
   });

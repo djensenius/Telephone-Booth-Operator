@@ -32,21 +32,27 @@ import { useNumericNavigation } from "../hooks/useNumericNavigation.js";
 import { BoothWebSocketProvider, InstallationRolloverBridge } from "../lib/booth-websocket.js";
 import { DIGIT_ROUTES, isMessageFilter } from "../lib/navigation.js";
 
+// Each field falls back on its own. A stale `status` in a bookmarked URL must
+// not take a valid `installationId` down with it, or the operator silently
+// lands on the active era instead of the run they linked to.
 const messagesSearchSchema = z.object({
-  status: z.enum(["all", "needs-review", "approved", "rejected", "uploading"]).optional(),
-  installationId: z.string().optional(),
+  status: z
+    .enum(["all", "needs-review", "approved", "rejected", "uploading"])
+    .optional()
+    .catch(undefined),
+  installationId: z.string().optional().catch(undefined),
 });
 
 const statsSearchSchema = z.object({
-  installationId: z.string().optional(),
+  installationId: z.string().optional().catch(undefined),
 });
 
 const sessionsSearchSchema = z.object({
-  installationId: z.string().optional(),
+  installationId: z.string().optional().catch(undefined),
 });
 
 const eventsSearchSchema = z.object({
-  installationId: z.string().optional(),
+  installationId: z.string().optional().catch(undefined),
 });
 
 const loginSearchSchema = z.object({
@@ -180,9 +186,12 @@ const messagesRoute = createRoute({
   validateSearch: (search: Record<string, unknown>) => {
     const parsed = messagesSearchSchema.safeParse(search);
     if (parsed.success) return parsed.data;
-    const fallback: { status?: "all" | "needs-review" | "approved" | "rejected" | "uploading" } =
-      isMessageFilter(search.status) ? { status: search.status } : {};
-    return fallback;
+    return {
+      ...(isMessageFilter(search.status) ? { status: search.status } : {}),
+      ...(typeof search.installationId === "string"
+        ? { installationId: search.installationId }
+        : {}),
+    };
   },
   component: () => protectedScreen(<MessagesScreen />),
 });

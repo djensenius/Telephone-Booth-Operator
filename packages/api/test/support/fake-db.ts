@@ -769,6 +769,10 @@ export const fakeDb = {
         return [...store.files.values()].find((file) => file.blobKey === where.blobKey) ?? null;
       return null;
     },
+    // The purge re-checks each blob key immediately before deleting the blob,
+    // so a file recreated by a concurrent upload keeps its audio.
+    findFirst: async ({ where = {} }: { where?: Record<string, unknown> } = {}) =>
+      [...store.files.values()].find((file) => matchesFileWhere(file, where)) ?? null,
     create: async ({ data }: { data: Partial<FakeFile> & Omit<FakeFile, "id" | "createdAt"> }) => {
       const file = fileFromData(data);
       assertFileUnique(file);
@@ -2142,6 +2146,14 @@ const matchesWhere = (record: Record<string, unknown>, where: Record<string, unk
   for (const [key, raw] of Object.entries(where)) {
     if (key === "OR" && Array.isArray(raw)) {
       const ok = raw.some((branch) => matchesWhere(record, branch as Record<string, unknown>));
+      if (!ok) return false;
+      continue;
+    }
+    // `AND: [ … ]` — every branch must match. Without this the generic
+    // fall-through below answers "true", which quietly disables whichever
+    // predicate the caller put there.
+    if (key === "AND" && Array.isArray(raw)) {
+      const ok = raw.every((branch) => matchesWhere(record, branch as Record<string, unknown>));
       if (!ok) return false;
       continue;
     }

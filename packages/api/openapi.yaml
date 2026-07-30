@@ -121,9 +121,10 @@ paths:
           in: query
           description: |
             Comma-separated question ids (max 200). When present this is the
-            whole filter: the named questions are returned regardless of
-            installation scope or status, so a caller can resolve the prompts
-            of messages it is already showing.
+            whole filter: every named question is returned regardless of
+            installation scope, status, `limit` or `cursor`, so a caller can
+            resolve the prompts of messages it is already showing in one call.
+            `nextCursor` is always null for such a request.
           schema: { type: string }
         - name: installationId
           in: query

@@ -446,6 +446,7 @@ const purgeOrphanFiles = async (
   const blobsRetained = owned.length - deleted.length;
 
   let blobsDeleted = 0;
+  let blobsResurrected = 0;
   const blobFailures: string[] = [];
 
   // Blob deletion runs after the database transaction has committed. A partial
@@ -460,6 +461,15 @@ const purgeOrphanFiles = async (
     for (let next = queue.pop(); next !== undefined; next = queue.pop()) {
       const { blobKey } = next;
       try {
+        // Recordings are content-addressed, so a booth upload after the row
+        // above was deleted can recreate the same file and blob key while this
+        // pool is still working through the queue. Re-check immediately before
+        // each delete and leave a resurrected blob alone: deleting it would
+        // take the audio out from under a live message.
+        if (await db.file.findFirst({ where: { blobKey }, select: { id: true } })) {
+          blobsResurrected += 1;
+          continue;
+        }
         // `deleteBlob` reports false when the blob was already gone. Counting
         // that as a deletion would overstate what the purge actually removed.
         if (await deleteBlob(blobKey)) blobsDeleted += 1;
@@ -473,5 +483,5 @@ const purgeOrphanFiles = async (
     Array.from({ length: Math.min(PURGE_BLOB_CONCURRENCY, queue.length) }, () => worker()),
   );
 
-  return { blobsDeleted, blobsRetained, blobFailures };
+  return { blobsDeleted, blobsRetained: blobsRetained + blobsResurrected, blobFailures };
 };

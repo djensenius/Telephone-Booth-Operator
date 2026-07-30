@@ -25,6 +25,7 @@ import {
   requireActiveInstallation,
   requireOpenInstallation,
   resolveInstallationScope,
+  ROLLOVER_MESSAGE_NOTE,
   scopeWhere,
 } from "../lib/installation.js";
 import { countMessagesAwaitingModeration } from "../lib/moderation-badge.js";
@@ -327,6 +328,15 @@ messagesRouter.post(
       await db.message.updateMany({
         where: { id, installationId: landed },
         data: { installationId: open },
+      });
+      // The close-out drains its era's queue, so a rollover landing in that
+      // window will have rejected this recording on its way past. That is
+      // bookkeeping, not a decision, and the recording did arrive — restore it
+      // to the queue as it moves. An operator's own verdict in the same window
+      // names itself differently and is left alone.
+      await db.message.updateMany({
+        where: { id, status: "rejected", notes: ROLLOVER_MESSAGE_NOTE },
+        data: { status: "pending", notes: null, decidedAt: null, receivedAt },
       });
       refiled = open;
     }

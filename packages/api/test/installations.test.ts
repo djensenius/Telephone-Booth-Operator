@@ -36,10 +36,12 @@ import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { fakeBlobs, resetFakeAzure, seedBlobData } from "./support/fake-azure.js";
 import {
   DEFAULT_INSTALLATION_ID,
+  fakeDb,
   resetFakeDb,
   seedBoothEvent,
   seedCallSession,
   seedFile,
+  seedInstallation,
   seedMessage,
   seedMobileDevice,
   seedQuestion,
@@ -494,6 +496,29 @@ describe("installations", () => {
       expect(res.status, await res.clone().text()).toBe(200);
       const items = ((await res.json()) as { items: { id: string; prompt: string }[] }).items;
       expect(items.map((row) => row.prompt).sort()).toEqual(["New era prompt", "Old era prompt"]);
+    });
+
+    // An id list is not a page. A caller naming more questions than the default
+    // limit is resolving prompts it is already showing, so silently truncating
+    // the tail would leave those messages captionless.
+    it("returns every named question past the default page size", async () => {
+      const app = createApp();
+      const ids = Array.from({ length: 60 }, (_, index) => {
+        const question = seedQuestion({
+          status: "active",
+          prompt: `Prompt ${index}`,
+          audioId: seedFile({ sha256: `id-${index}` }).id,
+        });
+        return question.id;
+      });
+
+      const res = await app.request(`/v1/questions?ids=${ids.join(",")}`, {
+        headers: operatorHeaders(),
+      });
+      expect(res.status, await res.clone().text()).toBe(200);
+      const body = (await res.json()) as { items: unknown[]; nextCursor: string | null };
+      expect(body.items).toHaveLength(60);
+      expect(body.nextCursor).toBeNull();
     });
 
     it("rejects an id list that is not a list of uuids", async () => {
@@ -981,6 +1006,57 @@ describe("installations", () => {
       const landed = store.messages.get(slot.id);
       expect(landed?.status).toBe("pending");
       expect(landed?.installationId).toBe(currentEra);
+    });
+
+    // The nastier ordering: the rollover commits *after* the recording is
+    // promoted, so the close-out drains it out of the queue as a rejection. It
+    // is a finished recording nobody decided on, so re-filing restores it.
+    it("restores a recording the rollover rejected as it landed", async () => {
+      const app = createApp();
+      const sha256 = "f".repeat(64);
+      const initiated = await app.request("/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ durationMs: 3000, sha256 }),
+      });
+      const slot = (await initiated.json()) as { id: string; blobName: string };
+      fakeBlobs.set(slot.blobName, {
+        exists: true,
+        sizeBytes: 4242,
+        contentType: "audio/flac",
+        sha256,
+      });
+
+      // Stand in for a rollover that commits between the promotion and the
+      // recheck: the era still reads as open when `/complete` looks, and is
+      // closed out — rejection and all — immediately after the promotion lands.
+      const promote = fakeDb.message.updateMany;
+      let raced = false;
+      vi.spyOn(fakeDb.message, "updateMany").mockImplementation(async (args) => {
+        const result = await promote(args);
+        if (!raced) {
+          raced = true;
+          store.installations.get(DEFAULT_INSTALLATION_ID)!.endedAt = new Date();
+          const row = store.messages.get(slot.id)!;
+          row.status = "rejected";
+          row.notes = "Closed out when the installation ended.";
+          row.decidedAt = new Date();
+          seedInstallation({ id: "aaaaaaaa-0000-4000-8000-0000000000e2", name: "Second era" });
+        }
+        return result;
+      });
+
+      const completed = await app.request(`/v1/messages/${slot.id}/complete`, {
+        method: "POST",
+        headers: phoneHeaders,
+      });
+      expect(completed.status, await completed.clone().text()).toBe(200);
+      vi.restoreAllMocks();
+
+      const landed = store.messages.get(slot.id);
+      expect(landed?.status).toBe("pending");
+      expect(landed?.notes).toBeNull();
+      expect(landed?.installationId).toBe("aaaaaaaa-0000-4000-8000-0000000000e2");
     });
   });
 

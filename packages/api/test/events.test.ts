@@ -30,6 +30,7 @@ import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { resetFakeAzure } from "./support/fake-azure.js";
 import {
   DEFAULT_INSTALLATION_ID,
+  fakeDb,
   resetFakeDb,
   seedCallSession,
   seedInstallation,
@@ -294,14 +295,25 @@ describe("GET /v1/events", () => {
     expect(after.durationMs).toBe(1000);
   });
 
+  // The pre-flight read that decides whether a session is frozen happens before
+  // the transaction writes, so a rollover committing in between would slip past
+  // it. The update is therefore also conditional in the database on the era
+  // still being open. Standing in for that window: the era is closed in the
+  // store, but the pre-flight lookup is made to report it as open.
   it("refuses a straggler whose era closed after the frozen check", async () => {
+    const nextEra = "22222222-2222-4222-8222-22222222000a";
+    seedInstallation({ id: nextEra });
+    store.installations.get(DEFAULT_INSTALLATION_ID)!.endedAt = new Date("2026-01-01T00:00:00Z");
     const stale = seedCallSession({
       id: "11111111-1111-4111-8111-11111111000a",
       bootId: "33333333-3333-4333-8333-33333333000a",
-      // Still looks open to the pre-flight read: no endedAt, era not closed.
-      outcome: "installation_ended",
+      // An ordinary open session: nothing about the row itself says frozen, so
+      // only the era predicate can refuse this write.
+      endedAt: null,
+      outcome: null,
       installationId: DEFAULT_INSTALLATION_ID,
     });
+    vi.spyOn(fakeDb.installation, "findMany").mockImplementationOnce(async () => []);
 
     const res = await createApp().request("/v1/events", {
       method: "POST",
@@ -323,7 +335,8 @@ describe("GET /v1/events", () => {
 
     expect(res.status, await res.clone().text()).toBe(200);
     const after = store.callSessions.get(stale.id)!;
-    expect(after.outcome).toBe("installation_ended");
+    expect(after.outcome).toBeNull();
+    expect(after.endedAt).toBeNull();
     expect(after.durationMs).toBeNull();
   });
 });

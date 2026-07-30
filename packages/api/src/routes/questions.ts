@@ -78,13 +78,19 @@ questionsRouter.get("/", zValidator("query", listQuerySchema), async (c) => {
         ...scopeWhere(await resolveInstallationScope(installationId)),
         ...(status === "any" ? {} : status ? { status } : { status: { not: "archived" as const } }),
       };
+  // An id list is already bounded by the schema at 200, and a caller resolving
+  // named rows cannot page: it asked for these questions, not for a window over
+  // them. Paginating here would silently drop the tail of a long list.
+  const page = ids
+    ? { take: ids.length }
+    : { take: limit + 1, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) };
   const questions = await db.question.findMany({
     where,
     include: { audio: true },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    take: limit + 1,
-    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    ...page,
   });
+  if (ids) return c.json({ items: questions.map(serializeQuestion), nextCursor: null });
   const items = questions.slice(0, limit).map(serializeQuestion);
   const next = questions.length > limit ? questions[limit]?.id : null;
   return c.json({ items, nextCursor: next ?? null });
