@@ -123,7 +123,15 @@ const start = (): void => {
     if (stopping) return;
     stopping = true;
     void statusWebSocket.close().finally(() => {
-      server.close();
+      const forceClose = setTimeout(() => {
+        if ("closeAllConnections" in server && typeof server.closeAllConnections === "function") {
+          server.closeAllConnections();
+        }
+      }, 10_000);
+      forceClose.unref();
+      server.close(() => {
+        clearTimeout(forceClose);
+      });
     });
   };
   process.once("SIGTERM", shutdown);
