@@ -141,8 +141,14 @@ const replayOutstandingWork = (ws: LiveSocket): void => {
   })();
 };
 
-export const attachStatusWebSocket = (server: ServerType): void => {
+export interface StatusWebSocketHandle {
+  close(): Promise<void>;
+}
+
+export const attachStatusWebSocket = (server: ServerType): StatusWebSocketHandle => {
   const wss = new WebSocketServer({ noServer: true });
+  let closePromise: Promise<void> | null = null;
+  let closing = false;
   const heartbeat = setInterval(() => {
     for (const ws of wss.clients as Set<LiveSocket>) {
       if (ws.isAlive === false) {
@@ -156,6 +162,10 @@ export const attachStatusWebSocket = (server: ServerType): void => {
   heartbeat.unref();
 
   wss.on("connection", (ws: LiveSocket, _request: IncomingMessage, kind?: SubscriberKind) => {
+    if (closing || ws.readyState !== WebSocket.OPEN) {
+      ws.terminate();
+      return;
+    }
     ws.isAlive = true;
     ws.clientId = randomUUID();
     if (kind) ws.subscriberKind = kind;
@@ -170,12 +180,16 @@ export const attachStatusWebSocket = (server: ServerType): void => {
     });
   });
 
-  server.on("upgrade", (request: IncomingMessage, socket: Duplex, head: Buffer) => {
+  const handleUpgrade = (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
     if (!isStatusWsPath(request)) return;
 
     wss.handleUpgrade(request, socket, head, (ws) => {
       void (async () => {
         const kind = await authorizeStatusUpgrade(request);
+        if (closing || ws.readyState !== WebSocket.OPEN) {
+          ws.terminate();
+          return;
+        }
         if (!kind) {
           closePolicyViolation(ws);
           return;
@@ -186,10 +200,22 @@ export const attachStatusWebSocket = (server: ServerType): void => {
         if (kind === "worker") setImmediate(() => replayOutstandingWork(liveSocket));
       })();
     });
-  });
+  };
+  server.on("upgrade", handleUpgrade);
 
-  server.on("close", () => {
+  const close = (): Promise<void> => {
+    if (closePromise) return closePromise;
+    closing = true;
     clearInterval(heartbeat);
-    wss.close();
+    server.off("upgrade", handleUpgrade);
+    for (const ws of wss.clients) ws.terminate();
+    closePromise = new Promise<void>((resolve) => {
+      wss.close(() => resolve());
+    });
+    return closePromise;
+  };
+  server.once("close", () => {
+    void close();
   });
+  return { close };
 };

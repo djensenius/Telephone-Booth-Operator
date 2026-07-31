@@ -133,6 +133,29 @@ const seedOutstandingTranslationWork = async (): Promise<string> => {
 describe("status websocket", () => {
   beforeEach(setup);
 
+  it("closes active sockets during graceful shutdown", async () => {
+    const app = createApp();
+    const server = serve({ fetch: app.fetch, port: 0 });
+    const statusWebSocket = attachStatusWebSocket(server);
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("missing test server address");
+
+    const ws = new WebSocket(`ws://127.0.0.1:${address.port}/v1/ws/status`, {
+      headers: { cookie: operatorCookie() },
+    });
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", resolve);
+      ws.once("error", reject);
+    });
+    const closed = new Promise<void>((resolve) => {
+      ws.once("close", () => resolve());
+    });
+
+    await statusWebSocket.close();
+    await closed;
+    await closeServer(server);
+  });
+
   it("closes missing-cookie clients with 1008", async () => {
     const app = createApp();
     const server = serve({ fetch: app.fetch, port: 0 });

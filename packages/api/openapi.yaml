@@ -1617,10 +1617,10 @@ paths:
     put:
       summary: Push the latest live system snapshot from a booth.
       description: |
-        Booth → API. The operator caches the snapshot in-memory per booth
+        Booth → API. The operator upserts one current snapshot per booth
         and broadcasts a `{kind:"system",...}` envelope on the status WS.
-        Historical metrics are owned by VictoriaMetrics (scraped via vmagent),
-        so this endpoint does **not** persist to Postgres.
+        Historical metrics remain owned by VictoriaMetrics (scraped via
+        vmagent); Postgres stores only the latest snapshot.
       tags: [system]
       security:
         - apiToken: []
@@ -1643,11 +1643,12 @@ paths:
 
   /v1/system/current:
     get:
-      summary: Get the latest cached system snapshot for one or all booths.
+      summary: Get the latest persisted system snapshot for one or all booths.
       tags: [system]
       security:
         - operatorSession: []
         - operatorBearer: []
+        - apiToken: []
       parameters:
         - name: boothId
           in: query
@@ -1655,7 +1656,7 @@ paths:
       responses:
         "200":
           description: snapshot or list of snapshots
-        "404": { description: no snapshot cached for the given booth }
+        "404": { description: no snapshot persisted for the given booth }
 
   /v1/devices:
     get:

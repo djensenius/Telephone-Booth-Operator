@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import type { DisplayDrawParams } from "@busy-app/busy-lib";
-import type { BoothStatus } from "@telephone-booth-operator/shared";
+import type { BoothStatus, BoothSystemSnapshotEnvelope } from "@telephone-booth-operator/shared";
 import type { BusyBarDeviceClient } from "../src/lib/busy-bar/client.js";
 import type { BusyBarMonitorConfig } from "../src/lib/busy-bar/config.js";
 import { BusyBarMonitor } from "../src/lib/busy-bar/monitor.js";
@@ -30,6 +30,17 @@ const status = (state: BoothStatus["state"]): BoothStatus => ({
   currentMessageId: null,
   lastError: state === "error" ? "test error" : null,
   runtimeMode: "real",
+});
+
+const healthySystem = (): BoothSystemSnapshotEnvelope => ({
+  boothId: "booth-01",
+  snapshot: {
+    cpu: { usageRatio: 0.1, loadAvg1m: 0.2, physicalCores: 4 },
+    memory: { usedBytes: 500, totalBytes: 1_000 },
+    temperatureCelsius: 45,
+  },
+  receivedAt: new Date().toISOString(),
+  version: "0.3.2",
 });
 
 const frontText = (payload: DisplayDrawParams): string | undefined =>
@@ -106,6 +117,7 @@ describe("BUSY Bar monitor lifecycle", () => {
     const client = createClient();
     const monitor = new BusyBarMonitor({ ...config, staleAfterMs: 1_000_000 }, client);
     monitor.updateStatus(status("idle"));
+    monitor.updateSystem(healthySystem());
     await monitor.start();
     await vi.advanceTimersByTimeAsync(250);
 
@@ -131,6 +143,7 @@ describe("BUSY Bar monitor lifecycle", () => {
     );
     const monitor = new BusyBarMonitor(config, client);
     monitor.updateStatus(status("idle"));
+    monitor.updateSystem(healthySystem());
     await monitor.start();
     await vi.advanceTimersByTimeAsync(250);
     monitor.updateStatus(status("error"));

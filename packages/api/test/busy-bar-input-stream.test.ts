@@ -15,6 +15,13 @@ describe("BUSY Bar input protobuf decoder", () => {
     ]);
   });
 
+  it("materializes default OK press enum values", () => {
+    const bytes = Uint8Array.from([0x12, 0x04, 0x5a, 0x02, 0x0a, 0x00]);
+    expect(decodeBusyBarInputEvents(bytes)).toEqual([
+      { kind: "button", button: "OK", action: "PRESS" },
+    ]);
+  });
+
   it("decodes encoder direction", () => {
     // Encoder delta -1 is zig-zag encoded as 1.
     const bytes = Uint8Array.from([0x12, 0x06, 0x5a, 0x04, 0x1a, 0x02, 0x08, 0x01]);

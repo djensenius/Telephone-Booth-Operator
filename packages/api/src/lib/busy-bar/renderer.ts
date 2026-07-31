@@ -220,6 +220,11 @@ export const renderBusyBar = (
     frontSignature,
     backSignature,
     signature: JSON.stringify(payload),
-    alertKind: offline ? "offline" : state.status?.state === "error" ? "error" : null,
+    alertKind:
+      offline || healthView.label === "OFFLINE"
+        ? "offline"
+        : state.status?.state === "error"
+          ? "error"
+          : null,
   };
 };

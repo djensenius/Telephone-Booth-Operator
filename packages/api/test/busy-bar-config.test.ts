@@ -7,6 +7,9 @@ import {
 describe("BUSY Bar monitor configuration", () => {
   it("is disabled by default", () => {
     expect(resolveBusyBarMonitorConfig({})).toEqual({ enabled: false });
+    expect(() => resolveBusyBarMonitorConfig({ BUSY_BAR_MONITOR_ENABLED: "TRUE" })).toThrow(
+      "BUSY_BAR_MONITOR_ENABLED",
+    );
   });
 
   it("requires a token and alert sound when enabled", () => {
@@ -77,5 +80,8 @@ describe("BUSY Bar monitor configuration", () => {
     expect(() =>
       resolveBusyBarMonitorConfig({ ...base, BUSY_BAR_OPERATOR_API_URL: "http://operator.local" }),
     ).toThrow("BUSY_BAR_OPERATOR_API_URL");
+    expect(() => resolveBusyBarMonitorConfig({ ...base, BUSY_BAR_AUDIO_ENABLED: "flase" })).toThrow(
+      "BUSY_BAR_AUDIO_ENABLED",
+    );
   });
 });

@@ -184,10 +184,24 @@ const startOperatorPolling = (
   };
 };
 
+const waitWhileDisabled = (): Promise<void> =>
+  new Promise((resolve) => {
+    const keepAlive = setInterval(() => undefined, 60_000);
+    const shutdown = (): void => {
+      clearInterval(keepAlive);
+      process.off("SIGTERM", shutdown);
+      process.off("SIGINT", shutdown);
+      resolve();
+    };
+    process.once("SIGTERM", shutdown);
+    process.once("SIGINT", shutdown);
+  });
+
 const start = async (): Promise<void> => {
   const config = resolveBusyBarMonitorConfig();
   if (!config.enabled) {
-    log.info("BUSY Bar worker is disabled");
+    log.info("BUSY Bar worker is disabled; waiting for shutdown");
+    await waitWhileDisabled();
     return;
   }
   const monitor = new BusyBarMonitor(config, createBusyBarDeviceClient(config));

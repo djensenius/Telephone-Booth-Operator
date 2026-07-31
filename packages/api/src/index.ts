@@ -117,9 +117,14 @@ const start = (): void => {
   const server = serve({ fetch: app.fetch, port }, ({ port }) => {
     console.log(`telephone-booth-operator API listening on :${port}`);
   });
-  attachStatusWebSocket(server);
+  const statusWebSocket = attachStatusWebSocket(server);
+  let stopping = false;
   const shutdown = (): void => {
-    server.close();
+    if (stopping) return;
+    stopping = true;
+    void statusWebSocket.close().finally(() => {
+      server.close();
+    });
   };
   process.once("SIGTERM", shutdown);
   process.once("SIGINT", shutdown);

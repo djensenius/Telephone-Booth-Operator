@@ -27,6 +27,14 @@ const value = (input: string | undefined): string | undefined => {
   return trimmed ? trimmed : undefined;
 };
 
+const boolean = (env: NodeJS.ProcessEnv, name: string, fallback: boolean): boolean => {
+  const raw = value(env[name]);
+  if (raw === undefined) return fallback;
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  throw new BusyBarConfigurationError(`${name} must be true or false.`);
+};
+
 const integer = (
   env: NodeJS.ProcessEnv,
   name: string,
@@ -66,7 +74,7 @@ const url = (input: string, name: string, protocols: readonly string[]): string 
 export const resolveBusyBarMonitorConfig = (
   env: NodeJS.ProcessEnv = process.env,
 ): BusyBarMonitorConfig => {
-  if (env.BUSY_BAR_MONITOR_ENABLED !== "true") return { enabled: false };
+  if (!boolean(env, "BUSY_BAR_MONITOR_ENABLED", false)) return { enabled: false };
   const token = value(env.BUSY_BAR_CLOUD_TOKEN);
   if (!token) {
     throw new BusyBarConfigurationError(
@@ -85,7 +93,7 @@ export const resolveBusyBarMonitorConfig = (
       "BUSY_BAR_OPERATOR_API_URL is required when BUSY_BAR_MONITOR_ENABLED=true.",
     );
   }
-  const audioEnabled = env.BUSY_BAR_AUDIO_ENABLED !== "false";
+  const audioEnabled = boolean(env, "BUSY_BAR_AUDIO_ENABLED", true);
   const alertSound = value(env.BUSY_BAR_ALERT_SOUND) ?? null;
   if (audioEnabled && !alertSound) {
     throw new BusyBarConfigurationError(

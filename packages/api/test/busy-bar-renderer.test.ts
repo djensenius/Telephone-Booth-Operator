@@ -102,6 +102,27 @@ describe("BUSY Bar renderer", () => {
     );
     expect(textsFor(offline.payload, "front")).toEqual(["OFFLINE"]);
     expect(offline.alertKind).toBe("offline");
+
+    const staleSystem = renderBusyBar(
+      model({
+        system: { ...system, receivedAt: new Date(now - 30_000).toISOString() },
+      }),
+      config,
+      now,
+    );
+    expect(textsFor(staleSystem.payload, "front")).toEqual(["OFFLINE"]);
+    expect(staleSystem.alertKind).toBe("offline");
+
+    const activeWithStaleSystem = renderBusyBar(
+      model({
+        status: status("recording"),
+        system: { ...system, receivedAt: new Date(now - 30_000).toISOString() },
+      }),
+      config,
+      now,
+    );
+    expect(textsFor(activeWithStaleSystem.payload, "front")).toEqual(["RECORDING"]);
+    expect(activeWithStaleSystem.alertKind).toBe("offline");
   });
 
   it("keeps the front signature stable during back-page navigation", () => {

@@ -105,7 +105,7 @@ export const decodeBusyBarInputEvents = (bytes: Uint8Array): BusyBarInputEvent[]
     longs: Number,
     bytes: Uint8Array,
     enums: String,
-    defaults: false,
+    defaults: true,
   }) as DecodedState;
   const events: BusyBarInputEvent[] = [];
   for (const update of decoded.updates ?? []) {
