@@ -39,6 +39,7 @@ export function LiveSystemPanel({ boothId = DEFAULT_BOOTH_ID }: LiveSystemPanelP
     const memory = snapshot.memory;
     const audio = snapshot.audio;
     const tailscale = snapshot.tailscale;
+    const fan = snapshot.fan;
     const memoryUsedBytes = memory?.usedBytes ?? null;
     const memoryTotalBytes = memory?.totalBytes ?? null;
     return [
@@ -79,6 +80,28 @@ export function LiveSystemPanel({ boothId = DEFAULT_BOOTH_ID }: LiveSystemPanelP
             : tailscale.connected
               ? `up${tailscale.hostname ? ` (${tailscale.hostname})` : ""}`
               : "down",
+      },
+      {
+        label: "Fan command",
+        value:
+          fan?.commandedOn != null
+            ? `${fan.commandedOn ? "on" : "off"}${
+                fan.pwmRatio != null ? ` (${(fan.pwmRatio * 100).toFixed(0)}% PWM)` : ""
+              }`
+            : fan?.pwmRatio != null
+              ? `${(fan.pwmRatio * 100).toFixed(0)}% PWM`
+              : "—",
+      },
+      {
+        label: "Fan cooling state",
+        value:
+          fan?.coolingState == null
+            ? "—"
+            : `${fan.coolingState}${fan.maxCoolingState != null ? ` / ${fan.maxCoolingState}` : ""}`,
+      },
+      {
+        label: "Fan measured speed",
+        value: fan?.rpm != null ? `${fan.rpm} RPM` : fan ? "— (no tachometer)" : "—",
       },
       {
         label: "Throttling",

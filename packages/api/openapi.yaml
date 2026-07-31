@@ -2278,6 +2278,8 @@ components:
           anyOf: [{ $ref: "#/components/schemas/BoothAudioStats" }, { type: "null" }]
         tailscale:
           anyOf: [{ $ref: "#/components/schemas/BoothTailscaleStats" }, { type: "null" }]
+        fan:
+          anyOf: [{ $ref: "#/components/schemas/BoothFanStats" }, { type: "null" }]
         throttling:
           anyOf: [{ $ref: "#/components/schemas/BoothThrottlingFlags" }, { type: "null" }]
     BoothCpuStats:
@@ -2345,6 +2347,19 @@ components:
         peerCount: { type: [integer, "null"], minimum: 0 }
         hostname: { type: [string, "null"] }
         exitNode: { type: [string, "null"] }
+    BoothFanStats:
+      type: object
+      description: |
+        PWM cooling-fan state. `commandedOn` and `pwmRatio` describe the
+        kernel request; `rpm` is measured rotor speed and is omitted when no
+        tachometer feedback is available.
+      additionalProperties: true
+      properties:
+        commandedOn: { type: [boolean, "null"] }
+        pwmRatio: { type: [number, "null"], minimum: 0, maximum: 1 }
+        rpm: { type: [integer, "null"], minimum: 0 }
+        coolingState: { type: [integer, "null"], minimum: 0 }
+        maxCoolingState: { type: [integer, "null"], minimum: 0 }
     BoothThrottlingFlags:
       type: object
       additionalProperties: true

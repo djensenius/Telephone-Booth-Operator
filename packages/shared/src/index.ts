@@ -552,6 +552,19 @@ export const BoothTailscaleStatsSchema = z
   .passthrough();
 export type BoothTailscaleStats = z.infer<typeof BoothTailscaleStatsSchema>;
 
+// Linux PWM cooling-fan command and optional tachometer feedback. Commanded
+// state describes the kernel request; only `rpm` confirms measured rotor speed.
+export const BoothFanStatsSchema = z
+  .object({
+    commandedOn: z.boolean().nullable().optional(),
+    pwmRatio: z.number().min(0).max(1).nullable().optional(),
+    rpm: z.number().int().nonnegative().nullable().optional(),
+    coolingState: z.number().int().nonnegative().nullable().optional(),
+    maxCoolingState: z.number().int().nonnegative().nullable().optional(),
+  })
+  .passthrough();
+export type BoothFanStats = z.infer<typeof BoothFanStatsSchema>;
+
 // Mirrors the six boolean Pi throttling flags reported by `vcgencmd
 // get_throttled`. Adapters that can't read these (non-Pi hosts) omit the
 // whole object.
@@ -578,6 +591,7 @@ export const BoothSystemSnapshotSchema = z
     process: BoothProcessStatsSchema.nullable().optional(),
     audio: BoothAudioStatsSchema.nullable().optional(),
     tailscale: BoothTailscaleStatsSchema.nullable().optional(),
+    fan: BoothFanStatsSchema.nullable().optional(),
     throttling: BoothThrottlingFlagsSchema.nullable().optional(),
     runtimeMode: RuntimeModeSchema.nullable().optional(),
   })
