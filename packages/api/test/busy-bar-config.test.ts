@@ -21,6 +21,7 @@ describe("BUSY Bar monitor configuration", () => {
       resolveBusyBarMonitorConfig({
         BUSY_BAR_MONITOR_ENABLED: "true",
         BUSY_BAR_CLOUD_TOKEN: "secret-token",
+        BUSY_BAR_BOOTH_ID: "booth-01",
         BUSY_BAR_OPERATOR_API_URL: "https://operator.example.com",
         BUSY_BAR_OPERATOR_TOKEN: "operator-token",
       }),
@@ -40,6 +41,7 @@ describe("BUSY Bar monitor configuration", () => {
     const config = resolveBusyBarMonitorConfig({
       BUSY_BAR_MONITOR_ENABLED: "true",
       BUSY_BAR_CLOUD_TOKEN: "secret-token",
+      BUSY_BAR_BOOTH_ID: "booth-01",
       BUSY_BAR_OPERATOR_API_URL: "https://operator.example.com",
       BUSY_BAR_OPERATOR_TOKEN: "operator-token",
       BUSY_BAR_ALERT_SOUND: "alert.snd",
@@ -49,6 +51,7 @@ describe("BUSY Bar monitor configuration", () => {
       enabled: true,
       apiUrl: "https://api.busy.app",
       cloudWebSocketUrl: "wss://api.busy.app/api/v1/bars/ws",
+      boothId: "booth-01",
       displayPriority: 100,
       staleAfterMs: 20_000,
       frontRotationMs: 8_000,
@@ -61,6 +64,7 @@ describe("BUSY Bar monitor configuration", () => {
     const base = {
       BUSY_BAR_MONITOR_ENABLED: "true",
       BUSY_BAR_CLOUD_TOKEN: "secret-token",
+      BUSY_BAR_BOOTH_ID: "booth-01",
       BUSY_BAR_OPERATOR_API_URL: "https://operator.example.com",
       BUSY_BAR_OPERATOR_TOKEN: "operator-token",
       BUSY_BAR_ALERT_SOUND: "alert.snd",

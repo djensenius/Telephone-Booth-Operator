@@ -166,8 +166,12 @@ export class BusyBarMonitor {
     this.#rendering = true;
     try {
       const wasDisconnected = !this.#state.cloudConnected;
-      const rendered = renderBusyBar(this.#state, this.#config, Date.now());
-      if (rendered.signature !== this.#renderSignature) {
+      const rendered = renderBusyBar(
+        wasDisconnected ? { ...this.#state, cloudConnected: true } : this.#state,
+        this.#config,
+        Date.now(),
+      );
+      if (wasDisconnected || rendered.signature !== this.#renderSignature) {
         await this.#client.draw(rendered.payload);
         this.#renderSignature = rendered.signature;
       }

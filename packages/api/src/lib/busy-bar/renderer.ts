@@ -94,11 +94,11 @@ const healthPresentation = (
   ) {
     return { label: "HOT", color: COLORS.red, severity: "crit" };
   }
+  const severity = aggregateSystemHealthSeverity(snapshot);
+  if (severity === "crit") return { label: "SYSTEM CRIT", color: COLORS.red, severity };
   if (throttling.length > 0) {
     return { label: "THROTTLED", color: COLORS.amber, severity: "warn" };
   }
-  const severity = aggregateSystemHealthSeverity(snapshot);
-  if (severity === "crit") return { label: "SYSTEM CRIT", color: COLORS.red, severity };
   if (severity === "warn") return { label: "SYSTEM WARN", color: COLORS.amber, severity };
   return { label: "SYSTEM OK", color: COLORS.green, severity };
 };

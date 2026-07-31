@@ -47,6 +47,7 @@ BUSY_BAR_API_URL=https://api.busy.app
 BUSY_BAR_CLOUD_WS_URL=wss://api.busy.app/api/v1/bars/ws
 BUSY_BAR_OPERATOR_API_URL=https://operator.example.com
 BUSY_BAR_OPERATOR_TOKEN=replace-with-operator-scoped-api-token
+BUSY_BAR_BOOTH_ID=booth-01
 BUSY_BAR_DEVICE_ID=
 BUSY_BAR_APPLICATION_NAME=telephone-booth-monitor
 BUSY_BAR_DISPLAY_PRIORITY=100
@@ -64,6 +65,9 @@ physical input navigation.
 Create `BUSY_BAR_OPERATOR_TOKEN` as an operator-scoped static API token in the
 operator UI. The worker uses it only to read `/v1/status`,
 `/v1/system/current`, and `/v1/ws/status`.
+
+`BUSY_BAR_BOOTH_ID` selects the booth whose system telemetry is displayed.
+System WebSocket events for other booths are ignored.
 
 The cloud token, operator token, and alert sound are required when their
 corresponding features are enabled. Only HTTPS/WSS endpoints are accepted.

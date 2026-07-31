@@ -9,6 +9,7 @@ export type BusyBarMonitorConfig =
       token: string;
       apiUrl: string;
       cloudWebSocketUrl: string;
+      boothId: string;
       deviceId: string | null;
       applicationName: string;
       displayPriority: number;
@@ -93,6 +94,12 @@ export const resolveBusyBarMonitorConfig = (
       "BUSY_BAR_OPERATOR_API_URL is required when BUSY_BAR_MONITOR_ENABLED=true.",
     );
   }
+  const boothId = value(env.BUSY_BAR_BOOTH_ID);
+  if (!boothId) {
+    throw new BusyBarConfigurationError(
+      "BUSY_BAR_BOOTH_ID is required when BUSY_BAR_MONITOR_ENABLED=true.",
+    );
+  }
   const audioEnabled = boolean(env, "BUSY_BAR_AUDIO_ENABLED", true);
   const alertSound = value(env.BUSY_BAR_ALERT_SOUND) ?? null;
   if (audioEnabled && !alertSound) {
@@ -111,6 +118,7 @@ export const resolveBusyBarMonitorConfig = (
       "BUSY_BAR_CLOUD_WS_URL",
       ["wss:"],
     ),
+    boothId,
     deviceId: value(env.BUSY_BAR_DEVICE_ID) ?? null,
     applicationName: value(env.BUSY_BAR_APPLICATION_NAME) ?? "telephone-booth-monitor",
     displayPriority: integer(env, "BUSY_BAR_DISPLAY_PRIORITY", 100, 1, 100),

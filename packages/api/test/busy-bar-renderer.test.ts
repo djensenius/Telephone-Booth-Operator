@@ -12,6 +12,7 @@ const config: Extract<BusyBarMonitorConfig, { enabled: true }> = {
   token: "secret",
   apiUrl: "https://api.busy.app",
   cloudWebSocketUrl: "wss://api.busy.app/api/v1/bars/ws",
+  boothId: "booth-01",
   deviceId: null,
   applicationName: "telephone-booth-monitor",
   displayPriority: 100,
@@ -123,6 +124,22 @@ describe("BUSY Bar renderer", () => {
     );
     expect(textsFor(activeWithStaleSystem.payload, "front")).toEqual(["RECORDING"]);
     expect(activeWithStaleSystem.alertKind).toBe("offline");
+
+    const throttledCritical = renderBusyBar(
+      model({
+        system: {
+          ...system,
+          snapshot: {
+            ...system.snapshot,
+            tailscale: { connected: false },
+            throttling: { undervoltage: true },
+          },
+        },
+      }),
+      config,
+      now,
+    );
+    expect(textsFor(throttledCritical.payload, "front")).toEqual(["SYSTEM CRIT"]);
   });
 
   it("keeps the front signature stable during back-page navigation", () => {

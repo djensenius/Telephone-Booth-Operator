@@ -6,15 +6,10 @@ import {
 import type { BoothStatus, BoothSystemSnapshotEnvelope } from "@telephone-booth-operator/shared";
 import { pathToFileURL } from "node:url";
 import { WebSocket } from "ws";
-import { z } from "zod";
 import { createBusyBarDeviceClient } from "./lib/busy-bar/client.js";
 import { resolveBusyBarMonitorConfig } from "./lib/busy-bar/config.js";
 import { BusyBarMonitor } from "./lib/busy-bar/monitor.js";
 import { log } from "./lib/logger.js";
-
-const systemListSchema = z.object({
-  items: z.array(BoothSystemSnapshotEnvelopeSchema),
-});
 
 const websocketUrl = (apiUrl: string): string => {
   const url = new URL("/v1/ws/status", apiUrl);
@@ -42,8 +37,10 @@ const readInitialStatus = async (apiUrl: string, token: string): Promise<BoothSt
 const readInitialSystem = async (
   apiUrl: string,
   token: string,
+  boothId: string,
 ): Promise<BoothSystemSnapshotEnvelope | null> => {
   const url = new URL("/v1/system/current", apiUrl);
+  url.searchParams.set("boothId", boothId);
   const response = await fetch(url, {
     headers: { authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(5_000),
@@ -53,8 +50,8 @@ const readInitialSystem = async (
     throw new Error(`Operator API returned ${response.status} for ${url.pathname}`);
   }
   const raw: unknown = await response.json();
-  const parsed = systemListSchema.safeParse(raw);
-  return parsed.success ? (parsed.data.items[0] ?? null) : null;
+  const parsed = BoothSystemSnapshotEnvelopeSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
 };
 
 interface OperatorStreamHandle {
@@ -69,6 +66,7 @@ const statusReceiptTime = (status: BoothStatus): number => {
 const startOperatorStream = (
   apiUrl: string,
   token: string,
+  boothId: string,
   monitor: BusyBarMonitor,
 ): OperatorStreamHandle => {
   let socket: WebSocket | null = null;
@@ -105,7 +103,7 @@ const startOperatorStream = (
       if (!parsed.success) return;
       if (parsed.data.kind === "status") {
         monitor.updateStatus(parsed.data.status);
-      } else if (parsed.data.kind === "system") {
+      } else if (parsed.data.kind === "system" && parsed.data.boothId === boothId) {
         monitor.updateSystem({
           boothId: parsed.data.boothId,
           snapshot: parsed.data.snapshot,
@@ -144,6 +142,7 @@ const startOperatorStream = (
 const startOperatorPolling = (
   apiUrl: string,
   token: string,
+  boothId: string,
   monitor: BusyBarMonitor,
 ): OperatorStreamHandle => {
   let stopped = false;
@@ -161,7 +160,7 @@ const startOperatorPolling = (
         .catch((error: unknown) => {
           log.warn({ err: error }, "BUSY Bar worker status poll failed");
         }),
-      readInitialSystem(apiUrl, token)
+      readInitialSystem(apiUrl, token, boothId)
         .then((system) => {
           if (system && !stopped) monitor.updateSystem(system);
         })
@@ -207,13 +206,23 @@ const start = async (): Promise<void> => {
   const monitor = new BusyBarMonitor(config, createBusyBarDeviceClient(config));
   const [status, system] = await Promise.all([
     readInitialStatus(config.operatorApiUrl, config.operatorToken),
-    readInitialSystem(config.operatorApiUrl, config.operatorToken),
+    readInitialSystem(config.operatorApiUrl, config.operatorToken, config.boothId),
   ]);
   if (status) monitor.updateStatus(status, statusReceiptTime(status));
   if (system) monitor.updateSystem(system);
   await monitor.start();
-  const stream = startOperatorStream(config.operatorApiUrl, config.operatorToken, monitor);
-  const polling = startOperatorPolling(config.operatorApiUrl, config.operatorToken, monitor);
+  const stream = startOperatorStream(
+    config.operatorApiUrl,
+    config.operatorToken,
+    config.boothId,
+    monitor,
+  );
+  const polling = startOperatorPolling(
+    config.operatorApiUrl,
+    config.operatorToken,
+    config.boothId,
+    monitor,
+  );
   let stopping = false;
   const shutdown = (): void => {
     if (stopping) return;

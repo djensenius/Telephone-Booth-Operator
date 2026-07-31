@@ -10,6 +10,7 @@ const config: Extract<BusyBarMonitorConfig, { enabled: true }> = {
   token: "busy-token",
   apiUrl: "https://api.busy.app",
   cloudWebSocketUrl: "wss://api.busy.app/api/v1/bars/ws",
+  boothId: "booth-01",
   deviceId: null,
   applicationName: "telephone-booth-monitor",
   displayPriority: 100,
@@ -104,12 +105,39 @@ describe("BUSY Bar monitor lifecycle", () => {
       client,
     );
     monitor.updateStatus(status("idle"));
+    monitor.updateSystem(healthySystem());
     await monitor.start();
 
     await vi.advanceTimersByTimeAsync(250);
     expect(client.draw).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1_250);
     expect(client.draw).toHaveBeenCalledTimes(2);
+    expect(frontText(client.draw.mock.calls[1]?.[0] as DisplayDrawParams)).toBe("READY");
+    await monitor.stop();
+  });
+
+  it("forces a recovery draw when state returns to the last signature", async () => {
+    const client = createClient();
+    client.draw
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("cloud down"))
+      .mockResolvedValue(undefined);
+    const monitor = new BusyBarMonitor(
+      { ...config, audioEnabled: false, alertSound: null },
+      client,
+    );
+    monitor.updateStatus(status("idle"));
+    monitor.updateSystem(healthySystem());
+    await monitor.start();
+    await vi.advanceTimersByTimeAsync(250);
+
+    monitor.updateStatus(status("recording"));
+    await vi.advanceTimersByTimeAsync(250);
+    monitor.updateStatus(status("idle"));
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(client.draw).toHaveBeenCalledTimes(3);
+    expect(frontText(client.draw.mock.calls[2]?.[0] as DisplayDrawParams)).toBe("READY");
     await monitor.stop();
   });
 
