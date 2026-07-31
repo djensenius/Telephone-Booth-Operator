@@ -18,14 +18,27 @@ describe("BUSY Bar monitor configuration", () => {
       resolveBusyBarMonitorConfig({
         BUSY_BAR_MONITOR_ENABLED: "true",
         BUSY_BAR_CLOUD_TOKEN: "secret-token",
+        BUSY_BAR_OPERATOR_API_URL: "https://operator.example.com",
+        BUSY_BAR_OPERATOR_TOKEN: "operator-token",
       }),
     ).toThrow("BUSY_BAR_ALERT_SOUND");
+
+    expect(() =>
+      resolveBusyBarMonitorConfig({
+        BUSY_BAR_MONITOR_ENABLED: "true",
+        BUSY_BAR_CLOUD_TOKEN: "secret-token",
+        BUSY_BAR_OPERATOR_TOKEN: "operator-token",
+        BUSY_BAR_ALERT_SOUND: "alert.snd",
+      }),
+    ).toThrow("BUSY_BAR_OPERATOR_API_URL");
   });
 
   it("resolves safe defaults without exposing the token in errors", () => {
     const config = resolveBusyBarMonitorConfig({
       BUSY_BAR_MONITOR_ENABLED: "true",
       BUSY_BAR_CLOUD_TOKEN: "secret-token",
+      BUSY_BAR_OPERATOR_API_URL: "https://operator.example.com",
+      BUSY_BAR_OPERATOR_TOKEN: "operator-token",
       BUSY_BAR_ALERT_SOUND: "alert.snd",
     });
 
@@ -37,6 +50,7 @@ describe("BUSY Bar monitor configuration", () => {
       staleAfterMs: 20_000,
       frontRotationMs: 8_000,
       alertCooldownMs: 300_000,
+      operatorApiUrl: "https://operator.example.com",
     });
   });
 
@@ -44,6 +58,8 @@ describe("BUSY Bar monitor configuration", () => {
     const base = {
       BUSY_BAR_MONITOR_ENABLED: "true",
       BUSY_BAR_CLOUD_TOKEN: "secret-token",
+      BUSY_BAR_OPERATOR_API_URL: "https://operator.example.com",
+      BUSY_BAR_OPERATOR_TOKEN: "operator-token",
       BUSY_BAR_ALERT_SOUND: "alert.snd",
     };
     expect(() =>
@@ -52,5 +68,14 @@ describe("BUSY Bar monitor configuration", () => {
     expect(() =>
       resolveBusyBarMonitorConfig({ ...base, BUSY_BAR_CLOUD_WS_URL: "https://example.com/ws" }),
     ).toThrow("BUSY_BAR_CLOUD_WS_URL");
+    expect(() =>
+      resolveBusyBarMonitorConfig({ ...base, BUSY_BAR_FRONT_ROTATION_SECONDS: "8seconds" }),
+    ).toThrow("BUSY_BAR_FRONT_ROTATION_SECONDS");
+    expect(() =>
+      resolveBusyBarMonitorConfig({ ...base, BUSY_BAR_API_URL: "http://api.busy.app" }),
+    ).toThrow("BUSY_BAR_API_URL");
+    expect(() =>
+      resolveBusyBarMonitorConfig({ ...base, BUSY_BAR_OPERATOR_API_URL: "http://operator.local" }),
+    ).toThrow("BUSY_BAR_OPERATOR_API_URL");
   });
 });

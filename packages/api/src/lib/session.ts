@@ -655,6 +655,7 @@ const publicV1Route = (path: string, method: string): boolean => {
   // protected by phone API-token middleware. Both bypass the operator-only global
   // guard so the booth (which has no operator cookie) is not rejected here.
   if (method === "GET" && path === "/v1/status") return true;
+  if (method === "GET" && path === "/v1/system/current") return true;
   if (method === "PUT" && path === "/v1/status") return true;
   // Booth → API observability endpoints use bearer-token auth; the per-route
   // middleware enforces it. They must bypass requireOperator() because the

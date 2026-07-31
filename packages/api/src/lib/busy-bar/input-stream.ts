@@ -93,10 +93,7 @@ export const decodeBusyBarCloudFrame = (data: WebSocket.RawData): Uint8Array | n
   }
   if (!parsed || typeof parsed !== "object") return null;
   const frame = parsed as Record<string, unknown>;
-  if (
-    typeof frame.state !== "string" ||
-    (frame.type !== undefined && frame.type !== "protobuf")
-  ) {
+  if (typeof frame.state !== "string" || (frame.type !== undefined && frame.type !== "protobuf")) {
     return null;
   }
   return Buffer.from(frame.state, "base64");

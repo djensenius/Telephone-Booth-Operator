@@ -21,6 +21,8 @@ const config: Extract<BusyBarMonitorConfig, { enabled: true }> = {
   audioEnabled: true,
   alertSound: "alert.snd",
   alertCooldownMs: 300_000,
+  operatorApiUrl: "https://operator.example.com",
+  operatorToken: "operator-token",
 };
 
 const status = (state: BoothStatus["state"]): BoothStatus => ({

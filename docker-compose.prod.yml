@@ -19,6 +19,17 @@ services:
     depends_on:
       - api
 
+  # Optional singleton BUSY Bar monitor. Keep this service at exactly one
+  # replica; it consumes the operator API instead of process-local API state.
+  busy-bar:
+    image: ghcr.io/djensenius/telephone-booth-operator-api:latest
+    command: ["node", "dist/busy-bar-worker.js"]
+    restart: unless-stopped
+    env_file: .env
+    profiles: ["busy-bar"]
+    depends_on:
+      - api
+
   # NOTE: in production, Postgres and Azure Blob Storage are external services.
   # Provide DATABASE_URL and AZURE_STORAGE_CONNECTION_STRING in `.env`.
   # The `db` service below is OPTIONAL and only here for single-node deploys.

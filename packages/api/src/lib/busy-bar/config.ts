@@ -18,6 +18,8 @@ export type BusyBarMonitorConfig =
       audioEnabled: boolean;
       alertSound: string | null;
       alertCooldownMs: number;
+      operatorApiUrl: string;
+      operatorToken: string;
     };
 
 const value = (input: string | undefined): string | undefined => {
@@ -34,7 +36,12 @@ const integer = (
 ): number => {
   const raw = value(env[name]);
   if (!raw) return fallback;
-  const parsed = Number.parseInt(raw, 10);
+  if (!/^\d+$/.test(raw)) {
+    throw new BusyBarConfigurationError(
+      `${name} must be an integer between ${minimum} and ${maximum}.`,
+    );
+  }
+  const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
     throw new BusyBarConfigurationError(
       `${name} must be an integer between ${minimum} and ${maximum}.`,
@@ -66,6 +73,18 @@ export const resolveBusyBarMonitorConfig = (
       "BUSY_BAR_CLOUD_TOKEN is required when BUSY_BAR_MONITOR_ENABLED=true.",
     );
   }
+  const operatorToken = value(env.BUSY_BAR_OPERATOR_TOKEN);
+  if (!operatorToken) {
+    throw new BusyBarConfigurationError(
+      "BUSY_BAR_OPERATOR_TOKEN is required when BUSY_BAR_MONITOR_ENABLED=true.",
+    );
+  }
+  const operatorApiUrl = value(env.BUSY_BAR_OPERATOR_API_URL);
+  if (!operatorApiUrl) {
+    throw new BusyBarConfigurationError(
+      "BUSY_BAR_OPERATOR_API_URL is required when BUSY_BAR_MONITOR_ENABLED=true.",
+    );
+  }
   const audioEnabled = env.BUSY_BAR_AUDIO_ENABLED !== "false";
   const alertSound = value(env.BUSY_BAR_ALERT_SOUND) ?? null;
   if (audioEnabled && !alertSound) {
@@ -78,12 +97,11 @@ export const resolveBusyBarMonitorConfig = (
     token,
     apiUrl: url(value(env.BUSY_BAR_API_URL) ?? "https://api.busy.app", "BUSY_BAR_API_URL", [
       "https:",
-      "http:",
     ]),
     cloudWebSocketUrl: url(
       value(env.BUSY_BAR_CLOUD_WS_URL) ?? "wss://api.busy.app/api/v1/bars/ws",
       "BUSY_BAR_CLOUD_WS_URL",
-      ["wss:", "ws:"],
+      ["wss:"],
     ),
     deviceId: value(env.BUSY_BAR_DEVICE_ID) ?? null,
     applicationName: value(env.BUSY_BAR_APPLICATION_NAME) ?? "telephone-booth-monitor",
@@ -94,5 +112,7 @@ export const resolveBusyBarMonitorConfig = (
     audioEnabled,
     alertSound,
     alertCooldownMs: integer(env, "BUSY_BAR_ALERT_COOLDOWN_SECONDS", 300, 10, 86_400) * 1000,
+    operatorApiUrl: url(operatorApiUrl, "BUSY_BAR_OPERATOR_API_URL", ["https:"]),
+    operatorToken,
   };
 };

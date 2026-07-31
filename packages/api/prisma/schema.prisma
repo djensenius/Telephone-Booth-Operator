@@ -108,6 +108,15 @@ model Installation {
   @@index([endedAt])
 }
 
+// Latest system telemetry per booth. This is a single-row upsert, not the
+// historical metrics store; VictoriaMetrics remains the time-series owner.
+model BoothSystemSnapshot {
+  boothId    String   @id
+  snapshot   Json
+  receivedAt DateTime
+  version    String?
+}
+
 model Question {
   id             String         @id @default(uuid()) @db.Uuid
   prompt         String

@@ -15,8 +15,6 @@ import { pathToFileURL } from "node:url";
 import { startAiSweeper } from "./lib/ai/sweeper.js";
 import { auditWrites, type AuditVariables } from "./lib/audit.js";
 import { startAuditPruner } from "./lib/audit-pruner.js";
-import { resolveBusyBarMonitorConfig } from "./lib/busy-bar/config.js";
-import { startBusyBarMonitor } from "./lib/busy-bar/monitor.js";
 import { startSnapshotPruner } from "./lib/snapshot-pruner.js";
 import {
   AuthConfigurationError,
@@ -109,7 +107,6 @@ const start = (): void => {
     }
     assertOidcIssuerAllowed(authConfig);
     assertAuthorizationConfigured(authConfig);
-    resolveBusyBarMonitorConfig();
   } catch (error) {
     console.error(error instanceof Error ? error.message : "Invalid auth configuration.");
     process.exitCode = 1;
@@ -121,11 +118,6 @@ const start = (): void => {
     console.log(`telephone-booth-operator API listening on :${port}`);
   });
   attachStatusWebSocket(server);
-  const busyBarMonitor = startBusyBarMonitor();
-  const stopBusyBarMonitor = (): void => {
-    void busyBarMonitor?.stop();
-  };
-  server.on("close", stopBusyBarMonitor);
   const shutdown = (): void => {
     server.close();
   };

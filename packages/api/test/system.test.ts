@@ -24,7 +24,6 @@ vi.mock("../src/lib/require-api-token.js", () => ({
 }));
 
 import { createApp } from "../src/index.js";
-import { clearSystemSnapshotsForTests } from "../src/lib/system-cache.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { resetFakeAzure } from "./support/fake-azure.js";
 import { resetFakeDb } from "./support/fake-db.js";
@@ -36,7 +35,6 @@ const setup = () => {
   resetSessionCryptoForTests();
   resetFakeDb();
   resetFakeAzure();
-  clearSystemSnapshotsForTests();
 };
 
 const sampleSnapshot = {
@@ -65,6 +63,11 @@ describe("system routes", () => {
     });
     expect(put.status).toBe(204);
 
+    const apiTokenRead = await app.request("/v1/system/current?boothId=booth-01", {
+      headers: phoneHeaders,
+    });
+    expect(apiTokenRead.status).toBe(200);
+
     const missing = await app.request("/v1/system/current?boothId=booth-01");
     expect(missing.status).toBe(401);
 
@@ -84,7 +87,7 @@ describe("system routes", () => {
     await expect(list.json()).resolves.toMatchObject({ items: [{ boothId: "booth-01" }] });
   });
 
-  it("preserves runtimeMode on the snapshot through cache + GET", async () => {
+  it("preserves runtimeMode on the snapshot through persistence + GET", async () => {
     const app = createApp();
     const put = await app.request("/v1/system", {
       method: "PUT",
@@ -105,7 +108,7 @@ describe("system routes", () => {
     });
   });
 
-  it("echoes the booth client version through cache + GET", async () => {
+  it("echoes the booth client version through persistence + GET", async () => {
     const app = createApp();
     const put = await app.request("/v1/system", {
       method: "PUT",

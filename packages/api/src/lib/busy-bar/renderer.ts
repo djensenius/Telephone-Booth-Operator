@@ -72,8 +72,7 @@ export const statusIsStale = (
   statusReceivedAtMs: number | null,
   nowMs: number,
   staleAfterMs: number,
-): boolean =>
-  statusReceivedAtMs === null || Math.max(0, nowMs - statusReceivedAtMs) > staleAfterMs;
+): boolean => statusReceivedAtMs === null || Math.max(0, nowMs - statusReceivedAtMs) > staleAfterMs;
 
 const healthPresentation = (
   state: BusyBarMonitorState,

@@ -1,15 +1,8 @@
 import { aggregateSystemHealthSeverity } from "@telephone-booth-operator/shared";
-import type { BoothSystemSnapshotEnvelope } from "@telephone-booth-operator/shared";
-import { randomUUID } from "node:crypto";
-import { wsBroadcaster } from "../broadcaster.js";
-import { db } from "../db.js";
+import type { BoothStatus, BoothSystemSnapshotEnvelope } from "@telephone-booth-operator/shared";
 import { log } from "../logger.js";
-import { serializeStatus } from "../serializers.js";
-import { listSystemSnapshots } from "../system-cache.js";
 import type { BusyBarDeviceClient } from "./client.js";
-import { createBusyBarDeviceClient } from "./client.js";
 import type { BusyBarMonitorConfig } from "./config.js";
-import { resolveBusyBarMonitorConfig } from "./config.js";
 import type { BusyBarInputEvent, BusyBarInputStreamHandle } from "./input-stream.js";
 import { startBusyBarInputStream } from "./input-stream.js";
 import type { BackPage, BusyBarMonitorState } from "./renderer.js";
@@ -22,10 +15,9 @@ export interface BusyBarMonitorHandle {
 const nextPage = (page: BackPage, direction: number): BackPage =>
   ((((page + direction) % 3) + 3) % 3) as BackPage;
 
-class BusyBarMonitor {
+export class BusyBarMonitor {
   readonly #config: Extract<BusyBarMonitorConfig, { enabled: true }>;
   readonly #client: BusyBarDeviceClient;
-  readonly #subscriberId = `busy-bar-${randomUUID()}`;
   #state: BusyBarMonitorState = {
     status: null,
     statusReceivedAtMs: null,
@@ -49,8 +41,11 @@ class BusyBarMonitor {
     offline: 0,
   };
   #stopped = false;
+  #started = false;
   #stopPromise: Promise<void> | null = null;
   #currentAlertKind: "error" | "offline" | null = null;
+  #statusSourceAtMs: number | null = null;
+  #systemSourceAtMs: number | null = null;
 
   constructor(
     config: Extract<BusyBarMonitorConfig, { enabled: true }>,
@@ -61,47 +56,7 @@ class BusyBarMonitor {
   }
 
   async start(): Promise<void> {
-    const latestStatus = await db.boothStatusSnapshot.findFirst({
-      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-    });
-    if (this.#stopped) return;
-    this.#state = {
-      ...this.#state,
-      status: latestStatus ? serializeStatus(latestStatus) : null,
-      statusReceivedAtMs: latestStatus
-        ? Math.min(Date.now(), latestStatus.updatedAt.getTime())
-        : null,
-      system: listSystemSnapshots()[0] ?? null,
-    };
-    wsBroadcaster.subscribe(this.#subscriberId, (event) => {
-      if (event.kind === "status") {
-        const wasActive = this.#state.status?.state !== "idle";
-        this.#state = {
-          ...this.#state,
-          status: event.status,
-          statusReceivedAtMs: Date.now(),
-          frontFrame: event.status.state !== "idle" || wasActive ? "state" : this.#state.frontFrame,
-        };
-        this.#scheduleRender();
-      } else if (event.kind === "system") {
-        const previousSeverity = aggregateSystemHealthSeverity(this.#state.system?.snapshot);
-        const system: BoothSystemSnapshotEnvelope = {
-          boothId: event.boothId,
-          snapshot: event.snapshot,
-          receivedAt: event.receivedAt,
-          version: event.version,
-        };
-        const recovered =
-          previousSeverity !== "ok" && aggregateSystemHealthSeverity(system.snapshot) === "ok";
-        this.#state = {
-          ...this.#state,
-          system,
-          frontFrame: recovered ? "state" : this.#state.frontFrame,
-        };
-        this.#scheduleRender();
-      }
-    });
-
+    this.#started = true;
     this.#freshnessTimer = setInterval(() => this.#scheduleRender(), 5_000);
     this.#freshnessTimer.unref();
     this.#rotationTimer = setInterval(() => {
@@ -137,6 +92,42 @@ class BusyBarMonitor {
     log.info("BUSY Bar monitor started");
   }
 
+  updateStatus(status: BoothStatus, receivedAtMs = Date.now()): void {
+    const reportedAtMs = Date.parse(status.updatedAt);
+    const sourceAtMs = Math.min(
+      Number.isFinite(reportedAtMs) ? reportedAtMs : receivedAtMs,
+      receivedAtMs,
+      Date.now(),
+    );
+    if (this.#statusSourceAtMs !== null && sourceAtMs < this.#statusSourceAtMs) return;
+    const wasActive = this.#state.status?.state !== "idle";
+    const cappedReceivedAtMs = Math.min(receivedAtMs, Date.now());
+    this.#statusSourceAtMs = sourceAtMs;
+    this.#state = {
+      ...this.#state,
+      status,
+      statusReceivedAtMs: Math.max(this.#state.statusReceivedAtMs ?? 0, cappedReceivedAtMs),
+      frontFrame: status.state !== "idle" || wasActive ? "state" : this.#state.frontFrame,
+    };
+    this.#scheduleRender();
+  }
+
+  updateSystem(system: BoothSystemSnapshotEnvelope): void {
+    const receivedAtMs = Date.parse(system.receivedAt);
+    const sourceAtMs = Number.isFinite(receivedAtMs) ? receivedAtMs : Date.now();
+    if (this.#systemSourceAtMs !== null && sourceAtMs < this.#systemSourceAtMs) return;
+    const previousSeverity = aggregateSystemHealthSeverity(this.#state.system?.snapshot);
+    const recovered =
+      previousSeverity !== "ok" && aggregateSystemHealthSeverity(system.snapshot) === "ok";
+    this.#systemSourceAtMs = sourceAtMs;
+    this.#state = {
+      ...this.#state,
+      system,
+      frontFrame: recovered ? "state" : this.#state.frontFrame,
+    };
+    this.#scheduleRender();
+  }
+
   #handleInput(event: BusyBarInputEvent): void {
     if (event.kind === "switch") return;
     if (event.kind === "button") {
@@ -155,7 +146,11 @@ class BusyBarMonitor {
   }
 
   #scheduleRender(): void {
-    if (this.#stopped || this.#renderTimer) return;
+    if (!this.#started || this.#stopped || this.#renderTimer) return;
+    if (this.#rendering) {
+      this.#renderQueued = true;
+      return;
+    }
     this.#renderTimer = setTimeout(() => {
       this.#renderTimer = null;
       const render = this.#render();
@@ -168,10 +163,6 @@ class BusyBarMonitor {
   }
 
   async #render(): Promise<void> {
-    if (this.#rendering) {
-      this.#renderQueued = true;
-      return;
-    }
     this.#rendering = true;
     try {
       const wasDisconnected = !this.#state.cloudConnected;
@@ -184,7 +175,7 @@ class BusyBarMonitor {
       this.#retryAttempt = 0;
       if (this.#retryTimer) clearTimeout(this.#retryTimer);
       this.#retryTimer = null;
-      void this.#maybeAlert(rendered.alertKind);
+      await this.#maybeAlert(rendered.alertKind);
       if (wasDisconnected) {
         this.#state = { ...this.#state, frontFrame: "state" };
         this.#scheduleRender();
@@ -205,12 +196,7 @@ class BusyBarMonitor {
   async #maybeAlert(kind: "error" | "offline" | null): Promise<void> {
     const previousKind = this.#currentAlertKind;
     this.#currentAlertKind = kind;
-    if (
-      !kind ||
-      kind === previousKind ||
-      !this.#config.audioEnabled ||
-      !this.#config.alertSound
-    ) {
+    if (!kind || kind === previousKind || !this.#config.audioEnabled || !this.#config.alertSound) {
       return;
     }
     const now = Date.now();
@@ -237,7 +223,6 @@ class BusyBarMonitor {
   stop(): Promise<void> {
     if (this.#stopPromise) return this.#stopPromise;
     this.#stopped = true;
-    wsBroadcaster.unsubscribe(this.#subscriberId);
     if (this.#renderTimer) clearTimeout(this.#renderTimer);
     if (this.#freshnessTimer) clearInterval(this.#freshnessTimer);
     if (this.#rotationTimer) clearInterval(this.#rotationTimer);
@@ -254,13 +239,3 @@ class BusyBarMonitor {
     return this.#stopPromise;
   }
 }
-
-export const startBusyBarMonitor = (): BusyBarMonitorHandle | null => {
-  const config = resolveBusyBarMonitorConfig();
-  if (!config.enabled) return null;
-  const monitor = new BusyBarMonitor(config, createBusyBarDeviceClient(config));
-  void monitor.start().catch((error: unknown) => {
-    log.error({ err: error }, "BUSY Bar monitor failed to start");
-  });
-  return monitor;
-};

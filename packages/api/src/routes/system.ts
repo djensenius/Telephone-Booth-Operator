@@ -1,6 +1,7 @@
 // Live system snapshot endpoints. The booth pushes one PUT every ~5s; the
 // operator UI reads the latest via GET (or via the status WS envelope).
-// No Postgres persistence in v1 — VictoriaMetrics owns historical metrics.
+// Postgres holds one current row per booth so reads work across API replicas.
+// VictoriaMetrics remains the owner of historical metrics.
 
 import { zValidator } from "@hono/zod-validator";
 import {
@@ -10,9 +11,10 @@ import {
 import { Hono } from "hono";
 import { z } from "zod";
 import { wsBroadcaster } from "../lib/broadcaster.js";
+import { db } from "../lib/db.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
-import { getSystemSnapshot, listSystemSnapshots, setSystemSnapshot } from "../lib/system-cache.js";
-import { requireOperator, type AuthVariables } from "../lib/session.js";
+import { requireOperatorOrApiToken, type AuthVariables } from "../lib/session.js";
+import type { Prisma } from "../generated/prisma/client.js";
 
 const putBodySchema = z.object({
   boothId: z.string().min(1).max(64),
@@ -24,15 +26,29 @@ const putBodySchema = z.object({
 
 const systemRouter = new Hono<{ Variables: AuthVariables & ApiTokenVariables }>();
 
-systemRouter.put("/", requireApiToken(), zValidator("json", putBodySchema), (c) => {
+systemRouter.put("/", requireApiToken(), zValidator("json", putBodySchema), async (c) => {
   const { boothId, snapshot, version } = c.req.valid("json");
-  const receivedAt = new Date().toISOString();
-  setSystemSnapshot({ boothId, snapshot, receivedAt, version: version ?? null });
+  const receivedAt = new Date();
+  await db.boothSystemSnapshot.upsert({
+    where: { boothId },
+    create: {
+      boothId,
+      snapshot: snapshot as Prisma.InputJsonValue,
+      receivedAt,
+      version: version ?? null,
+    },
+    update: {
+      snapshot: snapshot as Prisma.InputJsonValue,
+      receivedAt,
+      version: version ?? null,
+    },
+  });
+  const receivedAtIso = receivedAt.toISOString();
   wsBroadcaster.broadcast({
     kind: "system",
     boothId,
     snapshot,
-    receivedAt,
+    receivedAt: receivedAtIso,
     version: version ?? null,
   });
   return c.body(null, 204);
@@ -40,16 +56,29 @@ systemRouter.put("/", requireApiToken(), zValidator("json", putBodySchema), (c) 
 
 systemRouter.get(
   "/current",
-  requireOperator(),
+  requireOperatorOrApiToken(),
   zValidator("query", z.object({ boothId: z.string().min(1).optional() })),
-  (c) => {
+  async (c) => {
     const { boothId } = c.req.valid("query");
     if (boothId) {
-      const cached = getSystemSnapshot(boothId);
-      if (!cached) return c.json({ error: "not_found" }, 404);
-      return c.json(cached);
+      const current = await db.boothSystemSnapshot.findUnique({ where: { boothId } });
+      if (!current) return c.json({ error: "not_found" }, 404);
+      return c.json({
+        boothId: current.boothId,
+        snapshot: BoothSystemSnapshotSchema.parse(current.snapshot),
+        receivedAt: current.receivedAt.toISOString(),
+        version: current.version,
+      });
     }
-    return c.json({ items: listSystemSnapshots() });
+    const rows = await db.boothSystemSnapshot.findMany({ orderBy: { boothId: "asc" } });
+    return c.json({
+      items: rows.map((current) => ({
+        boothId: current.boothId,
+        snapshot: BoothSystemSnapshotSchema.parse(current.snapshot),
+        receivedAt: current.receivedAt.toISOString(),
+        version: current.version,
+      })),
+    });
   },
 );
 

@@ -14,9 +14,9 @@ external VictoriaMetrics instance; Grafana dashboards live under
 - **`CallSession`** — derived from `call_started` / `call_ended` events.
   Lazily upserted at insert time. Holds the dialed-digits string,
   call outcome, recording id, and duration.
-- **No `BoothSystemSnapshot` table.** Live system pushes go to an
-  in-memory per-booth cache and are broadcast over the status WebSocket;
-  VictoriaMetrics owns the time series.
+- **`BoothSystemSnapshot`** — one current row per booth, upserted by live
+  system pushes so reads stay consistent across API replicas. VictoriaMetrics
+  remains the time-series owner.
 
 ## HTTP routes
 
@@ -27,8 +27,8 @@ external VictoriaMetrics instance; Grafana dashboards live under
 | `GET /v1/events/stream`  | Operator cookie  | SSE live tail. Same-origin only.         |
 | `GET /v1/sessions`       | Operator cookie  | Cursor-paginated.                        |
 | `GET /v1/sessions/:id`   | Operator cookie  | Session + ordered events.                |
-| `PUT /v1/system`         | API token        | Update in-memory cache + WS broadcast.   |
-| `GET /v1/system/current` | Operator cookie  | Latest cached snapshot.                  |
+| `PUT /v1/system`         | API token        | Upsert current row + WS broadcast.       |
+| `GET /v1/system/current` | Cookie or bearer | Latest persisted snapshot.               |
 | `GET /v1/ws/status`      | Cookie or bearer | Discriminated `{kind,…}` envelope.       |
 
 Cursors are base64url-encoded `(receivedAt, id)` tuples and pair with the
@@ -65,8 +65,9 @@ the rest of the console; the audit log additionally requires admin.
 
 ## BUSY Bar physical monitor
 
-The optional [BUSY Bar monitor](busy-bar-monitor.md) consumes the same live
-status and system snapshots. It logs sanitized connection, render, retry, and
-input-stream state through Pino. BUSY credentials and authentication payloads
-must never appear in logs. Integration failures are intentionally excluded from
-the API health status because the bar is an auxiliary display.
+The optional singleton [BUSY Bar monitor](busy-bar-monitor.md) consumes live
+status and system snapshots through the authenticated operator REST/WebSocket
+API. It logs sanitized connection, render, retry, and input-stream state through
+Pino. BUSY credentials and authentication payloads must never appear in logs.
+Integration failures are intentionally excluded from API health because the bar
+is an auxiliary display.
