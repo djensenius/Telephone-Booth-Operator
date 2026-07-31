@@ -117,7 +117,29 @@ const start = (): void => {
   const server = serve({ fetch: app.fetch, port }, ({ port }) => {
     console.log(`telephone-booth-operator API listening on :${port}`);
   });
-  attachStatusWebSocket(server);
+  const statusWebSocket = attachStatusWebSocket(server);
+  let stopping = false;
+  const shutdown = (): void => {
+    if (stopping) return;
+    stopping = true;
+    void statusWebSocket.close().finally(() => {
+      const forceClose = setTimeout(() => {
+        if ("closeAllConnections" in server && typeof server.closeAllConnections === "function") {
+          server.closeAllConnections();
+        }
+      }, 10_000);
+      forceClose.unref();
+      server.close(() => {
+        clearTimeout(forceClose);
+      });
+    });
+  };
+  process.once("SIGTERM", shutdown);
+  process.once("SIGINT", shutdown);
+  server.once("close", () => {
+    process.off("SIGTERM", shutdown);
+    process.off("SIGINT", shutdown);
+  });
   startAiSweeper();
   startSnapshotPruner();
   startAuditPruner();

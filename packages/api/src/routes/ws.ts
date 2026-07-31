@@ -22,7 +22,7 @@ export const wsRouter = new Hono<{ Variables: AuthVariables }>();
 
 wsRouter.get("/status", (c) => c.json({ error: "upgrade_required" }, 426));
 
-type SubscriberKind = "operator" | "worker";
+type SubscriberKind = "operator" | "worker" | "monitor";
 
 type LiveSocket = WebSocket & {
   isAlive?: boolean;
@@ -63,8 +63,9 @@ const bearerTokenFromHeader = (header: string | undefined): string | null => {
 // The returned kind scopes what the subscriber may receive: "operator"
 // connections get every non-`work` envelope (status/system/message, which carry
 // audio SAS URLs and transcript/moderation content); "worker" connections get
-// ONLY `work` envelopes. A generic (operator-scoped) API token therefore cannot
-// read work events, and a worker-scoped token cannot read message content.
+// only `work`; "monitor" connections get only status/system. A generic
+// operator-scoped token cannot read work events, and narrower scopes cannot read
+// message content.
 // Returns `null` when the upgrade is not authorized.
 const authorizeStatusUpgrade = async (request: IncomingMessage): Promise<SubscriberKind | null> => {
   const session = await readSessionFromCookieHeader(request.headers.cookie);
@@ -85,6 +86,7 @@ const authorizeStatusUpgrade = async (request: IncomingMessage): Promise<Subscri
     // `scope` is stored as an unconstrained string; classify known values
     // explicitly and fail closed on anything unexpected.
     if (apiToken.scope === "worker") return "worker";
+    if (apiToken.scope === "monitor") return "monitor";
     if (apiToken.scope === "operator") return "operator";
     return null;
   } catch {
@@ -96,7 +98,11 @@ const authorizeStatusUpgrade = async (request: IncomingMessage): Promise<Subscri
 // connections are limited to `work` events; operator connections receive
 // everything else (never raw `work`, which is internal scheduling).
 const envelopeVisibleTo = (kind: SubscriberKind, envelope: WsEnvelope): boolean =>
-  kind === "worker" ? envelope.kind === "work" : envelope.kind !== "work";
+  kind === "worker"
+    ? envelope.kind === "work"
+    : kind === "monitor"
+      ? envelope.kind === "status" || envelope.kind === "system"
+      : envelope.kind !== "work";
 
 const sendEnvelopeToSocket = (ws: LiveSocket, envelope: WsEnvelope): void => {
   if (ws.readyState !== WebSocket.OPEN) return;
@@ -141,8 +147,14 @@ const replayOutstandingWork = (ws: LiveSocket): void => {
   })();
 };
 
-export const attachStatusWebSocket = (server: ServerType): void => {
+export interface StatusWebSocketHandle {
+  close(): Promise<void>;
+}
+
+export const attachStatusWebSocket = (server: ServerType): StatusWebSocketHandle => {
   const wss = new WebSocketServer({ noServer: true });
+  let closePromise: Promise<void> | null = null;
+  let closing = false;
   const heartbeat = setInterval(() => {
     for (const ws of wss.clients as Set<LiveSocket>) {
       if (ws.isAlive === false) {
@@ -156,6 +168,10 @@ export const attachStatusWebSocket = (server: ServerType): void => {
   heartbeat.unref();
 
   wss.on("connection", (ws: LiveSocket, _request: IncomingMessage, kind?: SubscriberKind) => {
+    if (closing || ws.readyState !== WebSocket.OPEN) {
+      ws.terminate();
+      return;
+    }
     ws.isAlive = true;
     ws.clientId = randomUUID();
     if (kind) ws.subscriberKind = kind;
@@ -170,12 +186,16 @@ export const attachStatusWebSocket = (server: ServerType): void => {
     });
   });
 
-  server.on("upgrade", (request: IncomingMessage, socket: Duplex, head: Buffer) => {
+  const handleUpgrade = (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
     if (!isStatusWsPath(request)) return;
 
     wss.handleUpgrade(request, socket, head, (ws) => {
       void (async () => {
         const kind = await authorizeStatusUpgrade(request);
+        if (closing || ws.readyState !== WebSocket.OPEN) {
+          ws.terminate();
+          return;
+        }
         if (!kind) {
           closePolicyViolation(ws);
           return;
@@ -186,10 +206,22 @@ export const attachStatusWebSocket = (server: ServerType): void => {
         if (kind === "worker") setImmediate(() => replayOutstandingWork(liveSocket));
       })();
     });
-  });
+  };
+  server.on("upgrade", handleUpgrade);
 
-  server.on("close", () => {
+  const close = (): Promise<void> => {
+    if (closePromise) return closePromise;
+    closing = true;
     clearInterval(heartbeat);
-    wss.close();
+    server.off("upgrade", handleUpgrade);
+    for (const ws of wss.clients) ws.terminate();
+    closePromise = new Promise<void>((resolve) => {
+      wss.close(() => resolve());
+    });
+    return closePromise;
+  };
+  server.once("close", () => {
+    void close();
   });
+  return { close };
 };

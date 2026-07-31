@@ -7,6 +7,7 @@ import {
 } from "node:crypto";
 import type { OperatorSession, OperatorUser } from "../generated/prisma/client.js";
 import type { Context, MiddlewareHandler } from "hono";
+import type { ApiTokenScope } from "@telephone-booth-operator/shared";
 import { recordAudit } from "./audit.js";
 import { verifyOperatorBearer } from "./bearer-auth.js";
 import { clientIp } from "./client-ip.js";
@@ -655,6 +656,7 @@ const publicV1Route = (path: string, method: string): boolean => {
   // protected by phone API-token middleware. Both bypass the operator-only global
   // guard so the booth (which has no operator cookie) is not rejected here.
   if (method === "GET" && path === "/v1/status") return true;
+  if (method === "GET" && path === "/v1/system/current") return true;
   if (method === "PUT" && path === "/v1/status") return true;
   // Booth → API observability endpoints use bearer-token auth; the per-route
   // middleware enforces it. They must bypass requireOperator() because the
@@ -720,17 +722,19 @@ const authenticateOperator: MiddlewareHandler<{ Variables: AuthVariables }> = as
 
 // Guard for read endpoints consumed by both operator clients and the booth. The
 // booth/phone client presents a static API token; operator clients use a session
-// cookie or an operator bearer (JWT). Any valid credential is accepted; requests
-// with none are rejected with 401. Used by `GET /v1/status` so booth state is no
-// longer disclosed to unauthenticated callers.
+// cookie or an operator bearer (JWT). Callers select which static-token scopes
+// are accepted; requests with no allowed credential are rejected.
 export const requireOperatorOrApiToken =
-  (): MiddlewareHandler<{ Variables: AuthVariables & ApiTokenVariables }> => async (c, next) => {
+  (
+    apiTokenScopes: readonly ApiTokenScope[] = ["operator"],
+  ): MiddlewareHandler<{ Variables: AuthVariables & ApiTokenVariables }> =>
+  async (c, next) => {
     let authorizedByApiToken = false;
     const markAuthorized = (): Promise<void> => {
       authorizedByApiToken = true;
       return Promise.resolve();
     };
-    await requireApiToken()(
+    await requireApiToken(apiTokenScopes)(
       c as unknown as Context<{ Variables: ApiTokenVariables }, string, Record<string, never>>,
       markAuthorized,
     );

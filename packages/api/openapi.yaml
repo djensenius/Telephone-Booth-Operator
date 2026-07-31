@@ -1424,14 +1424,16 @@ paths:
         `Authorization: Bearer` Authentik access token; the push-mode
         Transcription worker (macOS + iOS) presents its static API token and
         reacts to `{kind:"work", messageId, needs}` envelopes by running the
-        named steps and POSTing results to `/v1/worker/messages/{id}/*`. The
-        connection is
-        dropped with code 1009 if outbound buffering exceeds ~1 MiB (slow
-        consumer guard).
+        named steps and POSTing results to `/v1/worker/messages/{id}/*`.
+        Monitor-scoped static API tokens receive only `status` and `system`
+        envelopes; worker-scoped tokens receive only `work` envelopes. The
+        connection is dropped with code 1009 if outbound buffering exceeds
+        ~1 MiB (slow consumer guard).
       tags: [status]
       security:
         - operatorSession: []
         - operatorBearer: []
+        - apiToken: []
       responses:
         "101": { description: switching protocols }
         "426": { description: upgrade required }
@@ -1617,10 +1619,10 @@ paths:
     put:
       summary: Push the latest live system snapshot from a booth.
       description: |
-        Booth → API. The operator caches the snapshot in-memory per booth
+        Booth → API. The operator upserts one current snapshot per booth
         and broadcasts a `{kind:"system",...}` envelope on the status WS.
-        Historical metrics are owned by VictoriaMetrics (scraped via vmagent),
-        so this endpoint does **not** persist to Postgres.
+        Historical metrics remain owned by VictoriaMetrics (scraped via
+        vmagent); Postgres stores only the latest snapshot.
       tags: [system]
       security:
         - apiToken: []
@@ -1643,11 +1645,12 @@ paths:
 
   /v1/system/current:
     get:
-      summary: Get the latest cached system snapshot for one or all booths.
+      summary: Get the latest persisted system snapshot for one or all booths.
       tags: [system]
       security:
         - operatorSession: []
         - operatorBearer: []
+        - apiToken: []
       parameters:
         - name: boothId
           in: query
@@ -1655,7 +1658,7 @@ paths:
       responses:
         "200":
           description: snapshot or list of snapshots
-        "404": { description: no snapshot cached for the given booth }
+        "404": { description: no snapshot persisted for the given booth }
 
   /v1/devices:
     get:
@@ -2108,13 +2111,14 @@ components:
         name: { type: string, minLength: 1, maxLength: 64 }
         scope:
           type: string
-          enum: [operator, worker]
+          enum: [operator, worker, monitor]
           default: operator
           description: >-
             Capability scope. "operator" (default) authenticates booth/phone and
             native operator clients; "worker" is limited to the push-worker
             callback routes and receives only `work` events on the status
-            WebSocket.
+            WebSocket; "monitor" is limited to read-only status/system routes
+            and receives only those envelopes.
         expiresInDays: { type: integer, minimum: 1, maximum: 3650 }
     ApiToken:
       type: object
@@ -2122,7 +2126,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
-        scope: { type: string, enum: [operator, worker] }
+        scope: { type: string, enum: [operator, worker, monitor] }
         last4: { type: string, minLength: 4, maxLength: 4 }
         createdAt: { type: string, format: date-time }
         expiresAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }

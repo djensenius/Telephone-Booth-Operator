@@ -56,6 +56,13 @@ export type FakeStatus = {
   installationId: string | null;
 };
 
+export type FakeSystemSnapshot = {
+  boothId: string;
+  snapshot: unknown;
+  receivedAt: Date;
+  version: string | null;
+};
+
 type FakeSession = {
   id: string;
   userId: string;
@@ -226,6 +233,7 @@ export const store = {
   instructions: new Map<string, FakeInstruction>(),
   messages: new Map<string, FakeMessage>(),
   statuses: [] as FakeStatus[],
+  systemSnapshots: new Map<string, FakeSystemSnapshot>(),
   sessions: new Map<string, FakeSession>(),
   users: new Map<string, Record<string, unknown>>(),
   boothEvents: [] as FakeBoothEvent[],
@@ -637,6 +645,7 @@ export const resetFakeDb = (): void => {
   store.instructions.clear();
   store.messages.clear();
   store.statuses.length = 0;
+  store.systemSnapshots.clear();
   store.sessions.clear();
   store.users.clear();
   store.boothEvents.length = 0;
@@ -1715,6 +1724,32 @@ export const fakeDb = {
       store.statuses.push(...keep);
       return { count: before - store.statuses.length };
     },
+  },
+  boothSystemSnapshot: {
+    upsert: async ({
+      where,
+      create,
+      update,
+    }: {
+      where: { boothId: string };
+      create: FakeSystemSnapshot;
+      update: Omit<FakeSystemSnapshot, "boothId">;
+    }) => {
+      const existing = store.systemSnapshots.get(where.boothId);
+      const row: FakeSystemSnapshot = existing
+        ? { ...existing, ...update, receivedAt: cloneDate(update.receivedAt) }
+        : { ...create, receivedAt: cloneDate(create.receivedAt) };
+      store.systemSnapshots.set(where.boothId, row);
+      return row;
+    },
+    findUnique: async ({ where }: { where: { boothId: string } }) => {
+      const row = store.systemSnapshots.get(where.boothId);
+      return row ? { ...row, receivedAt: cloneDate(row.receivedAt) } : null;
+    },
+    findMany: async () =>
+      [...store.systemSnapshots.values()]
+        .sort((a, b) => a.boothId.localeCompare(b.boothId))
+        .map((row) => ({ ...row, receivedAt: cloneDate(row.receivedAt) })),
   },
   operatorSession: {
     findUnique: async ({

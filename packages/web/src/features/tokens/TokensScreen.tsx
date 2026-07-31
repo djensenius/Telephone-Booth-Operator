@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { FormEvent, JSX } from "react";
-import type { ApiToken } from "@telephone-booth-operator/shared";
+import type { ApiToken, ApiTokenScope } from "@telephone-booth-operator/shared";
 import { GlassPanel } from "../../components/booth/index.js";
 import {
   useApiTokenUsage,
@@ -48,7 +48,7 @@ export function NewTokenDialog({
 }): JSX.Element | null {
   const createToken = useCreateApiToken();
   const [name, setName] = useState("");
-  const [scope, setScope] = useState<"operator" | "worker">("operator");
+  const [scope, setScope] = useState<ApiTokenScope>("operator");
   const [expiresInDays, setExpiresInDays] = useState("");
   const [plaintext, setPlaintext] = useState<string | null>(null);
   if (!open) return null;
@@ -93,12 +93,16 @@ export function NewTokenDialog({
             Scope
             <select
               value={scope}
-              onChange={(event) =>
-                setScope(event.currentTarget.value === "worker" ? "worker" : "operator")
-              }
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                if (value === "operator" || value === "worker" || value === "monitor") {
+                  setScope(value);
+                }
+              }}
             >
               <option value="operator">Operator (booth / phone / operator clients)</option>
               <option value="worker">Worker (push-worker callbacks only)</option>
+              <option value="monitor">Monitor (read-only status / system)</option>
             </select>
           </label>
           <label>

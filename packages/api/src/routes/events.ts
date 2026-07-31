@@ -40,6 +40,12 @@ export const eventsBroadcaster = new Broadcaster<BoothEventRecord>();
 const MAX_LIMIT = 500;
 const DEFAULT_LIMIT = 100;
 
+const sleepUnref = (milliseconds: number): Promise<void> =>
+  new Promise((resolve) => {
+    const timer = setTimeout(resolve, milliseconds);
+    timer.unref();
+  });
+
 const listQuerySchema = z.object({
   boothId: z.string().min(1).optional(),
   since: z.string().datetime().optional(),
@@ -98,7 +104,7 @@ eventsRouter.get("/stream", requireOperator(), zValidator("query", streamQuerySc
     await stream.writeSSE({ event: "ready", data: "ok" });
     // Heartbeat keeps proxies from idle-closing the connection.
     while (!done) {
-      await stream.sleep(15_000);
+      await sleepUnref(15_000);
       if (done) break;
       await stream.writeSSE({ event: "ping", data: new Date().toISOString() });
     }
