@@ -154,6 +154,21 @@ describe("LiveSystemPanel", () => {
     expect(within(measuredSpeedRow!).getByText("— (no tachometer)")).toBeDefined();
   });
 
+  it("shows PWM telemetry when commanded state is absent", () => {
+    renderPanel({
+      boothId: "booth-01",
+      snapshot: {
+        ...baseSnapshot,
+        fan: {
+          pwmRatio: 0.67,
+        },
+      },
+      receivedAt: "2026-05-27T00:00:05.000Z",
+    });
+
+    expect(screen.getByText("67% PWM")).toBeDefined();
+  });
+
   it("renders disk entries from snapshot.disks with mountPoint and filesystem", () => {
     renderPanel({
       boothId: "booth-01",

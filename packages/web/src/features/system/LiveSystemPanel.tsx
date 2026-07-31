@@ -84,11 +84,13 @@ export function LiveSystemPanel({ boothId = DEFAULT_BOOTH_ID }: LiveSystemPanelP
       {
         label: "Fan command",
         value:
-          fan?.commandedOn == null
-            ? "—"
-            : `${fan.commandedOn ? "on" : "off"}${
+          fan?.commandedOn != null
+            ? `${fan.commandedOn ? "on" : "off"}${
                 fan.pwmRatio != null ? ` (${(fan.pwmRatio * 100).toFixed(0)}% PWM)` : ""
-              }`,
+              }`
+            : fan?.pwmRatio != null
+              ? `${(fan.pwmRatio * 100).toFixed(0)}% PWM`
+              : "—",
       },
       {
         label: "Fan cooling state",
