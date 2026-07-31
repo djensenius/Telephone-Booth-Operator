@@ -182,7 +182,6 @@ export const startOperatorPolling = (
   timer = setInterval(() => {
     void poll();
   }, 5_000);
-  timer.unref();
   return {
     stop(): void {
       stopped = true;

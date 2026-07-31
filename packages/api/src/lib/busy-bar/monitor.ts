@@ -46,6 +46,7 @@ export class BusyBarMonitor {
   #stopPromise: Promise<void> | null = null;
   #currentAlertKind: "error" | "offline" | "critical" | null = null;
   #statusSourceAtMs: number | null = null;
+  #statusSourceId: number | null = null;
   #systemSourceAtMs: number | null = null;
 
   constructor(
@@ -100,10 +101,20 @@ export class BusyBarMonitor {
       receivedAtMs,
       Date.now(),
     );
-    if (this.#statusSourceAtMs !== null && sourceAtMs < this.#statusSourceAtMs) return;
+    if (this.#statusSourceAtMs !== null) {
+      if (sourceAtMs < this.#statusSourceAtMs) return;
+      if (
+        sourceAtMs === this.#statusSourceAtMs &&
+        this.#statusSourceId !== null &&
+        (status.id === undefined || status.id < this.#statusSourceId)
+      ) {
+        return;
+      }
+    }
     const wasActive = this.#state.status?.state !== "idle";
     const cappedReceivedAtMs = Math.min(receivedAtMs, Date.now());
     this.#statusSourceAtMs = sourceAtMs;
+    this.#statusSourceId = status.id ?? null;
     this.#state = {
       ...this.#state,
       status,

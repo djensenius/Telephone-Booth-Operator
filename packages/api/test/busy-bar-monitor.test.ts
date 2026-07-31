@@ -97,6 +97,20 @@ describe("BUSY Bar monitor lifecycle", () => {
     await monitor.stop();
   });
 
+  it("uses the status row id to order updates with the same timestamp", async () => {
+    const client = createClient();
+    const monitor = new BusyBarMonitor(config, client);
+    const updatedAt = new Date().toISOString();
+    monitor.updateStatus({ ...status("recording"), id: 2, updatedAt });
+    monitor.updateStatus({ ...status("idle"), id: 1, updatedAt });
+    await monitor.start();
+
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(frontText(client.draw.mock.calls[0]?.[0] as DisplayDrawParams)).toBe("RECORDING");
+    await monitor.stop();
+  });
+
   it("retries a failed draw and recovers", async () => {
     const client = createClient();
     client.draw.mockRejectedValueOnce(new Error("cloud down")).mockResolvedValue(undefined);
