@@ -62,3 +62,11 @@ screens accessible from the **Observability** block in the sidebar:
 
 These screens are gated by the same operator OIDC session that guards
 the rest of the console; the audit log additionally requires admin.
+
+## BUSY Bar physical monitor
+
+The optional [BUSY Bar monitor](busy-bar-monitor.md) consumes the same live
+status and system snapshots. It logs sanitized connection, render, retry, and
+input-stream state through Pino. BUSY credentials and authentication payloads
+must never appear in logs. Integration failures are intentionally excluded from
+the API health status because the bar is an auxiliary display.

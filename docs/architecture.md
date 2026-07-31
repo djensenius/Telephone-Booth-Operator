@@ -14,9 +14,11 @@ flowchart LR
   Browser -->|GET FLAC via short-lived SAS| Blob
   Browser -->|OIDC login| Authentik[Authentik\nIdP]
   API -->|JWKS / token exchange| Authentik
+  API -->|BUSY Cloud HTTP + WS| BusyBar[BUSY Bar\nstatus monitor]
 
   classDef ext fill:#fef,stroke:#a4a;
   class Blob,DB,Authentik,Phone ext;
+  class BusyBar ext;
 ```
 
 ## Packages
@@ -56,6 +58,10 @@ spec change.
    session cookie; native clients (iOS/watchOS/tvOS, the Rust CLI) present
    an `Authorization: Bearer` token. Clients that present neither a valid
    cookie nor a valid bearer are closed with policy violation `1008`.
+6. When the optional BUSY Bar monitor is enabled, the API consumes the same
+   in-process status/system envelopes, renders a front-first physical display
+   through BUSY Cloud, and receives BUSY input events only for diagnostic-page
+   navigation. It does not expose or call booth mutation operations.
 
 ## Request flow: operator login
 

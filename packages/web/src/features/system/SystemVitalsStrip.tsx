@@ -11,67 +11,19 @@ import type { JSX } from "react";
 // authenticated page it refreshes at the polling cadence (5 s, matching the
 // booth's `PUT /v1/system` interval).
 
-import type { BoothThrottlingFlags } from "@telephone-booth-operator/shared";
+import {
+  SYSTEM_HEALTH_THRESHOLDS,
+  activeThrottlingLabels,
+  aggregateSystemHealthSeverity,
+  systemLoadSeverity,
+  systemMemorySeverity,
+  systemTemperatureSeverity,
+} from "@telephone-booth-operator/shared";
+import type { SystemHealthSeverity } from "@telephone-booth-operator/shared";
 import { useSystemCurrent } from "../../lib/api-client.js";
 import { fmtBytes, fmtNumber, fmtPercent, fmtUptime } from "./format.js";
 
 const DEFAULT_BOOTH_ID = "booth-01";
-
-// Visual thresholds — chosen to match the Prometheus alerts shipped with
-// the booth's Grafana dashboards.
-const TEMP_WARN_C = 60;
-const TEMP_CRIT_C = 75;
-const MEMORY_WARN_RATIO = 0.85;
-const MEMORY_CRIT_RATIO = 0.95;
-
-type Severity = "ok" | "warn" | "crit";
-
-// Map the six boolean Pi throttling flags to short display labels matching
-// what `vcgencmd get_throttled` reports. Only currently-asserted flags are
-// returned so the tile can render a count + tooltip without leaking the
-// internal field names.
-function collectThrottlingFlags(flags: BoothThrottlingFlags): string[] {
-  const labels: string[] = [];
-  if (flags.undervoltage) labels.push("under-voltage");
-  if (flags.armFreqCapped) labels.push("arm-freq-capped");
-  if (flags.throttled) labels.push("throttled");
-  if (flags.softTempLimit) labels.push("soft-temp-limit");
-  if (flags.undervoltageOccurred) labels.push("under-voltage-occurred");
-  if (flags.throttledOccurred) labels.push("throttled-occurred");
-  return labels;
-}
-
-function temperatureSeverity(value: number | null | undefined): Severity {
-  if (typeof value !== "number") return "ok";
-  if (value >= TEMP_CRIT_C) return "crit";
-  if (value >= TEMP_WARN_C) return "warn";
-  return "ok";
-}
-
-function memorySeverity(
-  used: number | null | undefined,
-  total: number | null | undefined,
-): Severity {
-  if (typeof used !== "number" || typeof total !== "number" || total <= 0) return "ok";
-  const ratio = used / total;
-  if (ratio >= MEMORY_CRIT_RATIO) return "crit";
-  if (ratio >= MEMORY_WARN_RATIO) return "warn";
-  return "ok";
-}
-
-function loadSeverity(
-  value: number | null | undefined,
-  cores: number | null | undefined,
-): Severity {
-  if (typeof value !== "number") return "ok";
-  // Treat one runnable task per core as the warning threshold; double that
-  // as critical. Falls back to a sane single-core default if we don't know
-  // the core count yet.
-  const reference = typeof cores === "number" && cores > 0 ? cores : 1;
-  if (value >= reference * 2) return "crit";
-  if (value >= reference) return "warn";
-  return "ok";
-}
 
 interface SystemVitalsStripProps {
   readonly boothId?: string;
@@ -80,7 +32,7 @@ interface SystemVitalsStripProps {
 interface TileProps {
   readonly label: string;
   readonly value: string;
-  readonly severity?: Severity;
+  readonly severity?: SystemHealthSeverity;
   readonly hint?: string;
 }
 
@@ -127,7 +79,7 @@ export function SystemVitalsStrip({
   // Collect any throttling flags that are currently asserted so the tile can
   // show a count + tooltip without leaking the Pi-specific field names into
   // the UI.
-  const activeThrottlingFlags = throttling ? collectThrottlingFlags(throttling) : [];
+  const activeThrottlingFlags = activeThrottlingLabels(throttling);
 
   // Show a placeholder strip when there's nothing cached yet so the layout
   // doesn't pop in once the first refetch resolves.
@@ -146,17 +98,10 @@ export function SystemVitalsStrip({
   // be relentless. Instead we summarise the highest tile severity in a
   // visually-hidden live region so SR users only hear "warning" / "critical"
   // when the booth's health changes, not on every refetch.
-  const tempSev = temperatureSeverity(temperatureCelsius);
-  const memSev = memorySeverity(memoryUsedBytes, memoryTotalBytes);
-  const loadSev = loadSeverity(loadAvg1m, cpuCores);
-  const throttleSev: Severity = activeThrottlingFlags.length > 0 ? "warn" : "ok";
-  const tailscaleSev: Severity = tailscale?.connected === false ? "crit" : "ok";
-  const aggregateSeverity: Severity = (
-    [tempSev, memSev, loadSev, throttleSev, tailscaleSev] as readonly Severity[]
-  ).reduce<Severity>(
-    (acc, s) => (s === "crit" ? "crit" : s === "warn" && acc === "ok" ? "warn" : acc),
-    "ok",
-  );
+  const tempSev = systemTemperatureSeverity(temperatureCelsius);
+  const memSev = systemMemorySeverity(memoryUsedBytes, memoryTotalBytes);
+  const loadSev = systemLoadSeverity(loadAvg1m, cpuCores);
+  const aggregateSeverity = aggregateSystemHealthSeverity(snapshot);
   const liveSummary = isEmpty
     ? ""
     : aggregateSeverity === "crit"
@@ -183,7 +128,7 @@ export function SystemVitalsStrip({
             typeof temperatureCelsius === "number" ? `${fmtNumber(temperatureCelsius, 1)}°C` : "—"
           }
           severity={tempSev}
-          hint={`CPU temperature (warn ≥${TEMP_WARN_C}°C, crit ≥${TEMP_CRIT_C}°C)`}
+          hint={`CPU temperature (warn ≥${SYSTEM_HEALTH_THRESHOLDS.temperatureWarnCelsius}°C, crit ≥${SYSTEM_HEALTH_THRESHOLDS.temperatureCriticalCelsius}°C)`}
         />
         <VitalTile
           label="CPU"

@@ -165,6 +165,9 @@ needed. See [`installations.md`](installations.md).
   [`azure-storage.md`](azure-storage.md).
 - Phone-client API tokens: rotated via the operator UI; old ones can be
   revoked instantly.
+- `BUSY_BAR_CLOUD_TOKEN`: required only when the optional dedicated BUSY Bar
+  monitor is enabled. Store and rotate it like any other external-service
+  bearer token; see [`busy-bar-monitor.md`](busy-bar-monitor.md).
 
 Use whichever secrets store your platform offers (Vault, 1Password, Doppler,
 AKV, …). Plain `.env` files are fine for solo / home deployments.
@@ -174,3 +177,6 @@ AKV, …). Plain `.env` files are fine for solo / home deployments.
 The API ships structured pino logs to stdout (`LOG_LEVEL=info`); pipe
 them into whatever log shipper you use. There's no built-in tracing
 exporter yet — that's tracked in `docs/adr/` for a future ADR.
+
+The BUSY Bar integration is auxiliary. A cloud or device outage is logged but
+does not make `/healthz` fail or prevent booth/operator traffic.
