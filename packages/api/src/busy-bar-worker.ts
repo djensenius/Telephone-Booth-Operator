@@ -28,10 +28,13 @@ const fetchJson = async (url: URL, token: string): Promise<unknown> => {
   return response.json();
 };
 
-const readInitialStatus = async (apiUrl: string, token: string): Promise<BoothStatus | null> => {
+export const readInitialStatus = async (
+  apiUrl: string,
+  token: string,
+): Promise<BoothStatus | null> => {
   const raw = await fetchJson(new URL("/v1/status", apiUrl), token);
   const parsed = BoothStatusSchema.safeParse(raw);
-  return parsed.success ? parsed.data : null;
+  return parsed.success && parsed.data.id !== undefined ? parsed.data : null;
 };
 
 const readInitialSystem = async (
@@ -54,8 +57,13 @@ const readInitialSystem = async (
   return parsed.success ? parsed.data : null;
 };
 
-interface OperatorStreamHandle {
+export interface OperatorStreamHandle {
   stop(): void;
+}
+
+export interface BusyBarOperatorMonitor {
+  updateStatus(status: BoothStatus, receivedAtMs?: number): void;
+  updateSystem(system: BoothSystemSnapshotEnvelope): void;
 }
 
 const statusReceiptTime = (status: BoothStatus): number => {
@@ -63,11 +71,11 @@ const statusReceiptTime = (status: BoothStatus): number => {
   return Number.isFinite(reportedAt) ? Math.min(Date.now(), reportedAt) : Date.now();
 };
 
-const startOperatorStream = (
+export const startOperatorStream = (
   apiUrl: string,
   token: string,
   boothId: string,
-  monitor: BusyBarMonitor,
+  monitor: BusyBarOperatorMonitor,
 ): OperatorStreamHandle => {
   let socket: WebSocket | null = null;
   let retry: NodeJS.Timeout | null = null;
@@ -139,11 +147,11 @@ const startOperatorStream = (
   };
 };
 
-const startOperatorPolling = (
+export const startOperatorPolling = (
   apiUrl: string,
   token: string,
   boothId: string,
-  monitor: BusyBarMonitor,
+  monitor: BusyBarOperatorMonitor,
 ): OperatorStreamHandle => {
   let stopped = false;
   let timer: NodeJS.Timeout | null = null;

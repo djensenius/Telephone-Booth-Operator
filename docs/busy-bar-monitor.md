@@ -13,7 +13,9 @@ WebSocket connection.
   between `READY` and a compact system-health frame.
 - Any call activity immediately pins the corresponding state (`CALLING`,
   `PLAYING`, `RECORDING`, or `SENDING`).
-- Warning, error, and stale/offline frames remain pinned until recovery.
+- Booth errors and stale booth status pin until recovery. While idle, system
+  warning, critical, and stale/offline frames also pin; active call labels stay
+  visible while system-offline audio still alerts.
 - The back display has Call, System, and Network pages.
 - Encoder movement, OK, and START cycle back pages; BACK returns to Call.
   Switch events and button releases are ignored.
