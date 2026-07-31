@@ -111,7 +111,7 @@ describe("BUSY Bar monitor lifecycle", () => {
     await monitor.stop();
   });
 
-  it("retries a failed draw and recovers", async () => {
+  it("backs off failed draws and recovers with the latest state", async () => {
     const client = createClient();
     client.draw.mockRejectedValueOnce(new Error("cloud down")).mockResolvedValue(undefined);
     const monitor = new BusyBarMonitor(
@@ -124,9 +124,13 @@ describe("BUSY Bar monitor lifecycle", () => {
 
     await vi.advanceTimersByTimeAsync(250);
     expect(client.draw).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(1_250);
+    monitor.updateStatus(status("recording"));
+    monitor.updateSystem(healthySystem());
+    await vi.advanceTimersByTimeAsync(500);
+    expect(client.draw).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(750);
     expect(client.draw).toHaveBeenCalledTimes(2);
-    expect(frontText(client.draw.mock.calls[1]?.[0] as DisplayDrawParams)).toBe("READY");
+    expect(frontText(client.draw.mock.calls[1]?.[0] as DisplayDrawParams)).toBe("RECORDING");
     await monitor.stop();
   });
 
@@ -150,6 +154,8 @@ describe("BUSY Bar monitor lifecycle", () => {
     monitor.updateStatus(status("idle"));
     await vi.advanceTimersByTimeAsync(250);
 
+    expect(client.draw).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(client.draw).toHaveBeenCalledTimes(3);
     expect(frontText(client.draw.mock.calls[2]?.[0] as DisplayDrawParams)).toBe("READY");
     await monitor.stop();

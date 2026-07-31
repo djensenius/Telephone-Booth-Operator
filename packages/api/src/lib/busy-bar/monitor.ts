@@ -158,7 +158,7 @@ export class BusyBarMonitor {
   }
 
   #scheduleRender(): void {
-    if (!this.#started || this.#stopped || this.#renderTimer) return;
+    if (!this.#started || this.#stopped || this.#renderTimer || this.#retryTimer) return;
     if (this.#rendering) {
       this.#renderQueued = true;
       return;
