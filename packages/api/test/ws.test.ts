@@ -36,9 +36,11 @@ vi.mock("../src/lib/api-tokens.js", async (importActual) => {
     verifyToken: async (plaintext: string) =>
       plaintext === "worker-token"
         ? ({ id: "worker-token-1", scope: "worker" } as never)
-        : plaintext === "operator-token"
-          ? ({ id: "operator-token-1", scope: "operator" } as never)
-          : null,
+        : plaintext === "monitor-token"
+          ? ({ id: "monitor-token-1", scope: "monitor" } as never)
+          : plaintext === "operator-token"
+            ? ({ id: "operator-token-1", scope: "operator" } as never)
+            : null,
   };
 });
 
@@ -309,6 +311,38 @@ describe("status websocket", () => {
     });
     expect(put.status).toBe(204);
     await expect(received).resolves.toMatchObject({ kind: "status" });
+    ws.close();
+    await closeServer(server);
+  });
+
+  it("delivers only status/system data to monitor-scoped tokens", async () => {
+    installBearerVerifier();
+    const app = createApp();
+    const server = serve({ fetch: app.fetch, port: 0 });
+    attachStatusWebSocket(server);
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("missing test server address");
+
+    const ws = new WebSocket(`ws://127.0.0.1:${address.port}/v1/ws/status`, {
+      headers: { authorization: ["Bearer", "monitor-token"].join(" ") },
+    });
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", resolve);
+      ws.once("error", reject);
+    });
+    const received = new Promise<Record<string, unknown>>((resolve) => {
+      ws.once("message", (data) => resolve(JSON.parse(data.toString()) as Record<string, unknown>));
+    });
+
+    broadcastWork("33333333-3333-4333-8333-333333333333", ["moderation"]);
+    const put = await app.request("/v1/status", {
+      method: "PUT",
+      headers: { "content-type": "application/json", ...phoneHeaders },
+      body: JSON.stringify({ state: "recording" }),
+    });
+    expect(put.status).toBe(204);
+    await expect(received).resolves.toMatchObject({ kind: "status" });
+
     ws.close();
     await closeServer(server);
   });

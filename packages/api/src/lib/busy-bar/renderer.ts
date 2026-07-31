@@ -29,7 +29,7 @@ export interface BusyBarRender {
   frontSignature: string;
   backSignature: string;
   signature: string;
-  alertKind: "error" | "offline" | null;
+  alertKind: "error" | "offline" | "critical" | null;
 }
 
 const COLORS = {
@@ -225,6 +225,8 @@ export const renderBusyBar = (
         ? "offline"
         : state.status?.state === "error"
           ? "error"
-          : null,
+          : healthView.severity === "crit"
+            ? "critical"
+            : null,
   };
 };

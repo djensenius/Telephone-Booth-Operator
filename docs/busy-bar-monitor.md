@@ -20,8 +20,8 @@ WebSocket connection.
 - Encoder movement, OK, and START cycle back pages; BACK returns to Call.
   Switch events and button releases are ignored.
 - BUSY inputs never mutate booth state.
-- Critical audio runs only on transitions into booth error or stale/offline and
-  is rate-limited.
+- Critical audio runs only on transitions into booth error, critical system
+  health, or stale/offline and is rate-limited.
 
 The monitor uses display priority 100 by default. This intentionally overrides
 the bar's built-in BUSY/CUSTOM sessions, so use a dedicated device.
@@ -48,7 +48,7 @@ BUSY_BAR_CLOUD_TOKEN=replace-with-secret-token
 BUSY_BAR_API_URL=https://api.busy.app
 BUSY_BAR_CLOUD_WS_URL=wss://api.busy.app/api/v1/bars/ws
 BUSY_BAR_OPERATOR_API_URL=https://operator.example.com
-BUSY_BAR_OPERATOR_TOKEN=replace-with-operator-scoped-api-token
+BUSY_BAR_OPERATOR_TOKEN=replace-with-monitor-scoped-api-token
 BUSY_BAR_BOOTH_ID=booth-01
 BUSY_BAR_DEVICE_ID=
 BUSY_BAR_APPLICATION_NAME=telephone-booth-monitor
@@ -64,7 +64,7 @@ BUSY_BAR_ALERT_COOLDOWN_SECONDS=300
 `BUSY_BAR_DEVICE_ID` is optional for display and audio output, but required for
 physical input navigation.
 
-Create `BUSY_BAR_OPERATOR_TOKEN` as an operator-scoped static API token in the
+Create `BUSY_BAR_OPERATOR_TOKEN` as a monitor-scoped static API token in the
 operator UI. The worker uses it only to read `/v1/status`,
 `/v1/system/current`, and `/v1/ws/status`.
 

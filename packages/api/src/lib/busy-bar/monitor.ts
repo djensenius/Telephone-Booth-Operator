@@ -36,14 +36,15 @@ export class BusyBarMonitor {
   #activeRender: Promise<void> | null = null;
   #retryAttempt = 0;
   #renderSignature: string | null = null;
-  readonly #lastAlertAt: Record<"error" | "offline", number> = {
+  readonly #lastAlertAt: Record<"error" | "offline" | "critical", number> = {
     error: 0,
     offline: 0,
+    critical: 0,
   };
   #stopped = false;
   #started = false;
   #stopPromise: Promise<void> | null = null;
-  #currentAlertKind: "error" | "offline" | null = null;
+  #currentAlertKind: "error" | "offline" | "critical" | null = null;
   #statusSourceAtMs: number | null = null;
   #systemSourceAtMs: number | null = null;
 
@@ -197,7 +198,7 @@ export class BusyBarMonitor {
     }
   }
 
-  async #maybeAlert(kind: "error" | "offline" | null): Promise<void> {
+  async #maybeAlert(kind: "error" | "offline" | "critical" | null): Promise<void> {
     const previousKind = this.#currentAlertKind;
     this.#currentAlertKind = kind;
     if (!kind || kind === previousKind || !this.#config.audioEnabled || !this.#config.alertSound) {

@@ -168,7 +168,7 @@ needed. See [`installations.md`](installations.md).
 - `BUSY_BAR_CLOUD_TOKEN`: required only when the optional dedicated BUSY Bar
   monitor is enabled. Store and rotate it like any other external-service
   bearer token; see [`busy-bar-monitor.md`](busy-bar-monitor.md).
-- `BUSY_BAR_OPERATOR_TOKEN`: operator-scoped static API token used by the
+- `BUSY_BAR_OPERATOR_TOKEN`: monitor-scoped static API token used by the
   singleton monitor worker to consume status/system data.
 
 Use whichever secrets store your platform offers (Vault, 1Password, Doppler,

@@ -887,6 +887,16 @@ describe("Tokens feature", () => {
     expect(lastCreatedTokenScope).toBe("worker");
   });
 
+  it("issues a monitor-scoped token", async () => {
+    renderPath("/tokens");
+    fireEvent.click(await screen.findByText("New token"));
+    fireEvent.change(screen.getByLabelText("Token name"), { target: { value: "busy bar" } });
+    fireEvent.change(screen.getByLabelText("Scope"), { target: { value: "monitor" } });
+    fireEvent.click(screen.getByText("Issue token"));
+    expect(await screen.findByText("booth-token-plaintext")).toBeTruthy();
+    expect(lastCreatedTokenScope).toBe("monitor");
+  });
+
   it("opens the new token dialog", async () => {
     renderPath("/tokens");
     fireEvent.click(await screen.findByText("New token"));

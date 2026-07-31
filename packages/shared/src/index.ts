@@ -296,7 +296,7 @@ export const OperatorMeSchema = z.object({
 });
 export type OperatorMe = z.infer<typeof OperatorMeSchema>;
 
-export const ApiTokenScopeSchema = z.enum(["operator", "worker"]);
+export const ApiTokenScopeSchema = z.enum(["operator", "worker", "monitor"]);
 export type ApiTokenScope = z.infer<typeof ApiTokenScopeSchema>;
 
 export const CreateApiTokenRequestSchema = z.object({

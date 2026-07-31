@@ -78,21 +78,18 @@ describe("BUSY Bar renderer", () => {
   });
 
   it("pins critical health and offline frames", () => {
-    expect(
-      textsFor(
-        renderBusyBar(
-          model({
-            system: {
-              ...system,
-              snapshot: { ...system.snapshot, temperatureCelsius: 80 },
-            },
-          }),
-          config,
-          now,
-        ).payload,
-        "front",
-      ),
-    ).toEqual(["HOT"]);
+    const hot = renderBusyBar(
+      model({
+        system: {
+          ...system,
+          snapshot: { ...system.snapshot, temperatureCelsius: 80 },
+        },
+      }),
+      config,
+      now,
+    );
+    expect(textsFor(hot.payload, "front")).toEqual(["HOT"]);
+    expect(hot.alertKind).toBe("critical");
 
     const offline = renderBusyBar(
       model({
@@ -140,6 +137,7 @@ describe("BUSY Bar renderer", () => {
       now,
     );
     expect(textsFor(throttledCritical.payload, "front")).toEqual(["SYSTEM CRIT"]);
+    expect(throttledCritical.alertKind).toBe("critical");
   });
 
   it("keeps the front signature stable during back-page navigation", () => {

@@ -160,6 +160,31 @@ describe("BUSY Bar monitor lifecycle", () => {
     await monitor.stop();
   });
 
+  it("plays audio only when entering critical system health", async () => {
+    const client = createClient();
+    const monitor = new BusyBarMonitor({ ...config, staleAfterMs: 1_000_000 }, client);
+    monitor.updateStatus(status("idle"));
+    monitor.updateSystem(healthySystem());
+    await monitor.start();
+    await vi.advanceTimersByTimeAsync(250);
+
+    monitor.updateSystem({
+      ...healthySystem(),
+      snapshot: { ...healthySystem().snapshot, temperatureCelsius: 80 },
+    });
+    await vi.advanceTimersByTimeAsync(250);
+    expect(client.playStockSound).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(config.alertCooldownMs);
+    monitor.updateSystem({
+      ...healthySystem(),
+      snapshot: { ...healthySystem().snapshot, temperatureCelsius: 80 },
+    });
+    await vi.advanceTimersByTimeAsync(250);
+    expect(client.playStockSound).toHaveBeenCalledTimes(1);
+    await monitor.stop();
+  });
+
   it("waits for alert audio before clearing on stop", async () => {
     let finishAudio: (() => void) | undefined;
     const client = createClient();

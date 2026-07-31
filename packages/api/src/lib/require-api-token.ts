@@ -15,12 +15,11 @@ const bearerTokenFromHeader = (authorization: string | undefined): string | null
   return token;
 };
 
-// The token must carry exactly `requiredScope`. Defaults to "operator" so the
-// booth/phone and native-operator routes reject worker-scoped tokens; the push
-// worker router opts in with `requireApiToken("worker")`.
+// The token must carry one of the required scopes. Defaults to "operator" so
+// booth/phone and native-operator routes reject worker/monitor credentials.
 export const requireApiToken =
   (
-    requiredScope: ApiTokenScope = "operator",
+    requiredScope: ApiTokenScope | readonly ApiTokenScope[] = "operator",
   ): MiddlewareHandler<{ Variables: ApiTokenVariables }> =>
   async (c, next) => {
     const plaintext = bearerTokenFromHeader(c.req.header("authorization"));
@@ -34,7 +33,8 @@ export const requireApiToken =
     c.set("apiToken", token);
     c.set("apiTokenId", token.id);
 
-    if (token.scope !== requiredScope) {
+    const requiredScopes = Array.isArray(requiredScope) ? requiredScope : [requiredScope];
+    if (!requiredScopes.some((scope) => token.scope === scope)) {
       return c.json({ error: "insufficient_scope" }, 403);
     }
     await next();

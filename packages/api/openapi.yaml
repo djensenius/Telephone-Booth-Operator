@@ -1424,14 +1424,16 @@ paths:
         `Authorization: Bearer` Authentik access token; the push-mode
         Transcription worker (macOS + iOS) presents its static API token and
         reacts to `{kind:"work", messageId, needs}` envelopes by running the
-        named steps and POSTing results to `/v1/worker/messages/{id}/*`. The
-        connection is
-        dropped with code 1009 if outbound buffering exceeds ~1 MiB (slow
-        consumer guard).
+        named steps and POSTing results to `/v1/worker/messages/{id}/*`.
+        Monitor-scoped static API tokens receive only `status` and `system`
+        envelopes; worker-scoped tokens receive only `work` envelopes. The
+        connection is dropped with code 1009 if outbound buffering exceeds
+        ~1 MiB (slow consumer guard).
       tags: [status]
       security:
         - operatorSession: []
         - operatorBearer: []
+        - apiToken: []
       responses:
         "101": { description: switching protocols }
         "426": { description: upgrade required }
@@ -2109,13 +2111,14 @@ components:
         name: { type: string, minLength: 1, maxLength: 64 }
         scope:
           type: string
-          enum: [operator, worker]
+          enum: [operator, worker, monitor]
           default: operator
           description: >-
             Capability scope. "operator" (default) authenticates booth/phone and
             native operator clients; "worker" is limited to the push-worker
             callback routes and receives only `work` events on the status
-            WebSocket.
+            WebSocket; "monitor" is limited to read-only status/system routes
+            and receives only those envelopes.
         expiresInDays: { type: integer, minimum: 1, maximum: 3650 }
     ApiToken:
       type: object
@@ -2123,7 +2126,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
-        scope: { type: string, enum: [operator, worker] }
+        scope: { type: string, enum: [operator, worker, monitor] }
         last4: { type: string, minLength: 4, maxLength: 4 }
         createdAt: { type: string, format: date-time }
         expiresAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }

@@ -73,7 +73,7 @@ function isRepeatOf(
   );
 }
 
-statusRouter.get("/", requireOperatorOrApiToken(), async (c) => {
+statusRouter.get("/", requireOperatorOrApiToken(["operator", "monitor"]), async (c) => {
   // Authenticated read of the latest booth snapshot. Operator clients use a
   // session cookie or operator bearer; the booth/phone client uses its API token.
   const latest = await db.boothStatusSnapshot.findFirst({

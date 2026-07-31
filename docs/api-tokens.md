@@ -13,7 +13,7 @@ stores only:
 - `lookupId` — the first 8 characters, indexed for a fast database lookup.
 - `tokenHash` — an Argon2id hash of the full plaintext token.
 - `last4` — display hint for operators.
-- `scope` — capability scope, either `operator` (default) or `worker`.
+- `scope` — capability scope: `operator` (default), `worker`, or `monitor`.
 - lifecycle fields: `createdAt`, `expiresAt`, `lastUsedAt`, and `revokedAt`.
 
 The plaintext token is returned exactly once by `POST /v1/api-tokens` as
@@ -37,15 +37,19 @@ narrowest scope for the credential's job:
   input route `GET /v1/worker/messages/:id/work`; it is the broadcast
   WebSocket stream, not the worker input, that excludes content.) An
   operator-scoped token can never read `work` events.
+- **`monitor`** — a read-only credential for the BUSY Bar singleton. It may
+  read only `GET /v1/status` and `GET /v1/system/current`; on
+  `/v1/ws/status` it receives only `status` and `system` envelopes.
 
 Requests to `/v1/worker/*` with a non-`worker` token are rejected with
-`403 insufficient_scope`. Tokens created before scopes existed default to
-`operator`, preserving their prior behavior.
+`403 insufficient_scope`. Monitor tokens are likewise rejected from booth
+writes and operator message content. Tokens created before scopes existed
+default to `operator`, preserving their prior behavior.
 
 ## Lifecycle
 
 1. An authenticated operator creates a token with a name, a `scope`
-   (`operator` or `worker`), and an optional `expiresInDays` value.
+   (`operator`, `worker`, or `monitor`), and an optional `expiresInDays` value.
 2. The API stores the Argon2id hash and returns the plaintext once.
 3. The phone client sends `Authorization: Bearer <token>` on protected phone
    routes.

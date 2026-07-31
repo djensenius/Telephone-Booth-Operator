@@ -56,7 +56,7 @@ systemRouter.put("/", requireApiToken(), zValidator("json", putBodySchema), asyn
 
 systemRouter.get(
   "/current",
-  requireOperatorOrApiToken(),
+  requireOperatorOrApiToken(["operator", "monitor"]),
   zValidator("query", z.object({ boothId: z.string().min(1).optional() })),
   async (c) => {
     const { boothId } = c.req.valid("query");
