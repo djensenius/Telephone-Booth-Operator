@@ -43,6 +43,13 @@ const sampleSnapshot = {
   cpu: { usageRatio: 0.12, loadAvg1m: 0.12, physicalCores: 4 },
   temperatureCelsius: 48.5,
   memory: { totalBytes: 2048, usedBytes: 1024 },
+  fan: {
+    commandedOn: true,
+    pwmRatio: 0.67,
+    rpm: 4250,
+    coolingState: 2,
+    maxCoolingState: 3,
+  },
   uptimeSeconds: 60,
 };
 

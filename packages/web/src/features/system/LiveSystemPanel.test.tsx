@@ -59,6 +59,13 @@ const baseSnapshot = {
   },
   audio: { sampleRateHz: 48_000 },
   tailscale: { connected: true, hostname: "telephone-booth" },
+  fan: {
+    commandedOn: true,
+    pwmRatio: 0.67,
+    rpm: 4_250,
+    coolingState: 2,
+    maxCoolingState: 3,
+  },
   runtimeMode: "real" as const,
 };
 
@@ -120,6 +127,31 @@ describe("LiveSystemPanel", () => {
 
     // Tailscale shows hostname when connected.
     expect(screen.getByText("up (telephone-booth)")).toBeDefined();
+
+    // Commanded fan state remains distinct from measured tachometer speed.
+    expect(screen.getByText("on (67% PWM)")).toBeDefined();
+    expect(screen.getByText("2 / 3")).toBeDefined();
+    expect(screen.getByText("4250 RPM")).toBeDefined();
+  });
+
+  it("shows fan command without implying measured rotation when tachometer data is absent", () => {
+    renderPanel({
+      boothId: "booth-01",
+      snapshot: {
+        ...baseSnapshot,
+        fan: {
+          commandedOn: true,
+          pwmRatio: 0.34,
+          coolingState: 1,
+          maxCoolingState: 3,
+        },
+      },
+      receivedAt: "2026-05-27T00:00:05.000Z",
+    });
+
+    expect(screen.getByText("on (34% PWM)")).toBeDefined();
+    const measuredSpeedRow = screen.getByText("Fan measured speed").parentElement;
+    expect(within(measuredSpeedRow!).getByText("— (no tachometer)")).toBeDefined();
   });
 
   it("renders disk entries from snapshot.disks with mountPoint and filesystem", () => {
