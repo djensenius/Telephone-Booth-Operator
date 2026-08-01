@@ -718,6 +718,71 @@ textarea:focus-visible,
   opacity: 0.7;
 }
 
+.fan-vital-tile__body {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.fan-vital-tile__dial {
+  flex: 0 0 28px;
+  width: 28px;
+  overflow: visible;
+}
+
+.fan-vital-tile__track,
+.fan-vital-tile__progress {
+  fill: none;
+  stroke-linecap: round;
+  stroke-width: 6;
+}
+
+.fan-vital-tile__track {
+  stroke: color-mix(in srgb, var(--text-muted) 24%, transparent);
+}
+
+.fan-vital-tile__progress {
+  stroke: var(--accent-red-strong);
+  stroke-dasharray: var(--fan-gauge-progress) 100;
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--accent-red) 42%, transparent));
+}
+
+.fan-vital-tile__needle {
+  stroke: var(--accent-yellow);
+  stroke-linecap: round;
+  stroke-width: 2.5;
+  transform: rotate(var(--fan-gauge-needle));
+  transform-origin: 32px 32px;
+  transition: transform 300ms ease;
+}
+
+.fan-vital-tile__hub {
+  fill: var(--accent-yellow);
+}
+
+.fan-vital-tile__readout {
+  display: grid;
+  min-width: 0;
+  line-height: 1.05;
+}
+
+.system-vitals-strip__tile--fan .system-vitals-strip__tile-value {
+  font-size: 0.75rem;
+}
+
+.fan-vital-tile__meta {
+  display: block;
+  width: 100%;
+  margin-top: 0;
+  font-family: var(--font-mono);
+  font-size: 0.5rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .app-shell__main {
   min-width: 0;
 }
