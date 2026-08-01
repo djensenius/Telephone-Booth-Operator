@@ -605,7 +605,6 @@ textarea:focus-visible,
    the same surface/border treatment as `.operator-sidebar__nav` (declared
    in the shared selector above) and adds layout + tile styling here. */
 .operator-sidebar .system-vitals-strip {
-  container-type: inline-size;
   padding: 14px 16px 12px;
   background: color-mix(in srgb, var(--surface-panel) 92%, transparent);
   border: 1px solid var(--border-subtle);
@@ -722,13 +721,13 @@ textarea:focus-visible,
 .fan-vital-tile__body {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
 }
 
 .fan-vital-tile__dial {
-  flex: 0 0 46px;
-  width: 46px;
+  flex: 0 0 28px;
+  width: 28px;
   overflow: visible;
 }
 
@@ -768,18 +767,16 @@ textarea:focus-visible,
   line-height: 1.05;
 }
 
+.system-vitals-strip__tile--fan .system-vitals-strip__tile-value {
+  font-size: 0.75rem;
+}
+
 .fan-vital-tile__meta {
   margin-top: 4px;
   font-family: var(--font-mono);
-  font-size: 0.55rem;
+  font-size: 0.5rem;
   color: var(--text-muted);
   white-space: nowrap;
-}
-
-@container (max-width: 320px) {
-  .system-vitals-strip__tile--fan {
-    grid-column: 1 / -1;
-  }
 }
 
 .app-shell__main {

@@ -23,7 +23,7 @@ export function FanVitalTile({ fan }: FanVitalTileProps): JSX.Element {
         : (command ?? "—");
   const meta =
     measuredRpm != null
-      ? `RPM${pwmPercent != null ? ` · ${pwmPercent}% PWM` : command ? ` · ${command}` : ""}`
+      ? `RPM${pwmPercent != null ? ` · ${pwmPercent}%` : command ? ` · ${command}` : ""}`
       : pwmPercent != null
         ? "PWM · no tach"
         : fan

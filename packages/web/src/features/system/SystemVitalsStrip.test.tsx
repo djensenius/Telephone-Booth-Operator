@@ -84,7 +84,7 @@ describe("SystemVitalsStrip", () => {
       screen.getByRole("group", { name: /4250 RPM measured, 67% PWM commanded/i }),
     ).toBeDefined();
     expect(screen.getByText("4,250")).toBeDefined();
-    expect(screen.getByText("RPM · 67% PWM")).toBeDefined();
+    expect(screen.getByText("RPM · 67%")).toBeDefined();
   });
 
   it("labels commanded fan speed when tachometer feedback is unavailable", () => {
