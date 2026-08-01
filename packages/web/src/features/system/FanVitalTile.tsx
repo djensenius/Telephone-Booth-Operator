@@ -51,6 +51,7 @@ export function FanVitalTile({ fan }: FanVitalTileProps): JSX.Element {
   return (
     <div
       className="system-vitals-strip__tile system-vitals-strip__tile--fan"
+      role="group"
       aria-label={`Cooling fan: ${description || "telemetry unavailable"}`}
       title={description || undefined}
     >

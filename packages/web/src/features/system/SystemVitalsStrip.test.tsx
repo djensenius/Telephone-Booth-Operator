@@ -80,7 +80,9 @@ describe("SystemVitalsStrip", () => {
       receivedAt: "2026-05-27T00:00:05.000Z",
     });
 
-    expect(screen.getByLabelText(/4250 RPM measured, 67% PWM commanded/i)).toBeDefined();
+    expect(
+      screen.getByRole("group", { name: /4250 RPM measured, 67% PWM commanded/i }),
+    ).toBeDefined();
     expect(screen.getByText("4,250")).toBeDefined();
     expect(screen.getByText("RPM · 67% PWM")).toBeDefined();
   });
@@ -118,7 +120,7 @@ describe("SystemVitalsStrip", () => {
     expect(screen.getByText("900")).toBeDefined();
     expect(screen.getByText("RPM · Off")).toBeDefined();
     expect(screen.queryByText(/0% PWM/i)).toBeNull();
-    expect(screen.getByLabelText(/fan commanded off/i)).toBeDefined();
+    expect(screen.getByRole("group", { name: /fan commanded off/i })).toBeDefined();
   });
 
   it("flags CPU temperature severity when it crosses warn/crit thresholds", () => {

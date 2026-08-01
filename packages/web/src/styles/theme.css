@@ -776,7 +776,7 @@ textarea:focus-visible,
   white-space: nowrap;
 }
 
-@container (max-width: 250px) {
+@container (max-width: 320px) {
   .system-vitals-strip__tile--fan {
     grid-column: 1 / -1;
   }

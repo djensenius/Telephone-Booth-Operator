@@ -168,6 +168,7 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
           <div
             aria-label="Cooling fan: telemetry unavailable"
             class="system-vitals-strip__tile system-vitals-strip__tile--fan"
+            role="group"
           >
             <span
               class="system-vitals-strip__tile-label"
