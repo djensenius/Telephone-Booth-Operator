@@ -6,7 +6,7 @@ database and an Azure Blob container.
 ```mermaid
 flowchart LR
   Phone[Rust phone client] -->|Bearer API token| API
-  Browser[Operator browser\n(React)] -->|Session cookie| API
+  Browser["Operator browser\n(React)"] -->|Session cookie| API
   Browser -->|WS /v1/ws/status| API
   API[Hono API] --> DB[(Postgres\nvia Prisma)]
   API -->|presigned SAS| Phone
