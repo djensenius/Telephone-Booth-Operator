@@ -62,6 +62,44 @@ describe("SystemVitalsStrip", () => {
     expect(screen.getByText("3d 4h 15m")).toBeDefined();
   });
 
+  it("renders fan PWM as a dial while prioritizing measured RPM", () => {
+    renderStrip({
+      boothId: "booth-01",
+      snapshot: {
+        ...baseSnapshot,
+        fan: {
+          commandedOn: true,
+          pwmRatio: 0.67,
+          rpm: 4_250,
+          coolingState: 2,
+          maxCoolingState: 3,
+        },
+      },
+      receivedAt: "2026-05-27T00:00:05.000Z",
+    });
+
+    expect(screen.getByLabelText(/4250 RPM measured, 67% PWM commanded/i)).toBeDefined();
+    expect(screen.getByText("4,250")).toBeDefined();
+    expect(screen.getByText("RPM · 67% PWM")).toBeDefined();
+  });
+
+  it("labels commanded fan speed when tachometer feedback is unavailable", () => {
+    renderStrip({
+      boothId: "booth-01",
+      snapshot: {
+        ...baseSnapshot,
+        fan: {
+          commandedOn: true,
+          pwmRatio: 0.34,
+        },
+      },
+      receivedAt: "2026-05-27T00:00:05.000Z",
+    });
+
+    expect(screen.getByText("34%")).toBeDefined();
+    expect(screen.getByText("PWM · no tach")).toBeDefined();
+  });
+
   it("flags CPU temperature severity when it crosses warn/crit thresholds", () => {
     renderStrip({
       boothId: "booth-01",

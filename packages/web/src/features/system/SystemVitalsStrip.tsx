@@ -21,6 +21,7 @@ import {
 } from "@telephone-booth-operator/shared";
 import type { SystemHealthSeverity } from "@telephone-booth-operator/shared";
 import { useSystemCurrent } from "../../lib/api-client.js";
+import { FanVitalTile } from "./FanVitalTile.js";
 import { fmtBytes, fmtNumber, fmtPercent, fmtUptime } from "./format.js";
 
 const DEFAULT_BOOTH_ID = "booth-01";
@@ -156,6 +157,7 @@ export function SystemVitalsStrip({
           value={fmtUptime(snapshot?.uptimeSeconds)}
           hint="Host uptime since last boot"
         />
+        {snapshot?.fan ? <FanVitalTile fan={snapshot.fan} /> : null}
         {activeThrottlingFlags.length > 0 ? (
           <VitalTile
             label="Throttling"
