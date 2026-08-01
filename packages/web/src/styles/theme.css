@@ -605,6 +605,7 @@ textarea:focus-visible,
    the same surface/border treatment as `.operator-sidebar__nav` (declared
    in the shared selector above) and adds layout + tile styling here. */
 .operator-sidebar .system-vitals-strip {
+  container-type: inline-size;
   padding: 14px 16px 12px;
   background: color-mix(in srgb, var(--surface-panel) 92%, transparent);
   border: 1px solid var(--border-subtle);
@@ -773,6 +774,12 @@ textarea:focus-visible,
   font-size: 0.55rem;
   color: var(--text-muted);
   white-space: nowrap;
+}
+
+@container (max-width: 250px) {
+  .system-vitals-strip__tile--fan {
+    grid-column: 1 / -1;
+  }
 }
 
 .app-shell__main {

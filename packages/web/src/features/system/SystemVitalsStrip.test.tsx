@@ -44,6 +44,8 @@ describe("SystemVitalsStrip", () => {
     // Tiles still render so layout doesn't pop in once data arrives.
     expect(screen.getByText("CPU temp")).toBeDefined();
     expect(screen.getByText("Memory")).toBeDefined();
+    expect(screen.getByText("Fan")).toBeDefined();
+    expect(screen.getByText("Awaiting telemetry")).toBeDefined();
   });
 
   it("formats values with units once a snapshot is cached", () => {
@@ -98,6 +100,25 @@ describe("SystemVitalsStrip", () => {
 
     expect(screen.getByText("34%")).toBeDefined();
     expect(screen.getByText("PWM · no tach")).toBeDefined();
+  });
+
+  it("does not invent zero PWM when only an off command is reported", () => {
+    renderStrip({
+      boothId: "booth-01",
+      snapshot: {
+        ...baseSnapshot,
+        fan: {
+          commandedOn: false,
+          rpm: 900,
+        },
+      },
+      receivedAt: "2026-05-27T00:00:05.000Z",
+    });
+
+    expect(screen.getByText("900")).toBeDefined();
+    expect(screen.getByText("RPM · Off")).toBeDefined();
+    expect(screen.queryByText(/0% PWM/i)).toBeNull();
+    expect(screen.getByLabelText(/fan commanded off/i)).toBeDefined();
   });
 
   it("flags CPU temperature severity when it crosses warn/crit thresholds", () => {

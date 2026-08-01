@@ -165,6 +165,57 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
               —
             </span>
           </div>
+          <div
+            aria-label="Cooling fan: telemetry unavailable"
+            class="system-vitals-strip__tile system-vitals-strip__tile--fan"
+          >
+            <span
+              class="system-vitals-strip__tile-label"
+            >
+              Fan
+            </span>
+            <div
+              class="fan-vital-tile__body"
+            >
+              <svg
+                aria-hidden="true"
+                class="fan-vital-tile__dial"
+                style="--fan-gauge-progress: 0; --fan-gauge-needle: -90deg;"
+                viewBox="0 0 64 38"
+              >
+                <path
+                  class="fan-vital-tile__track"
+                  d="M 8 32 A 24 24 0 0 1 56 32"
+                  pathLength="100"
+                />
+                <path
+                  class="fan-vital-tile__progress"
+                  d="M 8 32 A 24 24 0 0 1 56 32"
+                  pathLength="100"
+                />
+                <circle
+                  class="fan-vital-tile__hub"
+                  cx="32"
+                  cy="32"
+                  r="3"
+                />
+              </svg>
+              <div
+                class="fan-vital-tile__readout"
+              >
+                <span
+                  class="system-vitals-strip__tile-value"
+                >
+                  —
+                </span>
+                <span
+                  class="fan-vital-tile__meta"
+                >
+                  Awaiting telemetry
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
         <footer
           class="system-vitals-strip__footer system-vitals-strip__footer--muted"

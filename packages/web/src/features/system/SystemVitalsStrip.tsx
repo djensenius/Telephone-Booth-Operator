@@ -157,7 +157,7 @@ export function SystemVitalsStrip({
           value={fmtUptime(snapshot?.uptimeSeconds)}
           hint="Host uptime since last boot"
         />
-        {snapshot?.fan ? <FanVitalTile fan={snapshot.fan} /> : null}
+        <FanVitalTile fan={snapshot?.fan} />
         {activeThrottlingFlags.length > 0 ? (
           <VitalTile
             label="Throttling"
