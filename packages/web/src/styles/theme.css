@@ -772,11 +772,15 @@ textarea:focus-visible,
 }
 
 .fan-vital-tile__meta {
-  margin-top: 4px;
+  display: block;
+  width: 100%;
+  margin-top: 0;
   font-family: var(--font-mono);
   font-size: 0.5rem;
   color: var(--text-muted);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .app-shell__main {

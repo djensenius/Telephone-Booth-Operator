@@ -71,9 +71,9 @@ export function FanVitalTile({ fan }: FanVitalTileProps): JSX.Element {
         </svg>
         <div className="fan-vital-tile__readout">
           <span className="system-vitals-strip__tile-value">{value}</span>
-          <span className="fan-vital-tile__meta">{meta}</span>
         </div>
       </div>
+      <span className="fan-vital-tile__meta">{meta}</span>
     </div>
   );
 }

@@ -209,13 +209,13 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
                 >
                   —
                 </span>
-                <span
-                  class="fan-vital-tile__meta"
-                >
-                  Awaiting telemetry
-                </span>
               </div>
             </div>
+            <span
+              class="fan-vital-tile__meta"
+            >
+              Awaiting telemetry
+            </span>
           </div>
         </div>
         <footer
