@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.js")).fakeDb }));
@@ -204,6 +205,85 @@ describe("message review actions", () => {
       expect(broadcasts).toContainEqual(expect.objectContaining({ kind: "message" }));
     });
 
+    it("targets and attributes an on-device translation", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const transcription = await fakeDb.transcription.create({
+        data: {
+          messageId: id,
+          provider: "on_device",
+          status: "succeeded",
+          text: "hola mundo",
+          language: "es",
+          completedAt: new Date(),
+        },
+      });
+      const moderation = await fakeDb.moderation.create({
+        data: {
+          messageId: id,
+          transcriptionId: transcription.id,
+          provider: "on_device",
+          status: "succeeded",
+          recommendation: "approve",
+          completedAt: new Date(),
+        },
+      });
+      const cookie = operatorCookie();
+      const res = await app.request(`/v1/messages/${id}/translation`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({
+          transcriptionId: transcription.id,
+          translatedText: "hello world",
+          translatedLanguage: "en",
+          model: "apple-foundation-models",
+        }),
+      });
+
+      expect(res.status, await res.clone().text()).toBe(200);
+      expect(await res.json()).toMatchObject({
+        id: transcription.id,
+        translationProvider: "on_device",
+        translationModel: "apple-foundation-models",
+      });
+      expect(store.moderations.get(moderation.id)).toMatchObject({
+        status: "failed",
+        error: "superseded_by_translation",
+      });
+    });
+
+    it("rejects a superseded targeted translation", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const stale = await fakeDb.transcription.create({
+        data: {
+          messageId: id,
+          provider: "push",
+          status: "succeeded",
+          text: "hola",
+          createdAt: new Date(1),
+        },
+      });
+      await fakeDb.transcription.create({
+        data: {
+          messageId: id,
+          provider: "push",
+          status: "succeeded",
+          text: "bonjour",
+          createdAt: new Date(2),
+        },
+      });
+      const cookie = operatorCookie();
+      const res = await app.request(`/v1/messages/${id}/translation`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ transcriptionId: stale.id, translatedText: "hello" }),
+      });
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: "stale_transcription" });
+    });
+
     it("returns 409 when there is no succeeded transcription", async () => {
       const app = createApp();
       const id = await seedReceivedMessage(app);
@@ -304,11 +384,34 @@ describe("message review actions", () => {
       const body = await res.json();
       expect(body).toMatchObject({
         messageId: id,
-        provider: "push",
+        provider: "on_device",
         status: "succeeded",
         text: "hello there",
         requestedById: "operator-1",
       });
+    });
+
+    it("can suppress server-side translation and moderation", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const cookie = operatorCookie();
+      const res = await app.request(`/v1/messages/${id}/transcription`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({
+          text: "hola mundo",
+          language: "es",
+          model: "apple-speech",
+          processDownstream: false,
+        }),
+      });
+
+      expect(res.status, await res.clone().text()).toBe(202);
+      expect(await res.json()).toMatchObject({
+        provider: "on_device",
+        translationStatus: null,
+      });
+      expect([...store.moderations.values()].filter((row) => row.messageId === id)).toHaveLength(0);
     });
 
     it("accepts an empty transcript for a silent recording", async () => {
@@ -437,7 +540,11 @@ describe("message review actions", () => {
       const res = await app.request(`/v1/messages/${id}/moderation`, {
         method: "POST",
         headers: { cookie, "content-type": "application/json" },
-        body: JSON.stringify({ ...verdict, transcriptionId: transcription.id }),
+        body: JSON.stringify({
+          ...verdict,
+          transcriptionId: transcription.id,
+          inputSha256: createHash("sha256").update("hello there", "utf8").digest("hex"),
+        }),
       });
       wsBroadcaster.unsubscribe("test-moderation");
       expect(res.status, await res.clone().text()).toBe(202);
@@ -474,6 +581,48 @@ describe("message review actions", () => {
         recommendation: "reject",
         requestedById: "operator-1",
       });
+    });
+
+    it("rejects a verdict for stale input text", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const transcription = await fakeDb.transcription.create({
+        data: {
+          messageId: id,
+          provider: "on_device",
+          status: "succeeded",
+          text: "bonjour",
+          translatedText: "hello",
+          translationStatus: "succeeded",
+        },
+      });
+      const cookie = operatorCookie();
+      const inputSha256 = createHash("sha256").update("different", "utf8").digest("hex");
+      const res = await app.request(`/v1/messages/${id}/moderation`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ ...verdict, transcriptionId: transcription.id, inputSha256 }),
+      });
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: "stale_moderation_input" });
+      expect([...store.moderations.values()].filter((row) => row.messageId === id)).toHaveLength(0);
+    });
+
+    it("requires an input hash for targeted moderation", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const transcription = await fakeDb.transcription.create({
+        data: { messageId: id, provider: "on_device", status: "succeeded", text: "hello" },
+      });
+      const cookie = operatorCookie();
+      const res = await app.request(`/v1/messages/${id}/moderation`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ ...verdict, transcriptionId: transcription.id }),
+      });
+
+      expect(res.status).toBe(400);
     });
 
     it("never decides the message", async () => {
@@ -620,7 +769,11 @@ describe("message review actions", () => {
       const res = await app.request(`/v1/messages/${id}/moderation`, {
         method: "POST",
         headers: { cookie, "content-type": "application/json" },
-        body: JSON.stringify({ ...verdict, transcriptionId: foreign.id }),
+        body: JSON.stringify({
+          ...verdict,
+          transcriptionId: foreign.id,
+          inputSha256: createHash("sha256").update("foreign", "utf8").digest("hex"),
+        }),
       });
       expect(res.status).toBe(404);
       expect(await res.json()).toEqual({ error: "transcription_not_found" });

@@ -141,3 +141,11 @@ Built-in providers: OpenAI (cloud), `mac_app` (push to a reachable Mac),
 and `disabled`. The Transcription app (macOS + iOS) can additionally run as a
 **push** worker: it subscribes to `/v1/ws/status` for `work` events and posts
 results back to `/v1/worker/*` — see [`operator-push.md`](./operator-push.md).
+
+Authenticated operator clients can also submit a complete on-device result
+set. They record the transcript with `processDownstream: false`, attach the
+translation to that exact transcription ID with on-device model provenance,
+then submit moderation with a SHA-256 of the text that was scored. The API
+rejects superseded rows or mismatched moderation input and invalidates an older
+verdict whenever a translation is corrected. This keeps local message content
+out of configured cloud providers while preserving the normal audit trail.

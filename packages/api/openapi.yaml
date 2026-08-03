@@ -520,11 +520,13 @@ paths:
         finalized, otherwise a new succeeded row is recorded (a redelivery of
         the latest succeeded transcript — same `text`, `language`, `model` and
         submitter — is a no-op, while a correction records a new row). The row is
-        attributed to the submitting operator (`requestedById`). Like all
-        pushed transcripts the text is still translated and moderated
-        server-side before it can be acted on. `text` may be empty for a silent
-        recording. The resulting `Transcription` row is returned and broadcast
-        on `/v1/ws/status` as a `{kind:"message"}` envelope.
+        attributed to the submitting operator (`requestedById`) and stamped
+        with provider `on_device`. By default the server still translates and
+        moderates the text; clients submitting their own complete local result
+        set pass `processDownstream: false` to prevent any downstream provider
+        call. `text` may be empty for a silent recording. The resulting
+        `Transcription` row is returned and broadcast on `/v1/ws/status` as a
+        `{kind:"message"}` envelope.
       tags: [transcriptions]
       security:
         - operatorSession: []
@@ -540,6 +542,7 @@ paths:
                 text: { type: string, maxLength: 20000 }
                 language: { type: [string, "null"], minLength: 1, maxLength: 64 }
                 model: { type: [string, "null"], minLength: 1, maxLength: 128 }
+                processDownstream: { type: boolean, default: true }
       responses:
         "202":
           description: transcription recorded
@@ -604,6 +607,12 @@ paths:
               required: [flagged, recommendation, maxScore]
               properties:
                 transcriptionId: { type: [string, "null"], format: uuid }
+                inputSha256:
+                  type: string
+                  pattern: "^[a-f0-9]{64}$"
+                  description: >-
+                    SHA-256 of the exact transcript or translation moderated;
+                    required when transcriptionId is supplied.
                 flagged: { type: boolean }
                 recommendation: { $ref: "#/components/schemas/ModerationRecommendation" }
                 maxScore: { type: number, minimum: 0, maximum: 1 }
@@ -619,6 +628,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Moderation" }
         "404": { description: message or transcription not found }
+        "409": { description: moderation input no longer matches the transcription }
 
   /v1/messages/{id}/decision:
     parameters:
@@ -662,14 +672,15 @@ paths:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     post:
-      summary: Attach a human translation to the latest succeeded transcription.
+      summary: Attach a translation to a succeeded transcription.
       description: |
-        Lets a logged-in operator supply an English translation for a
-        transcription the translation worker could not produce. Updates the
-        message's latest succeeded transcription, marking `translationStatus`
-        as `succeeded` with a null `translationProvider` (consumers infer a
-        manual translation from a succeeded translation with no provider).
-        Returns `409` when the message has no succeeded transcription yet.
+        Without `transcriptionId`, records a human English correction on the
+        latest succeeded transcription with null provider/model. With
+        `transcriptionId`, requires that row to still be latest and records an
+        on-device generated translation with provider `on_device` and its
+        optional model. Either form invalidates prior moderation for the row.
+        Returns `409` when no succeeded transcription exists or the targeted
+        transcription has been superseded.
       tags: [messages]
       security:
         - operatorSession: []
@@ -682,8 +693,10 @@ paths:
               type: object
               required: [translatedText]
               properties:
+                transcriptionId: { type: string, format: uuid }
                 translatedText: { type: string, minLength: 1, maxLength: 20000 }
                 translatedLanguage: { type: string, minLength: 1, maxLength: 64 }
+                model: { type: [string, "null"], minLength: 1, maxLength: 128 }
       responses:
         "200":
           description: translation recorded
@@ -691,7 +704,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Transcription" }
         "404": { description: message not found }
-        "409": { description: no succeeded transcription to translate }
+        "409": { description: no succeeded transcription or targeted row is stale }
 
   /v1/uploads/sas:
     post:
