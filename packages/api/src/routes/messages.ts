@@ -15,6 +15,7 @@ import { z } from "zod";
 import { resolveAiConfig } from "../lib/ai/config.js";
 import { recordAudit } from "../lib/audit.js";
 import {
+  advanceMessageAfterModeration,
   kickPipelineForMessage,
   recordModerationResult,
   recordTranscriptionResult,
@@ -592,6 +593,7 @@ messagesRouter.post(
       }
       const row = await db.moderation.findUnique({ where: { id: outcome.moderationId } });
       if (!row) return c.json({ error: "not_found" }, 404);
+      await advanceMessageAfterModeration(id);
       await broadcastMessageById(id);
       return c.json(serializeModeration(row), 202);
     }

@@ -534,6 +534,7 @@ describe("message review actions", () => {
         requestedById: "operator-1",
       });
       expect(broadcasts).toContainEqual(expect.objectContaining({ kind: "message" }));
+      expect(store.messages.get(id)?.status).toBe("pending");
     });
 
     it("records a new succeeded transcription when none is pending", async () => {
