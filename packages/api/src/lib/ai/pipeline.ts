@@ -928,7 +928,7 @@ export const recordModerationResult = async (
       },
       orderBy: { createdAt: "desc" },
     });
-    if (!opts.transcriptionId && pending?.transcriptionId && opts.provider == null) {
+    if (!opts.transcriptionId && pending?.transcriptionId) {
       return { outcome: "stale_transcription" } as const;
     }
     const now = new Date();

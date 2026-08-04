@@ -1088,6 +1088,32 @@ describe("message review actions", () => {
       expect(body).toMatchObject({ provider: "on_device", recommendation: "reject" });
     });
 
+    it("does not let an untargeted operator verdict claim a scoped pending row", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const transcription = await fakeDb.transcription.create({
+        data: { messageId: id, provider: "push", status: "succeeded", text: "hello" },
+      });
+      const pending = await fakeDb.moderation.create({
+        data: {
+          messageId: id,
+          transcriptionId: transcription.id,
+          provider: "push",
+          status: "pending",
+        },
+      });
+      const cookie = operatorCookie();
+      const res = await app.request(`/v1/messages/${id}/moderation`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify(verdict),
+      });
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: "stale_transcription" });
+      expect(store.moderations.get(pending.id)?.status).toBe("pending");
+    });
+
     it("records a changed verdict as a new attempt", async () => {
       const app = createApp();
       const id = await seedReceivedMessage(app);
