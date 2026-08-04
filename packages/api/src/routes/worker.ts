@@ -294,14 +294,14 @@ workerRouter.post(
     });
     const result = await recordModerationResult({
       messageId: id,
-      transcriptionId: data.transcriptionId,
+      ...(data.transcriptionId !== undefined ? { transcriptionId: data.transcriptionId } : {}),
       flagged: data.flagged,
       recommendation: data.recommendation,
       maxScore: data.maxScore,
       categories: data.categories ?? null,
       reasonSummary: data.reasonSummary ?? null,
       model: data.model ?? null,
-      inputSha256: data.inputSha256,
+      ...(data.inputSha256 !== undefined ? { inputSha256: data.inputSha256 } : {}),
       // Worker moderation is solicited: `runModeration` creates the pending
       // row before emitting the `work` event, so a callback with nothing
       // pending is stale and is dropped rather than resurrected.
