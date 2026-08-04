@@ -212,6 +212,11 @@ export type MessageDecision = z.infer<typeof MessageDecisionSchema>;
 export const TranslationSubmitSchema = z.object({
   transcriptionId: z.guid().optional(),
   expectedTranscriptionId: z.guid().optional(),
+  expectedTranslationSha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .nullable()
+    .optional(),
   translatedText: z.string().trim().min(1).max(20_000),
   translatedLanguage: z.string().trim().min(1).max(64).optional(),
   model: z.string().trim().min(1).max(128).nullable().optional(),

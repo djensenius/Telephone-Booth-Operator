@@ -743,13 +743,15 @@ messagesRouter.post(
   zValidator("json", TranslationSubmitSchema),
   async (c) => {
     const { id } = c.req.valid("param");
+    const data = c.req.valid("json");
     const {
       transcriptionId,
       expectedTranscriptionId,
+      expectedTranslationSha256,
       translatedText,
       translatedLanguage,
       model,
-    } = c.req.valid("json");
+    } = data;
     recordAudit(c, {
       action: "message.translation.submit",
       targetType: "message",
@@ -759,6 +761,7 @@ messagesRouter.post(
         translatedTextLength: translatedText.length,
         transcriptionId: transcriptionId ?? null,
         expectedTranscriptionId: expectedTranscriptionId ?? null,
+        expectedTranslationSha256: expectedTranslationSha256 ?? null,
         model: model ?? null,
       },
     });
@@ -772,6 +775,21 @@ messagesRouter.post(
       const targetTranscriptionId = transcriptionId ?? expectedTranscriptionId;
       if (targetTranscriptionId && latest.id !== targetTranscriptionId) {
         return { outcome: "stale_transcription" } as const;
+      }
+      if ("expectedTranslationSha256" in data) {
+        const currentTranslation =
+          latest.translationStatus === "succeeded" &&
+          typeof latest.translatedText === "string" &&
+          latest.translatedText.trim().length > 0
+            ? latest.translatedText.trim()
+            : null;
+        const currentTranslationSha256 =
+          currentTranslation === null
+            ? null
+            : createHash("sha256").update(currentTranslation, "utf8").digest("hex");
+        if (currentTranslationSha256 !== expectedTranslationSha256) {
+          return { outcome: "stale_translation" } as const;
+        }
       }
       const previousReviewText =
         latest.translationStatus === "succeeded" &&
@@ -815,6 +833,9 @@ messagesRouter.post(
     }
     if (result.outcome === "stale_transcription") {
       return c.json({ error: "stale_transcription" }, 409);
+    }
+    if (result.outcome === "stale_translation") {
+      return c.json({ error: "stale_translation" }, 409);
     }
     recordAudit(c, { metadata: { transcriptionId: result.transcription.id } });
     await broadcastMessageById(id);

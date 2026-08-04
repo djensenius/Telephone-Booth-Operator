@@ -192,6 +192,7 @@ describe("message review actions", () => {
         headers: { cookie, "content-type": "application/json" },
         body: JSON.stringify({
           expectedTranscriptionId: transcription.id,
+          expectedTranslationSha256: null,
           translatedText: "  hello world  ",
           translatedLanguage: "en",
         }),
@@ -245,6 +246,38 @@ describe("message review actions", () => {
       expect(await res.json()).toEqual({ error: "stale_transcription" });
     });
 
+    it("rejects a translation when the observed translation content changed", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const transcription = await fakeDb.transcription.create({
+        data: {
+          messageId: id,
+          provider: "push",
+          status: "succeeded",
+          text: "hola",
+          translationStatus: "succeeded",
+          translatedText: "newer translation",
+          createdAt: new Date(),
+        },
+      });
+
+      const res = await app.request(`/v1/messages/${id}/translation`, {
+        method: "POST",
+        headers: { cookie: operatorCookie(), "content-type": "application/json" },
+        body: JSON.stringify({
+          expectedTranscriptionId: transcription.id,
+          expectedTranslationSha256: createHash("sha256")
+            .update("older translation", "utf8")
+            .digest("hex"),
+          translatedText: "my correction",
+        }),
+      });
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: "stale_translation" });
+      expect(store.transcriptions.get(transcription.id)?.translatedText).toBe("newer translation");
+    });
+
     it("targets and attributes an on-device translation", async () => {
       const app = createApp();
       const id = await seedReceivedMessage(app);
@@ -274,6 +307,7 @@ describe("message review actions", () => {
         headers: { cookie, "content-type": "application/json" },
         body: JSON.stringify({
           transcriptionId: transcription.id,
+          expectedTranslationSha256: null,
           translatedText: "hello world",
           translatedLanguage: "en",
           model: "apple-foundation-models",
@@ -323,6 +357,7 @@ describe("message review actions", () => {
         headers: { cookie: operatorCookie(), "content-type": "application/json" },
         body: JSON.stringify({
           transcriptionId: transcription.id,
+          expectedTranslationSha256: createHash("sha256").update("hello world", "utf8").digest("hex"),
           translatedText: "hello world",
           translatedLanguage: "en",
           model: "apple-foundation-models",

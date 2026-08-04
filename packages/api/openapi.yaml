@@ -683,7 +683,8 @@ paths:
         Without `transcriptionId`, records a human English correction on the
         latest succeeded transcription with null provider/model.
         `expectedTranscriptionId` conditionally targets that human correction
-        without changing its provenance. With
+        without changing its provenance. `expectedTranslationSha256` binds
+        either form to the translation content the client observed. With
         `transcriptionId`, requires that row to still be latest and records an
         on-device generated translation with provider `on_device` and its
         optional model. Either form invalidates prior moderation for the row.
@@ -708,6 +709,12 @@ paths:
                   description: >-
                     Latest transcription observed while editing a human
                     correction; rejected if it is no longer latest.
+                expectedTranslationSha256:
+                  type: [string, "null"]
+                  pattern: "^[a-f0-9]{64}$"
+                  description: >-
+                    SHA-256 of the trimmed translation observed by the client,
+                    or null when no succeeded translation existed.
                 translatedText: { type: string, minLength: 1, maxLength: 20000 }
                 translatedLanguage: { type: string, minLength: 1, maxLength: 64 }
                 model: { type: [string, "null"], minLength: 1, maxLength: 128 }
@@ -718,7 +725,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Transcription" }
         "404": { description: message not found }
-        "409": { description: no succeeded transcription or targeted row is stale }
+        "409": { description: "no succeeded transcription, or stale transcription or translation input" }
 
   /v1/uploads/sas:
     post:
