@@ -180,19 +180,37 @@ export const runTranscription = async (
       broadcastWork(message.id, ["transcription"]);
       return { outcome: "created", transcriptionId: prepared.pending.id };
     }
-    const failed = await db.transcription.create({
-      data: {
-        messageId: message.id,
-        provider: deps.config.transcriptionProvider,
-        model: null,
-        status: "failed",
-        error: "transcription provider disabled",
-        requestedById: opts.requestedByUserId ?? null,
-        completedAt: new Date(),
-      },
+    const prepared = await db.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "Message" WHERE "id" = ${message.id}::uuid FOR UPDATE
+      `;
+      if (rows.length === 0) return { outcome: "not_found" } as const;
+      const latestSucceeded = await tx.transcription.findFirst({
+        where: { messageId: message.id, status: "succeeded" },
+        orderBy: { createdAt: "desc" },
+      });
+      if ((latestSucceeded?.id ?? null) !== (latestSucceededAtStart?.id ?? null)) {
+        return { outcome: "skipped", existingId: latestSucceeded?.id ?? "" } as const;
+      }
+      const failed = await tx.transcription.create({
+        data: {
+          messageId: message.id,
+          provider: deps.config.transcriptionProvider,
+          model: null,
+          status: "failed",
+          error: "transcription provider disabled",
+          requestedById: opts.requestedByUserId ?? null,
+          completedAt: new Date(),
+        },
+      });
+      return { outcome: "created", failed } as const;
     });
+    if (prepared.outcome === "not_found") return { outcome: "not_found" };
+    if (prepared.outcome === "skipped") {
+      return { outcome: "skipped", existingId: prepared.existingId };
+    }
     await broadcastMessage(message.id);
-    return { outcome: "created", transcriptionId: failed.id };
+    return { outcome: "created", transcriptionId: prepared.failed.id };
   }
 
   const staleThresholdMs = deps.config.sweeperStaleThresholdSeconds * 1000;
@@ -303,7 +321,7 @@ export const runTranscription = async (
       await tx.$queryRaw`
         SELECT "id" FROM "Message" WHERE "id" = ${message.id}::uuid FOR UPDATE
       `;
-      return tx.transcription.updateMany({
+      const updated = await tx.transcription.updateMany({
         where: { id: pending.id, status: "pending", provider: provider.name },
         data: {
           status: "succeeded",
@@ -313,6 +331,20 @@ export const runTranscription = async (
           completedAt: new Date(),
         },
       });
+      if (updated.count > 0) {
+        await tx.moderation.updateMany({
+          where: {
+            messageId: message.id,
+            status: { in: ["pending", "succeeded"] },
+          },
+          data: {
+            status: "failed",
+            error: "superseded_by_transcription",
+            completedAt: new Date(),
+          },
+        });
+      }
+      return updated;
     });
     if (finalized.count === 0) return { outcome: "created", transcriptionId: pending.id };
     log("info", "ai.transcription.completed", {

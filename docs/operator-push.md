@@ -192,6 +192,7 @@ content; moderation runs against it. On success the Operator broadcasts
 ```json
 {
   "transcriptionId": "abc…",
+  "inputSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   "flagged": false,
   "recommendation": "approve",
   "maxScore": 0.02,
