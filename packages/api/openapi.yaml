@@ -626,8 +626,8 @@ paths:
                   type: string
                   pattern: "^[a-f0-9]{64}$"
                   description: >-
-                    SHA-256 of the exact transcript or translation moderated;
-                    required when transcriptionId is supplied.
+                    SHA-256 of the ECMAScript-trimmed transcript or translation
+                    moderated; required when transcriptionId is supplied.
                 flagged: { type: boolean }
                 recommendation: { $ref: "#/components/schemas/ModerationRecommendation" }
                 maxScore: { type: number, minimum: 0, maximum: 1 }
@@ -1885,7 +1885,7 @@ components:
                 moderationInputSha256:
                   type: string
                   pattern: "^[0-9a-f]{64}$"
-                  description: "SHA-256 of moderationText; the worker must return it with the verdict."
+                  description: "SHA-256 of moderationText; new workers should return it with the verdict."
     WorkerTranscriptionBody:
       type: object
       required: [text]

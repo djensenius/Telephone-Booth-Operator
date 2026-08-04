@@ -1045,29 +1045,35 @@ export const runModeration = async (opts: RunModerationOptions): Promise<string 
       broadcastWork(opts.messageId, ["moderation"]);
       return pending.id;
     }
-    const failed = await db.moderation.create({
-      data: {
-        messageId: opts.messageId,
-        transcriptionId: transcription.id,
-        provider: deps.config.moderationProvider,
-        model: null,
-        status: "failed",
-        error: "moderation provider disabled",
-        requestedById: opts.requestedByUserId,
-        completedAt: new Date(),
-      },
+    const failed = await db.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "Message" WHERE "id" = ${opts.messageId}::uuid FOR UPDATE
+      `;
+      if (rows.length === 0) return null;
+      const current = await tx.transcription.findFirst({
+        where: { messageId: opts.messageId, status: "succeeded" },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!current || current.id !== transcription.id) return null;
+      const result = await tx.moderation.create({
+        data: {
+          messageId: opts.messageId,
+          transcriptionId: current.id,
+          provider: deps.config.moderationProvider,
+          model: null,
+          status: "failed",
+          error: "moderation provider disabled",
+          requestedById: opts.requestedByUserId,
+          completedAt: new Date(),
+        },
+      });
+      await tx.message.updateMany({
+        where: { id: opts.messageId, status: "received" },
+        data: { status: "pending" },
+      });
+      return result;
     });
-    // Moderation is disabled — advance the message into the operator queue
-    // anyway so it doesn't get stranded in "received". Only flip the status
-    // if it is still "received" so we don't clobber an operator decision on
-    // a manual re-run.
-    const current = await db.message.findUnique({
-      where: { id: opts.messageId },
-      select: { status: true },
-    });
-    if (current?.status === "received") {
-      await db.message.update({ where: { id: opts.messageId }, data: { status: "pending" } });
-    }
+    if (!failed) return null;
     await broadcastMessage(opts.messageId);
     return failed.id;
   }

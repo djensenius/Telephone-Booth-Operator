@@ -46,16 +46,21 @@ const translationBody = z.object({
   model: z.string().nullable().optional(),
 });
 
-const moderationBody = z.object({
-  transcriptionId: z.string().min(1).optional(),
-  inputSha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
-  flagged: z.boolean(),
-  recommendation: z.enum(["approve", "review", "reject"]),
-  maxScore: z.number().min(0).max(1),
-  categories: z.record(z.string(), z.number()).optional(),
-  reasonSummary: z.string().optional(),
-  model: z.string().nullable().optional(),
-});
+const moderationBody = z
+  .object({
+    transcriptionId: z.guid().optional(),
+    inputSha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+    flagged: z.boolean(),
+    recommendation: z.enum(["approve", "review", "reject"]),
+    maxScore: z.number().min(0).max(1),
+    categories: z.record(z.string(), z.number()).optional(),
+    reasonSummary: z.string().optional(),
+    model: z.string().nullable().optional(),
+  })
+  .refine((body) => body.inputSha256 == null || body.transcriptionId != null, {
+    message: "transcriptionId is required when inputSha256 is supplied",
+    path: ["transcriptionId"],
+  });
 
 // Broadcast the latest serialized message so connected operators see status
 // changes immediately. Mirrors the helper in pipeline.ts / messages.ts.

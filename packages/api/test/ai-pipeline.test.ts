@@ -274,6 +274,44 @@ describe("AI pipeline", () => {
     expect(withRelations.moderations[0]?.error).toMatch(/disabled/);
   });
 
+  it("does not append a disabled moderation result after the transcription is superseded", async () => {
+    const id = await seedReceivedMessage();
+    const original = await fakeDb.transcription.create({
+      data: {
+        messageId: id,
+        provider: "openai",
+        status: "succeeded",
+        text: "first",
+      },
+    });
+    const findFirst = fakeDb.transcription.findFirst;
+    vi.spyOn(fakeDb.transcription, "findFirst").mockImplementationOnce(async (args) => {
+      await fakeDb.transcription.create({
+        data: {
+          messageId: id,
+          provider: "on_device",
+          status: "succeeded",
+          text: "newer",
+          createdAt: new Date(Date.now() + 1_000),
+        },
+      });
+      return findFirst(args);
+    });
+
+    const result = await runModeration({
+      messageId: id,
+      transcriptionId: original.id,
+      deps: baseDeps({
+        moderationProvider: null,
+        config: { moderationProvider: "disabled" } as never,
+      }),
+      requestedByUserId: null,
+    });
+
+    expect(result).toBeNull();
+    expect([...store.moderations.values()].filter((row) => row.messageId === id)).toHaveLength(0);
+  });
+
   it("does not roll back an operator decision when re-running moderation while disabled", async () => {
     const id = await seedReceivedMessage();
     // First pass: real moderation runs and the operator approves.
