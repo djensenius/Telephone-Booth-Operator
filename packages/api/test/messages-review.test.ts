@@ -537,6 +537,32 @@ describe("message review actions", () => {
       expect(store.messages.get(id)?.status).toBe("pending");
     });
 
+    it("clears an inherited provider model when finalizing on device", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const pending = await fakeDb.transcription.create({
+        data: {
+          messageId: id,
+          provider: "openai",
+          model: "whisper-1",
+          status: "pending",
+        },
+      });
+
+      const res = await app.request(`/v1/messages/${id}/transcription`, {
+        method: "POST",
+        headers: { cookie: operatorCookie(), "content-type": "application/json" },
+        body: JSON.stringify({ text: "local result" }),
+      });
+
+      expect(res.status, await res.clone().text()).toBe(202);
+      expect(await res.json()).toMatchObject({
+        id: pending.id,
+        provider: "on_device",
+        model: null,
+      });
+    });
+
     it("records a new succeeded transcription when none is pending", async () => {
       const app = createApp();
       const id = await seedReceivedMessage(app);
@@ -653,6 +679,36 @@ describe("message review actions", () => {
 
       expect(res.status).toBe(409);
       expect(await res.json()).toEqual({ error: "stale_transcription" });
+    });
+
+    it("accepts an uppercase latest-transcription snapshot hash", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const baseline = await fakeDb.transcription.create({
+        data: {
+          messageId: id,
+          provider: "push",
+          status: "succeeded",
+          text: "current result",
+        },
+      });
+      const expectedLatestTranscriptionSha256 = createHash("sha256")
+        .update("succeeded\ncurrent result", "utf8")
+        .digest("hex")
+        .toUpperCase();
+
+      const res = await app.request(`/v1/messages/${id}/transcription`, {
+        method: "POST",
+        headers: { cookie: operatorCookie(), "content-type": "application/json" },
+        body: JSON.stringify({
+          expectedLatestTranscriptionId: baseline.id,
+          expectedLatestTranscriptionSha256,
+          text: "new local result",
+          processDownstream: false,
+        }),
+      });
+
+      expect(res.status, await res.clone().text()).toBe(202);
     });
 
     it("conditionally records a first transcript when the expected snapshot is null", async () => {

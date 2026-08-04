@@ -679,7 +679,7 @@ export const recordTranscriptionResult = async (
         ("expectedLatestTranscriptionId" in opts &&
           (latest?.id ?? null) !== (opts.expectedLatestTranscriptionId ?? null)) ||
         ("expectedLatestTranscriptionSha256" in opts &&
-          latestSha256 !== (opts.expectedLatestTranscriptionSha256 ?? null))
+          latestSha256 !== (opts.expectedLatestTranscriptionSha256?.toLowerCase() ?? null))
       ) {
         return { outcome: "stale_transcription" } as const;
       }
@@ -692,6 +692,9 @@ export const recordTranscriptionResult = async (
       },
       orderBy: { createdAt: "desc" },
     });
+    if (opts.transcriptionId && !pending) {
+      return { outcome: "stale_transcription" } as const;
+    }
     const now = new Date();
     if (pending) {
       const startedAt = pending.createdAt;
@@ -701,7 +704,7 @@ export const recordTranscriptionResult = async (
           status: "succeeded",
           text: opts.text,
           language: opts.language ?? null,
-          model: opts.model ?? pending.model,
+          model: opts.model ?? (opts.provider == null ? pending.model : null),
           ...(opts.provider != null ? { provider: opts.provider } : {}),
           latencyMs: now.getTime() - startedAt.getTime(),
           completedAt: now,

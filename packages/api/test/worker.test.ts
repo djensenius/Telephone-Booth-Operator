@@ -110,6 +110,30 @@ describe("worker push-back callbacks", () => {
     expect(await res.json()).toEqual({ error: "stale_transcription" });
   });
 
+  it("rejects a second targeted callback after its pending row was finalized", async () => {
+    const app = createApp();
+    const message = seedMessage({ status: "received" });
+    const pending = await seedPendingTranscription(message.id);
+
+    const first = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: pending.id,
+      text: "first worker result",
+      language: "en",
+    });
+    expect(first.status).toBe(200);
+
+    const second = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: pending.id,
+      text: "stale second result",
+      language: "en",
+    });
+
+    expect(second.status).toBe(409);
+    expect(await second.json()).toEqual({ error: "stale_transcription" });
+    expect([...store.transcriptions.values()].filter((row) => row.messageId === message.id))
+      .toHaveLength(1);
+  });
+
   it("stores an English transcription and broadcasts moderation work", async () => {
     process.env.MODERATION_PROVIDER = "push";
     const app = createApp();
