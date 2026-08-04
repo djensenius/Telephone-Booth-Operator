@@ -32,7 +32,7 @@ const idParamSchema = z.object({ id: z.guid() });
 
 const transcriptionBody = z.object({
   transcriptionId: z.string().min(1).nullable().optional(),
-  expectedLatestTranscriptionId: z.string().min(1).nullable(),
+  expectedLatestTranscriptionId: z.string().min(1).nullable().optional(),
   text: z.string(),
   language: z.string().nullable().optional(),
   model: z.string().nullable().optional(),
@@ -47,8 +47,8 @@ const translationBody = z.object({
 });
 
 const moderationBody = z.object({
-  transcriptionId: z.string().min(1),
-  inputSha256: z.string().regex(/^[0-9a-f]{64}$/),
+  transcriptionId: z.string().min(1).optional(),
+  inputSha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
   flagged: z.boolean(),
   recommendation: z.enum(["approve", "review", "reject"]),
   maxScore: z.number().min(0).max(1),
@@ -170,7 +170,9 @@ workerRouter.post(
     const result = await recordTranscriptionResult({
       messageId: id,
       transcriptionId: data.transcriptionId ?? null,
-      expectedLatestTranscriptionId: data.expectedLatestTranscriptionId,
+      ...("expectedLatestTranscriptionId" in data
+        ? { expectedLatestTranscriptionId: data.expectedLatestTranscriptionId ?? null }
+        : {}),
       text: data.text,
       language: data.language ?? null,
       model: data.model ?? null,
