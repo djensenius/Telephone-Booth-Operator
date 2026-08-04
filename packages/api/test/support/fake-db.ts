@@ -2183,10 +2183,14 @@ export const fakeDb = {
   // concurrency to serialise in a test, so the fake only has to answer the
   // question the lock asks: is this era still open?
   $queryRaw: async (
-    _strings: TemplateStringsArray,
+    strings: TemplateStringsArray,
     ...values: unknown[]
-  ): Promise<{ endedAt: Date | null }[]> => {
+  ): Promise<Array<{ endedAt: Date | null } | { id: string }>> => {
     const id = values.find((value) => typeof value === "string");
+    if (strings.join("").includes('FROM "Message"')) {
+      const message = typeof id === "string" ? store.messages.get(id) : undefined;
+      return message ? [{ id: message.id }] : [];
+    }
     const era = typeof id === "string" ? store.installations.get(id) : undefined;
     return era ? [{ endedAt: era.endedAt }] : [];
   },
