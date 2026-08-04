@@ -428,16 +428,16 @@ messagesRouter.post("/:id/transcribe", zValidator("param", idParamSchema), async
 // app doing on-device transcription) records transcript text directly, rather
 // than triggering the server-side transcription pipeline via `/transcribe`.
 // Mirrors the worker push-back semantics — finalizes a pending row or records a
-// new succeeded one — but attributes the row to the submitting operator and,
-// like all pushed transcripts, still runs translation and moderation
-// server-side before the text can be acted on.
+// new succeeded one — but attributes the row to the submitting operator.
+// Complete on-device pipelines suppress downstream provider work.
 messagesRouter.post(
   "/:id/transcription",
   zValidator("param", idParamSchema),
   zValidator("json", TranscriptionSubmitSchema),
   async (c) => {
     const { id } = c.req.valid("param");
-    const { text, language, model, processDownstream } = c.req.valid("json");
+    const data = c.req.valid("json");
+    const { expectedLatestTranscriptionId, text, language, model, processDownstream } = data;
     // An operator overriding the machine transcript is exactly the kind of
     // edit the trail exists for; the text itself stays in the Transcription row.
     recordAudit(c, {
@@ -449,6 +449,9 @@ messagesRouter.post(
     const user = c.get("user") as { id: string } | undefined;
     const result = await recordTranscriptionResult({
       messageId: id,
+      ...("expectedLatestTranscriptionId" in data
+        ? { expectedLatestTranscriptionId: expectedLatestTranscriptionId ?? null }
+        : {}),
       text,
       language: language ?? null,
       model: model ?? null,
@@ -740,7 +743,13 @@ messagesRouter.post(
   zValidator("json", TranslationSubmitSchema),
   async (c) => {
     const { id } = c.req.valid("param");
-    const { transcriptionId, translatedText, translatedLanguage, model } = c.req.valid("json");
+    const {
+      transcriptionId,
+      expectedTranscriptionId,
+      translatedText,
+      translatedLanguage,
+      model,
+    } = c.req.valid("json");
     recordAudit(c, {
       action: "message.translation.submit",
       targetType: "message",
@@ -749,6 +758,7 @@ messagesRouter.post(
         translatedLanguage: translatedLanguage ?? null,
         translatedTextLength: translatedText.length,
         transcriptionId: transcriptionId ?? null,
+        expectedTranscriptionId: expectedTranscriptionId ?? null,
         model: model ?? null,
       },
     });
@@ -759,7 +769,8 @@ messagesRouter.post(
         orderBy: { createdAt: "desc" },
       });
       if (!latest) return { outcome: "no_transcription" } as const;
-      if (transcriptionId && latest.id !== transcriptionId) {
+      const targetTranscriptionId = transcriptionId ?? expectedTranscriptionId;
+      if (targetTranscriptionId && latest.id !== targetTranscriptionId) {
         return { outcome: "stale_transcription" } as const;
       }
       const previousReviewText =

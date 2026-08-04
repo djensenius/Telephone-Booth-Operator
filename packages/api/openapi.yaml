@@ -523,7 +523,7 @@ paths:
         attributed to the submitting operator (`requestedById`) and stamped
         with provider `on_device`. By default the server still translates and
         moderates the text; clients submitting their own complete local result
-        set pass `processDownstream: false` to prevent any downstream provider
+        set `processDownstream: false` to prevent any downstream provider
         call. `text` may be empty for a silent recording. The resulting
         `Transcription` row is returned and broadcast on `/v1/ws/status` as a
         `{kind:"message"}` envelope.
@@ -540,6 +540,12 @@ paths:
               required: [text]
               properties:
                 text: { type: string, maxLength: 20000 }
+                expectedLatestTranscriptionId:
+                  type: [string, "null"]
+                  format: uuid
+                  description: >-
+                    Latest transcription observed by the client. When present,
+                    the write is rejected if that snapshot has changed.
                 language: { type: [string, "null"], minLength: 1, maxLength: 64 }
                 model: { type: [string, "null"], minLength: 1, maxLength: 128 }
                 processDownstream: { type: boolean, default: true }
@@ -675,7 +681,9 @@ paths:
       summary: Attach a translation to a succeeded transcription.
       description: |
         Without `transcriptionId`, records a human English correction on the
-        latest succeeded transcription with null provider/model. With
+        latest succeeded transcription with null provider/model.
+        `expectedTranscriptionId` conditionally targets that human correction
+        without changing its provenance. With
         `transcriptionId`, requires that row to still be latest and records an
         on-device generated translation with provider `on_device` and its
         optional model. Either form invalidates prior moderation for the row.
@@ -694,6 +702,12 @@ paths:
               required: [translatedText]
               properties:
                 transcriptionId: { type: string, format: uuid }
+                expectedTranscriptionId:
+                  type: string
+                  format: uuid
+                  description: >-
+                    Latest transcription observed while editing a human
+                    correction; rejected if it is no longer latest.
                 translatedText: { type: string, minLength: 1, maxLength: 20000 }
                 translatedLanguage: { type: string, minLength: 1, maxLength: 64 }
                 model: { type: [string, "null"], minLength: 1, maxLength: 128 }

@@ -211,16 +211,22 @@ export type MessageDecision = z.infer<typeof MessageDecisionSchema>;
 
 export const TranslationSubmitSchema = z.object({
   transcriptionId: z.guid().optional(),
+  expectedTranscriptionId: z.guid().optional(),
   translatedText: z.string().trim().min(1).max(20_000),
   translatedLanguage: z.string().trim().min(1).max(64).optional(),
   model: z.string().trim().min(1).max(128).nullable().optional(),
-});
+}).refine(
+  ({ transcriptionId, expectedTranscriptionId }) =>
+    !transcriptionId || !expectedTranscriptionId || transcriptionId === expectedTranscriptionId,
+  { message: "transcription targets must match" },
+);
 export type TranslationSubmit = z.infer<typeof TranslationSubmitSchema>;
 
 // Operator-supplied transcript text (e.g. from the iOS Transcriber app doing
 // on-device transcription). Text may be empty for a silent recording, mirroring
 // the worker push-back callback. `language` and `model` are optional metadata.
 export const TranscriptionSubmitSchema = z.object({
+  expectedLatestTranscriptionId: z.guid().nullable().optional(),
   text: z.string().max(20_000),
   language: z.string().trim().min(1).max(64).nullable().optional(),
   model: z.string().trim().min(1).max(128).nullable().optional(),

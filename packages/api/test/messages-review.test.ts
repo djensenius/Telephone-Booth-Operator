@@ -171,7 +171,7 @@ describe("message review actions", () => {
     it("attaches a human translation to the latest succeeded transcription", async () => {
       const app = createApp();
       const id = await seedReceivedMessage(app);
-      await fakeDb.transcription.create({
+      const transcription = await fakeDb.transcription.create({
         data: {
           messageId: id,
           provider: "openai",
@@ -183,13 +183,18 @@ describe("message review actions", () => {
           completedAt: new Date(),
         },
       });
+
       const cookie = operatorCookie();
       const broadcasts: Array<{ kind: string }> = [];
       wsBroadcaster.subscribe("test-translation", (e) => broadcasts.push(e));
       const res = await app.request(`/v1/messages/${id}/translation`, {
         method: "POST",
         headers: { cookie, "content-type": "application/json" },
-        body: JSON.stringify({ translatedText: "  hello world  ", translatedLanguage: "en" }),
+        body: JSON.stringify({
+          expectedTranscriptionId: transcription.id,
+          translatedText: "  hello world  ",
+          translatedLanguage: "en",
+        }),
       });
       wsBroadcaster.unsubscribe("test-translation");
       expect(res.status, await res.clone().text()).toBe(200);
@@ -203,6 +208,41 @@ describe("message review actions", () => {
       });
       expect(typeof body.translationCompletedAt).toBe("string");
       expect(broadcasts).toContainEqual(expect.objectContaining({ kind: "message" }));
+    });
+
+    it("rejects a human correction when its expected transcription was superseded", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const stale = await fakeDb.transcription.create({
+        data: {
+          messageId: id,
+          provider: "push",
+          status: "succeeded",
+          text: "hola",
+          createdAt: new Date(1),
+        },
+      });
+      await fakeDb.transcription.create({
+        data: {
+          messageId: id,
+          provider: "push",
+          status: "succeeded",
+          text: "bonjour",
+          createdAt: new Date(2),
+        },
+      });
+
+      const res = await app.request(`/v1/messages/${id}/translation`, {
+        method: "POST",
+        headers: { cookie: operatorCookie(), "content-type": "application/json" },
+        body: JSON.stringify({
+          expectedTranscriptionId: stale.id,
+          translatedText: "hello",
+        }),
+      });
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: "stale_transcription" });
     });
 
     it("targets and attributes an on-device translation", async () => {
@@ -502,6 +542,60 @@ describe("message review actions", () => {
         translationStatus: null,
       });
       expect([...store.moderations.values()].filter((row) => row.messageId === id)).toHaveLength(0);
+    });
+
+    it("rejects a transcript when the latest snapshot changed", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const baseline = await fakeDb.transcription.create({
+        data: {
+          messageId: id,
+          provider: "push",
+          status: "succeeded",
+          text: "first",
+          createdAt: new Date(1),
+        },
+      });
+      await fakeDb.transcription.create({
+        data: {
+          messageId: id,
+          provider: "push",
+          status: "succeeded",
+          text: "newer",
+          createdAt: new Date(2),
+        },
+      });
+
+      const res = await app.request(`/v1/messages/${id}/transcription`, {
+        method: "POST",
+        headers: { cookie: operatorCookie(), "content-type": "application/json" },
+        body: JSON.stringify({
+          expectedLatestTranscriptionId: baseline.id,
+          text: "local result",
+          processDownstream: false,
+        }),
+      });
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: "stale_transcription" });
+    });
+
+    it("conditionally records a first transcript when the expected snapshot is null", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+
+      const res = await app.request(`/v1/messages/${id}/transcription`, {
+        method: "POST",
+        headers: { cookie: operatorCookie(), "content-type": "application/json" },
+        body: JSON.stringify({
+          expectedLatestTranscriptionId: null,
+          text: "first local result",
+          processDownstream: false,
+        }),
+      });
+
+      expect(res.status, await res.clone().text()).toBe(202);
+      expect(await res.json()).toMatchObject({ text: "first local result" });
     });
 
     it("accepts an empty transcript for a silent recording", async () => {
