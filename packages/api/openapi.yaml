@@ -696,7 +696,8 @@ paths:
         either form to the translation content the client observed. With
         `transcriptionId`, requires that row to still be latest and records an
         on-device generated translation with provider `on_device` and its
-        optional model. Either form invalidates prior moderation for the row.
+        optional model. Moderation is invalidated only when the effective
+        reviewed text changes.
         Returns `409` when no succeeded transcription exists or the targeted
         transcription has been superseded.
       tags: [messages]

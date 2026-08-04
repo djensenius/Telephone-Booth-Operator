@@ -87,6 +87,18 @@ describe("worker push-back callbacks", () => {
     expect(res.status).toBe(401);
   });
 
+  it("rejects malformed transcription snapshot IDs", async () => {
+    const app = createApp();
+    const message = seedMessage({ status: "received" });
+    const res = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: "not-a-uuid",
+      expectedLatestTranscriptionId: "also-not-a-uuid",
+      text: "hello",
+    });
+
+    expect(res.status).toBe(400);
+  });
+
   it("rejects a transcription callback when a newer result already landed", async () => {
     const app = createApp();
     const message = seedMessage({ status: "received" });
@@ -138,10 +150,11 @@ describe("worker push-back callbacks", () => {
     process.env.MODERATION_PROVIDER = "push";
     const app = createApp();
     const message = seedMessage({ status: "received" });
-    await seedPendingTranscription(message.id);
+    const pending = await seedPendingTranscription(message.id);
     const cap = captureEnvelopes();
 
     const res = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: pending.id,
       text: "hello there",
       language: "en",
     });
@@ -168,10 +181,11 @@ describe("worker push-back callbacks", () => {
     process.env.MODERATION_PROVIDER = "push";
     const app = createApp();
     const message = seedMessage({ status: "received" });
-    await seedPendingTranscription(message.id);
+    const pending = await seedPendingTranscription(message.id);
     const cap = captureEnvelopes();
 
     const res = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: pending.id,
       text: "bonjour",
       language: "fr",
     });
@@ -189,10 +203,11 @@ describe("worker push-back callbacks", () => {
   it("advances a silent (empty) recording without creating moderation work", async () => {
     const app = createApp();
     const message = seedMessage({ status: "received" });
-    await seedPendingTranscription(message.id);
+    const pending = await seedPendingTranscription(message.id);
     const cap = captureEnvelopes();
 
     const res = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: pending.id,
       text: "   ",
     });
     cap.stop();
@@ -234,6 +249,19 @@ describe("worker push-back callbacks", () => {
     expect([...store.moderations.values()].filter((m) => m.messageId === message.id)).toHaveLength(
       1,
     );
+  });
+
+  it("rejects an ID-less callback when a pending row exists", async () => {
+    const app = createApp();
+    const message = seedMessage({ status: "received" });
+    await seedPendingTranscription(message.id);
+
+    const res = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      text: "legacy stale result",
+    });
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "stale_transcription" });
   });
 
   it("is idempotent when an unsolicited transcription is redelivered", async () => {
@@ -299,6 +327,7 @@ describe("worker push-back callbacks", () => {
     });
     const cap = captureEnvelopes();
     const res = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: seeded.id,
       text: "hello there",
       language: "en",
     });
@@ -317,8 +346,9 @@ describe("worker push-back callbacks", () => {
     process.env.MODERATION_PROVIDER = "push";
     const app = createApp();
     const message = seedMessage({ status: "received" });
-    await seedPendingTranscription(message.id);
+    const transcriptionPending = await seedPendingTranscription(message.id);
     await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: transcriptionPending.id,
       text: "bonjour",
       language: "fr",
     });
@@ -348,8 +378,9 @@ describe("worker push-back callbacks", () => {
     process.env.MODERATION_PROVIDER = "push";
     const app = createApp();
     const message = seedMessage({ status: "received" });
-    await seedPendingTranscription(message.id);
+    const transcriptionPending = await seedPendingTranscription(message.id);
     await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: transcriptionPending.id,
       text: "bonjour",
       language: "fr",
     });
@@ -381,8 +412,9 @@ describe("worker push-back callbacks", () => {
     process.env.MODERATION_PROVIDER = "push";
     const app = createApp();
     const message = seedMessage({ status: "received" });
-    await seedPendingTranscription(message.id);
+    const pending = await seedPendingTranscription(message.id);
     await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: pending.id,
       text: "hello there",
       language: "en",
     });
@@ -414,12 +446,13 @@ describe("worker push-back callbacks", () => {
     expect(finalMessage?.decidedAt ?? null).toBeNull();
   });
 
-  it("accepts a legacy moderation callback without concurrency fields", async () => {
+  it("rejects an ID-less moderation callback for a transcription-scoped row", async () => {
     process.env.MODERATION_PROVIDER = "push";
     const app = createApp();
     const message = seedMessage({ status: "received" });
-    await seedPendingTranscription(message.id);
+    const pending = await seedPendingTranscription(message.id);
     await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: pending.id,
       text: "hello there",
       language: "en",
     });
@@ -430,11 +463,8 @@ describe("worker push-back callbacks", () => {
       maxScore: 0.02,
     });
 
-    expect(res.status).toBe(200);
-    expect([...store.moderations.values()].find((row) => row.messageId === message.id)).toMatchObject({
-      status: "succeeded",
-      recommendation: "approve",
-    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "stale_transcription" });
   });
 
   it("does not create moderation rows for an unknown transcription", async () => {
@@ -474,8 +504,9 @@ describe("worker push-back callbacks", () => {
 
     // After a non-English transcription + translation: moderationText is the
     // English translation, so the moderation step reads translated text.
-    await seedPendingTranscription(message.id);
+    const pending = await seedPendingTranscription(message.id);
     await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: pending.id,
       text: "bonjour",
       language: "fr",
     });
@@ -508,8 +539,9 @@ describe("worker push-back callbacks", () => {
     process.env.MODERATION_PROVIDER = "push";
     const app = createApp();
     const message = seedMessage({ status: "received" });
-    await seedPendingTranscription(message.id);
+    const transcriptionPending = await seedPendingTranscription(message.id);
     await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: transcriptionPending.id,
       text: "bonjour",
       language: "fr",
     });

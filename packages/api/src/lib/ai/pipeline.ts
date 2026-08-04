@@ -692,7 +692,10 @@ export const recordTranscriptionResult = async (
       },
       orderBy: { createdAt: "desc" },
     });
-    if (opts.transcriptionId && !pending) {
+    if (
+      (opts.transcriptionId && !pending) ||
+      (!opts.transcriptionId && pending && opts.provider !== "on_device")
+    ) {
       return { outcome: "stale_transcription" } as const;
     }
     const now = new Date();
@@ -893,6 +896,9 @@ export const recordModerationResult = async (
       },
       orderBy: { createdAt: "desc" },
     });
+    if (!opts.transcriptionId && pending?.transcriptionId && opts.provider == null) {
+      return { outcome: "stale_transcription" } as const;
+    }
     const now = new Date();
     const provider = opts.provider ?? null;
     let moderationId: string | null = null;

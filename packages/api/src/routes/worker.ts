@@ -31,8 +31,8 @@ import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-toke
 const idParamSchema = z.object({ id: z.guid() });
 
 const transcriptionBody = z.object({
-  transcriptionId: z.string().min(1).nullable().optional(),
-  expectedLatestTranscriptionId: z.string().min(1).nullable().optional(),
+  transcriptionId: z.guid().nullable().optional(),
+  expectedLatestTranscriptionId: z.guid().nullable().optional(),
   text: z.string(),
   language: z.string().nullable().optional(),
   model: z.string().nullable().optional(),
