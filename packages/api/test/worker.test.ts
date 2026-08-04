@@ -484,6 +484,7 @@ describe("worker push-back callbacks", () => {
     });
 
     const res = await postJson(app, `/v1/worker/messages/${message.id}/moderation`, {
+      transcriptionId: null,
       flagged: false,
       recommendation: "approve",
       maxScore: 0.02,

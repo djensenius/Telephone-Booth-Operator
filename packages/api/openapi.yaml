@@ -620,9 +620,14 @@ paths:
             schema:
               type: object
               required: [flagged, recommendation, maxScore]
-              dependentRequired:
-                transcriptionId: [inputSha256]
-                inputSha256: [transcriptionId]
+              oneOf:
+                - properties:
+                    transcriptionId: { type: "null" }
+                    inputSha256: false
+                - required: [transcriptionId, inputSha256]
+                  properties:
+                    transcriptionId: { type: string, format: uuid }
+                    inputSha256: { type: string, pattern: "^[a-f0-9]{64}$" }
               properties:
                 transcriptionId: { type: [string, "null"], format: uuid }
                 inputSha256:
@@ -1910,11 +1915,16 @@ components:
     WorkerModerationBody:
       type: object
       required: [flagged, recommendation, maxScore]
-      dependentRequired:
-        transcriptionId: [inputSha256]
-        inputSha256: [transcriptionId]
+      oneOf:
+        - properties:
+            transcriptionId: { type: "null" }
+            inputSha256: false
+        - required: [transcriptionId, inputSha256]
+          properties:
+            transcriptionId: { type: string, format: uuid }
+            inputSha256: { type: string, pattern: "^[0-9a-f]{64}$" }
       properties:
-        transcriptionId: { type: string, format: uuid }
+        transcriptionId: { type: [string, "null"], format: uuid }
         inputSha256: { type: string, pattern: "^[0-9a-f]{64}$" }
         flagged: { type: boolean }
         recommendation: { type: string, enum: [approve, review, reject] }

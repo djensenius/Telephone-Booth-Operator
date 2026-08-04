@@ -511,15 +511,20 @@ messagesRouter.post(
       },
     });
     const user = c.get("user") as { id: string } | undefined;
-    if (data.inputSha256) {
+    if (data.inputSha256 && data.transcriptionId) {
+      const targetTranscriptionId = data.transcriptionId;
       const outcome = await db.$transaction(async (tx) => {
         if (!(await lockMessageForReview(tx, id))) return { outcome: "not_found" } as const;
         const transcription = await tx.transcription.findFirst({
+          where: { id: targetTranscriptionId, messageId: id, status: "succeeded" },
+        });
+        if (!transcription) return { outcome: "transcription_not_found" } as const;
+        const latestTranscription = await tx.transcription.findFirst({
           where: { messageId: id, status: "succeeded" },
           orderBy: { createdAt: "desc" },
         });
-        if (!transcription || transcription.id !== data.transcriptionId) {
-          return { outcome: "transcription_not_found" } as const;
+        if (latestTranscription?.id !== transcription.id) {
+          return { outcome: "stale_transcription" } as const;
         }
         const input =
           transcription.translationStatus === "succeeded" &&
@@ -597,6 +602,9 @@ messagesRouter.post(
       if (outcome.outcome === "not_found") return c.json({ error: "not_found" }, 404);
       if (outcome.outcome === "transcription_not_found") {
         return c.json({ error: "transcription_not_found" }, 404);
+      }
+      if (outcome.outcome === "stale_transcription") {
+        return c.json({ error: "stale_transcription" }, 409);
       }
       if (outcome.outcome === "stale_input") {
         return c.json({ error: "stale_moderation_input" }, 409);

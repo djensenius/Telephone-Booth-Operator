@@ -48,7 +48,7 @@ const translationBody = z.object({
 
 const moderationBody = z
   .object({
-    transcriptionId: z.guid().optional(),
+    transcriptionId: z.guid().nullable().optional(),
     inputSha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
     flagged: z.boolean(),
     recommendation: z.enum(["approve", "review", "reject"]),
