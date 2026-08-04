@@ -1442,6 +1442,7 @@ paths:
       responses:
         "200": { description: Result accepted. }
         "404": { description: Message or transcription not found. }
+        "409": { description: The transcription or its source text changed while the worker was translating. }
 
   /v1/worker/messages/{id}/moderation:
     parameters:
@@ -1879,7 +1880,8 @@ components:
           oneOf:
             - type: "null"
             - type: object
-              required: [id, text, moderationText, moderationInputSha256]
+              required:
+                [id, text, translationInputSha256, moderationText, moderationInputSha256]
               properties:
                 id: { type: string, format: uuid }
                 text: { type: string }
@@ -1887,6 +1889,10 @@ components:
                 model: { type: [string, "null"] }
                 translationStatus: { type: [string, "null"] }
                 translatedText: { type: [string, "null"] }
+                translationInputSha256:
+                  type: string
+                  pattern: "^[0-9a-f]{64}$"
+                  description: "SHA-256 of the ECMAScript-trimmed transcript; translation callbacks must return it."
                 moderationText:
                   type: string
                   description: "Text the moderation step should score (English translation when available, else the transcript)."
@@ -1905,9 +1911,10 @@ components:
         model: { type: [string, "null"] }
     WorkerTranslationBody:
       type: object
-      required: [transcriptionId, translatedText]
+      required: [transcriptionId, inputSha256, translatedText]
       properties:
         transcriptionId: { type: string, format: uuid }
+        inputSha256: { type: string, pattern: "^[0-9a-f]{64}$" }
         translatedText: { type: string }
         sourceLanguage: { type: [string, "null"] }
         targetLanguage: { type: [string, "null"] }

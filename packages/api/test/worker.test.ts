@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.js")).fakeDb }));
@@ -29,6 +30,9 @@ import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { resetFakeAzure } from "./support/fake-azure.js";
 import { fakeDb, resetFakeDb, seedFile, seedMessage, store } from "./support/fake-db.js";
 import { phoneHeaders } from "./support/http.js";
+
+const sha256 = (value: string): string =>
+  createHash("sha256").update(value.trim(), "utf8").digest("hex");
 
 const setup = () => {
   process.env.NODE_ENV = "test";
@@ -385,6 +389,7 @@ describe("worker push-back callbacks", () => {
 
     const res = await postJson(app, `/v1/worker/messages/${message.id}/translation`, {
       transcriptionId: transcription?.id,
+      inputSha256: sha256("bonjour"),
       translatedText: "hello",
       sourceLanguage: "fr",
       targetLanguage: "en",
@@ -415,12 +420,14 @@ describe("worker push-back callbacks", () => {
     );
     await postJson(app, `/v1/worker/messages/${message.id}/translation`, {
       transcriptionId: transcription?.id,
+      inputSha256: sha256("bonjour"),
       translatedText: "hello",
       targetLanguage: "en",
     });
     const cap = captureEnvelopes();
     const duplicate = await postJson(app, `/v1/worker/messages/${message.id}/translation`, {
       transcriptionId: transcription?.id,
+      inputSha256: sha256("bonjour"),
       translatedText: "stale hello",
       targetLanguage: "en",
     });
@@ -542,6 +549,7 @@ describe("worker push-back callbacks", () => {
     );
     await postJson(app, `/v1/worker/messages/${message.id}/translation`, {
       transcriptionId: transcription?.id,
+      inputSha256: sha256("bonjour"),
       translatedText: "hello",
       targetLanguage: "en",
     });
@@ -552,13 +560,43 @@ describe("worker push-back callbacks", () => {
     const secondBody = (await second.json()) as {
       transcription: {
         text: string;
+        translationInputSha256: string;
         moderationText: string;
         moderationInputSha256: string;
       } | null;
     };
     expect(secondBody.transcription?.text).toBe("bonjour");
+    expect(secondBody.transcription?.translationInputSha256).toBe(sha256("bonjour"));
     expect(secondBody.transcription?.moderationText).toBe("hello");
     expect(secondBody.transcription?.moderationInputSha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("rejects a translation callback for text that changed after work was fetched", async () => {
+    process.env.TRANSLATION_PROVIDER = "push";
+    const app = createApp();
+    const message = seedMessage({ status: "received" });
+    const pending = await seedPendingTranscription(message.id);
+    const work = await app.request(`/v1/worker/messages/${message.id}/work`, {
+      headers: phoneHeaders,
+    });
+    const workBody = (await work.json()) as {
+      transcription: { translationInputSha256: string } | null;
+    };
+    await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: pending.id,
+      text: "bonjour",
+      language: "fr",
+    });
+    const stale = await postJson(app, `/v1/worker/messages/${message.id}/translation`, {
+      transcriptionId: pending.id,
+      inputSha256: workBody.transcription?.translationInputSha256,
+      translatedText: "stale translation",
+      targetLanguage: "en",
+    });
+
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toEqual({ error: "stale_translation_input" });
+    expect(store.transcriptions.get(pending.id)?.translatedText).toBeNull();
   });
 
   it("rejects a moderation callback for superseded review text", async () => {
@@ -584,6 +622,7 @@ describe("worker push-back callbacks", () => {
 
     await postJson(app, `/v1/worker/messages/${message.id}/translation`, {
       transcriptionId: transcription?.id,
+      inputSha256: sha256("bonjour"),
       translatedText: "hello",
       targetLanguage: "en",
     });

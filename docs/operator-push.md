@@ -125,13 +125,17 @@ audio through itself.
     "model": null,
     "translationStatus": "succeeded",
     "translatedText": "Hello",
+    "translationInputSha256": "9172e8eec99f144f72eca9a568759580edadb2cfd154857f07e657569493bc44",
     "moderationText": "Hello",
     "moderationInputSha256": "185f8db32271fe25f561a6fc938b2e264306ec304eda518007d1764826381969"
   }
 }
 ```
 
-`transcription` is `null` before the first transcription. `moderationText` is
+`transcription` is `null` before the first transcription. Return
+`translationInputSha256` with translation results so a delayed worker cannot
+write a translation for transcript text that changed after it fetched work.
+`moderationText` is
 the English translation when available, otherwise the original transcript —
 it is exactly the text the moderation step should score.
 New workers should return `moderationInputSha256` with their moderation result
@@ -176,6 +180,7 @@ row to the submitting operator (`requestedById`). It returns the resulting
 ```json
 {
   "transcriptionId": "abc…",
+  "inputSha256": "9172e8eec99f144f72eca9a568759580edadb2cfd154857f07e657569493bc44",
   "translatedText": "Hello",
   "sourceLanguage": "fr",
   "targetLanguage": "en",

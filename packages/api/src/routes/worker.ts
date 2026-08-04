@@ -40,6 +40,7 @@ const transcriptionBody = z.object({
 
 const translationBody = z.object({
   transcriptionId: z.string().min(1),
+  inputSha256: z.string().regex(/^[0-9a-f]{64}$/),
   translatedText: z.string(),
   sourceLanguage: z.string().nullable().optional(),
   targetLanguage: z.string().nullable().optional(),
@@ -124,6 +125,9 @@ workerRouter.get("/messages/:id/work", zValidator("param", idParamSchema), async
       : (transcription?.text ?? "")
   ).trim();
   const moderationInputSha256 = createHash("sha256").update(moderationText, "utf8").digest("hex");
+  const translationInputSha256 = createHash("sha256")
+    .update((transcription?.text ?? "").trim(), "utf8")
+    .digest("hex");
 
   return c.json({
     id: message.id,
@@ -137,6 +141,7 @@ workerRouter.get("/messages/:id/work", zValidator("param", idParamSchema), async
           model: transcription.model,
           translationStatus: transcription.translationStatus,
           translatedText: transcription.translatedText,
+          translationInputSha256,
           moderationText,
           moderationInputSha256,
         }
@@ -220,13 +225,21 @@ workerRouter.post(
       const rows = await tx.$queryRaw<{ id: string }[]>`
         SELECT "id" FROM "Message" WHERE "id" = ${id}::uuid FOR UPDATE
       `;
-      if (rows.length === 0) return 0;
+      if (rows.length === 0) return { outcome: "not_found" } as const;
       const current = await tx.transcription.findUnique({ where: { id: existing.id } });
       const latest = await tx.transcription.findFirst({
         where: { messageId: id, status: "succeeded" },
         orderBy: { createdAt: "desc" },
       });
-      if (!current || !latest || latest.id !== current.id) return 0;
+      if (!current || !latest || latest.id !== current.id) {
+        return { outcome: "stale_transcription" } as const;
+      }
+      const actualInputSha256 = createHash("sha256")
+        .update((current.text ?? "").trim(), "utf8")
+        .digest("hex");
+      if (actualInputSha256 !== data.inputSha256) {
+        return { outcome: "stale_input" } as const;
+      }
       const previousReviewText =
         current.translationStatus === "succeeded" &&
         typeof current.translatedText === "string" &&
@@ -260,9 +273,16 @@ workerRouter.post(
           },
         });
       }
-      return result.count;
+      return { outcome: "recorded", count: result.count } as const;
     });
-    if (updated === 0) return c.json({ ok: true });
+    if (updated.outcome === "not_found") return c.json({ error: "not_found" }, 404);
+    if (updated.outcome === "stale_transcription") {
+      return c.json({ error: "stale_transcription" }, 409);
+    }
+    if (updated.outcome === "stale_input") {
+      return c.json({ error: "stale_translation_input" }, 409);
+    }
+    if (updated.count === 0) return c.json({ ok: true });
     await broadcastMessageById(id);
     // Translation done — provider-aware moderation can now run against English
     // text. Push mode emits work; in-process providers run immediately.
