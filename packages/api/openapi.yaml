@@ -1907,6 +1907,9 @@ components:
     WorkerModerationBody:
       type: object
       required: [flagged, recommendation, maxScore]
+      dependentRequired:
+        transcriptionId: [inputSha256]
+        inputSha256: [transcriptionId]
       properties:
         transcriptionId: { type: string, format: uuid }
         inputSha256: { type: string, pattern: "^[0-9a-f]{64}$" }

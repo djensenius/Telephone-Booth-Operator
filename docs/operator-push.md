@@ -209,8 +209,9 @@ envelope so live operator UIs update instantly, and a human decides via
 
 New workers should include the work response's `transcription.id` as
 `transcriptionId` and its `moderationInputSha256`; the latter prevents
-recording a verdict against text that changed after the worker fetched it. Both
-fields remain optional for compatibility with existing workers.
+recording a verdict against text that changed after the worker fetched it.
+Legacy workers may omit both fields, but scoped callbacks must supply them
+together.
 
 **Operator-authenticated alternative.** A logged-in operator (OIDC) that holds
 no worker token — such as the iOS review app computing a verdict with Apple

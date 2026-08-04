@@ -57,8 +57,8 @@ const moderationBody = z
     reasonSummary: z.string().optional(),
     model: z.string().nullable().optional(),
   })
-  .refine((body) => body.inputSha256 == null || body.transcriptionId != null, {
-    message: "transcriptionId is required when inputSha256 is supplied",
+  .refine((body) => (body.inputSha256 == null) === (body.transcriptionId == null), {
+    message: "transcriptionId and inputSha256 must be supplied together",
     path: ["transcriptionId"],
   });
 

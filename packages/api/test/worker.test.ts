@@ -112,6 +112,19 @@ describe("worker push-back callbacks", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects a moderation target without its input hash", async () => {
+    const app = createApp();
+    const message = seedMessage({ status: "received" });
+    const res = await postJson(app, `/v1/worker/messages/${message.id}/moderation`, {
+      transcriptionId: "00000000-0000-4000-8000-000000000099",
+      flagged: false,
+      recommendation: "approve",
+      maxScore: 0,
+    });
+
+    expect(res.status).toBe(400);
+  });
+
   it("rejects a transcription callback when a newer result already landed", async () => {
     const app = createApp();
     const message = seedMessage({ status: "received" });
