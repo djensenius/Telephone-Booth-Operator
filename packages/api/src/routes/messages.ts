@@ -438,7 +438,14 @@ messagesRouter.post(
   async (c) => {
     const { id } = c.req.valid("param");
     const data = c.req.valid("json");
-    const { expectedLatestTranscriptionId, text, language, model, processDownstream } = data;
+    const {
+      expectedLatestTranscriptionId,
+      expectedLatestTranscriptionSha256,
+      text,
+      language,
+      model,
+      processDownstream,
+    } = data;
     // An operator overriding the machine transcript is exactly the kind of
     // edit the trail exists for; the text itself stays in the Transcription row.
     recordAudit(c, {
@@ -452,6 +459,9 @@ messagesRouter.post(
       messageId: id,
       ...("expectedLatestTranscriptionId" in data
         ? { expectedLatestTranscriptionId: expectedLatestTranscriptionId ?? null }
+        : {}),
+      ...("expectedLatestTranscriptionSha256" in data
+        ? { expectedLatestTranscriptionSha256: expectedLatestTranscriptionSha256 ?? null }
         : {}),
       text,
       language: language ?? null,

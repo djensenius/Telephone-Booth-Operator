@@ -232,6 +232,11 @@ export type TranslationSubmit = z.infer<typeof TranslationSubmitSchema>;
 // the worker push-back callback. `language` and `model` are optional metadata.
 export const TranscriptionSubmitSchema = z.object({
   expectedLatestTranscriptionId: z.guid().nullable().optional(),
+  expectedLatestTranscriptionSha256: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/i)
+    .nullable()
+    .optional(),
   text: z.string().max(20_000),
   language: z.string().trim().min(1).max(64).nullable().optional(),
   model: z.string().trim().min(1).max(128).nullable().optional(),

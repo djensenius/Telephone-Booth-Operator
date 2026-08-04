@@ -616,6 +616,45 @@ describe("message review actions", () => {
       expect(await res.json()).toEqual({ error: "stale_transcription" });
     });
 
+    it("rejects a transcript when the latest row changed without changing its ID", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const baseline = await fakeDb.transcription.create({
+        data: {
+          messageId: id,
+          provider: "push",
+          status: "pending",
+          text: null,
+          createdAt: new Date(1),
+        },
+      });
+      const expectedLatestTranscriptionSha256 = createHash("sha256")
+        .update("pending\n", "utf8")
+        .digest("hex");
+      await fakeDb.transcription.update({
+        where: { id: baseline.id },
+        data: {
+          status: "succeeded",
+          text: "worker result",
+          completedAt: new Date(2),
+        },
+      });
+
+      const res = await app.request(`/v1/messages/${id}/transcription`, {
+        method: "POST",
+        headers: { cookie: operatorCookie(), "content-type": "application/json" },
+        body: JSON.stringify({
+          expectedLatestTranscriptionId: baseline.id,
+          expectedLatestTranscriptionSha256,
+          text: "stale local result",
+          processDownstream: false,
+        }),
+      });
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: "stale_transcription" });
+    });
+
     it("conditionally records a first transcript when the expected snapshot is null", async () => {
       const app = createApp();
       const id = await seedReceivedMessage(app);

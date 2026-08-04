@@ -546,6 +546,14 @@ paths:
                   description: >-
                     Latest transcription observed by the client. When present,
                     the write is rejected if that snapshot has changed.
+                expectedLatestTranscriptionSha256:
+                  type: [string, "null"]
+                  pattern: "^[0-9a-fA-F]{64}$"
+                  description: >-
+                    SHA-256 of the observed latest transcription status, a
+                    newline, and its ECMAScript-trimmed text. Null represents
+                    no latest transcription. When present, the write is
+                    rejected if the row changed even when its ID is unchanged.
                 language: { type: [string, "null"], minLength: 1, maxLength: 64 }
                 model: { type: [string, "null"], minLength: 1, maxLength: 128 }
                 processDownstream: { type: boolean, default: true }
@@ -556,6 +564,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Transcription" }
         "404": { description: message not found }
+        "409": { description: latest transcription snapshot changed }
 
   /v1/messages/{id}/moderate:
     parameters:

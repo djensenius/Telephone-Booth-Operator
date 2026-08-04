@@ -619,6 +619,7 @@ export interface RecordTranscriptionResultOptions {
   readonly messageId: string;
   readonly transcriptionId?: string | null;
   readonly expectedLatestTranscriptionId?: string | null;
+  readonly expectedLatestTranscriptionSha256?: string | null;
   readonly text: string;
   readonly language?: string | null;
   readonly model?: string | null;
@@ -661,12 +662,25 @@ export const recordTranscriptionResult = async (
     });
     if (!message) return { outcome: "not_found" } as const;
 
-    if ("expectedLatestTranscriptionId" in opts) {
+    if (
+      "expectedLatestTranscriptionId" in opts ||
+      "expectedLatestTranscriptionSha256" in opts
+    ) {
       const latest = await tx.transcription.findFirst({
         where: { messageId: opts.messageId },
         orderBy: { createdAt: "desc" },
       });
-      if ((latest?.id ?? null) !== (opts.expectedLatestTranscriptionId ?? null)) {
+      const latestSha256 = latest
+        ? createHash("sha256")
+            .update(`${latest.status}\n${latest.text?.trim() ?? ""}`, "utf8")
+            .digest("hex")
+        : null;
+      if (
+        ("expectedLatestTranscriptionId" in opts &&
+          (latest?.id ?? null) !== (opts.expectedLatestTranscriptionId ?? null)) ||
+        ("expectedLatestTranscriptionSha256" in opts &&
+          latestSha256 !== (opts.expectedLatestTranscriptionSha256 ?? null))
+      ) {
         return { outcome: "stale_transcription" } as const;
       }
     }
