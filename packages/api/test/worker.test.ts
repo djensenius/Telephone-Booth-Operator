@@ -54,25 +54,12 @@ const postJson = (
   path: string,
   body: unknown,
   headers = phoneHeaders,
-) => {
-  let requestBody = body;
-  const match = path.match(/^\/v1\/worker\/messages\/([^/]+)\/transcription$/);
-  if (match && body && typeof body === "object" && !("expectedLatestTranscriptionId" in body)) {
-    const latest = [...store.transcriptions.values()]
-      .filter((row) => row.messageId === match[1])
-      .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0];
-    requestBody = {
-      ...body,
-      transcriptionId: latest?.status === "pending" ? latest.id : null,
-      expectedLatestTranscriptionId: latest?.id ?? null,
-    };
-  }
-  return app.request(path, {
+) =>
+  app.request(path, {
     method: "POST",
     headers: { ...headers, "content-type": "application/json" },
-    body: JSON.stringify(requestBody),
+    body: JSON.stringify(body),
   });
-};
 
 const seedPendingTranscription = (messageId: string) =>
   fakeDb.transcription.create({
@@ -401,6 +388,29 @@ describe("worker push-back callbacks", () => {
     const finalMessage = store.messages.get(message.id);
     expect(finalMessage?.status).toBe("pending");
     expect(finalMessage?.decidedAt ?? null).toBeNull();
+  });
+
+  it("accepts a legacy moderation callback without concurrency fields", async () => {
+    process.env.MODERATION_PROVIDER = "push";
+    const app = createApp();
+    const message = seedMessage({ status: "received" });
+    await seedPendingTranscription(message.id);
+    await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      text: "hello there",
+      language: "en",
+    });
+
+    const res = await postJson(app, `/v1/worker/messages/${message.id}/moderation`, {
+      flagged: false,
+      recommendation: "approve",
+      maxScore: 0.02,
+    });
+
+    expect(res.status).toBe(200);
+    expect([...store.moderations.values()].find((row) => row.messageId === message.id)).toMatchObject({
+      status: "succeeded",
+      recommendation: "approve",
+    });
   });
 
   it("does not create moderation rows for an unknown transcription", async () => {
