@@ -294,6 +294,33 @@ describe("worker push-back callbacks", () => {
     expect(await res.json()).toEqual({ error: "stale_transcription" });
   });
 
+  it("rejects a delayed ID-less callback after an on-device takeover", async () => {
+    process.env.MODERATION_PROVIDER = "push";
+    const app = createApp();
+    const message = seedMessage({ status: "pending" });
+    await fakeDb.transcription.create({
+      data: {
+        messageId: message.id,
+        provider: "on_device",
+        status: "succeeded",
+        text: "local result",
+        completedAt: new Date(),
+      },
+    });
+
+    const res = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      text: "delayed worker result",
+    });
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "stale_transcription" });
+    expect(
+      [...store.transcriptions.values()].filter((row) => row.messageId === message.id),
+    ).toHaveLength(1);
+    expect([...store.moderations.values()].filter((row) => row.messageId === message.id))
+      .toHaveLength(0);
+  });
+
   it("is idempotent when an unsolicited transcription is redelivered", async () => {
     process.env.MODERATION_PROVIDER = "push";
     const app = createApp();

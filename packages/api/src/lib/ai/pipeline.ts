@@ -768,6 +768,14 @@ export const recordTranscriptionResult = async (
       orderBy: { createdAt: "desc" },
     });
     if (
+      !opts.transcriptionId &&
+      opts.provider !== "on_device" &&
+      latest?.status === "succeeded" &&
+      latest.provider === "on_device"
+    ) {
+      return { outcome: "stale_transcription" } as const;
+    }
+    if (
       latest &&
       latest.status === "succeeded" &&
       (latest.text ?? "").trim() === opts.text.trim() &&
