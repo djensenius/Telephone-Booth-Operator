@@ -620,6 +620,9 @@ paths:
             schema:
               type: object
               required: [flagged, recommendation, maxScore]
+              dependentRequired:
+                transcriptionId: [inputSha256]
+                inputSha256: [transcriptionId]
               properties:
                 transcriptionId: { type: [string, "null"], format: uuid }
                 inputSha256:

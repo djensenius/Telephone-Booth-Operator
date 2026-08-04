@@ -736,11 +736,12 @@ describe("message review actions", () => {
       const res = await app.request(`/v1/messages/${id}/transcription`, {
         method: "POST",
         headers: { cookie, "content-type": "application/json" },
-        body: JSON.stringify({ text: "" }),
+        body: JSON.stringify({ text: "", processDownstream: false }),
       });
       expect(res.status, await res.clone().text()).toBe(202);
       const body = await res.json();
       expect(body).toMatchObject({ messageId: id, status: "succeeded", text: "" });
+      expect(store.messages.get(id)?.status).toBe("pending");
     });
 
     it("treats an identical resubmission as a no-op", async () => {
@@ -938,6 +939,13 @@ describe("message review actions", () => {
       });
 
       expect(res.status).toBe(400);
+
+      const missingTarget = await app.request(`/v1/messages/${id}/moderation`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ ...verdict, inputSha256: "a".repeat(64) }),
+      });
+      expect(missingTarget.status).toBe(400);
     });
 
     it("never decides the message", async () => {

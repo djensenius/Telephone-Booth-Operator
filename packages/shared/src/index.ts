@@ -264,8 +264,8 @@ export const ModerationSubmitSchema = z
     reasonSummary: z.string().max(2000).nullable().optional(),
     model: z.string().trim().min(1).max(128).nullable().optional(),
   })
-  .refine((value) => !value.transcriptionId || value.inputSha256, {
-    message: "inputSha256 is required when transcriptionId is supplied",
+  .refine((value) => (value.inputSha256 == null) === (value.transcriptionId == null), {
+    message: "transcriptionId and inputSha256 must be supplied together",
     path: ["inputSha256"],
   });
 export type ModerationSubmit = z.infer<typeof ModerationSubmitSchema>;

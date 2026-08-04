@@ -777,16 +777,16 @@ export const recordTranscriptionResult = async (
 
   await broadcastMessage(opts.messageId);
 
-  if (opts.processDownstream === false) {
-    return { outcome: "recorded", transcriptionId };
-  }
-
   const hasText = opts.text.trim().length > 0;
   if (!hasText) {
     // Silent recording: nothing to translate or moderate. Legacy `received`
     // messages still need surfacing; anything newer is already `pending`.
     await advanceMessageAfterModeration(opts.messageId);
     await broadcastMessage(opts.messageId);
+    return { outcome: "recorded", transcriptionId };
+  }
+
+  if (opts.processDownstream === false) {
     return { outcome: "recorded", transcriptionId };
   }
 
