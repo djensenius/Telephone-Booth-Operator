@@ -13,6 +13,7 @@
 //     legacy `received` messages that have no successful transcription, which
 //     covers server restarts mid-flight.
 
+import { createHash } from "node:crypto";
 import type { ModerationRecommendation } from "@telephone-booth-operator/shared";
 import { generateSasUrl } from "../azure-blob.js";
 import { broadcastWork, wsBroadcaster } from "../broadcaster.js";
@@ -126,6 +127,10 @@ export const runTranscription = async (
   const provider = deps.transcriptionProvider;
   const message = await loadMessage(opts.messageId);
   if (!message) return { outcome: "not_found" };
+  const latestSucceededAtStart = await db.transcription.findFirst({
+    where: { messageId: message.id, status: "succeeded" },
+    orderBy: { createdAt: "desc" },
+  });
 
   if (!provider) {
     // Push mode: no in-process transcription provider, but a subscribed
@@ -134,25 +139,46 @@ export const runTranscription = async (
     // /v1/worker/messages/:id/transcription. (In a truly disabled config we
     // instead record a failed row below.)
     if (deps.config.transcriptionProvider === "push") {
-      const existing = await db.transcription.findFirst({
-        where: { messageId: message.id, status: "pending" },
-        orderBy: { createdAt: "desc" },
+      const prepared = await db.$transaction(async (tx) => {
+        const rows = await tx.$queryRaw<{ id: string }[]>`
+          SELECT "id" FROM "Message" WHERE "id" = ${message.id}::uuid FOR UPDATE
+        `;
+        if (rows.length === 0) return { outcome: "not_found" } as const;
+        const latestSucceeded = await tx.transcription.findFirst({
+          where: { messageId: message.id, status: "succeeded" },
+          orderBy: { createdAt: "desc" },
+        });
+        if ((latestSucceeded?.id ?? null) !== (latestSucceededAtStart?.id ?? null)) {
+          return {
+            outcome: "skipped",
+            existingId: latestSucceeded?.id ?? "",
+          } as const;
+        }
+        const existing = await tx.transcription.findFirst({
+          where: { messageId: message.id, status: "pending" },
+          orderBy: { createdAt: "desc" },
+        });
+        const pending =
+          existing ??
+          (await tx.transcription.create({
+            data: {
+              messageId: message.id,
+              provider: "push",
+              model: null,
+              status: "pending",
+              durationMs: message.audio.durationMs,
+              requestedById: opts.requestedByUserId ?? null,
+            },
+          }));
+        return { outcome: "created", pending } as const;
       });
-      const pending =
-        existing ??
-        (await db.transcription.create({
-          data: {
-            messageId: message.id,
-            provider: "push",
-            model: null,
-            status: "pending",
-            durationMs: message.audio.durationMs,
-            requestedById: opts.requestedByUserId ?? null,
-          },
-        }));
+      if (prepared.outcome === "not_found") return { outcome: "not_found" };
+      if (prepared.outcome === "skipped") {
+        return { outcome: "skipped", existingId: prepared.existingId };
+      }
       await broadcastMessage(message.id);
       broadcastWork(message.id, ["transcription"]);
-      return { outcome: "created", transcriptionId: pending.id };
+      return { outcome: "created", transcriptionId: prepared.pending.id };
     }
     const failed = await db.transcription.create({
       data: {
@@ -169,71 +195,100 @@ export const runTranscription = async (
     return { outcome: "created", transcriptionId: failed.id };
   }
 
-  // Guard: only one active pending transcription per message at a time.
   const staleThresholdMs = deps.config.sweeperStaleThresholdSeconds * 1000;
-  const existingPending = await db.transcription.findFirst({
-    where: { messageId: message.id, status: "pending" },
-    orderBy: { createdAt: "desc" },
-  });
-  if (existingPending) {
-    const age = Date.now() - existingPending.createdAt.getTime();
-    if (age < staleThresholdMs) {
-      log("info", "ai.transcription.skipped", {
-        messageId: message.id,
-        reason: "pending transcription already active",
-        existingId: existingPending.id,
-        ageMs: age,
-      });
-      return { outcome: "skipped", existingId: existingPending.id };
-    }
-    // The existing pending row is older than the stale threshold — the
-    // original provider call likely crashed. Mark it failed and proceed.
-    await db.transcription.update({
-      where: { id: existingPending.id },
-      data: {
-        status: "failed",
-        error: "stale — superseded by newer attempt",
-        completedAt: new Date(),
-      },
-    });
-    log("warn", "ai.transcription.stale_superseded", {
-      messageId: message.id,
-      supersededId: existingPending.id,
-      ageMs: age,
-    });
-  }
+  const prepared = await db.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<{ id: string }[]>`
+      SELECT "id" FROM "Message" WHERE "id" = ${message.id}::uuid FOR UPDATE
+    `;
+    if (rows.length === 0) return { outcome: "not_found" } as const;
 
-  if (message.audio.sizeBytes > 0 && message.audio.sizeBytes > deps.config.maxAudioBytes) {
-    const failed = await db.transcription.create({
+    const latestSucceeded = await tx.transcription.findFirst({
+      where: { messageId: message.id, status: "succeeded" },
+      orderBy: { createdAt: "desc" },
+    });
+    if ((latestSucceeded?.id ?? null) !== (latestSucceededAtStart?.id ?? null)) {
+      return { outcome: "skipped", existingId: latestSucceeded?.id ?? "" } as const;
+    }
+
+    const existingPending = await tx.transcription.findFirst({
+      where: { messageId: message.id, status: "pending" },
+      orderBy: { createdAt: "desc" },
+    });
+    let superseded: { id: string; ageMs: number } | null = null;
+    if (existingPending) {
+      const ageMs = Date.now() - existingPending.createdAt.getTime();
+      if (ageMs < staleThresholdMs) {
+        return { outcome: "skipped", existingId: existingPending.id, ageMs } as const;
+      }
+      await tx.transcription.update({
+        where: { id: existingPending.id },
+        data: {
+          status: "failed",
+          error: "stale — superseded by newer attempt",
+          completedAt: new Date(),
+        },
+      });
+      superseded = { id: existingPending.id, ageMs };
+    }
+
+    if (message.audio.sizeBytes > 0 && message.audio.sizeBytes > deps.config.maxAudioBytes) {
+      const failed = await tx.transcription.create({
+        data: {
+          messageId: message.id,
+          provider: provider.name,
+          model: provider.model,
+          status: "failed",
+          error: `audio too large: ${message.audio.sizeBytes} bytes exceeds ${deps.config.maxAudioBytes} limit`,
+          requestedById: opts.requestedByUserId ?? null,
+          completedAt: new Date(),
+        },
+      });
+      return { outcome: "failed", transcriptionId: failed.id, superseded } as const;
+    }
+
+    const pending = await tx.transcription.create({
       data: {
         messageId: message.id,
         provider: provider.name,
         model: provider.model,
-        status: "failed",
-        error: `audio too large: ${message.audio.sizeBytes} bytes exceeds ${deps.config.maxAudioBytes} limit`,
+        status: "pending",
+        durationMs: message.audio.durationMs,
         requestedById: opts.requestedByUserId ?? null,
-        completedAt: new Date(),
       },
     });
+    return { outcome: "pending", pending, superseded } as const;
+  });
+
+  if (prepared.outcome === "not_found") return { outcome: "not_found" };
+  if (prepared.outcome === "skipped") {
+    log("info", "ai.transcription.skipped", {
+      messageId: message.id,
+      reason:
+        "ageMs" in prepared
+          ? "pending transcription already active"
+          : "newer transcription recorded",
+      existingId: prepared.existingId,
+      ...("ageMs" in prepared ? { ageMs: prepared.ageMs } : {}),
+    });
+    return { outcome: "skipped", existingId: prepared.existingId };
+  }
+  if (prepared.superseded) {
+    log("warn", "ai.transcription.stale_superseded", {
+      messageId: message.id,
+      supersededId: prepared.superseded.id,
+      ageMs: prepared.superseded.ageMs,
+    });
+  }
+  if (prepared.outcome === "failed") {
     log("warn", "ai.transcription.rejected_size", {
       messageId: message.id,
       sizeBytes: message.audio.sizeBytes,
       maxBytes: deps.config.maxAudioBytes,
     });
     await broadcastMessage(message.id);
-    return { outcome: "created", transcriptionId: failed.id };
+    return { outcome: "created", transcriptionId: prepared.transcriptionId };
   }
-
-  const pending = await db.transcription.create({
-    data: {
-      messageId: message.id,
-      provider: provider.name,
-      model: provider.model,
-      status: "pending",
-      durationMs: message.audio.durationMs,
-      requestedById: opts.requestedByUserId ?? null,
-    },
-  });
+  const { pending } = prepared;
   await broadcastMessage(message.id);
 
   const startedAt = Date.now();
@@ -379,16 +434,29 @@ export const runTranslation = async (opts: RunTranslationOptions): Promise<Trans
     // `/v1/worker/messages/:id/translation`. Use updateMany so we never flip a
     // row that a worker has just finalized between the read above and this
     // write.
-    await db.transcription.updateMany({
-      where: {
-        id: transcription.id,
-        OR: [{ translationStatus: null }, { translationStatus: "failed" }],
-      },
-      data: {
-        translationStatus: "pending",
-        translationProvider: deps.config.translationProvider,
-      },
+    const claimed = await db.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "Message" WHERE "id" = ${opts.messageId}::uuid FOR UPDATE
+      `;
+      if (rows.length === 0) return 0;
+      const latest = await tx.transcription.findFirst({
+        where: { messageId: opts.messageId, status: "succeeded" },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!latest || latest.id !== transcription.id) return 0;
+      const result = await tx.transcription.updateMany({
+        where: {
+          id: transcription.id,
+          OR: [{ translationStatus: null }, { translationStatus: "failed" }],
+        },
+        data: {
+          translationStatus: "pending",
+          translationProvider: deps.config.translationProvider,
+        },
+      });
+      return result.count;
     });
+    if (claimed === 0) return { outcome: "deferred", reason: "pending_push" };
     await broadcastMessage(opts.messageId);
     broadcastWork(opts.messageId, ["translation"]);
     return { outcome: "deferred", reason: "pending_push" };
@@ -396,18 +464,30 @@ export const runTranslation = async (opts: RunTranslationOptions): Promise<Trans
 
   // Atomic claim: only proceed if the row is still null/failed. If a worker
   // raced in and set `pending` (or even `succeeded`) we bail out cleanly.
-  const claimed = await db.transcription.updateMany({
-    where: {
-      id: transcription.id,
-      OR: [{ translationStatus: null }, { translationStatus: "failed" }],
-    },
-    data: {
-      translationStatus: "pending",
-      translationProvider: provider.name,
-      translationModel: provider.model,
-    },
+  const claimed = await db.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<{ id: string }[]>`
+      SELECT "id" FROM "Message" WHERE "id" = ${opts.messageId}::uuid FOR UPDATE
+    `;
+    if (rows.length === 0) return 0;
+    const latest = await tx.transcription.findFirst({
+      where: { messageId: opts.messageId, status: "succeeded" },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!latest || latest.id !== transcription.id) return 0;
+    const result = await tx.transcription.updateMany({
+      where: {
+        id: transcription.id,
+        OR: [{ translationStatus: null }, { translationStatus: "failed" }],
+      },
+      data: {
+        translationStatus: "pending",
+        translationProvider: provider.name,
+        translationModel: provider.model,
+      },
+    });
+    return result.count;
   });
-  if (claimed.count === 0) {
+  if (claimed === 0) {
     // Someone else (worker or a concurrent in-process run) owns the row.
     return { outcome: "deferred", reason: "pending_push" };
   }
@@ -422,21 +502,55 @@ export const runTranslation = async (opts: RunTranslationOptions): Promise<Trans
     // Only write the result if we still own the row (status === pending and
     // provider === ours). A pull-worker /succeed posted in the meantime
     // would have flipped status to `succeeded`; we leave that result alone.
-    await db.transcription.updateMany({
-      where: {
-        id: transcription.id,
-        translationStatus: "pending",
-        translationProvider: provider.name,
-      },
-      data: {
-        translationStatus: "succeeded",
-        translatedText: result.text,
-        translatedLanguage: result.language,
-        translationLatencyMs: Date.now() - startedAt,
-        translationCompletedAt: new Date(),
-        translationError: null,
-      },
+    const finalized = await db.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "Message" WHERE "id" = ${opts.messageId}::uuid FOR UPDATE
+      `;
+      if (rows.length === 0) return 0;
+      const current = await tx.transcription.findUnique({ where: { id: transcription.id } });
+      const latest = await tx.transcription.findFirst({
+        where: { messageId: opts.messageId, status: "succeeded" },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!current || !latest || latest.id !== current.id) return 0;
+      const previousReviewText =
+        current.translationStatus === "succeeded" &&
+        typeof current.translatedText === "string" &&
+        current.translatedText.trim().length > 0
+          ? current.translatedText
+          : current.text;
+      const updated = await tx.transcription.updateMany({
+        where: {
+          id: current.id,
+          translationStatus: "pending",
+          translationProvider: provider.name,
+        },
+        data: {
+          translationStatus: "succeeded",
+          translatedText: result.text,
+          translatedLanguage: result.language,
+          translationLatencyMs: Date.now() - startedAt,
+          translationCompletedAt: new Date(),
+          translationError: null,
+        },
+      });
+      if (updated.count > 0 && previousReviewText?.trim() !== result.text.trim()) {
+        await tx.moderation.updateMany({
+          where: {
+            messageId: opts.messageId,
+            OR: [{ transcriptionId: current.id }, { transcriptionId: null }],
+            status: { in: ["pending", "succeeded"] },
+          },
+          data: {
+            status: "failed",
+            error: "superseded_by_translation",
+            completedAt: new Date(),
+          },
+        });
+      }
+      return updated.count;
     });
+    if (finalized === 0) return { outcome: "deferred", reason: "pending_push" };
     log("info", "ai.translation.completed", {
       messageId: opts.messageId,
       provider: provider.name,
@@ -503,6 +617,8 @@ export const runTranslationThenModeration = async (opts: {
 
 export interface RecordTranscriptionResultOptions {
   readonly messageId: string;
+  readonly transcriptionId?: string | null;
+  readonly expectedLatestTranscriptionId?: string | null;
   readonly text: string;
   readonly language?: string | null;
   readonly model?: string | null;
@@ -516,6 +632,7 @@ export interface RecordTranscriptionResultOptions {
 
 export type RecordTranscriptionResultOutcome =
   | { outcome: "not_found" }
+  | { outcome: "stale_transcription" }
   | { outcome: "unchanged"; transcriptionId: string }
   | { outcome: "recorded"; transcriptionId: string };
 
@@ -544,8 +661,21 @@ export const recordTranscriptionResult = async (
     });
     if (!message) return { outcome: "not_found" } as const;
 
+    if ("expectedLatestTranscriptionId" in opts) {
+      const latest = await tx.transcription.findFirst({
+        where: { messageId: opts.messageId },
+        orderBy: { createdAt: "desc" },
+      });
+      if ((latest?.id ?? null) !== (opts.expectedLatestTranscriptionId ?? null)) {
+        return { outcome: "stale_transcription" } as const;
+      }
+    }
     const pending = await tx.transcription.findFirst({
-      where: { messageId: opts.messageId, status: "pending" },
+      where: {
+        messageId: opts.messageId,
+        status: "pending",
+        ...(opts.transcriptionId ? { id: opts.transcriptionId } : {}),
+      },
       orderBy: { createdAt: "desc" },
     });
     const now = new Date();
@@ -567,6 +697,17 @@ export const recordTranscriptionResult = async (
       if (updated.count === 0) {
         return { outcome: "unchanged", transcriptionId: pending.id } as const;
       }
+      await tx.moderation.updateMany({
+        where: {
+          messageId: opts.messageId,
+          status: { in: ["pending", "succeeded"] },
+        },
+        data: {
+          status: "failed",
+          error: "superseded_by_transcription",
+          completedAt: now,
+        },
+      });
       return { outcome: "recorded", transcriptionId: pending.id } as const;
     }
 
@@ -596,6 +737,17 @@ export const recordTranscriptionResult = async (
         durationMs: message.audio?.durationMs ?? null,
         completedAt: now,
         requestedById: opts.requestedByUserId ?? null,
+      },
+    });
+    await tx.moderation.updateMany({
+      where: {
+        messageId: opts.messageId,
+        status: { in: ["pending", "succeeded"] },
+      },
+      data: {
+        status: "failed",
+        error: "superseded_by_transcription",
+        completedAt: now,
       },
     });
     return { outcome: "recorded", transcriptionId: created.id } as const;
@@ -634,6 +786,7 @@ export interface RecordModerationResultOptions {
   readonly categories?: Record<string, number> | null;
   readonly reasonSummary?: string | null;
   readonly model?: string | null;
+  readonly inputSha256?: string | null;
   // Provider label to stamp on the row. The worker callback leaves the
   // solicited row's own provider in place; the operator submit route records
   // "on_device" so the UI can tell a locally computed verdict from an
@@ -651,6 +804,8 @@ export interface RecordModerationResultOptions {
 export type RecordModerationResultOutcome =
   | { outcome: "not_found" }
   | { outcome: "transcription_not_found" }
+  | { outcome: "stale_transcription" }
+  | { outcome: "stale_input" }
   | { outcome: "unchanged"; moderationId: string | null }
   | { outcome: "recorded"; moderationId: string };
 
@@ -690,10 +845,26 @@ export const recordModerationResult = async (
     if (opts.transcriptionId) {
       const transcription = await tx.transcription.findUnique({
         where: { id: opts.transcriptionId },
-        select: { messageId: true },
       });
       if (!transcription || transcription.messageId !== opts.messageId) {
         return { outcome: "transcription_not_found" } as const;
+      }
+      const latest = await tx.transcription.findFirst({
+        where: { messageId: opts.messageId, status: "succeeded" },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!latest || latest.id !== opts.transcriptionId) {
+        return { outcome: "stale_transcription" } as const;
+      }
+      if (opts.inputSha256) {
+        const input =
+          transcription.translationStatus === "succeeded" &&
+          typeof transcription.translatedText === "string" &&
+          transcription.translatedText.trim().length > 0
+            ? transcription.translatedText
+            : (transcription.text ?? "");
+        const actualHash = createHash("sha256").update(input.trim(), "utf8").digest("hex");
+        if (actualHash !== opts.inputSha256) return { outcome: "stale_input" } as const;
       }
     }
 
@@ -905,7 +1076,7 @@ export const runModeration = async (opts: RunModerationOptions): Promise<string 
         requestedById: opts.requestedByUserId,
       },
     });
-    return { pending, text };
+    return { pending, text: text.trim() };
   });
   if (!prepared) return null;
   const { pending, text: moderationText } = prepared;
@@ -915,9 +1086,15 @@ export const runModeration = async (opts: RunModerationOptions): Promise<string 
   try {
     const result = await provider.moderate({ text: moderationText });
     const finalized = await db.$transaction(async (tx) => {
-      await tx.$queryRaw`
+      const rows = await tx.$queryRaw<{ id: string }[]>`
         SELECT "id" FROM "Message" WHERE "id" = ${opts.messageId}::uuid FOR UPDATE
       `;
+      if (rows.length === 0) return { count: 0 };
+      const latest = await tx.transcription.findFirst({
+        where: { messageId: opts.messageId, status: "succeeded" },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!latest || latest.id !== pending.transcriptionId) return { count: 0 };
       return tx.moderation.updateMany({
         where: { id: pending.id, status: "pending", provider: provider.name },
         data: {

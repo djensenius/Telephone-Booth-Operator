@@ -13,6 +13,7 @@
 // cannot create a newer row or downgrade a finalized one.
 
 import { zValidator } from "@hono/zod-validator";
+import { createHash } from "node:crypto";
 import { Hono } from "hono";
 import { z } from "zod";
 import { recordAudit } from "../lib/audit.js";
@@ -30,6 +31,8 @@ import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-toke
 const idParamSchema = z.object({ id: z.guid() });
 
 const transcriptionBody = z.object({
+  transcriptionId: z.string().min(1).nullable().optional(),
+  expectedLatestTranscriptionId: z.string().min(1).nullable(),
   text: z.string(),
   language: z.string().nullable().optional(),
   model: z.string().nullable().optional(),
@@ -44,7 +47,8 @@ const translationBody = z.object({
 });
 
 const moderationBody = z.object({
-  transcriptionId: z.string().min(1).nullable().optional(),
+  transcriptionId: z.string().min(1),
+  inputSha256: z.string().regex(/^[0-9a-f]{64}$/),
   flagged: z.boolean(),
   recommendation: z.enum(["approve", "review", "reject"]),
   maxScore: z.number().min(0).max(1),
@@ -107,12 +111,14 @@ workerRouter.get("/messages/:id/work", zValidator("param", idParamSchema), async
 
   // The text to moderate is the English translation when available, else the
   // original transcript. Mirrors the old pull-queue moderation payload.
-  const moderationText =
+  const moderationText = (
     transcription?.translationStatus === "succeeded" &&
     typeof transcription.translatedText === "string" &&
     transcription.translatedText.trim().length > 0
       ? transcription.translatedText
-      : (transcription?.text ?? "");
+      : (transcription?.text ?? "")
+  ).trim();
+  const moderationInputSha256 = createHash("sha256").update(moderationText, "utf8").digest("hex");
 
   return c.json({
     id: message.id,
@@ -127,6 +133,7 @@ workerRouter.get("/messages/:id/work", zValidator("param", idParamSchema), async
           translationStatus: transcription.translationStatus,
           translatedText: transcription.translatedText,
           moderationText,
+          moderationInputSha256,
         }
       : null,
   });
@@ -162,11 +169,16 @@ workerRouter.post(
     });
     const result = await recordTranscriptionResult({
       messageId: id,
+      transcriptionId: data.transcriptionId ?? null,
+      expectedLatestTranscriptionId: data.expectedLatestTranscriptionId,
       text: data.text,
       language: data.language ?? null,
       model: data.model ?? null,
     });
     if (result.outcome === "not_found") return c.json({ error: "not_found" }, 404);
+    if (result.outcome === "stale_transcription") {
+      return c.json({ error: "stale_transcription" }, 409);
+    }
     return c.json({ ok: true });
   },
 );
@@ -197,23 +209,53 @@ workerRouter.post(
     if (!existing || existing.messageId !== id) {
       return c.json({ error: "not_found" }, 404);
     }
-    const now = new Date();
-    const startedAt = existing.createdAt;
-    // Guard: only the pending push row can be finalized. Duplicate or stale
-    // callbacks for already-finalized / non-pending rows are idempotent no-ops.
-    const updated = await db.transcription.updateMany({
-      where: { id: existing.id, translationStatus: "pending" },
-      data: {
-        translationStatus: "succeeded",
-        translatedText: data.translatedText,
-        translatedLanguage: data.targetLanguage ?? "en",
-        translationModel: data.model ?? existing.translationModel,
-        translationLatencyMs: now.getTime() - startedAt.getTime(),
-        translationCompletedAt: now,
-        translationError: null,
-      },
+    const updated = await db.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "Message" WHERE "id" = ${id}::uuid FOR UPDATE
+      `;
+      if (rows.length === 0) return 0;
+      const current = await tx.transcription.findUnique({ where: { id: existing.id } });
+      const latest = await tx.transcription.findFirst({
+        where: { messageId: id, status: "succeeded" },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!current || !latest || latest.id !== current.id) return 0;
+      const previousReviewText =
+        current.translationStatus === "succeeded" &&
+        typeof current.translatedText === "string" &&
+        current.translatedText.trim().length > 0
+          ? current.translatedText
+          : current.text;
+      const now = new Date();
+      const result = await tx.transcription.updateMany({
+        where: { id: current.id, translationStatus: "pending" },
+        data: {
+          translationStatus: "succeeded",
+          translatedText: data.translatedText,
+          translatedLanguage: data.targetLanguage ?? "en",
+          translationModel: data.model ?? current.translationModel,
+          translationLatencyMs: now.getTime() - current.createdAt.getTime(),
+          translationCompletedAt: now,
+          translationError: null,
+        },
+      });
+      if (result.count > 0 && previousReviewText?.trim() !== data.translatedText.trim()) {
+        await tx.moderation.updateMany({
+          where: {
+            messageId: id,
+            OR: [{ transcriptionId: current.id }, { transcriptionId: null }],
+            status: { in: ["pending", "succeeded"] },
+          },
+          data: {
+            status: "failed",
+            error: "superseded_by_translation",
+            completedAt: new Date(),
+          },
+        });
+      }
+      return result.count;
     });
-    if (updated.count === 0) return c.json({ ok: true });
+    if (updated === 0) return c.json({ ok: true });
     await broadcastMessageById(id);
     // Translation done — provider-aware moderation can now run against English
     // text. Push mode emits work; in-process providers run immediately.
@@ -250,13 +292,14 @@ workerRouter.post(
     });
     const result = await recordModerationResult({
       messageId: id,
-      transcriptionId: data.transcriptionId ?? null,
+      transcriptionId: data.transcriptionId,
       flagged: data.flagged,
       recommendation: data.recommendation,
       maxScore: data.maxScore,
       categories: data.categories ?? null,
       reasonSummary: data.reasonSummary ?? null,
       model: data.model ?? null,
+      inputSha256: data.inputSha256,
       // Worker moderation is solicited: `runModeration` creates the pending
       // row before emitting the `work` event, so a callback with nothing
       // pending is stale and is dropped rather than resurrected.
@@ -264,6 +307,12 @@ workerRouter.post(
     });
     if (result.outcome === "not_found" || result.outcome === "transcription_not_found") {
       return c.json({ error: "not_found" }, 404);
+    }
+    if (result.outcome === "stale_transcription") {
+      return c.json({ error: "stale_transcription" }, 409);
+    }
+    if (result.outcome === "stale_input") {
+      return c.json({ error: "stale_moderation_input" }, 409);
     }
     return c.json({ ok: true });
   },

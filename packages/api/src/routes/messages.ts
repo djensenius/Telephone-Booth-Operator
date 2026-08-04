@@ -457,6 +457,9 @@ messagesRouter.post(
       requestedByUserId: user?.id ?? null,
     });
     if (result.outcome === "not_found") return c.json({ error: "not_found" }, 404);
+    if (result.outcome === "stale_transcription") {
+      return c.json({ error: "stale_transcription" }, 409);
+    }
     const row = await db.transcription.findUnique({ where: { id: result.transcriptionId } });
     if (!row) return c.json({ error: "not_found" }, 404);
     return c.json(serializeTranscription(row), 202);
@@ -510,7 +513,7 @@ messagesRouter.post(
           transcription.translatedText.trim().length > 0
             ? transcription.translatedText
             : (transcription.text ?? "");
-        const actualHash = createHash("sha256").update(input, "utf8").digest("hex");
+        const actualHash = createHash("sha256").update(input.trim(), "utf8").digest("hex");
         if (actualHash !== data.inputSha256) return { outcome: "stale_input" } as const;
 
         const now = new Date();
@@ -605,6 +608,12 @@ messagesRouter.post(
     if (result.outcome === "not_found") return c.json({ error: "not_found" }, 404);
     if (result.outcome === "transcription_not_found") {
       return c.json({ error: "transcription_not_found" }, 404);
+    }
+    if (result.outcome === "stale_transcription") {
+      return c.json({ error: "stale_transcription" }, 409);
+    }
+    if (result.outcome === "stale_input") {
+      return c.json({ error: "stale_moderation_input" }, 409);
     }
     if (result.moderationId === null) return c.json({ error: "not_found" }, 404);
     const row = await db.moderation.findUnique({ where: { id: result.moderationId } });
@@ -753,17 +762,26 @@ messagesRouter.post(
       if (transcriptionId && latest.id !== transcriptionId) {
         return { outcome: "stale_transcription" } as const;
       }
-      await tx.moderation.updateMany({
-        where: {
-          messageId: id,
-          status: { in: ["pending", "succeeded"] },
-        },
-        data: {
-          status: "failed",
-          error: "superseded_by_translation",
-          completedAt: new Date(),
-        },
-      });
+      const previousReviewText =
+        latest.translationStatus === "succeeded" &&
+        typeof latest.translatedText === "string" &&
+        latest.translatedText.trim().length > 0
+          ? latest.translatedText
+          : latest.text;
+      if (previousReviewText?.trim() !== translatedText.trim()) {
+        await tx.moderation.updateMany({
+          where: {
+            messageId: id,
+            OR: [{ transcriptionId: latest.id }, { transcriptionId: null }],
+            status: { in: ["pending", "succeeded"] },
+          },
+          data: {
+            status: "failed",
+            error: "superseded_by_translation",
+            completedAt: new Date(),
+          },
+        });
+      }
       const updated = await tx.transcription.update({
         where: { id: latest.id },
         data: {

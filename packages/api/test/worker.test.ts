@@ -54,12 +54,25 @@ const postJson = (
   path: string,
   body: unknown,
   headers = phoneHeaders,
-) =>
-  app.request(path, {
+) => {
+  let requestBody = body;
+  const match = path.match(/^\/v1\/worker\/messages\/([^/]+)\/transcription$/);
+  if (match && body && typeof body === "object" && !("expectedLatestTranscriptionId" in body)) {
+    const latest = [...store.transcriptions.values()]
+      .filter((row) => row.messageId === match[1])
+      .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0];
+    requestBody = {
+      ...body,
+      transcriptionId: latest?.status === "pending" ? latest.id : null,
+      expectedLatestTranscriptionId: latest?.id ?? null,
+    };
+  }
+  return app.request(path, {
     method: "POST",
     headers: { ...headers, "content-type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify(requestBody),
   });
+};
 
 const seedPendingTranscription = (messageId: string) =>
   fakeDb.transcription.create({
@@ -85,6 +98,29 @@ describe("worker push-back callbacks", () => {
       { authorization: "nope" },
     );
     expect(res.status).toBe(401);
+  });
+
+  it("rejects a transcription callback when a newer result already landed", async () => {
+    const app = createApp();
+    const message = seedMessage({ status: "received" });
+    await fakeDb.transcription.create({
+      data: {
+        messageId: message.id,
+        provider: "on_device",
+        status: "succeeded",
+        text: "newer result",
+        completedAt: new Date(),
+      },
+    });
+
+    const res = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      expectedLatestTranscriptionId: null,
+      text: "stale worker result",
+      language: "en",
+    });
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "stale_transcription" });
   });
 
   it("stores an English transcription and broadcasts moderation work", async () => {
@@ -340,9 +376,16 @@ describe("worker push-back callbacks", () => {
       language: "en",
     });
     const moderation = [...store.moderations.values()].find((m) => m.messageId === message.id);
+    const work = await app.request(`/v1/worker/messages/${message.id}/work`, {
+      headers: phoneHeaders,
+    });
+    const workBody = (await work.json()) as {
+      transcription: { moderationInputSha256: string } | null;
+    };
 
     const res = await postJson(app, `/v1/worker/messages/${message.id}/moderation`, {
       transcriptionId: moderation?.transcriptionId,
+      inputSha256: workBody.transcription?.moderationInputSha256,
       flagged: true,
       recommendation: "reject",
       maxScore: 0.92,
@@ -360,16 +403,18 @@ describe("worker push-back callbacks", () => {
     expect(finalMessage?.decidedAt ?? null).toBeNull();
   });
 
-  it("does not create stale moderation rows for duplicate callbacks", async () => {
+  it("does not create moderation rows for an unknown transcription", async () => {
     const app = createApp();
     const message = seedMessage({ status: "received" });
     const res = await postJson(app, `/v1/worker/messages/${message.id}/moderation`, {
+      transcriptionId: "00000000-0000-4000-8000-000000000099",
+      inputSha256: "0".repeat(64),
       flagged: false,
       recommendation: "approve",
       maxScore: 0.01,
     });
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(404);
     expect([...store.moderations.values()].filter((m) => m.messageId === message.id)).toHaveLength(
       0,
     );
@@ -413,10 +458,56 @@ describe("worker push-back callbacks", () => {
       headers: phoneHeaders,
     });
     const secondBody = (await second.json()) as {
-      transcription: { text: string; moderationText: string } | null;
+      transcription: {
+        text: string;
+        moderationText: string;
+        moderationInputSha256: string;
+      } | null;
     };
     expect(secondBody.transcription?.text).toBe("bonjour");
     expect(secondBody.transcription?.moderationText).toBe("hello");
+    expect(secondBody.transcription?.moderationInputSha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("rejects a moderation callback for superseded review text", async () => {
+    process.env.TRANSLATION_PROVIDER = "push";
+    process.env.MODERATION_PROVIDER = "push";
+    const app = createApp();
+    const message = seedMessage({ status: "received" });
+    await seedPendingTranscription(message.id);
+    await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      text: "bonjour",
+      language: "fr",
+    });
+    const transcription = [...store.transcriptions.values()].find(
+      (row) => row.messageId === message.id,
+    );
+    const firstWork = await app.request(`/v1/worker/messages/${message.id}/work`, {
+      headers: phoneHeaders,
+    });
+    const firstBody = (await firstWork.json()) as {
+      transcription: { moderationInputSha256: string } | null;
+    };
+
+    await postJson(app, `/v1/worker/messages/${message.id}/translation`, {
+      transcriptionId: transcription?.id,
+      translatedText: "hello",
+      targetLanguage: "en",
+    });
+    const stale = await postJson(app, `/v1/worker/messages/${message.id}/moderation`, {
+      transcriptionId: transcription?.id,
+      inputSha256: firstBody.transcription?.moderationInputSha256,
+      flagged: false,
+      recommendation: "approve",
+      maxScore: 0.01,
+    });
+
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toEqual({ error: "stale_moderation_input" });
+    const pending = [...store.moderations.values()].filter(
+      (row) => row.messageId === message.id && row.status === "pending",
+    );
+    expect(pending).toHaveLength(1);
   });
 
   it("rejects work-input fetches without a valid API token", async () => {

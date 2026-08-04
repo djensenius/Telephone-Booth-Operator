@@ -1381,6 +1381,7 @@ paths:
       responses:
         "200": { description: Result accepted. }
         "404": { description: Message not found. }
+        "409": { description: A newer transcription was recorded while the worker was processing. }
 
   /v1/worker/messages/{id}/translation:
     parameters:
@@ -1425,6 +1426,7 @@ paths:
       responses:
         "200": { description: Suggestion accepted. }
         "404": { description: Message not found. }
+        "409": { description: The moderated text was superseded before the callback arrived. }
 
   /v1/ws/status:
     get:
@@ -1838,7 +1840,7 @@ components:
           oneOf:
             - type: "null"
             - type: object
-              required: [id, text, moderationText]
+              required: [id, text, moderationText, moderationInputSha256]
               properties:
                 id: { type: string, format: uuid }
                 text: { type: string }
@@ -1849,10 +1851,16 @@ components:
                 moderationText:
                   type: string
                   description: "Text the moderation step should score (English translation when available, else the transcript)."
+                moderationInputSha256:
+                  type: string
+                  pattern: "^[0-9a-f]{64}$"
+                  description: "SHA-256 of moderationText; the worker must return it with the verdict."
     WorkerTranscriptionBody:
       type: object
-      required: [text]
+      required: [expectedLatestTranscriptionId, text]
       properties:
+        transcriptionId: { type: [string, "null"], format: uuid }
+        expectedLatestTranscriptionId: { type: [string, "null"], format: uuid }
         text: { type: string }
         language: { type: [string, "null"] }
         model: { type: [string, "null"] }
@@ -1867,9 +1875,10 @@ components:
         model: { type: [string, "null"] }
     WorkerModerationBody:
       type: object
-      required: [flagged, recommendation, maxScore]
+      required: [transcriptionId, inputSha256, flagged, recommendation, maxScore]
       properties:
-        transcriptionId: { type: [string, "null"], format: uuid }
+        transcriptionId: { type: string, format: uuid }
+        inputSha256: { type: string, pattern: "^[0-9a-f]{64}$" }
         flagged: { type: boolean }
         recommendation: { type: string, enum: [approve, review, reject] }
         maxScore: { type: number, minimum: 0, maximum: 1 }

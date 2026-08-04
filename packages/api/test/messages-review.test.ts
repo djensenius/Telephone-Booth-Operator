@@ -252,6 +252,96 @@ describe("message review actions", () => {
       });
     });
 
+    it("keeps moderation when an identical translation is retried", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const transcription = await fakeDb.transcription.create({
+        data: {
+          messageId: id,
+          provider: "on_device",
+          status: "succeeded",
+          text: "hola mundo",
+          translatedText: "hello world",
+          translatedLanguage: "en",
+          translationStatus: "succeeded",
+          completedAt: new Date(),
+        },
+      });
+      const moderation = await fakeDb.moderation.create({
+        data: {
+          messageId: id,
+          transcriptionId: transcription.id,
+          provider: "on_device",
+          status: "succeeded",
+          recommendation: "approve",
+          completedAt: new Date(),
+        },
+      });
+
+      const res = await app.request(`/v1/messages/${id}/translation`, {
+        method: "POST",
+        headers: { cookie: operatorCookie(), "content-type": "application/json" },
+        body: JSON.stringify({
+          transcriptionId: transcription.id,
+          translatedText: "hello world",
+          translatedLanguage: "en",
+          model: "apple-foundation-models",
+        }),
+      });
+
+      expect(res.status, await res.clone().text()).toBe(200);
+      expect(store.moderations.get(moderation.id)).toMatchObject({
+        status: "succeeded",
+        error: null,
+      });
+    });
+
+    it("does not invalidate moderation for older transcription history", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const older = await fakeDb.transcription.create({
+        data: {
+          messageId: id,
+          provider: "push",
+          status: "succeeded",
+          text: "bonjour",
+          createdAt: new Date(1),
+        },
+      });
+      const latest = await fakeDb.transcription.create({
+        data: {
+          messageId: id,
+          provider: "on_device",
+          status: "succeeded",
+          text: "hola",
+          createdAt: new Date(2),
+        },
+      });
+      const olderModeration = await fakeDb.moderation.create({
+        data: {
+          messageId: id,
+          transcriptionId: older.id,
+          provider: "push",
+          status: "succeeded",
+          recommendation: "review",
+          completedAt: new Date(),
+        },
+      });
+
+      const res = await app.request(`/v1/messages/${id}/translation`, {
+        method: "POST",
+        headers: { cookie: operatorCookie(), "content-type": "application/json" },
+        body: JSON.stringify({
+          transcriptionId: latest.id,
+          translatedText: "hello",
+          translatedLanguage: "en",
+        }),
+      });
+
+      expect(res.status, await res.clone().text()).toBe(200);
+      expect(store.moderations.get(olderModeration.id)?.status).toBe("succeeded");
+    });
+
     it("rejects a superseded targeted translation", async () => {
       const app = createApp();
       const id = await seedReceivedMessage(app);

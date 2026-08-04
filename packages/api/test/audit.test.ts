@@ -482,7 +482,11 @@ describe("audit log middleware", () => {
     const pushed = await app.request(`/v1/worker/messages/${slot.id}/transcription`, {
       method: "POST",
       headers: { "content-type": "application/json", ...phoneHeaders },
-      body: JSON.stringify({ text: "hello booth", language: "en" }),
+      body: JSON.stringify({
+        expectedLatestTranscriptionId: null,
+        text: "hello booth",
+        language: "en",
+      }),
     });
     expect(pushed.status, await pushed.clone().text()).toBe(200);
 
