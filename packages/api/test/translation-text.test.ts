@@ -14,10 +14,14 @@ describe("normalizeTranslationText", () => {
     expect(normalizeTranslationText('```json\n{"translated_text":"Hello"}\n```')).toBe("Hello");
     expect(normalizeTranslationText('{"translatedText":"Hello"}')).toBe("Hello");
     expect(normalizeTranslationText('{"text":"Hello"}')).toBe("Hello");
+    expect(normalizeTranslationText("```\nHello\n```")).toBe("Hello");
   });
 
   it("preserves plain text and unrecognized JSON", () => {
     expect(normalizeTranslationText("  Hello there.  ")).toBe("Hello there.");
     expect(normalizeTranslationText('{"answer":"Hello"}')).toBe('{"answer":"Hello"}');
+    expect(normalizeTranslationText('{"message":"Hello","speaker":"Alice"}')).toBe(
+      '{"message":"Hello","speaker":"Alice"}',
+    );
   });
 });

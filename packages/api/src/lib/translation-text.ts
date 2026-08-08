@@ -13,13 +13,14 @@ export const normalizeTranslationText = (value: string): string => {
     const parsed: unknown = JSON.parse(candidate);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return trimmed;
     const record = parsed as Record<string, unknown>;
+    if (Object.keys(record).length !== 1) return candidate;
     for (const key of translationKeys) {
       const text = record[key];
       if (typeof text === "string" && text.trim().length > 0) return text.trim();
     }
   } catch {
-    return trimmed;
+    return candidate;
   }
 
-  return trimmed;
+  return candidate;
 };
