@@ -24,6 +24,7 @@ import type {
 } from "@telephone-booth-operator/shared";
 import type { BoothStatusEvent } from "./broadcaster.js";
 import { generateSasUrl } from "./azure-blob.js";
+import { normalizeTranslationText } from "./translation-text.js";
 
 export type WithAudio<T> = T & { audio: File };
 
@@ -66,7 +67,8 @@ export const serializeTranscription = (row: PrismaTranscription): TranscriptionP
   createdAt: iso(row.createdAt),
   completedAt: row.completedAt ? iso(row.completedAt) : null,
   translationStatus: row.translationStatus,
-  translatedText: row.translatedText,
+  translatedText:
+    row.translatedText === null ? null : normalizeTranslationText(row.translatedText),
   translatedLanguage: row.translatedLanguage,
   translationProvider: row.translationProvider ? (row.translationProvider as AiProvider) : null,
   translationModel: row.translationModel,

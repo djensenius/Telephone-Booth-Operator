@@ -18,6 +18,7 @@ import { generateSasUrl } from "../azure-blob.js";
 import { broadcastWork, wsBroadcaster } from "../broadcaster.js";
 import { db } from "../db.js";
 import { serializeMessage } from "../serializers.js";
+import { normalizeTranslationText } from "../translation-text.js";
 import { isEnglishLanguage, resolveAiConfig, type AiConfig } from "./config.js";
 import {
   buildModerationProvider,
@@ -407,6 +408,7 @@ export const runTranslation = async (opts: RunTranslationOptions): Promise<Trans
       text,
       sourceLanguage: transcription.language,
     });
+    const translatedText = normalizeTranslationText(result.text);
     // Only write the result if we still own the row (status === pending and
     // provider === ours). A pull-worker /succeed posted in the meantime
     // would have flipped status to `succeeded`; we leave that result alone.
@@ -418,7 +420,7 @@ export const runTranslation = async (opts: RunTranslationOptions): Promise<Trans
       },
       data: {
         translationStatus: "succeeded",
-        translatedText: result.text,
+        translatedText,
         translatedLanguage: result.language,
         translationLatencyMs: Date.now() - startedAt,
         translationCompletedAt: new Date(),
@@ -870,7 +872,7 @@ export const runModeration = async (opts: RunModerationOptions): Promise<string 
     transcription.translationStatus === "succeeded" &&
     typeof transcription.translatedText === "string" &&
     transcription.translatedText.trim().length > 0
-      ? transcription.translatedText
+      ? normalizeTranslationText(transcription.translatedText)
       : transcription.text;
   try {
     const result = await provider.moderate({ text: moderationText });

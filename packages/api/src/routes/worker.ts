@@ -25,6 +25,7 @@ import {
 import { generateSasUrl } from "../lib/azure-blob.js";
 import { wsBroadcaster } from "../lib/broadcaster.js";
 import { serializeMessage } from "../lib/serializers.js";
+import { normalizeTranslationText } from "../lib/translation-text.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 
 const idParamSchema = z.object({ id: z.guid() });
@@ -107,11 +108,15 @@ workerRouter.get("/messages/:id/work", zValidator("param", idParamSchema), async
 
   // The text to moderate is the English translation when available, else the
   // original transcript. Mirrors the old pull-queue moderation payload.
+  const translatedText =
+    transcription?.translatedText === null || transcription?.translatedText === undefined
+      ? null
+      : normalizeTranslationText(transcription.translatedText);
   const moderationText =
     transcription?.translationStatus === "succeeded" &&
-    typeof transcription.translatedText === "string" &&
-    transcription.translatedText.trim().length > 0
-      ? transcription.translatedText
+    translatedText !== null &&
+    translatedText.length > 0
+      ? translatedText
       : (transcription?.text ?? "");
 
   return c.json({
@@ -125,7 +130,7 @@ workerRouter.get("/messages/:id/work", zValidator("param", idParamSchema), async
           language: transcription.language,
           model: transcription.model,
           translationStatus: transcription.translationStatus,
-          translatedText: transcription.translatedText,
+          translatedText,
           moderationText,
         }
       : null,
@@ -180,6 +185,10 @@ workerRouter.post(
   async (c) => {
     const { id } = c.req.valid("param");
     const data = c.req.valid("json");
+    const translatedText = normalizeTranslationText(data.translatedText);
+    if (translatedText.length === 0) {
+      return c.json({ error: "translation_empty" }, 400);
+    }
     recordAudit(c, {
       action: "message.translation.push",
       targetType: "message",
@@ -188,7 +197,7 @@ workerRouter.post(
         transcriptionId: data.transcriptionId,
         model: data.model ?? null,
         targetLanguage: data.targetLanguage ?? "en",
-        translatedTextLength: data.translatedText.length,
+        translatedTextLength: translatedText.length,
       },
     });
     const existing = await db.transcription.findUnique({
@@ -205,7 +214,7 @@ workerRouter.post(
       where: { id: existing.id, translationStatus: "pending" },
       data: {
         translationStatus: "succeeded",
-        translatedText: data.translatedText,
+        translatedText,
         translatedLanguage: data.targetLanguage ?? "en",
         translationModel: data.model ?? existing.translationModel,
         translationLatencyMs: now.getTime() - startedAt.getTime(),

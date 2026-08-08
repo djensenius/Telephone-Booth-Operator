@@ -282,7 +282,7 @@ describe("worker push-back callbacks", () => {
 
     const res = await postJson(app, `/v1/worker/messages/${message.id}/translation`, {
       transcriptionId: transcription?.id,
-      translatedText: "hello",
+      translatedText: '```json\n{"message":"hello"}\n```',
       sourceLanguage: "fr",
       targetLanguage: "en",
     });

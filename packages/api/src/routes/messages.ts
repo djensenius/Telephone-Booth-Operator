@@ -39,6 +39,7 @@ import {
   serializeTranscription,
 } from "../lib/serializers.js";
 import type { AuthVariables } from "../lib/session.js";
+import { normalizeTranslationText } from "../lib/translation-text.js";
 
 const listQuerySchema = z.object({
   status: MessageStatusSchema.optional(),
@@ -609,13 +610,14 @@ messagesRouter.post(
   async (c) => {
     const { id } = c.req.valid("param");
     const { translatedText, translatedLanguage } = c.req.valid("json");
+    const normalizedTranslation = normalizeTranslationText(translatedText);
     recordAudit(c, {
       action: "message.translation.submit",
       targetType: "message",
       targetId: id,
       metadata: {
         translatedLanguage: translatedLanguage ?? null,
-        translatedTextLength: translatedText.length,
+        translatedTextLength: normalizedTranslation.length,
       },
     });
     const message = await db.message.findUnique({ where: { id }, select: { id: true } });
@@ -630,7 +632,7 @@ messagesRouter.post(
       where: { id: latest.id },
       data: {
         translationStatus: "succeeded",
-        translatedText,
+        translatedText: normalizedTranslation,
         translatedLanguage: translatedLanguage ?? null,
         // Human-supplied translation: no AI provider/model. Consumers infer a
         // manual translation from a succeeded translation with a null provider.
