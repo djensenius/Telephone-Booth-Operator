@@ -58,8 +58,9 @@ check: fmt lint typecheck test
 
 # Regenerate the typed API client from packages/api/openapi.yaml.
 openapi-gen:
-    pnpm --filter @telephone-booth-operator/web exec openapi-typescript \
-        ../api/openapi.yaml -o src/api/schema.gen.ts
+    pnpm --package=typescript@5.9.3 --package=openapi-typescript@7.13.0 dlx \
+        openapi-typescript packages/api/openapi.yaml \
+        -o packages/web/src/api/schema.gen.ts
 
 # Run end-to-end Playwright tests against a running stack.
 e2e:

@@ -19,6 +19,7 @@ import { generateSasUrl } from "../azure-blob.js";
 import { broadcastWork, wsBroadcaster } from "../broadcaster.js";
 import { db } from "../db.js";
 import { serializeMessage } from "../serializers.js";
+import { normalizeTranslationText } from "../translation-text.js";
 import { isEnglishLanguage, resolveAiConfig, type AiConfig } from "./config.js";
 import {
   buildModerationProvider,
@@ -531,6 +532,7 @@ export const runTranslation = async (opts: RunTranslationOptions): Promise<Trans
       text,
       sourceLanguage: transcription.language,
     });
+    const translatedText = normalizeTranslationText(result.text);
     // Only write the result if we still own the row (status === pending and
     // provider === ours). A pull-worker /succeed posted in the meantime
     // would have flipped status to `succeeded`; we leave that result alone.
@@ -549,8 +551,8 @@ export const runTranslation = async (opts: RunTranslationOptions): Promise<Trans
         current.translationStatus === "succeeded" &&
         typeof current.translatedText === "string" &&
         current.translatedText.trim().length > 0
-          ? current.translatedText
-          : current.text;
+          ? normalizeTranslationText(current.translatedText)
+          : current.text?.trim();
       const updated = await tx.transcription.updateMany({
         where: {
           id: current.id,
@@ -559,14 +561,14 @@ export const runTranslation = async (opts: RunTranslationOptions): Promise<Trans
         },
         data: {
           translationStatus: "succeeded",
-          translatedText: result.text,
+          translatedText,
           translatedLanguage: result.language,
           translationLatencyMs: Date.now() - startedAt,
           translationCompletedAt: new Date(),
           translationError: null,
         },
       });
-      if (updated.count > 0 && previousReviewText?.trim() !== result.text.trim()) {
+      if (updated.count > 0 && previousReviewText !== translatedText) {
         await tx.moderation.updateMany({
           where: {
             messageId: opts.messageId,
@@ -694,10 +696,7 @@ export const recordTranscriptionResult = async (
     });
     if (!message) return { outcome: "not_found" } as const;
 
-    if (
-      "expectedLatestTranscriptionId" in opts ||
-      "expectedLatestTranscriptionSha256" in opts
-    ) {
+    if ("expectedLatestTranscriptionId" in opts || "expectedLatestTranscriptionSha256" in opts) {
       const latest = await tx.transcription.findFirst({
         where: { messageId: opts.messageId },
         orderBy: { createdAt: "desc" },
@@ -921,8 +920,8 @@ export const recordModerationResult = async (
           transcription.translationStatus === "succeeded" &&
           typeof transcription.translatedText === "string" &&
           transcription.translatedText.trim().length > 0
-            ? transcription.translatedText
-            : (transcription.text ?? "");
+            ? normalizeTranslationText(transcription.translatedText)
+            : (transcription.text ?? "").trim();
         const actualHash = createHash("sha256").update(input.trim(), "utf8").digest("hex");
         if (actualHash !== opts.inputSha256) return { outcome: "stale_input" } as const;
       }
@@ -1128,13 +1127,17 @@ export const runModeration = async (opts: RunModerationOptions): Promise<string 
       orderBy: { createdAt: "desc" },
     });
     if (!current || current.id !== transcription.id) return null;
-    const text =
+    const translatedText =
       current.translationStatus === "succeeded" &&
       typeof current.translatedText === "string" &&
       current.translatedText.trim().length > 0
-        ? current.translatedText
-        : current.text;
-    if (!text || text.trim().length === 0) return null;
+        ? normalizeTranslationText(current.translatedText)
+        : null;
+    const text =
+      translatedText !== null && translatedText.length > 0
+        ? translatedText
+        : (current.text ?? "").trim();
+    if (text.length === 0) return null;
     const pending = await tx.moderation.create({
       data: {
         messageId: opts.messageId,
@@ -1145,7 +1148,7 @@ export const runModeration = async (opts: RunModerationOptions): Promise<string 
         requestedById: opts.requestedByUserId,
       },
     });
-    return { pending, text: text.trim() };
+    return { pending, text };
   });
   if (!prepared) return null;
   const { pending, text: moderationText } = prepared;

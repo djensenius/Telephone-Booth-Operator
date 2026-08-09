@@ -41,6 +41,7 @@ import {
   serializeTranscription,
 } from "../lib/serializers.js";
 import type { AuthVariables } from "../lib/session.js";
+import { normalizeTranslationText } from "../lib/translation-text.js";
 
 const listQuerySchema = z.object({
   status: MessageStatusSchema.optional(),
@@ -772,13 +773,14 @@ messagesRouter.post(
       translatedLanguage,
       model,
     } = data;
+    const normalizedTranslation = normalizeTranslationText(translatedText);
     recordAudit(c, {
       action: "message.translation.submit",
       targetType: "message",
       targetId: id,
       metadata: {
         translatedLanguage: translatedLanguage ?? null,
-        translatedTextLength: translatedText.length,
+        translatedTextLength: normalizedTranslation.length,
         transcriptionId: transcriptionId ?? null,
         expectedTranscriptionId: expectedTranscriptionId ?? null,
         expectedTranslationSha256: expectedTranslationSha256 ?? null,
@@ -801,7 +803,7 @@ messagesRouter.post(
           latest.translationStatus === "succeeded" &&
           typeof latest.translatedText === "string" &&
           latest.translatedText.trim().length > 0
-            ? latest.translatedText.trim()
+            ? normalizeTranslationText(latest.translatedText)
             : null;
         const currentTranslationSha256 =
           currentTranslation === null
@@ -815,9 +817,9 @@ messagesRouter.post(
         latest.translationStatus === "succeeded" &&
         typeof latest.translatedText === "string" &&
         latest.translatedText.trim().length > 0
-          ? latest.translatedText
-          : latest.text;
-      if (previousReviewText?.trim() !== translatedText.trim()) {
+          ? normalizeTranslationText(latest.translatedText)
+          : latest.text?.trim();
+      if (previousReviewText !== normalizedTranslation) {
         await tx.moderation.updateMany({
           where: {
             messageId: id,
@@ -835,7 +837,7 @@ messagesRouter.post(
         where: { id: latest.id },
         data: {
           translationStatus: "succeeded",
-          translatedText,
+          translatedText: normalizedTranslation,
           translatedLanguage: translatedLanguage ?? null,
           // A targeted submission comes from the operator's on-device pipeline.
           // Untargeted submissions remain human corrections.

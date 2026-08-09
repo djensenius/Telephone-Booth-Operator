@@ -26,6 +26,7 @@ import {
 import { generateSasUrl } from "../lib/azure-blob.js";
 import { wsBroadcaster } from "../lib/broadcaster.js";
 import { serializeMessage } from "../lib/serializers.js";
+import { normalizeTranslationText } from "../lib/translation-text.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 
 const idParamSchema = z.object({ id: z.guid() });
@@ -50,7 +51,10 @@ const translationBody = z.object({
 const moderationBody = z
   .object({
     transcriptionId: z.guid().nullable().optional(),
-    inputSha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+    inputSha256: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
     flagged: z.boolean(),
     recommendation: z.enum(["approve", "review", "reject"]),
     maxScore: z.number().min(0).max(1),
@@ -117,11 +121,15 @@ workerRouter.get("/messages/:id/work", zValidator("param", idParamSchema), async
 
   // The text to moderate is the English translation when available, else the
   // original transcript. Mirrors the old pull-queue moderation payload.
+  const translatedText =
+    transcription?.translatedText === null || transcription?.translatedText === undefined
+      ? null
+      : normalizeTranslationText(transcription.translatedText);
   const moderationText = (
     transcription?.translationStatus === "succeeded" &&
-    typeof transcription.translatedText === "string" &&
-    transcription.translatedText.trim().length > 0
-      ? transcription.translatedText
+    translatedText !== null &&
+    translatedText.length > 0
+      ? translatedText
       : (transcription?.text ?? "")
   ).trim();
   const moderationInputSha256 = createHash("sha256").update(moderationText, "utf8").digest("hex");
@@ -140,7 +148,7 @@ workerRouter.get("/messages/:id/work", zValidator("param", idParamSchema), async
           language: transcription.language,
           model: transcription.model,
           translationStatus: transcription.translationStatus,
-          translatedText: transcription.translatedText,
+          translatedText,
           translationInputSha256,
           moderationText,
           moderationInputSha256,
@@ -204,6 +212,10 @@ workerRouter.post(
   async (c) => {
     const { id } = c.req.valid("param");
     const data = c.req.valid("json");
+    const translatedText = normalizeTranslationText(data.translatedText);
+    if (translatedText.length === 0) {
+      return c.json({ error: "translation_empty" }, 400);
+    }
     recordAudit(c, {
       action: "message.translation.push",
       targetType: "message",
@@ -212,7 +224,7 @@ workerRouter.post(
         transcriptionId: data.transcriptionId,
         model: data.model ?? null,
         targetLanguage: data.targetLanguage ?? "en",
-        translatedTextLength: data.translatedText.length,
+        translatedTextLength: translatedText.length,
       },
     });
     const existing = await db.transcription.findUnique({
@@ -244,14 +256,14 @@ workerRouter.post(
         current.translationStatus === "succeeded" &&
         typeof current.translatedText === "string" &&
         current.translatedText.trim().length > 0
-          ? current.translatedText
-          : current.text;
+          ? normalizeTranslationText(current.translatedText)
+          : current.text?.trim();
       const now = new Date();
       const result = await tx.transcription.updateMany({
         where: { id: current.id, translationStatus: "pending" },
         data: {
           translationStatus: "succeeded",
-          translatedText: data.translatedText,
+          translatedText,
           translatedLanguage: data.targetLanguage ?? "en",
           translationModel: data.model ?? current.translationModel,
           translationLatencyMs: now.getTime() - current.createdAt.getTime(),
@@ -259,7 +271,7 @@ workerRouter.post(
           translationError: null,
         },
       });
-      if (result.count > 0 && previousReviewText?.trim() !== data.translatedText.trim()) {
+      if (result.count > 0 && previousReviewText !== translatedText) {
         await tx.moderation.updateMany({
           where: {
             messageId: id,

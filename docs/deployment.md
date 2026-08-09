@@ -165,11 +165,6 @@ needed. See [`installations.md`](installations.md).
   [`azure-storage.md`](azure-storage.md).
 - Phone-client API tokens: rotated via the operator UI; old ones can be
   revoked instantly.
-- `BUSY_BAR_CLOUD_TOKEN`: required only when the optional dedicated BUSY Bar
-  monitor is enabled. Store and rotate it like any other external-service
-  bearer token; see [`busy-bar-monitor.md`](busy-bar-monitor.md).
-- `BUSY_BAR_OPERATOR_TOKEN`: monitor-scoped static API token used by the
-  singleton monitor worker to consume status/system data.
 
 Use whichever secrets store your platform offers (Vault, 1Password, Doppler,
 AKV, …). Plain `.env` files are fine for solo / home deployments.
@@ -180,7 +175,8 @@ The API ships structured pino logs to stdout (`LOG_LEVEL=info`); pipe
 them into whatever log shipper you use. There's no built-in tracing
 exporter yet — that's tracked in `docs/adr/` for a future ADR.
 
-The BUSY Bar integration runs as a separate singleton worker (`minReplicas=1`,
-`maxReplicas=1`), never inside the horizontally scaled API service. A cloud,
-device, or worker outage is logged but does not make `/healthz` fail or prevent
-booth/operator traffic.
+The BUSY Bar integration is deployed from the separate
+[Telephone-Booth-Busy-Bar](https://github.com/djensenius/Telephone-Booth-Busy-Bar)
+repository, never inside the horizontally scaled API service. Its cloud token
+and monitor-scoped Operator token belong in that companion's secret store, not
+the Operator API environment.

@@ -172,8 +172,9 @@ describe("worker push-back callbacks", () => {
 
     expect(second.status).toBe(409);
     expect(await second.json()).toEqual({ error: "stale_transcription" });
-    expect([...store.transcriptions.values()].filter((row) => row.messageId === message.id))
-      .toHaveLength(1);
+    expect(
+      [...store.transcriptions.values()].filter((row) => row.messageId === message.id),
+    ).toHaveLength(1);
   });
 
   it("stores an English transcription and broadcasts moderation work", async () => {
@@ -317,8 +318,9 @@ describe("worker push-back callbacks", () => {
     expect(
       [...store.transcriptions.values()].filter((row) => row.messageId === message.id),
     ).toHaveLength(1);
-    expect([...store.moderations.values()].filter((row) => row.messageId === message.id))
-      .toHaveLength(0);
+    expect(
+      [...store.moderations.values()].filter((row) => row.messageId === message.id),
+    ).toHaveLength(0);
   });
 
   it("is idempotent when an unsolicited transcription is redelivered", async () => {
@@ -417,7 +419,7 @@ describe("worker push-back callbacks", () => {
     const res = await postJson(app, `/v1/worker/messages/${message.id}/translation`, {
       transcriptionId: transcription?.id,
       inputSha256: sha256("bonjour"),
-      translatedText: "hello",
+      translatedText: '```json\n{"message":"hello"}\n```',
       sourceLanguage: "fr",
       targetLanguage: "en",
     });

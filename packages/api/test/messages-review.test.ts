@@ -357,7 +357,9 @@ describe("message review actions", () => {
         headers: { cookie: operatorCookie(), "content-type": "application/json" },
         body: JSON.stringify({
           transcriptionId: transcription.id,
-          expectedTranslationSha256: createHash("sha256").update("hello world", "utf8").digest("hex"),
+          expectedTranslationSha256: createHash("sha256")
+            .update("hello world", "utf8")
+            .digest("hex"),
           translatedText: "hello world",
           translatedLanguage: "en",
           model: "apple-foundation-models",
