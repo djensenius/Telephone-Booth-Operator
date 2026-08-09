@@ -28,10 +28,10 @@ importers:
         version: 12.33.0
       '@hono/node-server':
         specifier: ^2.0.12
-        version: 2.0.12(hono@4.12.32)
+        version: 2.0.12(hono@4.12.34)
       '@hono/zod-validator':
         specifier: ^0.9.0
-        version: 0.9.0(hono@4.12.32)(zod@4.4.3)
+        version: 0.9.0(hono@4.12.34)(zod@4.4.3)
       '@prisma/adapter-pg':
         specifier: ^7.9.1
         version: 7.9.1
@@ -45,8 +45,8 @@ importers:
         specifier: ^0.45.1
         version: 0.45.1
       hono:
-        specifier: ^4.12.32
-        version: 4.12.32
+        specifier: ^4.12.34
+        version: 4.12.34
       jose:
         specifier: ^6.2.4
         version: 6.2.4
@@ -2025,8 +2025,8 @@ packages:
   help-me@5.0.0:
     resolution: {integrity: sha512-7xgomUX6ADmcYzFik0HzAxh/73YlKR9bmFzf51CZwR+b6YtzU2m0u49hQCqV6SvlqIqsaxovfwdvbnsw3b/zpg==}
 
-  hono@4.12.32:
-    resolution: {integrity: sha512-XcuyW9qE2kJn07PkecMOBd5Vq/hMy7mmGw+idz1yblbg9N17ijJODrvPkn7/dwL3Kulj8LcRJ69DLOWf91dRUg==}
+  hono@4.12.34:
+    resolution: {integrity: sha512-GqXJqY/xJkJmuloTrnV1ZEXG3fqte+VjkUqoRNZXcrUidiUOP4fMSIHHY4tsqZBK++kVyWmt/AAfSUuy57/eSA==}
     engines: {node: '>=16.9.0'}
 
   html-encoding-sniffer@6.0.0:
@@ -3174,13 +3174,13 @@ snapshots:
 
   '@fontsource/inter@5.3.0': {}
 
-  '@hono/node-server@2.0.12(hono@4.12.32)':
+  '@hono/node-server@2.0.12(hono@4.12.34)':
     dependencies:
-      hono: 4.12.32
+      hono: 4.12.34
 
-  '@hono/zod-validator@0.9.0(hono@4.12.32)(zod@4.4.3)':
+  '@hono/zod-validator@0.9.0(hono@4.12.34)(zod@4.4.3)':
     dependencies:
-      hono: 4.12.32
+      hono: 4.12.34
       zod: 4.4.3
 
   '@inquirer/ansi@2.0.7': {}
@@ -4497,7 +4497,7 @@ snapshots:
 
   help-me@5.0.0: {}
 
-  hono@4.12.32: {}
+  hono@4.12.34: {}
 
   html-encoding-sniffer@6.0.0:
     dependencies:
