@@ -29,6 +29,7 @@ tags:
   - name: transcriptions
   - name: moderations
   - name: stats
+  - name: monitor
   - name: installations
   - name: worker
   - name: audit
@@ -743,6 +744,34 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/StatsSummary" }
         "401": { description: missing or invalid credentials }
+
+  /v1/monitor/summary:
+    get:
+      summary: Least-privilege daily counters for the physical booth monitor.
+      description: |
+        Returns only aggregate call and message counts for the active
+        installation. Calendar-day boundaries use the requested IANA time zone.
+      tags: [monitor]
+      security:
+        - apiToken: []
+      parameters:
+        - name: timeZone
+          in: query
+          description: IANA time zone used to determine local midnight.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 64
+            default: America/Toronto
+      responses:
+        "200":
+          description: current local-day counters
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MonitorSummary" }
+        "400": { description: invalid time zone }
+        "401": { description: missing or invalid credentials }
+        "403": { description: API token does not have monitor scope }
 
   /v1/stats/overview:
     get:
@@ -2464,6 +2493,15 @@ components:
           properties:
             wsClients: { type: integer, minimum: 0 }
         generatedAt: { type: string, format: date-time }
+    MonitorSummary:
+      type: object
+      required: [callsToday, messagesToday, dayStartedAt, generatedAt, timeZone]
+      properties:
+        callsToday: { type: integer, minimum: 0 }
+        messagesToday: { type: integer, minimum: 0 }
+        dayStartedAt: { type: string, format: date-time }
+        generatedAt: { type: string, format: date-time }
+        timeZone: { type: string, minLength: 1, maxLength: 64 }
     Installation:
       type: object
       required:

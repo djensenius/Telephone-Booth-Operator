@@ -1244,6 +1244,7 @@ export const fakeDb = {
       where?: {
         status?: string | { in?: string[]; not?: string };
         createdAt?: { gte: Date };
+        receivedAt?: { gte: Date };
         installationId?: ScopeFilter;
       };
     } = {}) => {
@@ -1267,6 +1268,12 @@ export const fakeDb = {
       }
       if (where.createdAt?.gte)
         messages = messages.filter((message) => message.createdAt >= where.createdAt.gte);
+      const receivedAfter = where.receivedAt?.gte;
+      if (receivedAfter) {
+        messages = messages.filter(
+          (message) => message.receivedAt !== null && message.receivedAt >= receivedAfter,
+        );
+      }
       return messages.length;
     },
   },

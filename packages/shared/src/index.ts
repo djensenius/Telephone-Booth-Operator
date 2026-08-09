@@ -133,6 +133,15 @@ export const BoothStatusSchema = z.object({
 });
 export type BoothStatus = z.infer<typeof BoothStatusSchema>;
 
+export const MonitorSummarySchema = z.object({
+  callsToday: z.number().int().nonnegative(),
+  messagesToday: z.number().int().nonnegative(),
+  dayStartedAt: z.string().datetime(),
+  generatedAt: z.string().datetime(),
+  timeZone: z.string().min(1).max(64),
+});
+export type MonitorSummary = z.infer<typeof MonitorSummarySchema>;
+
 // Booth-supplied half of the wire shape: collapsing metadata is derived by the
 // operator, never sent by the booth.
 export const StatusUpdateSchema = BoothStatusSchema.omit({

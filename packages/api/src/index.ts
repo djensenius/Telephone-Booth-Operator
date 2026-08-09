@@ -31,14 +31,15 @@ import { devicesRouter } from "./routes/devices.js";
 import { eventsRouter } from "./routes/events.js";
 import { installationsRouter } from "./routes/installations.js";
 import { instructionsRouter } from "./routes/instructions.js";
-import { workerRouter } from "./routes/worker.js";
 import { messagesRouter } from "./routes/messages.js";
+import { monitorRouter } from "./routes/monitor.js";
 import { questionsRouter } from "./routes/questions.js";
 import { sessionsRouter } from "./routes/sessions.js";
 import { statsRouter } from "./routes/stats.js";
 import { statusRouter } from "./routes/status.js";
 import { systemRouter } from "./routes/system.js";
 import { uploadsRouter } from "./routes/uploads.js";
+import { workerRouter } from "./routes/worker.js";
 import { attachStatusWebSocket, wsRouter } from "./routes/ws.js";
 
 const webOrigins = (): string[] =>
@@ -85,6 +86,7 @@ export const createApp = (): Hono<{ Variables: AuthVariables & AuditVariables }>
   app.route("/v1/installations", installationsRouter);
   app.route("/v1/instructions", instructionsRouter);
   app.route("/v1/messages", messagesRouter);
+  app.route("/v1/monitor", monitorRouter);
   app.route("/v1/status", statusRouter);
   app.route("/v1/events", eventsRouter);
   app.route("/v1/sessions", sessionsRouter);

@@ -20,16 +20,17 @@ external VictoriaMetrics instance; Grafana dashboards live under
 
 ## HTTP routes
 
-| Route                    | Auth             | Notes                                    |
-| ------------------------ | ---------------- | ---------------------------------------- |
-| `POST /v1/events`        | API token        | Bulk insert (max 500), `skipDuplicates`. |
-| `GET /v1/events`         | Operator cookie  | Cursor-paginated, filterable.            |
-| `GET /v1/events/stream`  | Operator cookie  | SSE live tail. Same-origin only.         |
-| `GET /v1/sessions`       | Operator cookie  | Cursor-paginated.                        |
-| `GET /v1/sessions/:id`   | Operator cookie  | Session + ordered events.                |
-| `PUT /v1/system`         | API token        | Upsert current row + WS broadcast.       |
-| `GET /v1/system/current` | Cookie or bearer | Latest persisted snapshot.               |
-| `GET /v1/ws/status`      | Cookie or bearer | Discriminated `{kind,…}` envelope.       |
+| Route                     | Auth             | Notes                                    |
+| ------------------------- | ---------------- | ---------------------------------------- |
+| `POST /v1/events`         | API token        | Bulk insert (max 500), `skipDuplicates`. |
+| `GET /v1/events`          | Operator cookie  | Cursor-paginated, filterable.            |
+| `GET /v1/events/stream`   | Operator cookie  | SSE live tail. Same-origin only.         |
+| `GET /v1/sessions`        | Operator cookie  | Cursor-paginated.                        |
+| `GET /v1/sessions/:id`    | Operator cookie  | Session + ordered events.                |
+| `PUT /v1/system`          | API token        | Upsert current row + WS broadcast.       |
+| `GET /v1/system/current`  | Cookie or bearer | Latest persisted snapshot.               |
+| `GET /v1/monitor/summary` | Monitor token    | Local-day call/message aggregate counts. |
+| `GET /v1/ws/status`       | Cookie or bearer | Discriminated `{kind,…}` envelope.       |
 
 Cursors are base64url-encoded `(receivedAt, id)` tuples and pair with the
 composite `@@index([boothId, receivedAt, id])` for stable pagination.
@@ -65,9 +66,9 @@ the rest of the console; the audit log additionally requires admin.
 
 ## BUSY Bar physical monitor
 
-The optional singleton [BUSY Bar monitor](busy-bar-monitor.md) consumes live
-status and system snapshots through the authenticated operator REST/WebSocket
-API. It logs sanitized connection, render, retry, and input-stream state through
-Pino. BUSY credentials and authentication payloads must never appear in logs.
-Integration failures are intentionally excluded from API health because the bar
+The optional external [BUSY Bar companion](busy-bar-monitor.md) consumes live
+status and system snapshots through the authenticated Operator REST/WebSocket
+API and polls an aggregate-only daily summary. Its own container emits
+sanitized Pino logs for connection, render, retry, and input-stream state.
+Companion failures are intentionally excluded from API health because the bar
 is an auxiliary display.
