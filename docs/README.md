@@ -25,7 +25,7 @@ rebuilds it from the filesystem; CI fails if it drifts.
 - [Audit log](audit-log.md) — who did what, from where, and when
 - [UI routing](ui-routing.md) — digit shortcuts, keyboard nav, reduced motion
 - [Installations](installations.md) — ending a run, starting fresh, browsing history, hard purge
-- [BUSY Bar monitor](busy-bar-monitor.md) — front-first physical status and health display
+- [BUSY Bar companion](busy-bar-monitor.md) — external physical status and health display
 
 ## Running it
 

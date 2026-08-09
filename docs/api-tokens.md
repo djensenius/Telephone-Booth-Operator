@@ -37,9 +37,10 @@ narrowest scope for the credential's job:
   input route `GET /v1/worker/messages/:id/work`; it is the broadcast
   WebSocket stream, not the worker input, that excludes content.) An
   operator-scoped token can never read `work` events.
-- **`monitor`** — a read-only credential for the BUSY Bar singleton. It may
-  read only `GET /v1/status` and `GET /v1/system/current`; on
-  `/v1/ws/status` it receives only `status` and `system` envelopes.
+- **`monitor`** — a read-only credential for the external BUSY Bar companion.
+  It may read only `GET /v1/status`, `GET /v1/system/current`, and the
+  aggregate-only `GET /v1/monitor/summary`; on `/v1/ws/status` it receives only
+  `status` and `system` envelopes.
 
 Requests to `/v1/worker/*` with a non-`worker` token are rejected with
 `403 insufficient_scope`. Monitor tokens are likewise rejected from booth
