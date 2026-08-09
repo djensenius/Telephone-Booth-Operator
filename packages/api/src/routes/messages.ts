@@ -531,7 +531,7 @@ messagesRouter.post(
           transcription.translationStatus === "succeeded" &&
           typeof transcription.translatedText === "string" &&
           transcription.translatedText.trim().length > 0
-            ? transcription.translatedText
+            ? normalizeTranslationText(transcription.translatedText)
             : (transcription.text ?? "");
         const actualHash = createHash("sha256").update(input.trim(), "utf8").digest("hex");
         if (actualHash !== data.inputSha256) return { outcome: "stale_input" } as const;

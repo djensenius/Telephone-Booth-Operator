@@ -927,6 +927,38 @@ describe("message review actions", () => {
       expect([...store.moderations.values()].filter((row) => row.messageId === id)).toHaveLength(0);
     });
 
+    it("accepts the canonical hash for a structured translation", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      const transcription = await fakeDb.transcription.create({
+        data: {
+          messageId: id,
+          provider: "push",
+          status: "succeeded",
+          text: "bonjour",
+          translatedText: '```json\n{"message":"hello"}\n```',
+          translationStatus: "succeeded",
+        },
+      });
+      const res = await app.request(`/v1/messages/${id}/moderation`, {
+        method: "POST",
+        headers: { cookie: operatorCookie(), "content-type": "application/json" },
+        body: JSON.stringify({
+          ...verdict,
+          transcriptionId: transcription.id,
+          inputSha256: createHash("sha256").update("hello", "utf8").digest("hex"),
+        }),
+      });
+
+      expect(res.status, await res.clone().text()).toBe(202);
+      expect(await res.json()).toMatchObject({
+        messageId: id,
+        transcriptionId: transcription.id,
+        provider: "on_device",
+        status: "succeeded",
+      });
+    });
+
     it("returns a conflict for moderation targeting a superseded transcription", async () => {
       const app = createApp();
       const id = await seedReceivedMessage(app);
