@@ -747,10 +747,11 @@ paths:
 
   /v1/monitor/summary:
     get:
-      summary: Least-privilege daily counters for the physical booth monitor.
+      summary: Least-privilege counters for the physical booth monitor.
       description: |
-        Returns only aggregate call and message counts for the active
-        installation. Calendar-day boundaries use the requested IANA time zone.
+        Returns aggregate call and message counts for today and for the active
+        installation overall. Calendar-day boundaries use the requested IANA
+        time zone.
       tags: [monitor]
       security:
         - apiToken: []
@@ -765,7 +766,7 @@ paths:
             default: America/Toronto
       responses:
         "200":
-          description: current local-day counters
+          description: current local-day and overall counters
           content:
             application/json:
               schema: { $ref: "#/components/schemas/MonitorSummary" }
@@ -2495,10 +2496,21 @@ components:
         generatedAt: { type: string, format: date-time }
     MonitorSummary:
       type: object
-      required: [callsToday, messagesToday, dayStartedAt, generatedAt, timeZone]
+      required:
+        [
+          callsToday,
+          messagesToday,
+          callsTotal,
+          messagesTotal,
+          dayStartedAt,
+          generatedAt,
+          timeZone,
+        ]
       properties:
         callsToday: { type: integer, minimum: 0 }
         messagesToday: { type: integer, minimum: 0 }
+        callsTotal: { type: integer, minimum: 0 }
+        messagesTotal: { type: integer, minimum: 0 }
         dayStartedAt: { type: string, format: date-time }
         generatedAt: { type: string, format: date-time }
         timeZone: { type: string, minLength: 1, maxLength: 64 }

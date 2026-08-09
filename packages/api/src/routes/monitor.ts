@@ -27,15 +27,19 @@ monitorRouter.get(
     const generatedAt = new Date();
     const dayStartedAt = startOfDayInTimeZone(generatedAt, timeZone);
     const scoped = scopeWhere(await resolveInstallationScope(undefined));
-    const [callsToday, messagesToday] = await Promise.all([
+    const [callsToday, messagesToday, callsTotal, messagesTotal] = await Promise.all([
       db.callSession.count({ where: { ...scoped, startedAt: { gte: dayStartedAt } } }),
       db.message.count({ where: { ...scoped, receivedAt: { gte: dayStartedAt } } }),
+      db.callSession.count({ where: scoped }),
+      db.message.count({ where: { ...scoped, receivedAt: { not: null } } }),
     ]);
 
     return c.json(
       MonitorSummarySchema.parse({
         callsToday,
         messagesToday,
+        callsTotal,
+        messagesTotal,
         dayStartedAt: dayStartedAt.toISOString(),
         generatedAt: generatedAt.toISOString(),
         timeZone,

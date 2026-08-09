@@ -31,7 +31,7 @@ describe("/v1/monitor/summary", () => {
     vi.useRealTimers();
   });
 
-  it("counts the active installation since local midnight", async () => {
+  it("counts the active installation today and overall", async () => {
     seedMessage({
       createdAt: new Date("2026-08-08T03:59:00.000Z"),
       receivedAt: new Date("2026-08-08T04:00:00.000Z"),
@@ -56,6 +56,8 @@ describe("/v1/monitor/summary", () => {
     await expect(response.json()).resolves.toMatchObject({
       callsToday: 1,
       messagesToday: 1,
+      callsTotal: 2,
+      messagesTotal: 2,
       dayStartedAt: "2026-08-08T04:00:00.000Z",
       generatedAt: "2026-08-08T19:00:00.000Z",
       timeZone: "America/Toronto",

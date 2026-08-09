@@ -136,6 +136,8 @@ export type BoothStatus = z.infer<typeof BoothStatusSchema>;
 export const MonitorSummarySchema = z.object({
   callsToday: z.number().int().nonnegative(),
   messagesToday: z.number().int().nonnegative(),
+  callsTotal: z.number().int().nonnegative(),
+  messagesTotal: z.number().int().nonnegative(),
   dayStartedAt: z.string().datetime(),
   generatedAt: z.string().datetime(),
   timeZone: z.string().min(1).max(64),
