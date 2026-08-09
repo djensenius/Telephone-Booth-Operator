@@ -1244,7 +1244,7 @@ export const fakeDb = {
       where?: {
         status?: string | { in?: string[]; not?: string };
         createdAt?: { gte: Date };
-        receivedAt?: { gte: Date };
+        receivedAt?: { gte?: Date; not?: null };
         installationId?: ScopeFilter;
       };
     } = {}) => {
@@ -1273,6 +1273,9 @@ export const fakeDb = {
         messages = messages.filter(
           (message) => message.receivedAt !== null && message.receivedAt >= receivedAfter,
         );
+      }
+      if (where.receivedAt?.not === null) {
+        messages = messages.filter((message) => message.receivedAt !== null);
       }
       return messages.length;
     },
@@ -2184,7 +2187,10 @@ export const fakeDb = {
       update: Record<string, unknown>;
     }) => create,
   },
-  $transaction: async <T>(fn: (tx: typeof fakeDb) => Promise<T>): Promise<T> => fn(fakeDb),
+  $transaction: async <T>(
+    fn: (tx: typeof fakeDb) => Promise<T>,
+    _options?: { isolationLevel?: string; maxWait?: number; timeout?: number },
+  ): Promise<T> => fn(fakeDb),
   // The era row is locked with raw SQL — `FOR SHARE` for a writer, `FOR UPDATE`
   // for the close-out — because Prisma has no first-class row lock. There is no
   // concurrency to serialise in a test, so the fake only has to answer the
