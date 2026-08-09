@@ -9,6 +9,12 @@ describe("time-zone helpers", () => {
     expect(
       startOfDayInTimeZone(new Date("2026-01-08T19:00:00.000Z"), "America/Toronto").toISOString(),
     ).toBe("2026-01-08T05:00:00.000Z");
+    expect(
+      startOfDayInTimeZone(new Date("2026-03-08T16:00:00.000Z"), "America/Toronto").toISOString(),
+    ).toBe("2026-03-08T05:00:00.000Z");
+    expect(
+      startOfDayInTimeZone(new Date("2026-11-01T17:00:00.000Z"), "America/Toronto").toISOString(),
+    ).toBe("2026-11-01T04:00:00.000Z");
   });
 
   it("rejects unknown IANA zones", () => {

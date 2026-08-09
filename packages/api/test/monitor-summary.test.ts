@@ -32,8 +32,19 @@ describe("/v1/monitor/summary", () => {
   });
 
   it("counts the active installation since local midnight", async () => {
-    seedMessage({ createdAt: new Date("2026-08-08T03:59:59.000Z") });
-    seedMessage({ createdAt: new Date("2026-08-08T04:00:00.000Z") });
+    seedMessage({
+      createdAt: new Date("2026-08-08T03:59:00.000Z"),
+      receivedAt: new Date("2026-08-08T04:00:00.000Z"),
+    });
+    seedMessage({
+      createdAt: new Date("2026-08-08T04:00:00.000Z"),
+      receivedAt: new Date("2026-08-08T03:59:59.000Z"),
+    });
+    seedMessage({
+      status: "uploading",
+      createdAt: new Date("2026-08-08T04:00:00.000Z"),
+      receivedAt: null,
+    });
     seedCallSession({ startedAt: new Date("2026-08-08T03:59:59.000Z") });
     seedCallSession({ startedAt: new Date("2026-08-08T04:00:00.000Z") });
 

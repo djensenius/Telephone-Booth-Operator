@@ -29,7 +29,7 @@ monitorRouter.get(
     const scoped = scopeWhere(await resolveInstallationScope(undefined));
     const [callsToday, messagesToday] = await Promise.all([
       db.callSession.count({ where: { ...scoped, startedAt: { gte: dayStartedAt } } }),
-      db.message.count({ where: { ...scoped, createdAt: { gte: dayStartedAt } } }),
+      db.message.count({ where: { ...scoped, receivedAt: { gte: dayStartedAt } } }),
     ]);
 
     return c.json(
