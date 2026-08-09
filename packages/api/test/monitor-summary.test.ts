@@ -13,7 +13,13 @@ vi.mock("../src/lib/api-tokens.js", () => ({
 vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.js")).fakeDb }));
 
 import { monitorRouter } from "../src/routes/monitor.js";
-import { fakeDb, resetFakeDb, seedCallSession, seedMessage } from "./support/fake-db.js";
+import {
+  fakeDb,
+  resetFakeDb,
+  seedCallSession,
+  seedInstallation,
+  seedMessage,
+} from "./support/fake-db.js";
 import { phoneHeaders } from "./support/http.js";
 
 const app = new Hono();
@@ -49,6 +55,18 @@ describe("/v1/monitor/summary", () => {
     });
     seedCallSession({ startedAt: new Date("2026-08-08T03:59:59.000Z") });
     seedCallSession({ startedAt: new Date("2026-08-08T04:00:00.000Z") });
+    const otherInstallation = seedInstallation({
+      startedAt: new Date("2025-01-01T00:00:00.000Z"),
+      endedAt: new Date("2025-12-31T23:59:59.000Z"),
+    });
+    seedMessage({
+      installationId: otherInstallation.id,
+      receivedAt: new Date("2026-08-08T05:00:00.000Z"),
+    });
+    seedCallSession({
+      installationId: otherInstallation.id,
+      startedAt: new Date("2026-08-08T05:00:00.000Z"),
+    });
 
     const response = await app.request("/v1/monitor/summary?timeZone=America%2FToronto", {
       headers: phoneHeaders,
