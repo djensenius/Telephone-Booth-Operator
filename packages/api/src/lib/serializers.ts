@@ -67,8 +67,7 @@ export const serializeTranscription = (row: PrismaTranscription): TranscriptionP
   createdAt: iso(row.createdAt),
   completedAt: row.completedAt ? iso(row.completedAt) : null,
   translationStatus: row.translationStatus,
-  translatedText:
-    row.translatedText === null ? null : normalizeTranslationText(row.translatedText),
+  translatedText: row.translatedText === null ? null : normalizeTranslationText(row.translatedText),
   translatedLanguage: row.translatedLanguage,
   translationProvider: row.translationProvider ? (row.translationProvider as AiProvider) : null,
   translationModel: row.translationModel,

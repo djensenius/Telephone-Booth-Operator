@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.js")).fakeDb }));
@@ -29,6 +30,9 @@ import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { resetFakeAzure } from "./support/fake-azure.js";
 import { fakeDb, resetFakeDb, seedFile, seedMessage, store } from "./support/fake-db.js";
 import { phoneHeaders } from "./support/http.js";
+
+const sha256 = (value: string): string =>
+  createHash("sha256").update(value.trim(), "utf8").digest("hex");
 
 const setup = () => {
   process.env.NODE_ENV = "test";
@@ -87,14 +91,101 @@ describe("worker push-back callbacks", () => {
     expect(res.status).toBe(401);
   });
 
+  it("rejects malformed transcription snapshot IDs", async () => {
+    const app = createApp();
+    const message = seedMessage({ status: "received" });
+    const res = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: "not-a-uuid",
+      expectedLatestTranscriptionId: "also-not-a-uuid",
+      text: "hello",
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects a moderation hash without its transcription target", async () => {
+    const app = createApp();
+    const message = seedMessage({ status: "received" });
+    const res = await postJson(app, `/v1/worker/messages/${message.id}/moderation`, {
+      inputSha256: "a".repeat(64),
+      flagged: false,
+      recommendation: "approve",
+      maxScore: 0,
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects a moderation target without its input hash", async () => {
+    const app = createApp();
+    const message = seedMessage({ status: "received" });
+    const res = await postJson(app, `/v1/worker/messages/${message.id}/moderation`, {
+      transcriptionId: "00000000-0000-4000-8000-000000000099",
+      flagged: false,
+      recommendation: "approve",
+      maxScore: 0,
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects a transcription callback when a newer result already landed", async () => {
+    const app = createApp();
+    const message = seedMessage({ status: "received" });
+    await fakeDb.transcription.create({
+      data: {
+        messageId: message.id,
+        provider: "on_device",
+        status: "succeeded",
+        text: "newer result",
+        completedAt: new Date(),
+      },
+    });
+
+    const res = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      expectedLatestTranscriptionId: null,
+      text: "stale worker result",
+      language: "en",
+    });
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "stale_transcription" });
+  });
+
+  it("rejects a second targeted callback after its pending row was finalized", async () => {
+    const app = createApp();
+    const message = seedMessage({ status: "received" });
+    const pending = await seedPendingTranscription(message.id);
+
+    const first = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: pending.id,
+      text: "first worker result",
+      language: "en",
+    });
+    expect(first.status).toBe(200);
+
+    const second = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: pending.id,
+      text: "stale second result",
+      language: "en",
+    });
+
+    expect(second.status).toBe(409);
+    expect(await second.json()).toEqual({ error: "stale_transcription" });
+    expect(
+      [...store.transcriptions.values()].filter((row) => row.messageId === message.id),
+    ).toHaveLength(1);
+  });
+
   it("stores an English transcription and broadcasts moderation work", async () => {
     process.env.MODERATION_PROVIDER = "push";
     const app = createApp();
     const message = seedMessage({ status: "received" });
-    await seedPendingTranscription(message.id);
+    const pending = await seedPendingTranscription(message.id);
     const cap = captureEnvelopes();
 
     const res = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: pending.id,
       text: "hello there",
       language: "en",
     });
@@ -121,10 +212,11 @@ describe("worker push-back callbacks", () => {
     process.env.MODERATION_PROVIDER = "push";
     const app = createApp();
     const message = seedMessage({ status: "received" });
-    await seedPendingTranscription(message.id);
+    const pending = await seedPendingTranscription(message.id);
     const cap = captureEnvelopes();
 
     const res = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: pending.id,
       text: "bonjour",
       language: "fr",
     });
@@ -142,10 +234,11 @@ describe("worker push-back callbacks", () => {
   it("advances a silent (empty) recording without creating moderation work", async () => {
     const app = createApp();
     const message = seedMessage({ status: "received" });
-    await seedPendingTranscription(message.id);
+    const pending = await seedPendingTranscription(message.id);
     const cap = captureEnvelopes();
 
     const res = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: pending.id,
       text: "   ",
     });
     cap.stop();
@@ -187,6 +280,47 @@ describe("worker push-back callbacks", () => {
     expect([...store.moderations.values()].filter((m) => m.messageId === message.id)).toHaveLength(
       1,
     );
+  });
+
+  it("rejects an ID-less callback when a pending row exists", async () => {
+    const app = createApp();
+    const message = seedMessage({ status: "received" });
+    await seedPendingTranscription(message.id);
+
+    const res = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      text: "legacy stale result",
+    });
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "stale_transcription" });
+  });
+
+  it("rejects a delayed ID-less callback after an on-device takeover", async () => {
+    process.env.MODERATION_PROVIDER = "push";
+    const app = createApp();
+    const message = seedMessage({ status: "pending" });
+    await fakeDb.transcription.create({
+      data: {
+        messageId: message.id,
+        provider: "on_device",
+        status: "succeeded",
+        text: "local result",
+        completedAt: new Date(),
+      },
+    });
+
+    const res = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      text: "delayed worker result",
+    });
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "stale_transcription" });
+    expect(
+      [...store.transcriptions.values()].filter((row) => row.messageId === message.id),
+    ).toHaveLength(1);
+    expect(
+      [...store.moderations.values()].filter((row) => row.messageId === message.id),
+    ).toHaveLength(0);
   });
 
   it("is idempotent when an unsolicited transcription is redelivered", async () => {
@@ -252,6 +386,7 @@ describe("worker push-back callbacks", () => {
     });
     const cap = captureEnvelopes();
     const res = await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: seeded.id,
       text: "hello there",
       language: "en",
     });
@@ -270,8 +405,9 @@ describe("worker push-back callbacks", () => {
     process.env.MODERATION_PROVIDER = "push";
     const app = createApp();
     const message = seedMessage({ status: "received" });
-    await seedPendingTranscription(message.id);
+    const transcriptionPending = await seedPendingTranscription(message.id);
     await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: transcriptionPending.id,
       text: "bonjour",
       language: "fr",
     });
@@ -282,6 +418,7 @@ describe("worker push-back callbacks", () => {
 
     const res = await postJson(app, `/v1/worker/messages/${message.id}/translation`, {
       transcriptionId: transcription?.id,
+      inputSha256: sha256("bonjour"),
       translatedText: '```json\n{"message":"hello"}\n```',
       sourceLanguage: "fr",
       targetLanguage: "en",
@@ -301,8 +438,9 @@ describe("worker push-back callbacks", () => {
     process.env.MODERATION_PROVIDER = "push";
     const app = createApp();
     const message = seedMessage({ status: "received" });
-    await seedPendingTranscription(message.id);
+    const transcriptionPending = await seedPendingTranscription(message.id);
     await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: transcriptionPending.id,
       text: "bonjour",
       language: "fr",
     });
@@ -311,12 +449,14 @@ describe("worker push-back callbacks", () => {
     );
     await postJson(app, `/v1/worker/messages/${message.id}/translation`, {
       transcriptionId: transcription?.id,
+      inputSha256: sha256("bonjour"),
       translatedText: "hello",
       targetLanguage: "en",
     });
     const cap = captureEnvelopes();
     const duplicate = await postJson(app, `/v1/worker/messages/${message.id}/translation`, {
       transcriptionId: transcription?.id,
+      inputSha256: sha256("bonjour"),
       translatedText: "stale hello",
       targetLanguage: "en",
     });
@@ -334,15 +474,23 @@ describe("worker push-back callbacks", () => {
     process.env.MODERATION_PROVIDER = "push";
     const app = createApp();
     const message = seedMessage({ status: "received" });
-    await seedPendingTranscription(message.id);
+    const pending = await seedPendingTranscription(message.id);
     await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: pending.id,
       text: "hello there",
       language: "en",
     });
     const moderation = [...store.moderations.values()].find((m) => m.messageId === message.id);
+    const work = await app.request(`/v1/worker/messages/${message.id}/work`, {
+      headers: phoneHeaders,
+    });
+    const workBody = (await work.json()) as {
+      transcription: { moderationInputSha256: string } | null;
+    };
 
     const res = await postJson(app, `/v1/worker/messages/${message.id}/moderation`, {
       transcriptionId: moderation?.transcriptionId,
+      inputSha256: workBody.transcription?.moderationInputSha256,
       flagged: true,
       recommendation: "reject",
       maxScore: 0.92,
@@ -360,16 +508,40 @@ describe("worker push-back callbacks", () => {
     expect(finalMessage?.decidedAt ?? null).toBeNull();
   });
 
-  it("does not create stale moderation rows for duplicate callbacks", async () => {
+  it("rejects an ID-less moderation callback for a transcription-scoped row", async () => {
+    process.env.MODERATION_PROVIDER = "push";
+    const app = createApp();
+    const message = seedMessage({ status: "received" });
+    const pending = await seedPendingTranscription(message.id);
+    await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: pending.id,
+      text: "hello there",
+      language: "en",
+    });
+
+    const res = await postJson(app, `/v1/worker/messages/${message.id}/moderation`, {
+      transcriptionId: null,
+      flagged: false,
+      recommendation: "approve",
+      maxScore: 0.02,
+    });
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "stale_transcription" });
+  });
+
+  it("does not create moderation rows for an unknown transcription", async () => {
     const app = createApp();
     const message = seedMessage({ status: "received" });
     const res = await postJson(app, `/v1/worker/messages/${message.id}/moderation`, {
+      transcriptionId: "00000000-0000-4000-8000-000000000099",
+      inputSha256: "0".repeat(64),
       flagged: false,
       recommendation: "approve",
       maxScore: 0.01,
     });
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(404);
     expect([...store.moderations.values()].filter((m) => m.messageId === message.id)).toHaveLength(
       0,
     );
@@ -395,8 +567,9 @@ describe("worker push-back callbacks", () => {
 
     // After a non-English transcription + translation: moderationText is the
     // English translation, so the moderation step reads translated text.
-    await seedPendingTranscription(message.id);
+    const pending = await seedPendingTranscription(message.id);
     await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: pending.id,
       text: "bonjour",
       language: "fr",
     });
@@ -405,6 +578,7 @@ describe("worker push-back callbacks", () => {
     );
     await postJson(app, `/v1/worker/messages/${message.id}/translation`, {
       transcriptionId: transcription?.id,
+      inputSha256: sha256("bonjour"),
       translatedText: "hello",
       targetLanguage: "en",
     });
@@ -413,10 +587,88 @@ describe("worker push-back callbacks", () => {
       headers: phoneHeaders,
     });
     const secondBody = (await second.json()) as {
-      transcription: { text: string; moderationText: string } | null;
+      transcription: {
+        text: string;
+        translationInputSha256: string;
+        moderationText: string;
+        moderationInputSha256: string;
+      } | null;
     };
     expect(secondBody.transcription?.text).toBe("bonjour");
+    expect(secondBody.transcription?.translationInputSha256).toBe(sha256("bonjour"));
     expect(secondBody.transcription?.moderationText).toBe("hello");
+    expect(secondBody.transcription?.moderationInputSha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("rejects a translation callback for text that changed after work was fetched", async () => {
+    process.env.TRANSLATION_PROVIDER = "push";
+    const app = createApp();
+    const message = seedMessage({ status: "received" });
+    const pending = await seedPendingTranscription(message.id);
+    const work = await app.request(`/v1/worker/messages/${message.id}/work`, {
+      headers: phoneHeaders,
+    });
+    const workBody = (await work.json()) as {
+      transcription: { translationInputSha256: string } | null;
+    };
+    await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: pending.id,
+      text: "bonjour",
+      language: "fr",
+    });
+    const stale = await postJson(app, `/v1/worker/messages/${message.id}/translation`, {
+      transcriptionId: pending.id,
+      inputSha256: workBody.transcription?.translationInputSha256,
+      translatedText: "stale translation",
+      targetLanguage: "en",
+    });
+
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toEqual({ error: "stale_translation_input" });
+    expect(store.transcriptions.get(pending.id)?.translatedText).toBeNull();
+  });
+
+  it("rejects a moderation callback for superseded review text", async () => {
+    process.env.TRANSLATION_PROVIDER = "push";
+    process.env.MODERATION_PROVIDER = "push";
+    const app = createApp();
+    const message = seedMessage({ status: "received" });
+    const transcriptionPending = await seedPendingTranscription(message.id);
+    await postJson(app, `/v1/worker/messages/${message.id}/transcription`, {
+      transcriptionId: transcriptionPending.id,
+      text: "bonjour",
+      language: "fr",
+    });
+    const transcription = [...store.transcriptions.values()].find(
+      (row) => row.messageId === message.id,
+    );
+    const firstWork = await app.request(`/v1/worker/messages/${message.id}/work`, {
+      headers: phoneHeaders,
+    });
+    const firstBody = (await firstWork.json()) as {
+      transcription: { moderationInputSha256: string } | null;
+    };
+
+    await postJson(app, `/v1/worker/messages/${message.id}/translation`, {
+      transcriptionId: transcription?.id,
+      inputSha256: sha256("bonjour"),
+      translatedText: "hello",
+      targetLanguage: "en",
+    });
+    const stale = await postJson(app, `/v1/worker/messages/${message.id}/moderation`, {
+      transcriptionId: transcription?.id,
+      inputSha256: firstBody.transcription?.moderationInputSha256,
+      flagged: false,
+      recommendation: "approve",
+      maxScore: 0.01,
+    });
+
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toEqual({ error: "stale_moderation_input" });
+    const pending = [...store.moderations.values()].filter(
+      (row) => row.messageId === message.id && row.status === "pending",
+    );
+    expect(pending).toHaveLength(1);
   });
 
   it("rejects work-input fetches without a valid API token", async () => {

@@ -220,19 +220,40 @@ export const MessageDecisionSchema = z.object({
 });
 export type MessageDecision = z.infer<typeof MessageDecisionSchema>;
 
-export const TranslationSubmitSchema = z.object({
-  translatedText: z.string().trim().min(1).max(20_000),
-  translatedLanguage: z.string().trim().min(1).max(64).optional(),
-});
+export const TranslationSubmitSchema = z
+  .object({
+    transcriptionId: z.guid().optional(),
+    expectedTranscriptionId: z.guid().optional(),
+    expectedTranslationSha256: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .nullable()
+      .optional(),
+    translatedText: z.string().trim().min(1).max(20_000),
+    translatedLanguage: z.string().trim().min(1).max(64).optional(),
+    model: z.string().trim().min(1).max(128).nullable().optional(),
+  })
+  .refine(
+    ({ transcriptionId, expectedTranscriptionId }) =>
+      !transcriptionId || !expectedTranscriptionId || transcriptionId === expectedTranscriptionId,
+    { message: "transcription targets must match" },
+  );
 export type TranslationSubmit = z.infer<typeof TranslationSubmitSchema>;
 
 // Operator-supplied transcript text (e.g. from the iOS Transcriber app doing
 // on-device transcription). Text may be empty for a silent recording, mirroring
 // the worker push-back callback. `language` and `model` are optional metadata.
 export const TranscriptionSubmitSchema = z.object({
+  expectedLatestTranscriptionId: z.guid().nullable().optional(),
+  expectedLatestTranscriptionSha256: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/i)
+    .nullable()
+    .optional(),
   text: z.string().max(20_000),
   language: z.string().trim().min(1).max(64).nullable().optional(),
   model: z.string().trim().min(1).max(128).nullable().optional(),
+  processDownstream: z.boolean().optional(),
 });
 export type TranscriptionSubmit = z.infer<typeof TranscriptionSubmitSchema>;
 
@@ -242,15 +263,24 @@ export type TranscriptionSubmit = z.infer<typeof TranscriptionSubmitSchema>;
 // message. `provider` is deliberately absent — the server stamps `on_device`
 // so the UI can tell a locally computed verdict from an upstream one, and
 // `model` carries the specific model that produced it.
-export const ModerationSubmitSchema = z.object({
-  transcriptionId: z.guid().nullable().optional(),
-  flagged: z.boolean(),
-  recommendation: ModerationRecommendationSchema,
-  maxScore: z.number().min(0).max(1),
-  categories: z.record(z.string(), z.number()).optional(),
-  reasonSummary: z.string().max(2000).nullable().optional(),
-  model: z.string().trim().min(1).max(128).nullable().optional(),
-});
+export const ModerationSubmitSchema = z
+  .object({
+    transcriptionId: z.guid().nullable().optional(),
+    inputSha256: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+    flagged: z.boolean(),
+    recommendation: ModerationRecommendationSchema,
+    maxScore: z.number().min(0).max(1),
+    categories: z.record(z.string(), z.number()).optional(),
+    reasonSummary: z.string().max(2000).nullable().optional(),
+    model: z.string().trim().min(1).max(128).nullable().optional(),
+  })
+  .refine((value) => (value.inputSha256 == null) === (value.transcriptionId == null), {
+    message: "transcriptionId and inputSha256 must be supplied together",
+    path: ["inputSha256"],
+  });
 export type ModerationSubmit = z.infer<typeof ModerationSubmitSchema>;
 
 // 5 minutes — generous upper bound for booth recordings.
