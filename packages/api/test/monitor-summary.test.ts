@@ -13,7 +13,7 @@ vi.mock("../src/lib/api-tokens.js", () => ({
 vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.js")).fakeDb }));
 
 import { monitorRouter } from "../src/routes/monitor.js";
-import { resetFakeDb, seedCallSession, seedMessage } from "./support/fake-db.js";
+import { fakeDb, resetFakeDb, seedCallSession, seedMessage } from "./support/fake-db.js";
 import { phoneHeaders } from "./support/http.js";
 
 const app = new Hono();
@@ -28,10 +28,12 @@ describe("/v1/monitor/summary", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
   });
 
   it("counts the active installation today and overall", async () => {
+    const transaction = vi.spyOn(fakeDb, "$transaction");
     seedMessage({
       createdAt: new Date("2026-08-08T03:59:00.000Z"),
       receivedAt: new Date("2026-08-08T04:00:00.000Z"),
@@ -61,6 +63,9 @@ describe("/v1/monitor/summary", () => {
       dayStartedAt: "2026-08-08T04:00:00.000Z",
       generatedAt: "2026-08-08T19:00:00.000Z",
       timeZone: "America/Toronto",
+    });
+    expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: "RepeatableRead",
     });
   });
 
