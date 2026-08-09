@@ -521,11 +521,13 @@ paths:
         finalized, otherwise a new succeeded row is recorded (a redelivery of
         the latest succeeded transcript — same `text`, `language`, `model` and
         submitter — is a no-op, while a correction records a new row). The row is
-        attributed to the submitting operator (`requestedById`). Like all
-        pushed transcripts the text is still translated and moderated
-        server-side before it can be acted on. `text` may be empty for a silent
-        recording. The resulting `Transcription` row is returned and broadcast
-        on `/v1/ws/status` as a `{kind:"message"}` envelope.
+        attributed to the submitting operator (`requestedById`) and stamped
+        with provider `on_device`. By default the server still translates and
+        moderates the text; clients submitting their own complete local result
+        set `processDownstream: false` to prevent any downstream provider
+        call. `text` may be empty for a silent recording. The resulting
+        `Transcription` row is returned and broadcast on `/v1/ws/status` as a
+        `{kind:"message"}` envelope.
       tags: [transcriptions]
       security:
         - operatorSession: []
@@ -539,8 +541,23 @@ paths:
               required: [text]
               properties:
                 text: { type: string, maxLength: 20000 }
+                expectedLatestTranscriptionId:
+                  type: [string, "null"]
+                  format: uuid
+                  description: >-
+                    Latest transcription observed by the client. When present,
+                    the write is rejected if that snapshot has changed.
+                expectedLatestTranscriptionSha256:
+                  type: [string, "null"]
+                  pattern: "^[0-9a-fA-F]{64}$"
+                  description: >-
+                    SHA-256 of the observed latest transcription status, a
+                    newline, and its ECMAScript-trimmed text. Null represents
+                    no latest transcription. When present, the write is
+                    rejected if the row changed even when its ID is unchanged.
                 language: { type: [string, "null"], minLength: 1, maxLength: 64 }
                 model: { type: [string, "null"], minLength: 1, maxLength: 128 }
+                processDownstream: { type: boolean, default: true }
       responses:
         "202":
           description: transcription recorded
@@ -548,6 +565,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Transcription" }
         "404": { description: message not found }
+        "409": { description: latest transcription snapshot changed }
 
   /v1/messages/{id}/moderate:
     parameters:
@@ -603,8 +621,22 @@ paths:
             schema:
               type: object
               required: [flagged, recommendation, maxScore]
+              oneOf:
+                - properties:
+                    transcriptionId: { type: "null" }
+                    inputSha256: false
+                - required: [transcriptionId, inputSha256]
+                  properties:
+                    transcriptionId: { type: string, format: uuid }
+                    inputSha256: { type: string, pattern: "^[a-f0-9]{64}$" }
               properties:
                 transcriptionId: { type: [string, "null"], format: uuid }
+                inputSha256:
+                  type: string
+                  pattern: "^[a-f0-9]{64}$"
+                  description: >-
+                    SHA-256 of the ECMAScript-trimmed transcript or translation
+                    moderated; required when transcriptionId is supplied.
                 flagged: { type: boolean }
                 recommendation: { $ref: "#/components/schemas/ModerationRecommendation" }
                 maxScore: { type: number, minimum: 0, maximum: 1 }
@@ -620,6 +652,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Moderation" }
         "404": { description: message or transcription not found }
+        "409": { description: moderation input no longer matches the transcription }
 
   /v1/messages/{id}/decision:
     parameters:
@@ -663,14 +696,19 @@ paths:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     post:
-      summary: Attach a human translation to the latest succeeded transcription.
+      summary: Attach a translation to a succeeded transcription.
       description: |
-        Lets a logged-in operator supply an English translation for a
-        transcription the translation worker could not produce. Updates the
-        message's latest succeeded transcription, marking `translationStatus`
-        as `succeeded` with a null `translationProvider` (consumers infer a
-        manual translation from a succeeded translation with no provider).
-        Returns `409` when the message has no succeeded transcription yet.
+        Without `transcriptionId`, records a human English correction on the
+        latest succeeded transcription with null provider/model.
+        `expectedTranscriptionId` conditionally targets that human correction
+        without changing its provenance. `expectedTranslationSha256` binds
+        either form to the translation content the client observed. With
+        `transcriptionId`, requires that row to still be latest and records an
+        on-device generated translation with provider `on_device` and its
+        optional model. Moderation is invalidated only when the effective
+        reviewed text changes.
+        Returns `409` when no succeeded transcription exists or the targeted
+        transcription has been superseded.
       tags: [messages]
       security:
         - operatorSession: []
@@ -683,8 +721,22 @@ paths:
               type: object
               required: [translatedText]
               properties:
+                transcriptionId: { type: string, format: uuid }
+                expectedTranscriptionId:
+                  type: string
+                  format: uuid
+                  description: >-
+                    Latest transcription observed while editing a human
+                    correction; rejected if it is no longer latest.
+                expectedTranslationSha256:
+                  type: [string, "null"]
+                  pattern: "^[a-f0-9]{64}$"
+                  description: >-
+                    SHA-256 of the trimmed translation observed by the client,
+                    or null when no succeeded translation existed.
                 translatedText: { type: string, minLength: 1, maxLength: 20000 }
                 translatedLanguage: { type: string, minLength: 1, maxLength: 64 }
+                model: { type: [string, "null"], minLength: 1, maxLength: 128 }
       responses:
         "200":
           description: translation recorded
@@ -692,7 +744,8 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Transcription" }
         "404": { description: message not found }
-        "409": { description: no succeeded transcription to translate }
+        "409":
+          { description: "no succeeded transcription, or stale transcription or translation input" }
 
   /v1/uploads/sas:
     post:
@@ -1397,6 +1450,7 @@ paths:
       responses:
         "200": { description: Result accepted. }
         "404": { description: Message not found. }
+        "409": { description: A newer transcription was recorded while the worker was processing. }
 
   /v1/worker/messages/{id}/translation:
     parameters:
@@ -1418,6 +1472,10 @@ paths:
       responses:
         "200": { description: Result accepted. }
         "404": { description: Message or transcription not found. }
+        "409":
+          {
+            description: The transcription or its source text changed while the worker was translating.,
+          }
 
   /v1/worker/messages/{id}/moderation:
     parameters:
@@ -1441,6 +1499,7 @@ paths:
       responses:
         "200": { description: Suggestion accepted. }
         "404": { description: Message not found. }
+        "409": { description: The moderated text was superseded before the callback arrived. }
 
   /v1/ws/status:
     get:
@@ -1854,7 +1913,7 @@ components:
           oneOf:
             - type: "null"
             - type: object
-              required: [id, text, moderationText]
+              required: [id, text, translationInputSha256, moderationText, moderationInputSha256]
               properties:
                 id: { type: string, format: uuid }
                 text: { type: string }
@@ -1862,21 +1921,32 @@ components:
                 model: { type: [string, "null"] }
                 translationStatus: { type: [string, "null"] }
                 translatedText: { type: [string, "null"] }
+                translationInputSha256:
+                  type: string
+                  pattern: "^[0-9a-f]{64}$"
+                  description: "SHA-256 of the ECMAScript-trimmed transcript; translation callbacks must return it."
                 moderationText:
                   type: string
                   description: "Text the moderation step should score (English translation when available, else the transcript)."
+                moderationInputSha256:
+                  type: string
+                  pattern: "^[0-9a-f]{64}$"
+                  description: "SHA-256 of moderationText; new workers should return it with the verdict."
     WorkerTranscriptionBody:
       type: object
       required: [text]
       properties:
+        transcriptionId: { type: [string, "null"], format: uuid }
+        expectedLatestTranscriptionId: { type: [string, "null"], format: uuid }
         text: { type: string }
         language: { type: [string, "null"] }
         model: { type: [string, "null"] }
     WorkerTranslationBody:
       type: object
-      required: [transcriptionId, translatedText]
+      required: [transcriptionId, inputSha256, translatedText]
       properties:
         transcriptionId: { type: string, format: uuid }
+        inputSha256: { type: string, pattern: "^[0-9a-f]{64}$" }
         translatedText: { type: string }
         sourceLanguage: { type: [string, "null"] }
         targetLanguage: { type: [string, "null"] }
@@ -1884,8 +1954,17 @@ components:
     WorkerModerationBody:
       type: object
       required: [flagged, recommendation, maxScore]
+      oneOf:
+        - properties:
+            transcriptionId: { type: "null" }
+            inputSha256: false
+        - required: [transcriptionId, inputSha256]
+          properties:
+            transcriptionId: { type: string, format: uuid }
+            inputSha256: { type: string, pattern: "^[0-9a-f]{64}$" }
       properties:
         transcriptionId: { type: [string, "null"], format: uuid }
+        inputSha256: { type: string, pattern: "^[0-9a-f]{64}$" }
         flagged: { type: boolean }
         recommendation: { type: string, enum: [approve, review, reject] }
         maxScore: { type: number, minimum: 0, maximum: 1 }

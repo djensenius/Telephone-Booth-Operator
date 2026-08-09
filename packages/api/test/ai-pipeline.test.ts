@@ -139,6 +139,69 @@ describe("AI pipeline", () => {
     expect(withRelations.transcriptions[0]?.error).toMatch(/disabled/);
   });
 
+  it("does not append a disabled result after a newer transcription wins the lock", async () => {
+    const id = await seedReceivedMessage();
+    await fakeDb.transcription.create({
+      data: { messageId: id, provider: "openai", status: "succeeded", text: "original" },
+    });
+    const findFirst = fakeDb.transcription.findFirst;
+    let newerId = "";
+    vi.spyOn(fakeDb.transcription, "findFirst").mockImplementationOnce(async (args) => {
+      const snapshot = await findFirst(args);
+      const newer = await fakeDb.transcription.create({
+        data: {
+          messageId: id,
+          provider: "on_device",
+          status: "succeeded",
+          text: "newer",
+          createdAt: new Date(Date.now() + 1_000),
+        },
+      });
+      newerId = newer.id;
+      return snapshot;
+    });
+
+    const result = await runTranscription({
+      messageId: id,
+      deps: baseDeps({
+        transcriptionProvider: null,
+        config: { transcriptionProvider: "disabled" } as never,
+      }),
+    });
+
+    expect(result).toEqual({ outcome: "skipped", existingId: newerId });
+    const rows = [...store.transcriptions.values()].filter((row) => row.messageId === id);
+    expect(rows.filter((row) => row.status === "failed")).toHaveLength(0);
+  });
+
+  it("invalidates prior moderation when in-process transcription replaces the reviewed text", async () => {
+    const id = await seedReceivedMessage();
+    const old = await fakeDb.transcription.create({
+      data: { messageId: id, provider: "openai", status: "succeeded", text: "old" },
+    });
+    const moderation = await fakeDb.moderation.create({
+      data: {
+        messageId: id,
+        transcriptionId: old.id,
+        provider: "openai",
+        status: "succeeded",
+        flagged: false,
+        recommendation: "approve",
+      },
+    });
+
+    await runTranscription({
+      messageId: id,
+      deps: baseDeps({ transcriptionProvider: fakeTranscription("new") }),
+      skipDownstream: true,
+    });
+
+    expect(store.moderations.get(moderation.id)).toMatchObject({
+      status: "failed",
+      error: "superseded_by_transcription",
+    });
+  });
+
   it("never auto-rejects even when moderation flags the transcript; a human still decides", async () => {
     const id = await seedReceivedMessage();
     await runTranscription({
@@ -272,6 +335,44 @@ describe("AI pipeline", () => {
     expect(withRelations.moderations).toHaveLength(1);
     expect(withRelations.moderations[0]?.status).toBe("failed");
     expect(withRelations.moderations[0]?.error).toMatch(/disabled/);
+  });
+
+  it("does not append a disabled moderation result after the transcription is superseded", async () => {
+    const id = await seedReceivedMessage();
+    const original = await fakeDb.transcription.create({
+      data: {
+        messageId: id,
+        provider: "openai",
+        status: "succeeded",
+        text: "first",
+      },
+    });
+    const findFirst = fakeDb.transcription.findFirst;
+    vi.spyOn(fakeDb.transcription, "findFirst").mockImplementationOnce(async (args) => {
+      await fakeDb.transcription.create({
+        data: {
+          messageId: id,
+          provider: "on_device",
+          status: "succeeded",
+          text: "newer",
+          createdAt: new Date(Date.now() + 1_000),
+        },
+      });
+      return findFirst(args);
+    });
+
+    const result = await runModeration({
+      messageId: id,
+      transcriptionId: original.id,
+      deps: baseDeps({
+        moderationProvider: null,
+        config: { moderationProvider: "disabled" } as never,
+      }),
+      requestedByUserId: null,
+    });
+
+    expect(result).toBeNull();
+    expect([...store.moderations.values()].filter((row) => row.messageId === id)).toHaveLength(0);
   });
 
   it("does not roll back an operator decision when re-running moderation while disabled", async () => {
