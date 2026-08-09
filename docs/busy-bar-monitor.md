@@ -7,9 +7,9 @@ Run exactly one monitor instance on an always-on home server, Portainer host, or
 cloud container.
 
 The companion consumes the authenticated Operator REST and WebSocket API, then
-renders booth state, daily counters, and system health through BUSY Cloud. Its
-deployment guide, Portainer Compose file, environment reference, and update
-steps live in the companion repository.
+renders booth state, daily and active-installation counters, and system health
+through BUSY Cloud. Its deployment guide, Portainer Compose file, environment
+reference, and update steps live in the companion repository.
 
 ## Operator API contract
 
@@ -27,14 +27,24 @@ The summary endpoint returns aggregate counts for the active installation:
 {
   "callsToday": 12,
   "messagesToday": 8,
+  "callsTotal": 143,
+  "messagesTotal": 96,
   "dayStartedAt": "2026-08-08T04:00:00.000Z",
   "generatedAt": "2026-08-08T19:00:00.000Z",
   "timeZone": "America/Toronto"
 }
 ```
 
+`callsToday` counts call sessions started on or after `dayStartedAt`, while
+`messagesToday` counts messages completed on or after that boundary.
+`callsTotal` counts all call sessions in the active installation, and
+`messagesTotal` counts all completed messages in that installation. Messages
+still uploading are excluded because they do not yet have a `receivedAt`
+timestamp.
+
 `timeZone` is an optional IANA time-zone query parameter and defaults to
-`America/Toronto`. The response never includes message identifiers, audio URLs,
+`America/Toronto`; it affects the daily boundary but not the installation
+totals. The response never includes message identifiers, audio URLs,
 transcripts, or moderation content.
 
 ## Deployment order

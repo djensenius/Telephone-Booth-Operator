@@ -2576,15 +2576,7 @@ components:
     MonitorSummary:
       type: object
       required:
-        [
-          callsToday,
-          messagesToday,
-          callsTotal,
-          messagesTotal,
-          dayStartedAt,
-          generatedAt,
-          timeZone,
-        ]
+        [callsToday, messagesToday, callsTotal, messagesTotal, dayStartedAt, generatedAt, timeZone]
       properties:
         callsToday: { type: integer, minimum: 0 }
         messagesToday: { type: integer, minimum: 0 }
