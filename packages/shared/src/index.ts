@@ -224,15 +224,156 @@ export const MessageSchema = z.object({
 });
 export type Message = z.infer<typeof MessageSchema>;
 
-const Bcp47LanguageTagSchema = z
+const GRANDFATHERED_LANGUAGE_TAGS = new Map<string, string>([
+  ["art-lojban", "jbo"],
+  ["cel-gaulish", "xtg-x-cel-gaulish"],
+  ["en-gb-oed", "en-GB-oxendict"],
+  ["i-ami", "ami"],
+  ["i-bnn", "bnn"],
+  ["i-default", "i-default"],
+  ["i-enochian", "i-enochian"],
+  ["i-hak", "hak"],
+  ["i-klingon", "tlh"],
+  ["i-lux", "lb"],
+  ["i-mingo", "i-mingo"],
+  ["i-navajo", "nv"],
+  ["i-pwn", "pwn"],
+  ["i-tao", "tao"],
+  ["i-tay", "tay"],
+  ["i-tsu", "tsu"],
+  ["no-bok", "nb"],
+  ["no-nyn", "nn"],
+  ["sgn-be-fr", "sfb"],
+  ["sgn-be-nl", "vgt"],
+  ["sgn-ch-de", "sgg"],
+  ["zh-guoyu", "cmn"],
+  ["zh-hakka", "hak"],
+  ["zh-min", "zh-min"],
+  ["zh-min-nan", "nan"],
+  ["zh-xiang", "hsn"],
+]);
+
+const alpha = /^[A-Za-z]+$/;
+const alphanumeric = /^[A-Za-z0-9]+$/;
+
+const isVariant = (subtag: string): boolean =>
+  /^[A-Za-z0-9]{5,8}$/.test(subtag) || /^[0-9][A-Za-z0-9]{3}$/.test(subtag);
+
+// RFC 5646, section 2.1.  `Intl.getCanonicalLocales` supplies registry-aware
+// canonicalization; the parser covers valid private-use and grandfathered tags
+// that ECMA-402 locale identifiers intentionally exclude.
+const canonicalizeBcp47LanguageTag = (value: string): string | null => {
+  const tag = value.trim();
+  if (tag.length === 0 || tag.length > 64 || !/^[A-Za-z0-9-]+$/.test(tag)) return null;
+
+  const grandfathered = GRANDFATHERED_LANGUAGE_TAGS.get(tag.toLowerCase());
+  if (grandfathered !== undefined) return grandfathered;
+
+  const subtags = tag.split("-");
+  if (
+    subtags.some((subtag) => subtag.length === 0 || subtag.length > 8 || !alphanumeric.test(subtag))
+  ) {
+    return null;
+  }
+
+  if (subtags[0]?.toLowerCase() === "x") {
+    return subtags.length > 1
+      ? `x-${subtags
+          .slice(1)
+          .map((subtag) => subtag.toLowerCase())
+          .join("-")}`
+      : null;
+  }
+
+  const language = subtags[0];
+  if (
+    language === undefined ||
+    !(
+      (/^[A-Za-z]{2,3}$/.test(language) && language.length <= 3) ||
+      /^[A-Za-z]{4}$/.test(language) ||
+      /^[A-Za-z]{5,8}$/.test(language)
+    )
+  ) {
+    return null;
+  }
+
+  let index = 1;
+  const canonicalSubtags = [language.toLowerCase()];
+  if (language.length <= 3) {
+    let extlangs = 0;
+    while (extlangs < 3 && alpha.test(subtags[index] ?? "") && subtags[index]?.length === 3) {
+      canonicalSubtags.push(subtags[index]!.toLowerCase());
+      index += 1;
+      extlangs += 1;
+    }
+  }
+  if (alpha.test(subtags[index] ?? "") && subtags[index]?.length === 4) {
+    const script = subtags[index]!;
+    canonicalSubtags.push(`${script[0]?.toUpperCase() ?? ""}${script.slice(1).toLowerCase()}`);
+    index += 1;
+  }
+  if (
+    (alpha.test(subtags[index] ?? "") && subtags[index]?.length === 2) ||
+    /^[0-9]{3}$/.test(subtags[index] ?? "")
+  ) {
+    const region = subtags[index]!;
+    canonicalSubtags.push(alpha.test(region) ? region.toUpperCase() : region);
+    index += 1;
+  }
+  const variants = new Set<string>();
+  while (isVariant(subtags[index] ?? "")) {
+    const variant = subtags[index]!.toLowerCase();
+    if (variants.has(variant)) return null;
+    variants.add(variant);
+    canonicalSubtags.push(variant);
+    index += 1;
+  }
+  const singletons = new Set<string>();
+  while (/^[0-9A-WY-Za-wy-z]$/.test(subtags[index] ?? "")) {
+    const singleton = subtags[index]!.toLowerCase();
+    if (singletons.has(singleton)) return null;
+    singletons.add(singleton);
+    canonicalSubtags.push(singleton);
+    index += 1;
+    const extensionStart = index;
+    while (/^[A-Za-z0-9]{2,8}$/.test(subtags[index] ?? "")) {
+      canonicalSubtags.push(subtags[index]!.toLowerCase());
+      index += 1;
+    }
+    if (index === extensionStart) return null;
+  }
+  if (subtags[index]?.toLowerCase() === "x") {
+    canonicalSubtags.push("x");
+    index += 1;
+    const privateUseStart = index;
+    while (/^[A-Za-z0-9]{1,8}$/.test(subtags[index] ?? "")) {
+      canonicalSubtags.push(subtags[index]!.toLowerCase());
+      index += 1;
+    }
+    if (index === privateUseStart) return null;
+  }
+  if (index !== subtags.length) return null;
+
+  try {
+    return Intl.getCanonicalLocales(tag)[0] ?? null;
+  } catch {
+    // A grammar-valid tag can still be outside ECMA-402's locale subset. Keep
+    // its RFC 5646 casing canonical rather than rejecting valid BCP-47 input.
+    return canonicalSubtags.join("-");
+  }
+};
+
+export const Bcp47LanguageTagSchema = z
   .string()
   .trim()
-  .min(2)
+  .min(1)
   .max(64)
-  .regex(
-    /^(?:(?:[A-Za-z]{2,3}(?:-[A-Za-z]{3}(?:-[A-Za-z]{3}){0,2})?)|[A-Za-z]{4}|[A-Za-z]{5,8}|[0-9][A-Za-z0-9]{3})(?:-[A-Za-z0-9]{2,8})*$/,
-    "Expected a BCP-47 language tag.",
-  );
+  .superRefine((value, ctx) => {
+    if (canonicalizeBcp47LanguageTag(value) === null) {
+      ctx.addIssue({ code: "custom", message: "Expected a BCP-47 language tag." });
+    }
+  })
+  .transform((value) => canonicalizeBcp47LanguageTag(value) ?? value);
 
 export const DefaultTranscriptionLanguageSchema = Bcp47LanguageTagSchema;
 export type DefaultTranscriptionLanguage = z.infer<typeof DefaultTranscriptionLanguageSchema>;

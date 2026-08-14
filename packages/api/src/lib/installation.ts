@@ -68,7 +68,20 @@ type InstallationRow = {
 
 const parseSummary = (raw: unknown): InstallationSummary | null => {
   if (raw === null || raw === undefined) return null;
-  const parsed = InstallationSummarySchema.safeParse(raw);
+  // Summaries frozen before claimed processing used `messages` for every
+  // landed recording. New summaries reserve it for the approved/playable
+  // subset and add `allRecordings` plus `byStatus`. Presence of the new field
+  // is the persisted format marker, so historical eras remain truthful rather
+  // than silently rendering their total as a playable count.
+  const normalized =
+    typeof raw === "object" && !Array.isArray(raw) && !("allRecordings" in raw)
+      ? {
+          ...(raw as Record<string, unknown>),
+          allRecordings: (raw as Record<string, unknown>)["messages"],
+          messages: (raw as Record<string, unknown>)["messagesApproved"],
+        }
+      : raw;
+  const parsed = InstallationSummarySchema.safeParse(normalized);
   return parsed.success ? parsed.data : null;
 };
 

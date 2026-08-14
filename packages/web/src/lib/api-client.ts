@@ -942,6 +942,11 @@ export interface MessagesListOptions {
   readonly installationId?: InstallationScope;
 }
 
+// The status socket is process-local. This bounded REST refresh lets a console
+// connected to another API replica converge promptly when it misses a message
+// envelope, while the socket remains the low-latency path.
+const MESSAGE_INVALIDATION_POLL_MS = 5_000;
+
 export function useMessagesList(filter: MessageStatus | "all", options: MessagesListOptions = {}) {
   const limit = options.limit ?? 100;
   const statusFilter = MessageStatusSchema.safeParse(filter).success
@@ -956,18 +961,23 @@ export function useMessagesList(filter: MessageStatus | "all", options: Messages
         limit,
       }),
     enabled: options.enabled ?? true,
+    refetchInterval: MESSAGE_INVALIDATION_POLL_MS,
   });
 }
 
 export function useMessage(id: string) {
-  return useQuery({ queryKey: apiQueryKeys.message(id), queryFn: () => messages.get(id) });
+  return useQuery({
+    queryKey: apiQueryKeys.message(id),
+    queryFn: () => messages.get(id),
+    refetchInterval: MESSAGE_INVALIDATION_POLL_MS,
+  });
 }
 
 export function useMessageProcessingSummary() {
   return useQuery({
     queryKey: ["message-processing", "summary"],
     queryFn: messageProcessing.summary,
-    refetchInterval: 15_000,
+    refetchInterval: MESSAGE_INVALIDATION_POLL_MS,
   });
 }
 
@@ -985,6 +995,7 @@ export function useMessageTranscriptions(id: string) {
   return useQuery({
     queryKey: apiQueryKeys.transcriptions(id),
     queryFn: () => messages.transcriptions(id),
+    refetchInterval: MESSAGE_INVALIDATION_POLL_MS,
   });
 }
 

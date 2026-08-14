@@ -31,10 +31,12 @@ an opaque `leaseToken`, lease expiry, and the nullable installation
 `defaultTranscriptionLanguage`.
 
 The server stores only a SHA-256 digest of the lease token. Claiming uses a
-conditional update on the current message lease, so two devices cannot hold
-the same message concurrently. Expired leases are eligible again. A failed
-lease increments the message attempt counter; the third failure is terminal
-and is surfaced by `summary.terminal` instead of being retried forever.
+row lock plus conditional update on the current message lease, so two devices
+cannot hold the same message concurrently. The queue scan pages past completed
+or incompatible older rows rather than starving newer eligible work. Expired
+leases are eligible again. A failed lease increments the message attempt
+counter; the third failure is terminal and is surfaced by `summary.terminal`
+instead of being retried forever.
 
 `summary` returns `queued`, `leased`, `terminal`, and per-step `needs` counts.
 `queued` and `leased` count messages, while `needs` counts outstanding steps.
@@ -44,7 +46,13 @@ and is surfaced by `summary.terminal` instead of being retried forever.
 `POST /complete` accepts one or more of `transcription`, `translation`,
 `moderation`, and `review`, plus the lease token. It delegates transcript,
 translation, and moderation writes to the same stale-safe paths used by the
-existing message routes. A lost or expired lease returns `409 lease_lost`.
+existing message routes. The server binds every lease to the claimed
+processing snapshot and validates it under the message lock before accepting a
+result, so existing clients do not need to send a new snapshot field. A result
+superseded after the claim returns `409 claim_snapshot_stale`; a lost or
+expired lease returns `409 lease_lost`. The entire result set is atomic:
+validation failure in one component rolls back every component in that
+submission.
 
 For the conservative v1 client rule, a device evaluates audio locally:
 
@@ -62,8 +70,17 @@ server **never** deletes a recording based on this recommendation; existing
 
 Administrators can set `defaultTranscriptionLanguage` while creating or
 editing an installation. It is nullable and validated as a BCP-47 language
-tag (for example `en`, `en-CA`, or `fr-CA`). A claim echoes the current value
-so devices can choose it as their transcription default.
+tag (for example `en`, `en-CA`, `en-u-ca-gregory`, or `x-private`). The API
+canonicalizes its casing. A claim echoes the current value so devices can
+choose it as their transcription default.
+
+## Multi-replica updates
+
+Message envelopes are delivered immediately to WebSocket subscribers connected
+to the handling API replica. The web console also refreshes message lists,
+details, transcription history, and processing counts every five seconds, so a
+console attached to another replica converges promptly if it misses that
+process-local envelope.
 
 ## Statistics
 
@@ -73,3 +90,7 @@ and `byStatus` expose the complete recording population. Message average
 duration, hourly message buckets, and top-question counts use the approved
 subset. The default stats scope remains the active installation; a UUID and
 `installationId=all` continue to work.
+
+Frozen summaries from before these labels changed are normalized on read:
+their legacy `messages` total becomes `allRecordings`, while
+`messagesApproved` becomes the playable `messages` value.

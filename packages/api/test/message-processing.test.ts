@@ -8,6 +8,7 @@ vi.mock(
 
 import { createApp } from "../src/index.js";
 import { createHash } from "node:crypto";
+import { recordModerationResult, recordTranscriptionResult } from "../src/lib/ai/pipeline.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { resetFakeAzure } from "./support/fake-azure.js";
 import { resetFakeDb, seedMessage, store } from "./support/fake-db.js";
@@ -79,6 +80,41 @@ describe("operator message processing leases", () => {
     });
   });
 
+  it("pages past older completed rows to claim eligible work", async () => {
+    const app = createApp();
+    for (let index = 0; index < 100; index += 1) {
+      const message = seedMessage({
+        status: "pending",
+        createdAt: new Date(`2026-01-01T00:00:${String(index % 60).padStart(2, "0")}.000Z`),
+      });
+      const transcription = await recordTranscriptionResult({
+        messageId: message.id,
+        text: "already processed",
+        language: "en",
+        provider: "on_device",
+        processDownstream: false,
+      });
+      if (transcription.outcome !== "recorded") throw new Error("expected transcription");
+      const moderation = await recordModerationResult({
+        messageId: message.id,
+        transcriptionId: transcription.transcriptionId,
+        flagged: false,
+        recommendation: "approve",
+        maxScore: 0,
+        provider: "on_device",
+        createWhenMissing: true,
+      });
+      if (moderation.outcome !== "recorded") throw new Error("expected moderation");
+    }
+    const eligible = seedMessage({
+      status: "pending",
+      createdAt: new Date("2026-01-02T00:00:00.000Z"),
+    });
+
+    const leased = (await claim(app)).claim;
+    expect(leased?.message.id).toBe(eligible.id);
+  });
+
   it("persists a no-speech likely-hangup review without fabricating a transcript", async () => {
     const message = seedMessage({ status: "pending" });
     const app = createApp();
@@ -125,6 +161,56 @@ describe("operator message processing leases", () => {
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({ error: "lease_lost" });
     expect([...store.transcriptions.values()]).toHaveLength(0);
+  });
+
+  it("rejects a completion when the claimed processing snapshot changed", async () => {
+    const message = seedMessage({ status: "pending" });
+    const app = createApp();
+    const leased = (await claim(app)).claim;
+    if (leased === null) throw new Error("expected a claim");
+
+    await recordTranscriptionResult({
+      messageId: message.id,
+      text: "newer pipeline result",
+      language: "en",
+      provider: "on_device",
+      processDownstream: false,
+    });
+
+    const response = await app.request(`/v1/message-processing/${message.id}/complete`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({
+        leaseToken: leased.leaseToken,
+        transcription: { text: "stale device result" },
+      }),
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "claim_snapshot_stale" });
+    expect([...store.transcriptions.values()].map((row) => row.text)).toEqual([
+      "newer pipeline result",
+    ]);
+  });
+
+  it("rolls back every component when a later result is invalid", async () => {
+    const message = seedMessage({ status: "pending" });
+    const app = createApp();
+    const leased = (await claim(app)).claim;
+    if (leased === null) throw new Error("expected a claim");
+
+    const response = await app.request(`/v1/message-processing/${message.id}/complete`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({
+        leaseToken: leased.leaseToken,
+        transcription: { text: "speech" },
+        review: { classification: "unclear", recommendation: "review" },
+      }),
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "review_requires_no_speech" });
+    expect([...store.transcriptions.values()]).toHaveLength(0);
+    expect(store.messages.get(message.id)?.processingLeaseTokenHash).not.toBeNull();
   });
 
   it("stores a leased transcription, translation, and advisory moderation result", async () => {

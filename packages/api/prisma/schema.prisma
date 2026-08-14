@@ -194,6 +194,10 @@ model Message {
   processingLeasedAt       DateTime?
   processingLeasedById     String?
   processingLeasedBy       OperatorUser? @relation("MessageProcessingLeaseHolder", fields: [processingLeasedById], references: [id])
+  // Hash of the processing-relevant state at claim time. Completion validates
+  // it while holding the message row lock, rejecting a result superseded by a
+  // pipeline or operator write after the device received the lease.
+  processingSnapshotHash   String?
   processingAttemptCount   Int      @default(0)
   processingError          String?
   processingFailedAt       DateTime?

@@ -153,6 +153,49 @@ describe("installations", () => {
         });
         expect(invalid.status).toBe(400);
       });
+
+      it("canonicalizes extension and private-use BCP-47 tags", async () => {
+        const app = createApp();
+        const extension = await app.request(`/v1/installations/${DEFAULT_INSTALLATION_ID}`, {
+          method: "PATCH",
+          headers: jsonHeaders(adminHeaders()),
+          body: JSON.stringify({ defaultTranscriptionLanguage: "EN-u-ca-gregory" }),
+        });
+        expect(extension.status, await extension.clone().text()).toBe(200);
+        expect(await extension.json()).toMatchObject({
+          defaultTranscriptionLanguage: "en-u-ca-gregory",
+        });
+
+        const privateUse = await app.request(`/v1/installations/${DEFAULT_INSTALLATION_ID}`, {
+          method: "PATCH",
+          headers: jsonHeaders(adminHeaders()),
+          body: JSON.stringify({ defaultTranscriptionLanguage: "x-Private-Operator" }),
+        });
+        expect(privateUse.status, await privateUse.clone().text()).toBe(200);
+        expect(await privateUse.json()).toMatchObject({
+          defaultTranscriptionLanguage: "x-private-operator",
+        });
+
+        const grandfathered = await app.request(`/v1/installations/${DEFAULT_INSTALLATION_ID}`, {
+          method: "PATCH",
+          headers: jsonHeaders(adminHeaders()),
+          body: JSON.stringify({ defaultTranscriptionLanguage: "cel-gaulish" }),
+        });
+        expect(grandfathered.status, await grandfathered.clone().text()).toBe(200);
+        expect(await grandfathered.json()).toMatchObject({
+          defaultTranscriptionLanguage: "xtg-x-cel-gaulish",
+        });
+
+        const malformedExtension = await app.request(
+          `/v1/installations/${DEFAULT_INSTALLATION_ID}`,
+          {
+            method: "PATCH",
+            headers: jsonHeaders(adminHeaders()),
+            body: JSON.stringify({ defaultTranscriptionLanguage: "en-u" }),
+          },
+        );
+        expect(malformedExtension.status).toBe(400);
+      });
     });
 
     it("404s once the era has been closed and none restarted", async () => {
@@ -207,6 +250,46 @@ describe("installations", () => {
 
       // This era's questions are retired.
       expect(store.questions.get(question.id)?.status).toBe("archived");
+    });
+
+    it("normalizes frozen summaries written before recording labels changed", async () => {
+      const legacy = store.installations.get(DEFAULT_INSTALLATION_ID);
+      if (!legacy) throw new Error("expected default installation");
+      legacy.endedAt = new Date("2026-02-01T00:00:00.000Z");
+      legacy.summary = {
+        calls: 3,
+        messages: 12,
+        messagesApproved: 7,
+        messagesRejected: 4,
+        questions: 2,
+        events: 9,
+        recordedMs: 20_000,
+        firstActivityAt: null,
+        lastActivityAt: null,
+      };
+
+      const response = await createApp().request("/v1/installations", {
+        headers: operatorHeaders(),
+      });
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        items: Array<{
+          summary: {
+            messages: number;
+            allRecordings: number;
+            messagesApproved: number;
+            byStatus: Record<string, number>;
+          } | null;
+        }>;
+      };
+      expect(body.items[0]?.summary).toEqual(
+        expect.objectContaining({
+          messages: 7,
+          allRecordings: 12,
+          messagesApproved: 7,
+          byStatus: {},
+        }),
+      );
     });
 
     it("does not delete any data", async () => {

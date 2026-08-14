@@ -1421,7 +1421,9 @@ paths:
         Returns one hydrated, current-installation message compatible with the
         caller's local capabilities, or `claim: null` when none is available.
         Lease tokens are opaque, expire automatically, and are required by all
-        follow-up writes.
+        follow-up writes. The lease is bound to the message's processing
+        snapshot, so a result superseded by a pipeline or operator write is
+        rejected rather than overwriting newer state.
       tags: [message-processing]
       security:
         - operatorSession: []
@@ -1500,7 +1502,9 @@ paths:
       summary: Persist a leased device's processing result set and release it.
       description: |
         Transcription, translation, moderation, and no-speech review results
-        are optional parts of one result set. All suggestions are advisory:
+        are optional parts of one atomic result set. A stale claim snapshot or
+        invalid later component rejects the entire set without persisting an
+        earlier component. All suggestions are advisory:
         a `likely_hangup`/`delete` review never auto-deletes a recording.
       tags: [message-processing]
       security:
@@ -1517,7 +1521,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/MessageProcessingCompleteResponse" }
-        "409": { description: "lease lost, stale input, or installation ended" }
+        "409": { description: "lease lost, stale claim/input, or installation ended" }
 
   /v1/worker/messages/{id}/work:
     parameters:
@@ -2171,6 +2175,14 @@ components:
     Sha256:
       type: string
       pattern: "^[a-f0-9]{64}$"
+    Bcp47LanguageTag:
+      type: string
+      minLength: 1
+      maxLength: 64
+      format: bcp47
+      description: >-
+        RFC 5646 / BCP-47 language tag, including registered extensions and
+        private-use tags. The API returns its canonical casing.
     AudioRef:
       type: object
       required: [url, sha256, durationMs]
@@ -2342,7 +2354,10 @@ components:
           items: { type: string, enum: [transcription, translation, moderation, review] }
         leaseToken: { type: string, minLength: 32 }
         leaseExpiresAt: { type: string, format: date-time }
-        defaultTranscriptionLanguage: { type: [string, "null"], pattern: "^[A-Za-z0-9-]+$" }
+        defaultTranscriptionLanguage:
+          anyOf:
+            - $ref: "#/components/schemas/Bcp47LanguageTag"
+            - { type: "null" }
     MessageProcessingClaimResponse:
       type: object
       required: [claim]
@@ -2393,7 +2408,7 @@ components:
                 transcriptionId: { type: string, format: uuid }
                 expectedTranslationSha256: { type: [string, "null"], pattern: "^[0-9a-f]{64}$" }
                 translatedText: { type: string, minLength: 1, maxLength: 20000 }
-                translatedLanguage: { type: string, maxLength: 64 }
+                translatedLanguage: { $ref: "#/components/schemas/Bcp47LanguageTag" }
                 model: { type: [string, "null"], maxLength: 128 }
             moderation:
               type: object
@@ -2849,7 +2864,10 @@ components:
         name: { type: string }
         notes: { type: [string, "null"] }
         location: { type: [string, "null"] }
-        defaultTranscriptionLanguage: { type: [string, "null"], pattern: "^[A-Za-z0-9-]+$" }
+        defaultTranscriptionLanguage:
+          anyOf:
+            - $ref: "#/components/schemas/Bcp47LanguageTag"
+            - { type: "null" }
         startedAt: { type: string, format: date-time }
         endedAt: { type: [string, "null"], format: date-time }
         endedById: { type: [string, "null"] }
@@ -2906,7 +2924,10 @@ components:
         name: { type: string, minLength: 1, maxLength: 120 }
         notes: { type: [string, "null"], maxLength: 2000 }
         location: { type: [string, "null"], maxLength: 200 }
-        defaultTranscriptionLanguage: { type: [string, "null"], maxLength: 64 }
+        defaultTranscriptionLanguage:
+          anyOf:
+            - $ref: "#/components/schemas/Bcp47LanguageTag"
+            - { type: "null" }
         copyQuestions:
           type: boolean
           default: false
@@ -2920,7 +2941,10 @@ components:
         name: { type: string, minLength: 1, maxLength: 120 }
         notes: { type: [string, "null"], maxLength: 2000 }
         location: { type: [string, "null"], maxLength: 200 }
-        defaultTranscriptionLanguage: { type: [string, "null"], maxLength: 64 }
+        defaultTranscriptionLanguage:
+          anyOf:
+            - $ref: "#/components/schemas/Bcp47LanguageTag"
+            - { type: "null" }
 
     InstallationEnd:
       type: object

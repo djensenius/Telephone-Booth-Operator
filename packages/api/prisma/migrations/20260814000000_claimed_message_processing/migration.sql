@@ -17,6 +17,7 @@ ALTER TABLE "Message"
     ADD COLUMN "processingLeaseExpiresAt" TIMESTAMP(3),
     ADD COLUMN "processingLeasedAt" TIMESTAMP(3),
     ADD COLUMN "processingLeasedById" TEXT,
+    ADD COLUMN "processingSnapshotHash" TEXT,
     ADD COLUMN "processingAttemptCount" INTEGER NOT NULL DEFAULT 0,
     ADD COLUMN "processingError" TEXT,
     ADD COLUMN "processingFailedAt" TIMESTAMP(3),
