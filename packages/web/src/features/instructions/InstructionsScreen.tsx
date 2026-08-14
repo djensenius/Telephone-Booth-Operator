@@ -3,6 +3,8 @@ import type { FormEvent, JSX } from "react";
 import type { InstructionStatus } from "@telephone-booth-operator/shared";
 import { GlassPanel } from "../../components/booth/index.js";
 import {
+  AUDIO_UPLOAD_ACCEPT,
+  audioUploadContentType,
   sha256Hex,
   uploadBlobToSas,
   uploads,
@@ -47,16 +49,17 @@ export function NewInstructionDialog({
     try {
       setStatus("Reserving a clean line for the instruction audio…");
       const sha256 = await sha256Hex(file);
+      const contentType = audioUploadContentType(file);
       const slot = await uploads.sas({
         kind: "instruction-audio",
         sha256,
         sizeBytes: file.size,
-        contentType: "audio/flac",
+        contentType,
       });
       if (slot.audioFileId === undefined)
         throw new Error("Upload slot did not include an audio file id.");
       setStatus("Sending the instruction audio up the wire…");
-      await uploadBlobToSas(slot.uploadUrl, file);
+      await uploadBlobToSas(slot.uploadUrl, file, contentType);
       setStatus("Filing the instruction card…");
       await createInstruction.mutateAsync({
         description: description.trim() || undefined,
@@ -91,10 +94,10 @@ export function NewInstructionDialog({
             />
           </label>
           <label>
-            Audio file (FLAC)
+            Audio file
             <input
               type="file"
-              accept="audio/flac,.flac"
+              accept={AUDIO_UPLOAD_ACCEPT}
               onChange={(event) => setFile(event.currentTarget.files?.[0] ?? null)}
               required
             />

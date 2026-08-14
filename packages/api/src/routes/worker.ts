@@ -115,7 +115,7 @@ workerRouter.get("/messages/:id/work", zValidator("param", idParamSchema), async
         sha256: audio.sha256,
         durationMs: audio.durationMs,
         contentType: audio.contentType,
-        filename: `${audio.sha256}.flac`,
+        filename: audio.blobKey.split("/").at(-1) ?? audio.sha256,
       }
     : null;
 

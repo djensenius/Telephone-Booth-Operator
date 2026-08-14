@@ -61,7 +61,8 @@ public for visitors who only need lore and credits.
   to polling.
 - Rotary digit **2** → **Messages** reviews recordings, supports filters,
   playback, downloads, detail view, local listened marks, and bulk delete.
-- Rotary digit **3** → **Questions** uploads FLAC prompt audio, files prompt
+- Rotary digit **3** → **Questions** uploads FLAC, WAV, AIFF, MP3, M4A, or Ogg
+  prompt audio, files prompt
   cards, previews audio, and retires prompts.
 - Rotary digit **4** → **Tokens** issues API tokens (**admin-only**). Copy the
   plaintext token immediately; it is shown once. See
