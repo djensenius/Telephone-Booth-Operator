@@ -9,17 +9,33 @@ import type { AuthVariables } from "../lib/session.js";
 const blobNameFor = (
   kind: "message" | "question-audio" | "instruction-audio",
   sha256: string,
+  contentType: string,
 ): string => {
   const prefix =
     kind === "message" ? "messages" : kind === "question-audio" ? "questions" : "instructions";
-  return `${prefix}/${sha256.slice(0, 2)}/${sha256}.flac`;
+  const extension: Record<string, string> = {
+    "audio/flac": "flac",
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+    "audio/aiff": "aiff",
+    "audio/x-aiff": "aiff",
+    "audio/mpeg": "mp3",
+    "audio/mp4": "m4a",
+    "audio/x-m4a": "m4a",
+    "audio/ogg": "ogg",
+  };
+  return `${prefix}/${sha256.slice(0, 2)}/${sha256}.${extension[contentType]}`;
 };
 
 export const uploadsRouter = new Hono<{ Variables: AuthVariables }>();
 
 uploadsRouter.post("/sas", zValidator("json", UploadSasRequestSchema), async (c) => {
   const body = c.req.valid("json");
-  const blobName = blobNameFor(body.kind, body.sha256);
+  const existing =
+    body.kind === "question-audio" || body.kind === "instruction-audio"
+      ? await db.file.findUnique({ where: { sha256: body.sha256 } })
+      : null;
+  const blobName = existing?.blobKey ?? blobNameFor(body.kind, body.sha256, body.contentType);
   // The SAS URL itself is a short-lived credential and is never recorded.
   recordAudit(c, {
     action: "upload.sas.issue",
@@ -30,7 +46,6 @@ uploadsRouter.post("/sas", zValidator("json", UploadSasRequestSchema), async (c)
 
   let audioFileId: string | undefined;
   if (body.kind === "question-audio" || body.kind === "instruction-audio") {
-    const existing = await db.file.findUnique({ where: { sha256: body.sha256 } });
     const file =
       existing ??
       (await db.file.create({

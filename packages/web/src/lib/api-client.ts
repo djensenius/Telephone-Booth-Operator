@@ -238,11 +238,38 @@ export async function sha256Hex(file: Blob): Promise<string> {
   return Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export async function uploadBlobToSas(uploadUrl: string, file: Blob): Promise<void> {
+const AUDIO_CONTENT_TYPES_BY_EXTENSION = {
+  aif: "audio/aiff",
+  aiff: "audio/aiff",
+  flac: "audio/flac",
+  m4a: "audio/mp4",
+  mp3: "audio/mpeg",
+  ogg: "audio/ogg",
+  wav: "audio/wav",
+} as const;
+
+export function audioUploadContentType(file: File): UploadSasRequest["contentType"] {
+  const parsedType = UploadSasRequestSchema.shape.contentType.safeParse(file.type.toLowerCase());
+  if (parsedType.success) return parsedType.data;
+
+  const extension = file.name.split(".").at(-1)?.toLowerCase();
+  if (extension && extension in AUDIO_CONTENT_TYPES_BY_EXTENSION) {
+    return AUDIO_CONTENT_TYPES_BY_EXTENSION[
+      extension as keyof typeof AUDIO_CONTENT_TYPES_BY_EXTENSION
+    ];
+  }
+  throw new Error("Unsupported audio file type.");
+}
+
+export async function uploadBlobToSas(
+  uploadUrl: string,
+  file: Blob,
+  contentType: UploadSasRequest["contentType"] = "audio/flac",
+): Promise<void> {
   const response = await fetch(uploadUrl, {
     method: "PUT",
     headers: {
-      "Content-Type": file.type || "audio/flac",
+      "Content-Type": contentType,
       "x-ms-blob-type": "BlockBlob",
     },
     body: file,

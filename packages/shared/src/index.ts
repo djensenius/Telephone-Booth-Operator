@@ -477,11 +477,24 @@ export const MessageCompleteSchema = z.object({
 });
 export type MessageComplete = z.infer<typeof MessageCompleteSchema>;
 
+export const AudioUploadContentTypeSchema = z.enum([
+  "audio/flac",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/aiff",
+  "audio/x-aiff",
+  "audio/mpeg",
+  "audio/mp4",
+  "audio/x-m4a",
+  "audio/ogg",
+]);
+export type AudioUploadContentType = z.infer<typeof AudioUploadContentTypeSchema>;
+
 export const UploadSasRequestSchema = z.object({
   kind: z.enum(["message", "question-audio", "instruction-audio"]),
   sha256: Sha256Schema,
   sizeBytes: z.number().int().positive(),
-  contentType: z.literal("audio/flac"),
+  contentType: AudioUploadContentTypeSchema,
 });
 export type UploadSasRequest = z.infer<typeof UploadSasRequestSchema>;
 

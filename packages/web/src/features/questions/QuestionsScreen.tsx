@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { FormEvent, JSX } from "react";
 import { GlassPanel } from "../../components/booth/index.js";
 import {
+  audioUploadContentType,
   sha256Hex,
   uploadBlobToSas,
   uploads,
@@ -50,16 +51,17 @@ export function NewQuestionDialog({
     if (file === null) return;
     setStatus("Reserving a clean line for the audio…");
     const sha256 = await sha256Hex(file);
+    const contentType = audioUploadContentType(file);
     const slot = await uploads.sas({
       kind: "question-audio",
       sha256,
       sizeBytes: file.size,
-      contentType: "audio/flac",
+      contentType,
     });
     if (slot.audioFileId === undefined)
       throw new Error("Upload slot did not include an audio file id.");
     setStatus("Sending the question audio up the wire…");
-    await uploadBlobToSas(slot.uploadUrl, file);
+    await uploadBlobToSas(slot.uploadUrl, file, contentType);
     setStatus("Filing the prompt card…");
     await createQuestion.mutateAsync({ prompt, audioFileId: slot.audioFileId });
     setPrompt("");
@@ -88,10 +90,10 @@ export function NewQuestionDialog({
             />
           </label>
           <label>
-            Audio file (FLAC)
+            Audio file
             <input
               type="file"
-              accept="audio/flac,.flac"
+              accept=".flac,.wav,.aif,.aiff,.mp3,.m4a,.ogg,audio/*"
               onChange={(event) => setFile(event.currentTarget.files?.[0] ?? null)}
               required
             />

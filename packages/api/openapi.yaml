@@ -2442,7 +2442,22 @@ components:
         kind: { type: string, enum: [message, question-audio, instruction-audio] }
         sha256: { $ref: "#/components/schemas/Sha256" }
         sizeBytes: { type: integer, minimum: 1 }
-        contentType: { type: string, enum: [audio/flac] }
+        contentType:
+          {
+            type: string,
+            enum:
+              [
+                audio/flac,
+                audio/wav,
+                audio/x-wav,
+                audio/aiff,
+                audio/x-aiff,
+                audio/mpeg,
+                audio/mp4,
+                audio/x-m4a,
+                audio/ogg,
+              ],
+          }
     UploadSlot:
       type: object
       required: [uploadUrl, blobName, expiresAt]

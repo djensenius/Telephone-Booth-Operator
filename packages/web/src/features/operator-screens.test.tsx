@@ -552,8 +552,8 @@ describe("Questions feature", () => {
     fireEvent.change(screen.getByLabelText("Prompt"), {
       target: { value: "Who lifted the receiver?" },
     });
-    fireEvent.change(screen.getByLabelText("Audio file (FLAC)"), {
-      target: { files: [new File(["audio"], "q.flac", { type: "audio/flac" })] },
+    fireEvent.change(screen.getByLabelText("Audio file"), {
+      target: { files: [new File(["audio"], "q.wav", { type: "audio/wav" })] },
     });
     const form = screen.getByRole("dialog", { name: "New question" }).querySelector("form");
     expect(form).not.toBeNull();
