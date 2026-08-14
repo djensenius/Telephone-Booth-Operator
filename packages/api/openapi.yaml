@@ -1517,7 +1517,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/MessageProcessingCompleteResponse" }
-        "409": { description: lease lost, stale input, or installation ended }
+        "409": { description: "lease lost, stale input, or installation ended" }
 
   /v1/worker/messages/{id}/work:
     parameters:
