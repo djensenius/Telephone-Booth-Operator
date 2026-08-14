@@ -1060,19 +1060,24 @@ export const fakeDb = {
       const selected = typeof take === "number" ? instructions.slice(0, take) : instructions;
       return include?.audio ? selected.map(attachAudio) : selected;
     },
+    count: async ({ where = {} }: { where?: Record<string, unknown> } = {}) =>
+      [...store.instructions.values()].filter((instruction) => matchesWhere(instruction, where))
+        .length,
     findFirst: async ({
       where = {},
+      skip = 0,
       include,
       orderBy,
     }: {
       where?: Record<string, unknown>;
+      skip?: number;
       include?: { audio?: boolean };
       orderBy?: CreatedIdOrder;
     }) => {
       const instruction = sortByCreatedIdOrder(
         [...store.instructions.values()].filter((item) => matchesWhere(item, where)),
         orderBy,
-      )[0];
+      )[skip];
       if (!instruction) return null;
       return include?.audio ? attachAudio(instruction) : instruction;
     },

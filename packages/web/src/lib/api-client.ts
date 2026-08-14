@@ -21,6 +21,7 @@ import {
   InstructionCreateSchema,
   InstructionSchema,
   InstructionStatusSchema,
+  InstructionUpdateSchema,
   MessageSchema,
   MessageDecisionSchema,
   MessageProcessingClaimRequestSchema,
@@ -65,6 +66,7 @@ import type {
   Instruction,
   InstructionCreate,
   InstructionStatus,
+  InstructionUpdate,
   Message,
   MessageDecision,
   MessageProcessingClaimRequest,
@@ -350,6 +352,12 @@ export const instructions = {
     apiFetch<Instruction>("/v1/instructions", {
       method: "POST",
       body: InstructionCreateSchema.parse(input),
+      schema: InstructionSchema,
+    }),
+  update: (id: string, input: InstructionUpdate) =>
+    apiFetch<Instruction>(`/v1/instructions/${id}`, {
+      method: "PATCH",
+      body: InstructionUpdateSchema.parse(input),
       schema: InstructionSchema,
     }),
   activate: (id: string) =>
@@ -946,6 +954,15 @@ export function useDeleteInstruction() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: instructions.delete,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["instructions", "list"] }),
+  });
+}
+
+export function useUpdateInstruction() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { readonly id: string; readonly input: InstructionUpdate }) =>
+      instructions.update(id, input),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["instructions", "list"] }),
   });
 }

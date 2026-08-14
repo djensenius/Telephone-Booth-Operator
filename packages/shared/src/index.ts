@@ -202,6 +202,11 @@ export const InstructionCreateSchema = z.object({
 });
 export type InstructionCreate = z.infer<typeof InstructionCreateSchema>;
 
+export const InstructionUpdateSchema = z.object({
+  description: z.string().max(280).nullable(),
+});
+export type InstructionUpdate = z.infer<typeof InstructionUpdateSchema>;
+
 export const MessageSchema = z.object({
   id: z.guid(),
   status: MessageStatusSchema,

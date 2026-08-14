@@ -665,6 +665,7 @@ const publicV1Route = (path: string, method: string): boolean => {
   if (method === "POST" && path === "/v1/events") return true;
   if (method === "PUT" && path === "/v1/system") return true;
   if (method === "GET" && path === "/v1/questions/random") return true;
+  if (method === "GET" && /^\/v1\/instructions\/random\/?$/.test(path)) return true;
   if (method === "GET" && /^\/v1\/instructions\/current\/?$/.test(path)) return true;
   if (method === "GET" && path === "/v1/messages/random") return true;
   if (method === "POST" && path === "/v1/messages") return true;

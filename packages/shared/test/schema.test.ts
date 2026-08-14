@@ -5,6 +5,7 @@ import {
   CallSessionSchema,
   InstructionSchema,
   InstructionStatusSchema,
+  InstructionUpdateSchema,
   QuestionSchema,
   QuestionStatusSchema,
 } from "../src/index.js";
@@ -48,6 +49,16 @@ describe("BoothStatusSchema", () => {
       expect(InstructionSchema.parse(instruction).status).toBe("active");
       const { status: _status, ...withoutStatus } = instruction;
       expect(() => InstructionSchema.parse(withoutStatus)).toThrow();
+    });
+
+    it("accepts description edits and clearing", () => {
+      expect(InstructionUpdateSchema.parse({ description: "Updated" })).toEqual({
+        description: "Updated",
+      });
+      expect(InstructionUpdateSchema.parse({ description: null })).toEqual({
+        description: null,
+      });
+      expect(() => InstructionUpdateSchema.parse({})).toThrow();
     });
   });
 

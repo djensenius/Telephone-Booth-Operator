@@ -274,9 +274,24 @@ paths:
         "404": { description: audio file not found }
         "409": { description: audio already attached }
 
+  /v1/instructions/random:
+    get:
+      summary: A random active instruction clip for the phone client to play.
+      tags: [instructions]
+      security:
+        - apiToken: []
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Instruction" }
+        "404": { description: no instructions available }
+
   /v1/instructions/current:
     get:
-      summary: The most recent active instruction clip for the phone client to play.
+      summary: Compatibility alias for a random active instruction clip.
+      deprecated: true
       tags: [instructions]
       security:
         - apiToken: []
@@ -291,6 +306,24 @@ paths:
   /v1/instructions/{id}:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      summary: Update an instruction clip's description.
+      tags: [instructions]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InstructionUpdate" }
+      responses:
+        "200":
+          description: updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Instruction" }
+        "404": { description: not found }
     delete:
       summary: Delete an instruction clip.
       tags: [instructions]
@@ -2242,6 +2275,11 @@ components:
           allOf:
             - $ref: "#/components/schemas/InstructionStatus"
           description: Defaults to active when omitted.
+    InstructionUpdate:
+      type: object
+      required: [description]
+      properties:
+        description: { anyOf: [{ type: string, maxLength: 280 }, { type: "null" }] }
     InstructionList:
       type: object
       required: [items, nextCursor]
