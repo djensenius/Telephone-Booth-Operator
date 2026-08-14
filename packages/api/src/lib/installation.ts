@@ -58,6 +58,7 @@ type InstallationRow = {
   name: string;
   notes: string | null;
   location: string | null;
+  defaultTranscriptionLanguage: string | null;
   startedAt: Date;
   endedAt: Date | null;
   endedById: string | null;
@@ -67,7 +68,20 @@ type InstallationRow = {
 
 const parseSummary = (raw: unknown): InstallationSummary | null => {
   if (raw === null || raw === undefined) return null;
-  const parsed = InstallationSummarySchema.safeParse(raw);
+  // Summaries frozen before claimed processing used `messages` for every
+  // landed recording. New summaries reserve it for the approved/playable
+  // subset and add `allRecordings` plus `byStatus`. Presence of the new field
+  // is the persisted format marker, so historical eras remain truthful rather
+  // than silently rendering their total as a playable count.
+  const normalized =
+    typeof raw === "object" && !Array.isArray(raw) && !("allRecordings" in raw)
+      ? {
+          ...(raw as Record<string, unknown>),
+          allRecordings: (raw as Record<string, unknown>)["messages"],
+          messages: (raw as Record<string, unknown>)["messagesApproved"],
+        }
+      : raw;
+  const parsed = InstallationSummarySchema.safeParse(normalized);
   return parsed.success ? parsed.data : null;
 };
 
@@ -76,6 +90,7 @@ export const serializeInstallation = (row: InstallationRow): InstallationDto => 
   name: row.name,
   notes: row.notes,
   location: row.location,
+  defaultTranscriptionLanguage: row.defaultTranscriptionLanguage,
   startedAt: row.startedAt.toISOString(),
   endedAt: row.endedAt ? row.endedAt.toISOString() : null,
   endedById: row.endedById,
@@ -236,6 +251,7 @@ export const computeInstallationSummary = async (
     messages,
     messagesApproved,
     messagesRejected,
+    statusRows,
     questions,
     events,
     durations,
@@ -246,6 +262,10 @@ export const computeInstallationSummary = async (
     client.message.count({ where: landedMessages }),
     client.message.count({ where: { ...where, status: "approved" } }),
     client.message.count({ where: { ...where, status: "rejected" } }),
+    client.message.findMany({
+      where: landedMessages,
+      select: { status: true },
+    }),
     client.question.count({ where }),
     client.boothEvent.count({ where }),
     client.message.findMany({
@@ -265,10 +285,16 @@ export const computeInstallationSummary = async (
   ]);
 
   const recordedMs = durations.reduce((total, row) => total + (row.audio?.durationMs ?? 0), 0);
+  const byStatus: Record<string, number> = {};
+  for (const row of statusRows) {
+    byStatus[row.status] = (byStatus[row.status] ?? 0) + 1;
+  }
 
   return {
     calls,
-    messages,
+    messages: messagesApproved,
+    allRecordings: messages,
+    byStatus,
     messagesApproved,
     messagesRejected,
     questions,

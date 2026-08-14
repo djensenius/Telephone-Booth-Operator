@@ -19,6 +19,7 @@ import {
   kickPipelineForMessage,
   recordModerationResult,
   recordTranscriptionResult,
+  recordTranslationResult,
   runModeration,
   runTranscription,
 } from "../lib/ai/pipeline.js";
@@ -787,67 +788,17 @@ messagesRouter.post(
         model: model ?? null,
       },
     });
-    const result = await db.$transaction(async (tx) => {
-      if (!(await lockMessageForReview(tx, id))) return { outcome: "not_found" } as const;
-      const latest = await tx.transcription.findFirst({
-        where: { messageId: id, status: "succeeded" },
-        orderBy: { createdAt: "desc" },
-      });
-      if (!latest) return { outcome: "no_transcription" } as const;
-      const targetTranscriptionId = transcriptionId ?? expectedTranscriptionId;
-      if (targetTranscriptionId && latest.id !== targetTranscriptionId) {
-        return { outcome: "stale_transcription" } as const;
-      }
-      if ("expectedTranslationSha256" in data) {
-        const currentTranslation =
-          latest.translationStatus === "succeeded" &&
-          typeof latest.translatedText === "string" &&
-          latest.translatedText.trim().length > 0
-            ? normalizeTranslationText(latest.translatedText)
-            : null;
-        const currentTranslationSha256 =
-          currentTranslation === null
-            ? null
-            : createHash("sha256").update(currentTranslation, "utf8").digest("hex");
-        if (currentTranslationSha256 !== expectedTranslationSha256) {
-          return { outcome: "stale_translation" } as const;
-        }
-      }
-      const previousReviewText =
-        latest.translationStatus === "succeeded" &&
-        typeof latest.translatedText === "string" &&
-        latest.translatedText.trim().length > 0
-          ? normalizeTranslationText(latest.translatedText)
-          : latest.text?.trim();
-      if (previousReviewText !== normalizedTranslation) {
-        await tx.moderation.updateMany({
-          where: {
-            messageId: id,
-            OR: [{ transcriptionId: latest.id }, { transcriptionId: null }],
-            status: { in: ["pending", "succeeded"] },
-          },
-          data: {
-            status: "failed",
-            error: "superseded_by_translation",
-            completedAt: new Date(),
-          },
-        });
-      }
-      const updated = await tx.transcription.update({
-        where: { id: latest.id },
-        data: {
-          translationStatus: "succeeded",
-          translatedText: normalizedTranslation,
-          translatedLanguage: translatedLanguage ?? null,
-          // A targeted submission comes from the operator's on-device pipeline.
-          // Untargeted submissions remain human corrections.
-          translationProvider: transcriptionId ? "on_device" : null,
-          translationModel: transcriptionId ? (model ?? null) : null,
-          translationError: null,
-          translationCompletedAt: new Date(),
-        },
-      });
-      return { outcome: "recorded", transcription: updated } as const;
+    const result = await recordTranslationResult({
+      messageId: id,
+      ...(transcriptionId ? { transcriptionId } : {}),
+      ...(expectedTranscriptionId ? { expectedTranscriptionId } : {}),
+      ...("expectedTranslationSha256" in data
+        ? { expectedTranslationSha256: expectedTranslationSha256 ?? null }
+        : {}),
+      translatedText: normalizedTranslation,
+      translatedLanguage: translatedLanguage ?? null,
+      model: model ?? null,
+      ...(transcriptionId ? { provider: "on_device" as const } : {}),
     });
     if (result.outcome === "not_found") return c.json({ error: "not_found" }, 404);
     if (result.outcome === "no_transcription") {
@@ -859,8 +810,11 @@ messagesRouter.post(
     if (result.outcome === "stale_translation") {
       return c.json({ error: "stale_translation" }, 409);
     }
-    recordAudit(c, { metadata: { transcriptionId: result.transcription.id } });
-    await broadcastMessageById(id);
-    return c.json(serializeTranscription(result.transcription));
+    const transcription = await db.transcription.findUnique({
+      where: { id: result.transcriptionId },
+    });
+    if (!transcription) return c.json({ error: "not_found" }, 404);
+    recordAudit(c, { metadata: { transcriptionId: transcription.id } });
+    return c.json(serializeTranscription(transcription));
   },
 );

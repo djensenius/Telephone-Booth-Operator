@@ -23,6 +23,13 @@ import {
   InstructionStatusSchema,
   MessageSchema,
   MessageDecisionSchema,
+  MessageProcessingClaimRequestSchema,
+  MessageProcessingClaimResponseSchema,
+  MessageProcessingCompleteSchema,
+  MessageProcessingFailSchema,
+  MessageProcessingHeartbeatSchema,
+  MessageProcessingLeaseTokenSchema,
+  MessageProcessingSummarySchema,
   MessageStatusSchema,
   MetricFilterCreateSchema,
   MetricFilterSchema,
@@ -60,6 +67,12 @@ import type {
   InstructionStatus,
   Message,
   MessageDecision,
+  MessageProcessingClaimRequest,
+  MessageProcessingClaimResponse,
+  MessageProcessingComplete,
+  MessageProcessingFail,
+  MessageProcessingHeartbeat,
+  MessageProcessingSummary,
   MessageStatus,
   MetricFilter,
   MetricFilterCreate,
@@ -356,6 +369,39 @@ export const messages = {
       method: "POST",
       body: MessageDecisionSchema.parse(input),
       schema: MessageSchema,
+    }),
+};
+
+export const messageProcessing = {
+  summary: () =>
+    apiFetch<MessageProcessingSummary>("/v1/message-processing/summary", {
+      schema: MessageProcessingSummarySchema,
+    }),
+  claim: (input: Partial<MessageProcessingClaimRequest> = {}) =>
+    apiFetch<MessageProcessingClaimResponse>("/v1/message-processing/claim", {
+      method: "POST",
+      body: MessageProcessingClaimRequestSchema.parse(input),
+      schema: MessageProcessingClaimResponseSchema,
+    }),
+  heartbeat: (id: string, input: MessageProcessingHeartbeat) =>
+    apiFetch<{ ok: boolean; leaseExpiresAt: string }>(`/v1/message-processing/${id}/heartbeat`, {
+      method: "POST",
+      body: MessageProcessingHeartbeatSchema.parse(input),
+    }),
+  complete: (id: string, input: MessageProcessingComplete) =>
+    apiFetch<{ message: Message; needs: string[] }>(`/v1/message-processing/${id}/complete`, {
+      method: "POST",
+      body: MessageProcessingCompleteSchema.parse(input),
+    }),
+  release: (id: string, input: { readonly leaseToken: string }) =>
+    apiFetch<void>(`/v1/message-processing/${id}/release`, {
+      method: "POST",
+      body: MessageProcessingLeaseTokenSchema.parse(input),
+    }),
+  fail: (id: string, input: MessageProcessingFail) =>
+    apiFetch<{ ok: boolean; terminal: boolean }>(`/v1/message-processing/${id}/fail`, {
+      method: "POST",
+      body: MessageProcessingFailSchema.parse(input),
     }),
 };
 
@@ -896,6 +942,11 @@ export interface MessagesListOptions {
   readonly installationId?: InstallationScope;
 }
 
+// The status socket is process-local. This bounded REST refresh lets a console
+// connected to another API replica converge promptly when it misses a message
+// envelope, while the socket remains the low-latency path.
+const MESSAGE_INVALIDATION_POLL_MS = 5_000;
+
 export function useMessagesList(filter: MessageStatus | "all", options: MessagesListOptions = {}) {
   const limit = options.limit ?? 100;
   const statusFilter = MessageStatusSchema.safeParse(filter).success
@@ -910,11 +961,24 @@ export function useMessagesList(filter: MessageStatus | "all", options: Messages
         limit,
       }),
     enabled: options.enabled ?? true,
+    refetchInterval: MESSAGE_INVALIDATION_POLL_MS,
   });
 }
 
 export function useMessage(id: string) {
-  return useQuery({ queryKey: apiQueryKeys.message(id), queryFn: () => messages.get(id) });
+  return useQuery({
+    queryKey: apiQueryKeys.message(id),
+    queryFn: () => messages.get(id),
+    refetchInterval: MESSAGE_INVALIDATION_POLL_MS,
+  });
+}
+
+export function useMessageProcessingSummary() {
+  return useQuery({
+    queryKey: ["message-processing", "summary"],
+    queryFn: messageProcessing.summary,
+    refetchInterval: MESSAGE_INVALIDATION_POLL_MS,
+  });
 }
 
 export function useDeleteMessage() {
@@ -931,6 +995,7 @@ export function useMessageTranscriptions(id: string) {
   return useQuery({
     queryKey: apiQueryKeys.transcriptions(id),
     queryFn: () => messages.transcriptions(id),
+    refetchInterval: MESSAGE_INVALIDATION_POLL_MS,
   });
 }
 

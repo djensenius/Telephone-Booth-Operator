@@ -262,8 +262,10 @@ function MessagesSection({ overview }: OverviewProps): JSX.Element {
       <header className="stats-panel__header">
         <h2>Messages</h2>
         <p>
-          {fmtNumber(messages.total)} left · avg {fmtDurationMs(messages.averageDurationMs)} ·{" "}
-          {fmtNumber(playback.totalPlaybacks)} booth playbacks
+          {fmtNumber(messages.approved ?? messages.total)} approved/playable ·{" "}
+          {fmtNumber(messages.allRecordings ?? messages.total)} recordings · avg{" "}
+          {fmtDurationMs(messages.averageDurationMs)} · {fmtNumber(playback.totalPlaybacks)} booth
+          playbacks
         </p>
       </header>
       <h3>By status</h3>
@@ -377,7 +379,7 @@ function TopQuestionsSection({ overview }: OverviewProps): JSX.Element {
     <GlassPanel title="Top questions" className="stats-panel">
       <header className="stats-panel__header">
         <h2>Top questions</h2>
-        <p>Sorted by number of messages received in this window.</p>
+        <p>Sorted by approved/playable messages in this window.</p>
       </header>
       <ol className="stats-top-questions">
         {topQuestions.map((q) => (

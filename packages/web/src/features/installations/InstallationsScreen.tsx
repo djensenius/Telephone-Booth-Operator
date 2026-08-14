@@ -85,7 +85,8 @@ function FrozenSummary({ summary }: { readonly summary: InstallationSummary }): 
   return (
     <div className="stats-tiles installations-summary">
       <SummaryTile label="Calls" value={fmtNumber(summary.calls)} />
-      <SummaryTile label="Messages" value={fmtNumber(summary.messages)} />
+      <SummaryTile label="Playable messages" value={fmtNumber(summary.messages)} />
+      <SummaryTile label="All recordings" value={fmtNumber(summary.allRecordings)} />
       <SummaryTile label="Approved" value={fmtNumber(summary.messagesApproved)} />
       <SummaryTile label="Rejected" value={fmtNumber(summary.messagesRejected)} />
       <SummaryTile label="Questions" value={fmtNumber(summary.questions)} />
@@ -278,11 +279,15 @@ function EditActiveInstallationForm({
   const [name, setName] = useState(installation.name);
   const [notes, setNotes] = useState(installation.notes ?? "");
   const [location, setLocation] = useState(installation.location ?? "");
+  const [defaultTranscriptionLanguage, setDefaultTranscriptionLanguage] = useState(
+    installation.defaultTranscriptionLanguage ?? "",
+  );
 
   const reset = (): void => {
     setName(installation.name);
     setNotes(installation.notes ?? "");
     setLocation(installation.location ?? "");
+    setDefaultTranscriptionLanguage(installation.defaultTranscriptionLanguage ?? "");
   };
 
   const cancel = (): void => {
@@ -302,6 +307,10 @@ function EditActiveInstallationForm({
           name: trimmed,
           notes: notes.trim().length === 0 ? null : notes.trim(),
           location: location.trim().length === 0 ? null : location.trim(),
+          defaultTranscriptionLanguage:
+            defaultTranscriptionLanguage.trim().length === 0
+              ? null
+              : defaultTranscriptionLanguage.trim(),
         },
       },
       { onSuccess: () => setEditing(false) },
@@ -358,6 +367,16 @@ function EditActiveInstallationForm({
           onChange={(event) => setLocation(event.currentTarget.value)}
         />
       </label>
+      <label>
+        Default transcription language (optional BCP-47 tag)
+        <input
+          type="text"
+          value={defaultTranscriptionLanguage}
+          maxLength={64}
+          placeholder="en-CA"
+          onChange={(event) => setDefaultTranscriptionLanguage(event.currentTarget.value)}
+        />
+      </label>
       {updateInstallation.isError ? (
         <p className="settings-status settings-status--error" role="status">
           {errorMessage(updateInstallation.error, "Could not update the installation.")}
@@ -380,6 +399,7 @@ function StartInstallationForm(): JSX.Element {
   const [name, setName] = useState("");
   const [notes, setNotes] = useState("");
   const [location, setLocation] = useState("");
+  const [defaultTranscriptionLanguage, setDefaultTranscriptionLanguage] = useState("");
   const [copyQuestions, setCopyQuestions] = useState(false);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
@@ -390,6 +410,10 @@ function StartInstallationForm(): JSX.Element {
         name: name.trim(),
         notes: notes.trim().length === 0 ? null : notes.trim(),
         location: location.trim().length === 0 ? null : location.trim(),
+        defaultTranscriptionLanguage:
+          defaultTranscriptionLanguage.trim().length === 0
+            ? null
+            : defaultTranscriptionLanguage.trim(),
         copyQuestions,
       },
       {
@@ -397,6 +421,7 @@ function StartInstallationForm(): JSX.Element {
           setName("");
           setNotes("");
           setLocation("");
+          setDefaultTranscriptionLanguage("");
           setCopyQuestions(false);
         },
       },
@@ -440,6 +465,16 @@ function StartInstallationForm(): JSX.Element {
           />
         </label>
         <label>
+          Default transcription language (optional BCP-47 tag)
+          <input
+            type="text"
+            value={defaultTranscriptionLanguage}
+            maxLength={64}
+            placeholder="en-CA"
+            onChange={(event) => setDefaultTranscriptionLanguage(event.currentTarget.value)}
+          />
+        </label>
+        <label>
           <input
             type="checkbox"
             checked={copyQuestions}
@@ -480,6 +515,10 @@ function InstallationCard({ installation }: { readonly installation: Installatio
               ? null
               : ` · Ended ${absoluteTime(installation.endedAt) ?? installation.endedAt}`}
             {installation.location === null ? null : ` · ${installation.location}`}
+            {installation.defaultTranscriptionLanguage === null ||
+            installation.defaultTranscriptionLanguage === undefined
+              ? null
+              : ` · transcription ${installation.defaultTranscriptionLanguage}`}
           </p>
         </div>
         {installation.isActive ? (

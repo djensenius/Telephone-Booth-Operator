@@ -21,6 +21,7 @@ rebuilds it from the filesystem; CI fails if it drifts.
 - [Theme](theme.md) — operator-console visual system, components, accessibility
 - [Transcription providers](transcription-providers.md) — AI transcription + moderation pipeline
 - [Push-mode worker](operator-push.md) — WebSocket/REST contract for app-run transcription, translation, and moderation
+- [Claimed message processing](message-processing.md) — OIDC device leases, no-speech review, and queue progress
 - [Push notifications](push-notifications.md) — APNs setup, badge pipeline, sandbox vs production
 - [Audit log](audit-log.md) — who did what, from where, and when
 - [UI routing](ui-routing.md) — digit shortcuts, keyboard nav, reduced motion

@@ -40,6 +40,19 @@ export type FakeMessage = {
   receivedAt: Date | null;
   decidedAt: Date | null;
   decidedById: string | null;
+  reviewClassification: "likely_hangup" | "unclear" | null;
+  reviewRecommendation: "delete" | "review" | null;
+  reviewClassifiedAt: Date | null;
+  reviewClassifiedById: string | null;
+  processingLeaseTokenHash: string | null;
+  processingLeaseExpiresAt: Date | null;
+  processingLeasedAt: Date | null;
+  processingLeasedById: string | null;
+  processingSnapshotHash: string | null;
+  processingAttemptCount: number;
+  processingError: string | null;
+  processingFailedAt: Date | null;
+  processingCompletedAt: Date | null;
   installationId: string | null;
 };
 
@@ -199,6 +212,7 @@ export type FakeInstallation = {
   name: string;
   notes: string | null;
   location: string | null;
+  defaultTranscriptionLanguage: string | null;
   startedAt: Date;
   endedAt: Date | null;
   endedById: string | null;
@@ -323,6 +337,20 @@ const matchScalar = (value: unknown, expected: unknown): boolean => {
         return value.localeCompare(expObj.lt) < 0;
       }
       return (value as number) < (expObj.lt as number);
+    }
+    if ("lte" in expObj) {
+      if (value === null || value === undefined) return false;
+      if (value instanceof Date && expObj.lte instanceof Date) {
+        return value.getTime() <= expObj.lte.getTime();
+      }
+      return (value as number) <= (expObj.lte as number);
+    }
+    if ("gt" in expObj) {
+      if (value === null || value === undefined) return false;
+      if (value instanceof Date && expObj.gt instanceof Date) {
+        return value.getTime() > expObj.gt.getTime();
+      }
+      return (value as number) > (expObj.gt as number);
     }
     if ("in" in expObj && Array.isArray(expObj.in)) {
       return expObj.in.includes(value);
@@ -544,6 +572,19 @@ export const seedMessage = (overrides: Partial<FakeMessage> = {}): FakeMessage =
     receivedAt: overrides.receivedAt ?? null,
     decidedAt: overrides.decidedAt ?? null,
     decidedById: overrides.decidedById ?? null,
+    reviewClassification: overrides.reviewClassification ?? null,
+    reviewRecommendation: overrides.reviewRecommendation ?? null,
+    reviewClassifiedAt: overrides.reviewClassifiedAt ?? null,
+    reviewClassifiedById: overrides.reviewClassifiedById ?? null,
+    processingLeaseTokenHash: overrides.processingLeaseTokenHash ?? null,
+    processingLeaseExpiresAt: overrides.processingLeaseExpiresAt ?? null,
+    processingLeasedAt: overrides.processingLeasedAt ?? null,
+    processingLeasedById: overrides.processingLeasedById ?? null,
+    processingSnapshotHash: overrides.processingSnapshotHash ?? null,
+    processingAttemptCount: overrides.processingAttemptCount ?? 0,
+    processingError: overrides.processingError ?? null,
+    processingFailedAt: overrides.processingFailedAt ?? null,
+    processingCompletedAt: overrides.processingCompletedAt ?? null,
     installationId: overrides.installationId ?? DEFAULT_INSTALLATION_ID,
   };
   store.messages.set(message.id, message);
@@ -556,6 +597,7 @@ export const seedInstallation = (overrides: Partial<FakeInstallation> = {}): Fak
     name: overrides.name ?? "Seeded installation",
     notes: overrides.notes ?? null,
     location: overrides.location ?? null,
+    defaultTranscriptionLanguage: overrides.defaultTranscriptionLanguage ?? null,
     startedAt: overrides.startedAt ?? new Date(),
     endedAt: overrides.endedAt ?? null,
     endedById: overrides.endedById ?? null,
@@ -660,6 +702,7 @@ export const resetFakeDb = (): void => {
     name: "Installation 1",
     notes: null,
     location: null,
+    defaultTranscriptionLanguage: null,
     startedAt: new Date("2026-01-01T00:00:00.000Z"),
     endedAt: null,
     endedById: null,
@@ -667,6 +710,31 @@ export const resetFakeDb = (): void => {
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
   });
   store.auditLogs.length = 0;
+};
+
+type FakeStoreSnapshot = Record<string, Map<unknown, unknown> | unknown[]>;
+
+const snapshotFakeStore = (): FakeStoreSnapshot =>
+  Object.fromEntries(
+    Object.entries(store).map(([key, value]) => [
+      key,
+      value instanceof Map ? new Map(value) : [...value],
+    ]),
+  );
+
+const restoreFakeStore = (snapshot: FakeStoreSnapshot): void => {
+  for (const [key, saved] of Object.entries(snapshot)) {
+    const current = store[key as keyof typeof store] as unknown;
+    if (current instanceof Map && saved instanceof Map) {
+      current.clear();
+      for (const [entryKey, value] of saved) current.set(entryKey, value);
+      continue;
+    }
+    if (Array.isArray(current) && Array.isArray(saved)) {
+      current.length = 0;
+      current.push(...saved);
+    }
+  }
 };
 
 // Supports the `transcriptions: { none: {} } | { some: {...} }` relation
@@ -705,32 +773,34 @@ const attachAi = (
   }
   if (include?.transcriptions !== undefined) {
     const tConfig = include.transcriptions as
-      | { orderBy?: { createdAt?: "asc" | "desc" }; take?: number }
+      | {
+          orderBy?:
+            | { createdAt?: "asc" | "desc"; id?: "asc" | "desc" }
+            | Array<{ createdAt?: "asc" | "desc"; id?: "asc" | "desc" }>;
+          take?: number;
+        }
       | true;
     let transcriptions = [...store.transcriptions.values()].filter(
       (row) => row.messageId === message.id,
     );
-    const tOrder = typeof tConfig === "object" ? tConfig.orderBy?.createdAt : undefined;
-    transcriptions = transcriptions.sort((a, b) =>
-      tOrder === "asc"
-        ? a.createdAt.getTime() - b.createdAt.getTime()
-        : b.createdAt.getTime() - a.createdAt.getTime(),
-    );
+    const tOrderBy = typeof tConfig === "object" ? tConfig.orderBy : undefined;
+    transcriptions = sortByCreatedIdOrder(transcriptions, tOrderBy as CreatedIdOrder | undefined);
     const take = typeof tConfig === "object" ? tConfig.take : undefined;
     if (typeof take === "number") transcriptions = transcriptions.slice(0, take);
     (base as Record<string, unknown>).transcriptions = transcriptions;
   }
   if (include?.moderations !== undefined) {
     const mConfig = include.moderations as
-      | { orderBy?: { createdAt?: "asc" | "desc" }; take?: number }
+      | {
+          orderBy?:
+            | { createdAt?: "asc" | "desc"; id?: "asc" | "desc" }
+            | Array<{ createdAt?: "asc" | "desc"; id?: "asc" | "desc" }>;
+          take?: number;
+        }
       | true;
     let moderations = [...store.moderations.values()].filter((row) => row.messageId === message.id);
-    const mOrder = typeof mConfig === "object" ? mConfig.orderBy?.createdAt : undefined;
-    moderations = moderations.sort((a, b) =>
-      mOrder === "asc"
-        ? a.createdAt.getTime() - b.createdAt.getTime()
-        : b.createdAt.getTime() - a.createdAt.getTime(),
-    );
+    const mOrderBy = typeof mConfig === "object" ? mConfig.orderBy : undefined;
+    moderations = sortByCreatedIdOrder(moderations, mOrderBy as CreatedIdOrder | undefined);
     const take = typeof mConfig === "object" ? mConfig.take : undefined;
     if (typeof take === "number") moderations = moderations.slice(0, take);
     (base as Record<string, unknown>).moderations = moderations;
@@ -1061,6 +1131,7 @@ export const fakeDb = {
         id?: boolean;
         status?: boolean;
         installationId?: boolean;
+        processingAttemptCount?: boolean;
         audio?: boolean | { select?: Record<string, boolean> };
       };
     }) => {
@@ -1073,6 +1144,9 @@ export const fakeDb = {
         if (select.id) out.id = message.id;
         if (select.status) out.status = message.status;
         if (select.installationId) out.installationId = message.installationId ?? null;
+        if (select.processingAttemptCount) {
+          out.processingAttemptCount = message.processingAttemptCount;
+        }
         if (select.audio) {
           const audio = store.files.get(message.audioId) ?? null;
           if (audio === null) {
@@ -1097,6 +1171,7 @@ export const fakeDb = {
       where = {},
       include,
       take,
+      skip = 0,
       orderBy,
       select,
     }: {
@@ -1108,10 +1183,10 @@ export const fakeDb = {
       };
       include?: { audio?: boolean; transcriptions?: unknown; moderations?: unknown };
       take?: number;
+      skip?: number;
       orderBy?: unknown;
       select?: { audio?: { select?: Record<string, boolean> } };
     }) => {
-      void orderBy;
       let messages = [...store.messages.values()];
       if (where.installationId !== undefined) {
         messages = messages.filter((message) =>
@@ -1132,7 +1207,8 @@ export const fakeDb = {
           clauses.some((clause) => matchesTranscriptionFilter(message, clause)),
         );
       }
-      messages = messages.sort(byCreatedDesc);
+      messages = sortByCreatedIdOrder(messages, orderBy as CreatedIdOrder | undefined);
+      if (skip > 0) messages = messages.slice(skip);
       if (take !== undefined) messages = messages.slice(0, take);
       if (select?.audio) return messages.map((message) => projectAudio(message, select.audio));
       if (include) return messages.map((message) => attachAi(message, include));
@@ -1169,6 +1245,19 @@ export const fakeDb = {
         receivedAt: null,
         decidedAt: null,
         decidedById: null,
+        reviewClassification: null,
+        reviewRecommendation: null,
+        reviewClassifiedAt: null,
+        reviewClassifiedById: null,
+        processingLeaseTokenHash: null,
+        processingLeaseExpiresAt: null,
+        processingLeasedAt: null,
+        processingLeasedById: null,
+        processingSnapshotHash: null,
+        processingAttemptCount: 0,
+        processingError: null,
+        processingFailedAt: null,
+        processingCompletedAt: null,
         installationId: data.installationId ?? DEFAULT_INSTALLATION_ID,
       };
       store.messages.set(message.id, message);
@@ -1193,11 +1282,17 @@ export const fakeDb = {
       store.messages.set(where.id, message);
       return message;
     },
-    updateMany: async ({ where = {}, data }: { where?: Predicate; data: Partial<FakeMessage> }) => {
+    updateMany: async ({
+      where = {},
+      data,
+    }: {
+      where?: Predicate;
+      data: Record<string, unknown>;
+    }) => {
       let count = 0;
       for (const message of [...store.messages.values()]) {
         if (!matchesWhere(message, where ?? {})) continue;
-        store.messages.set(message.id, { ...message, ...data });
+        store.messages.set(message.id, applyUpdate(message, data));
         count += 1;
       }
       return { count };
@@ -2058,6 +2153,7 @@ export const fakeDb = {
         name: data.name,
         notes: data.notes ?? null,
         location: data.location ?? null,
+        defaultTranscriptionLanguage: data.defaultTranscriptionLanguage ?? null,
         startedAt: data.startedAt ?? now,
         endedAt: data.endedAt ?? null,
         endedById: data.endedById ?? null,
@@ -2190,7 +2286,15 @@ export const fakeDb = {
   $transaction: async <T>(
     fn: (tx: typeof fakeDb) => Promise<T>,
     _options?: { isolationLevel?: string; maxWait?: number; timeout?: number },
-  ): Promise<T> => fn(fakeDb),
+  ): Promise<T> => {
+    const snapshot = snapshotFakeStore();
+    try {
+      return await fn(fakeDb);
+    } catch (error) {
+      restoreFakeStore(snapshot);
+      throw error;
+    }
+  },
   // The era row is locked with raw SQL — `FOR SHARE` for a writer, `FOR UPDATE`
   // for the close-out — because Prisma has no first-class row lock. There is no
   // concurrency to serialise in a test, so the fake only has to answer the
@@ -2202,6 +2306,19 @@ export const fakeDb = {
     const id = values.find((value) => typeof value === "string");
     if (strings.join("").includes('FROM "Message"')) {
       const message = typeof id === "string" ? store.messages.get(id) : undefined;
+      if (strings.join("").includes('"processingLeaseTokenHash"')) {
+        const [messageId, tokenHash, expiresAt, userId] = values;
+        const leaseMatches =
+          typeof messageId === "string" &&
+          typeof tokenHash === "string" &&
+          expiresAt instanceof Date &&
+          typeof userId === "string" &&
+          message?.processingLeaseTokenHash === tokenHash &&
+          message.processingLeaseExpiresAt !== null &&
+          message.processingLeaseExpiresAt > expiresAt &&
+          message.processingLeasedById === userId;
+        return leaseMatches && message ? [{ id: message.id }] : [];
+      }
       return message ? [{ id: message.id }] : [];
     }
     const era = typeof id === "string" ? store.installations.get(id) : undefined;

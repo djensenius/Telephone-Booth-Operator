@@ -364,7 +364,8 @@ describe("admin data export/import", () => {
     expect(store.questions.get(questionId)?.status).toBe("archived");
     expect(restoredInstallation?.summary).toMatchObject({
       calls: 1,
-      messages: 1,
+      messages: 0,
+      allRecordings: 1,
       messagesRejected: 1,
       events: 1,
       firstActivityAt: generatedAt,

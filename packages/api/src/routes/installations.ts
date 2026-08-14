@@ -109,6 +109,7 @@ installationsRouter.post(
           name: body.name.length > 0 ? body.name : await nextInstallationName(),
           notes: body.notes ?? null,
           location: body.location ?? null,
+          defaultTranscriptionLanguage: body.defaultTranscriptionLanguage ?? null,
         };
         // Creating is arbitrated by the single-active index, but adopting is
         // just an update, so two admins naming the same auto-created era would
@@ -247,6 +248,9 @@ installationsRouter.patch(
         ...(body.name !== undefined ? { name: body.name } : {}),
         ...(body.notes !== undefined ? { notes: body.notes } : {}),
         ...(body.location !== undefined ? { location: body.location } : {}),
+        ...(body.defaultTranscriptionLanguage !== undefined
+          ? { defaultTranscriptionLanguage: body.defaultTranscriptionLanguage }
+          : {}),
       },
     });
     recordAudit(c, {
