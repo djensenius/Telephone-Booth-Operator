@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { FormEvent, JSX } from "react";
 import { GlassPanel } from "../../components/booth/index.js";
 import {
+  AUDIO_UPLOAD_ACCEPT,
   audioUploadContentType,
   sha256Hex,
   uploadBlobToSas,
@@ -43,31 +44,38 @@ export function NewQuestionDialog({
   const [prompt, setPrompt] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [status, setStatus] = useState("");
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   if (!open) return null;
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (file === null) return;
-    setStatus("Reserving a clean line for the audio…");
-    const sha256 = await sha256Hex(file);
-    const contentType = audioUploadContentType(file);
-    const slot = await uploads.sas({
-      kind: "question-audio",
-      sha256,
-      sizeBytes: file.size,
-      contentType,
-    });
-    if (slot.audioFileId === undefined)
-      throw new Error("Upload slot did not include an audio file id.");
-    setStatus("Sending the question audio up the wire…");
-    await uploadBlobToSas(slot.uploadUrl, file, contentType);
-    setStatus("Filing the prompt card…");
-    await createQuestion.mutateAsync({ prompt, audioFileId: slot.audioFileId });
-    setPrompt("");
-    setFile(null);
-    setStatus("");
-    onClose();
+    setUploadError(null);
+    try {
+      setStatus("Reserving a clean line for the audio…");
+      const sha256 = await sha256Hex(file);
+      const contentType = audioUploadContentType(file);
+      const slot = await uploads.sas({
+        kind: "question-audio",
+        sha256,
+        sizeBytes: file.size,
+        contentType,
+      });
+      if (slot.audioFileId === undefined)
+        throw new Error("Upload slot did not include an audio file id.");
+      setStatus("Sending the question audio up the wire…");
+      await uploadBlobToSas(slot.uploadUrl, file, contentType);
+      setStatus("Filing the prompt card…");
+      await createQuestion.mutateAsync({ prompt, audioFileId: slot.audioFileId });
+      setPrompt("");
+      setFile(null);
+      setStatus("");
+      onClose();
+    } catch {
+      setStatus("");
+      setUploadError("The question could not be filed.");
+    }
   }
 
   return (
@@ -93,13 +101,13 @@ export function NewQuestionDialog({
             Audio file
             <input
               type="file"
-              accept=".flac,.wav,.aif,.aiff,.mp3,.m4a,.ogg,audio/*"
+              accept={AUDIO_UPLOAD_ACCEPT}
               onChange={(event) => setFile(event.currentTarget.files?.[0] ?? null)}
               required
             />
           </label>
-          {createQuestion.error ? (
-            <FeatureError message="The question could not be filed." />
+          {createQuestion.error || uploadError !== null ? (
+            <FeatureError message={uploadError ?? "The question could not be filed."} />
           ) : null}
           <p aria-live="polite">{status}</p>
           <div className="debug-button-row">

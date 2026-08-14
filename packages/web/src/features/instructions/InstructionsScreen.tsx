@@ -3,6 +3,7 @@ import type { FormEvent, JSX } from "react";
 import type { InstructionStatus } from "@telephone-booth-operator/shared";
 import { GlassPanel } from "../../components/booth/index.js";
 import {
+  AUDIO_UPLOAD_ACCEPT,
   audioUploadContentType,
   sha256Hex,
   uploadBlobToSas,
@@ -96,7 +97,7 @@ export function NewInstructionDialog({
             Audio file
             <input
               type="file"
-              accept=".flac,.wav,.aif,.aiff,.mp3,.m4a,.ogg,audio/*"
+              accept={AUDIO_UPLOAD_ACCEPT}
               onChange={(event) => setFile(event.currentTarget.files?.[0] ?? null)}
               required
             />

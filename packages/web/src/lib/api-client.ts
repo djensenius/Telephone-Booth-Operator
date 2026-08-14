@@ -248,6 +248,9 @@ const AUDIO_CONTENT_TYPES_BY_EXTENSION = {
   wav: "audio/wav",
 } as const;
 
+export const AUDIO_UPLOAD_ACCEPT =
+  ".flac,.wav,.aif,.aiff,.mp3,.m4a,.ogg,audio/flac,audio/wav,audio/x-wav,audio/aiff,audio/x-aiff,audio/mpeg,audio/mp4,audio/x-m4a,audio/ogg";
+
 export function audioUploadContentType(file: File): UploadSasRequest["contentType"] {
   const parsedType = UploadSasRequestSchema.shape.contentType.safeParse(file.type.toLowerCase());
   if (parsedType.success) return parsedType.data;
