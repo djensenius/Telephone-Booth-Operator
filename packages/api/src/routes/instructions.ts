@@ -1,5 +1,9 @@
 import { zValidator } from "@hono/zod-validator";
-import { InstructionCreateSchema, InstructionStatusSchema } from "@telephone-booth-operator/shared";
+import {
+  InstructionCreateSchema,
+  InstructionStatusSchema,
+  InstructionUpdateSchema,
+} from "@telephone-booth-operator/shared";
 import { Hono } from "hono";
 import { z } from "zod";
 import { recordAudit } from "../lib/audit.js";
@@ -18,12 +22,31 @@ const idParamSchema = z.object({ id: z.guid() });
 
 export const instructionsRouter = new Hono<{ Variables: AuthVariables & ApiTokenVariables }>();
 
-instructionsRouter.get("/current", requireApiToken(), async (c) => {
-  const instruction = await db.instruction.findFirst({
-    where: { status: "active" },
+async function randomActiveInstruction() {
+  const where = { status: "active" as const };
+  const count = await db.instruction.count({ where });
+  if (count === 0) return null;
+
+  const skip = Math.floor(Math.random() * count);
+  const selected = await db.instruction.findFirst({
+    where,
+    skip,
     include: { audio: true },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
   });
+  if (selected) return selected;
+
+  // The active pool may shrink between count and selection.
+  return db.instruction.findFirst({ where, include: { audio: true } });
+}
+
+instructionsRouter.get("/random", requireApiToken(), async (c) => {
+  const instruction = await randomActiveInstruction();
+  if (!instruction) return c.json({ error: "no_instructions_available" }, 404);
+  return c.json(serializeInstruction(instruction));
+});
+
+instructionsRouter.get("/current", requireApiToken(), async (c) => {
+  const instruction = await randomActiveInstruction();
   if (!instruction) return c.json({ error: "no_instructions_available" }, 404);
   return c.json(serializeInstruction(instruction));
 });
@@ -71,6 +94,32 @@ instructionsRouter.post(
     } catch {
       return c.json({ error: "instruction_conflict" }, 409);
     }
+  },
+);
+
+instructionsRouter.patch(
+  "/:id",
+  requireAdmin(),
+  zValidator("param", idParamSchema),
+  zValidator("json", InstructionUpdateSchema),
+  async (c) => {
+    const { id } = c.req.valid("param");
+    const body = c.req.valid("json");
+    recordAudit(c, {
+      action: "instruction.update",
+      targetType: "instruction",
+      targetId: id,
+      metadata: { description: body.description },
+    });
+    const instruction = await db.instruction.findUnique({ where: { id } });
+    if (!instruction) return c.json({ error: "not_found" }, 404);
+
+    const updated = await db.instruction.update({
+      where: { id },
+      data: { description: body.description },
+      include: { audio: true },
+    });
+    return c.json(serializeInstruction(updated));
   },
 );
 
