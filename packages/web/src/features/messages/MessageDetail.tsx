@@ -475,6 +475,27 @@ export function MessageDetail(): JSX.Element {
                 <dt>Notes</dt>
                 <dd>{message.data.notes ?? "None"}</dd>
               </div>
+              <div>
+                <dt>Device review</dt>
+                <dd>
+                  {message.data.reviewClassification === "likely_hangup"
+                    ? "Likely hangup"
+                    : message.data.reviewClassification === "unclear"
+                      ? "Unclear recording"
+                      : "Not classified"}
+                </dd>
+              </div>
+              {message.data.reviewRecommendation === null ||
+              message.data.reviewRecommendation === undefined ? null : (
+                <div>
+                  <dt>Device recommendation</dt>
+                  <dd>
+                    {message.data.reviewRecommendation === "delete"
+                      ? "Delete (advisory; never automatic)"
+                      : "Review"}
+                  </dd>
+                </div>
+              )}
             </dl>
             <label className="feature-check">
               <input

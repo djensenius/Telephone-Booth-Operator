@@ -46,6 +46,15 @@ export type TranscriptionStatus = z.infer<typeof TranscriptionStatusSchema>;
 export const ModerationRecommendationSchema = z.enum(["approve", "review", "reject"]);
 export type ModerationRecommendation = z.infer<typeof ModerationRecommendationSchema>;
 
+// A local, no-speech review is separate from content moderation. It remains
+// advisory: "delete" tells a human reviewer what the device recommends, not
+// something the server will ever do by itself.
+export const MessageReviewClassificationSchema = z.enum(["likely_hangup", "unclear"]);
+export type MessageReviewClassification = z.infer<typeof MessageReviewClassificationSchema>;
+
+export const MessageReviewRecommendationSchema = z.enum(["delete", "review"]);
+export type MessageReviewRecommendation = z.infer<typeof MessageReviewRecommendationSchema>;
+
 // Provider label recorded on a transcription / moderation row. `openai`,
 // `mac_app`, `push` and `disabled` are the configurable server-side providers;
 // `on_device` is not configurable — it marks a result an operator's own device
@@ -205,11 +214,28 @@ export const MessageSchema = z.object({
   receivedAt: z.string().datetime().nullable().optional(),
   decidedAt: z.string().datetime().nullable().optional(),
   decidedById: z.string().nullable().optional(),
+  reviewClassification: MessageReviewClassificationSchema.nullable().optional(),
+  reviewRecommendation: MessageReviewRecommendationSchema.nullable().optional(),
+  reviewClassifiedAt: z.string().datetime().nullable().optional(),
+  reviewClassifiedById: z.string().nullable().optional(),
   audio: AudioRefSchema,
   latestTranscription: TranscriptionSchema.nullable().optional(),
   latestModeration: ModerationSchema.nullable().optional(),
 });
 export type Message = z.infer<typeof MessageSchema>;
+
+const Bcp47LanguageTagSchema = z
+  .string()
+  .trim()
+  .min(2)
+  .max(64)
+  .regex(
+    /^(?:(?:[A-Za-z]{2,3}(?:-[A-Za-z]{3}(?:-[A-Za-z]{3}){0,2})?)|[A-Za-z]{4}|[A-Za-z]{5,8}|[0-9][A-Za-z0-9]{3})(?:-[A-Za-z0-9]{2,8})*$/,
+    "Expected a BCP-47 language tag.",
+  );
+
+export const DefaultTranscriptionLanguageSchema = Bcp47LanguageTagSchema;
+export type DefaultTranscriptionLanguage = z.infer<typeof DefaultTranscriptionLanguageSchema>;
 
 // Human review actions. A logged-in operator can override the AI pipeline by
 // approving or rejecting a message, and can supply a translation for a
@@ -753,7 +779,12 @@ export type InstallationScope = z.infer<typeof InstallationScopeSchema>;
 // stay cheap to compute and safe to read back from old rows.
 export const InstallationSummarySchema = z.object({
   calls: z.number().int().nonnegative(),
+  // "messages" is deliberately the operator-playable approved subset.
   messages: z.number().int().nonnegative(),
+  allRecordings: z.number().int().nonnegative().default(0),
+  byStatus: z.record(z.string(), z.number().int().nonnegative()).default({}),
+  // Kept while archived clients transition to the unambiguous `messages`
+  // (approved) and `allRecordings` fields.
   messagesApproved: z.number().int().nonnegative(),
   messagesRejected: z.number().int().nonnegative(),
   questions: z.number().int().nonnegative(),
@@ -773,6 +804,7 @@ export const InstallationSchema = z.object({
   name: z.string(),
   notes: z.string().nullable(),
   location: z.string().nullable(),
+  defaultTranscriptionLanguage: DefaultTranscriptionLanguageSchema.nullable().optional(),
   startedAt: z.string().datetime(),
   endedAt: z.string().datetime().nullable(),
   endedById: z.string().nullable(),
@@ -789,6 +821,7 @@ const installationMetadataFields = {
   name: z.string().trim().min(1).max(120),
   notes: z.string().trim().max(2000).nullable().optional(),
   location: z.string().trim().max(200).nullable().optional(),
+  defaultTranscriptionLanguage: DefaultTranscriptionLanguageSchema.nullable().optional(),
 };
 
 export const InstallationCreateSchema = z.object({
@@ -829,6 +862,122 @@ export const InstallationPurgeResultSchema = z.object({
   blobFailures: z.array(z.string()),
 });
 export type InstallationPurgeResult = z.infer<typeof InstallationPurgeResultSchema>;
+
+// -----------------------------------------------------------------------------
+// Operator-authenticated on-device message processing.
+// -----------------------------------------------------------------------------
+
+export const MessageProcessingStepSchema = z.enum([
+  "transcription",
+  "translation",
+  "moderation",
+  "review",
+]);
+export type MessageProcessingStep = z.infer<typeof MessageProcessingStepSchema>;
+
+export const MessageProcessingCapabilitiesSchema = z
+  .array(MessageProcessingStepSchema)
+  .min(1)
+  .max(4)
+  .default(["transcription", "translation", "moderation", "review"]);
+export type MessageProcessingCapabilities = z.infer<typeof MessageProcessingCapabilitiesSchema>;
+
+export const MessageProcessingClaimRequestSchema = z.object({
+  capabilities: MessageProcessingCapabilitiesSchema,
+  leaseSeconds: z.number().int().min(30).max(900).default(300),
+});
+export type MessageProcessingClaimRequest = z.infer<typeof MessageProcessingClaimRequestSchema>;
+
+export const MessageProcessingClaimSchema = z.object({
+  message: MessageSchema,
+  needs: z.array(MessageProcessingStepSchema).min(1),
+  leaseToken: z.string().min(32),
+  leaseExpiresAt: z.string().datetime(),
+  defaultTranscriptionLanguage: DefaultTranscriptionLanguageSchema.nullable(),
+});
+export type MessageProcessingClaim = z.infer<typeof MessageProcessingClaimSchema>;
+
+export const MessageProcessingClaimResponseSchema = z.object({
+  claim: MessageProcessingClaimSchema.nullable(),
+});
+export type MessageProcessingClaimResponse = z.infer<typeof MessageProcessingClaimResponseSchema>;
+
+export const MessageProcessingSummarySchema = z.object({
+  queued: z.number().int().nonnegative(),
+  leased: z.number().int().nonnegative(),
+  terminal: z.number().int().nonnegative(),
+  needs: z.object({
+    transcription: z.number().int().nonnegative(),
+    translation: z.number().int().nonnegative(),
+    moderation: z.number().int().nonnegative(),
+    review: z.number().int().nonnegative(),
+  }),
+  generatedAt: z.string().datetime(),
+});
+export type MessageProcessingSummary = z.infer<typeof MessageProcessingSummarySchema>;
+
+const ProcessingTranslationSubmitSchema = z.object({
+  transcriptionId: z.guid().optional(),
+  expectedTranslationSha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .nullable()
+    .optional(),
+  translatedText: z.string().trim().min(1).max(20_000),
+  translatedLanguage: Bcp47LanguageTagSchema.optional(),
+  model: z.string().trim().min(1).max(128).nullable().optional(),
+});
+
+const ProcessingModerationSubmitSchema = z.object({
+  inputSha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
+  flagged: z.boolean(),
+  recommendation: ModerationRecommendationSchema,
+  maxScore: z.number().min(0).max(1),
+  categories: z.record(z.string(), z.number()).optional(),
+  reasonSummary: z.string().max(2000).nullable().optional(),
+  model: z.string().trim().min(1).max(128).nullable().optional(),
+});
+
+export const MessageProcessingCompleteSchema = z
+  .object({
+    leaseToken: z.string().min(32),
+    transcription: TranscriptionSubmitSchema.omit({ processDownstream: true }).optional(),
+    translation: ProcessingTranslationSubmitSchema.optional(),
+    moderation: ProcessingModerationSubmitSchema.optional(),
+    review: z
+      .object({
+        classification: MessageReviewClassificationSchema,
+        recommendation: MessageReviewRecommendationSchema,
+      })
+      .optional(),
+  })
+  .refine(
+    (value) =>
+      value.transcription !== undefined ||
+      value.translation !== undefined ||
+      value.moderation !== undefined ||
+      value.review !== undefined,
+    { message: "At least one processing result is required." },
+  );
+export type MessageProcessingComplete = z.infer<typeof MessageProcessingCompleteSchema>;
+
+export const MessageProcessingLeaseTokenSchema = z.object({
+  leaseToken: z.string().min(32),
+});
+
+export const MessageProcessingHeartbeatSchema = MessageProcessingLeaseTokenSchema.extend({
+  leaseSeconds: z.number().int().min(30).max(900).default(300),
+});
+export type MessageProcessingHeartbeat = z.infer<typeof MessageProcessingHeartbeatSchema>;
+
+export const MessageProcessingFailSchema = MessageProcessingLeaseTokenSchema.extend({
+  errorCode: z.string().trim().min(1).max(128),
+  errorMessage: z.string().trim().max(2000).optional(),
+});
+export type MessageProcessingFail = z.infer<typeof MessageProcessingFailSchema>;
 
 // Discriminated union for the `/v1/ws/status` socket. The legacy payload
 // shape (a bare `BoothStatus`) is migrated to `{ kind: "status", status }`
@@ -1004,7 +1153,11 @@ export const StatsOverviewSchema = z.object({
     perDay: z.array(StatsCallsPerDaySchema),
   }),
   messages: z.object({
+    // `total` remains for older clients and has the same approved/playable
+    // meaning as `approved`; use the explicit fields in new clients.
     total: z.number().int().nonnegative(),
+    approved: z.number().int().nonnegative().optional(),
+    allRecordings: z.number().int().nonnegative().optional(),
     // Keyed by MessageStatus string. As with `outcomes`, unrecognised
     // server-side values appear under their raw key — clients should
     // render whatever key arrives rather than special-casing "unknown".

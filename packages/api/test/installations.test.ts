@@ -128,10 +128,31 @@ describe("installations", () => {
       const res = await createApp().request("/v1/installations/current", {
         headers: operatorHeaders(),
       });
+
       expect(res.status).toBe(200);
       const body = (await res.json()) as { id: string; endedAt: string | null };
       expect(body.id).toBe(DEFAULT_INSTALLATION_ID);
       expect(body.endedAt).toBeNull();
+    });
+
+    describe("default transcription language", () => {
+      it("lets an admin set a nullable BCP-47 default", async () => {
+        const app = createApp();
+        const update = await app.request(`/v1/installations/${DEFAULT_INSTALLATION_ID}`, {
+          method: "PATCH",
+          headers: jsonHeaders(adminHeaders()),
+          body: JSON.stringify({ defaultTranscriptionLanguage: "fr-CA" }),
+        });
+        expect(update.status, await update.clone().text()).toBe(200);
+        expect(await update.json()).toMatchObject({ defaultTranscriptionLanguage: "fr-CA" });
+
+        const invalid = await app.request(`/v1/installations/${DEFAULT_INSTALLATION_ID}`, {
+          method: "PATCH",
+          headers: jsonHeaders(adminHeaders()),
+          body: JSON.stringify({ defaultTranscriptionLanguage: "not a language" }),
+        });
+        expect(invalid.status).toBe(400);
+      });
     });
 
     it("404s once the era has been closed and none restarted", async () => {
@@ -166,7 +187,13 @@ describe("installations", () => {
       };
       expect(body.isActive).toBe(false);
       expect(body.endedAt).not.toBeNull();
-      expect(body.summary).toMatchObject({ calls: 2, messages: 2, questions: 1, events: 1 });
+      expect(body.summary).toMatchObject({
+        calls: 2,
+        messages: 1,
+        allRecordings: 2,
+        questions: 1,
+        events: 1,
+      });
 
       // Open sessions are closed out with a distinguishable outcome.
       expect(store.callSessions.get("open-session")?.endedAt).not.toBeNull();
@@ -671,6 +698,8 @@ describe("installations", () => {
         body: JSON.stringify({ durationMs: 3000, sha256: "e".repeat(64), questionId: question.id }),
       });
       expect(created.status, await created.clone().text()).toBe(201);
+      const messageId = ((await created.json()) as { id: string }).id;
+      await fakeDb.message.update({ where: { id: messageId }, data: { status: "approved" } });
 
       const res = await app.request("/v1/stats/overview", { headers: operatorHeaders() });
       expect(res.status, await res.clone().text()).toBe(200);

@@ -836,6 +836,101 @@ export const recordTranscriptionResult = async (
   return { outcome: "recorded", transcriptionId };
 };
 
+export interface RecordTranslationResultOptions {
+  readonly messageId: string;
+  readonly transcriptionId?: string;
+  readonly expectedTranscriptionId?: string;
+  readonly expectedTranslationSha256?: string | null;
+  readonly translatedText: string;
+  readonly translatedLanguage?: string | null;
+  readonly model?: string | null;
+  // Targeted results came from an operator's device. Untargeted submissions
+  // are a human correction and intentionally retain null provenance.
+  readonly provider?: "on_device";
+}
+
+export type RecordTranslationResultOutcome =
+  | { outcome: "not_found" }
+  | { outcome: "no_transcription" }
+  | { outcome: "stale_transcription" }
+  | { outcome: "stale_translation" }
+  | { outcome: "recorded"; transcriptionId: string };
+
+// Shared stale-safe translation write used by the web correction route and
+// the leased on-device processing surface. Keeping it here prevents a new
+// client contract from weakening the snapshot protection of the older route.
+export const recordTranslationResult = async (
+  opts: RecordTranslationResultOptions,
+): Promise<RecordTranslationResultOutcome> => {
+  const translatedText = normalizeTranslationText(opts.translatedText);
+  const result = await db.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<{ id: string }[]>`
+      SELECT "id" FROM "Message" WHERE "id" = ${opts.messageId}::uuid FOR UPDATE
+    `;
+    if (rows.length === 0) return { outcome: "not_found" } as const;
+    const latest = await tx.transcription.findFirst({
+      where: { messageId: opts.messageId, status: "succeeded" },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!latest) return { outcome: "no_transcription" } as const;
+    const targetId = opts.transcriptionId ?? opts.expectedTranscriptionId;
+    if (targetId && latest.id !== targetId) return { outcome: "stale_transcription" } as const;
+
+    if (opts.expectedTranslationSha256 !== undefined) {
+      const currentTranslation =
+        latest.translationStatus === "succeeded" &&
+        typeof latest.translatedText === "string" &&
+        latest.translatedText.trim().length > 0
+          ? normalizeTranslationText(latest.translatedText)
+          : null;
+      const currentTranslationSha256 =
+        currentTranslation === null
+          ? null
+          : createHash("sha256").update(currentTranslation, "utf8").digest("hex");
+      if (currentTranslationSha256 !== opts.expectedTranslationSha256) {
+        return { outcome: "stale_translation" } as const;
+      }
+    }
+
+    const previousReviewText =
+      latest.translationStatus === "succeeded" &&
+      typeof latest.translatedText === "string" &&
+      latest.translatedText.trim().length > 0
+        ? normalizeTranslationText(latest.translatedText)
+        : latest.text?.trim();
+    if (previousReviewText !== translatedText) {
+      await tx.moderation.updateMany({
+        where: {
+          messageId: opts.messageId,
+          OR: [{ transcriptionId: latest.id }, { transcriptionId: null }],
+          status: { in: ["pending", "succeeded"] },
+        },
+        data: {
+          status: "failed",
+          error: "superseded_by_translation",
+          completedAt: new Date(),
+        },
+      });
+    }
+    const transcription = await tx.transcription.update({
+      where: { id: latest.id },
+      data: {
+        translationStatus: "succeeded",
+        translatedText,
+        translatedLanguage: opts.translatedLanguage ?? null,
+        translationProvider: opts.provider ?? null,
+        translationModel: opts.provider ? (opts.model ?? null) : null,
+        translationError: null,
+        translationCompletedAt: new Date(),
+      },
+    });
+    return { outcome: "recorded", transcriptionId: transcription.id } as const;
+  });
+  if (result.outcome !== "recorded") return result;
+  await broadcastMessage(opts.messageId);
+  return result;
+};
+
 export interface RecordModerationResultOptions {
   readonly messageId: string;
   readonly transcriptionId?: string | null;

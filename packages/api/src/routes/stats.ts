@@ -394,7 +394,8 @@ const computeStatsOverview = async (
   // messages.*
   const byStatus: Record<string, number> = {};
   for (const message of messages) incRecord(byStatus, message.status);
-  const messageDurations = messages
+  const approvedMessages = messages.filter((message) => message.status === "approved");
+  const messageDurations = approvedMessages
     .map((m) => m.audio?.durationMs)
     .filter((d): d is number => typeof d === "number");
   const messagesAverageDurationMs =
@@ -442,7 +443,7 @@ const computeStatsOverview = async (
       : [];
   const questionsById = new Map([...questions, ...referenced].map((q) => [q.id, q]));
   const messageCounts = new Map<string, { count: number; lastUsedAt: Date | null }>();
-  for (const message of messages) {
+  for (const message of approvedMessages) {
     if (!message.questionId) continue;
     const existing = messageCounts.get(message.questionId) ?? { count: 0, lastUsedAt: null };
     existing.count += 1;
@@ -474,7 +475,7 @@ const computeStatsOverview = async (
   // hourly + busiest
   const hourly = buildHourly(
     sessionsByStart.map((s) => s.startedAt),
-    messages.map((m) => m.createdAt),
+    approvedMessages.map((m) => m.createdAt),
   );
   const busiest = findBusiest(hourly, perDay);
 
@@ -517,7 +518,9 @@ const computeStatsOverview = async (
       perDay,
     },
     messages: {
-      total: messages.length,
+      total: approvedMessages.length,
+      approved: approvedMessages.length,
+      allRecordings: messages.length,
       byStatus,
       averageDurationMs: messagesAverageDurationMs,
     },

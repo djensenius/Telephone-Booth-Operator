@@ -40,6 +40,18 @@ export type FakeMessage = {
   receivedAt: Date | null;
   decidedAt: Date | null;
   decidedById: string | null;
+  reviewClassification: "likely_hangup" | "unclear" | null;
+  reviewRecommendation: "delete" | "review" | null;
+  reviewClassifiedAt: Date | null;
+  reviewClassifiedById: string | null;
+  processingLeaseTokenHash: string | null;
+  processingLeaseExpiresAt: Date | null;
+  processingLeasedAt: Date | null;
+  processingLeasedById: string | null;
+  processingAttemptCount: number;
+  processingError: string | null;
+  processingFailedAt: Date | null;
+  processingCompletedAt: Date | null;
   installationId: string | null;
 };
 
@@ -199,6 +211,7 @@ export type FakeInstallation = {
   name: string;
   notes: string | null;
   location: string | null;
+  defaultTranscriptionLanguage: string | null;
   startedAt: Date;
   endedAt: Date | null;
   endedById: string | null;
@@ -544,6 +557,18 @@ export const seedMessage = (overrides: Partial<FakeMessage> = {}): FakeMessage =
     receivedAt: overrides.receivedAt ?? null,
     decidedAt: overrides.decidedAt ?? null,
     decidedById: overrides.decidedById ?? null,
+    reviewClassification: overrides.reviewClassification ?? null,
+    reviewRecommendation: overrides.reviewRecommendation ?? null,
+    reviewClassifiedAt: overrides.reviewClassifiedAt ?? null,
+    reviewClassifiedById: overrides.reviewClassifiedById ?? null,
+    processingLeaseTokenHash: overrides.processingLeaseTokenHash ?? null,
+    processingLeaseExpiresAt: overrides.processingLeaseExpiresAt ?? null,
+    processingLeasedAt: overrides.processingLeasedAt ?? null,
+    processingLeasedById: overrides.processingLeasedById ?? null,
+    processingAttemptCount: overrides.processingAttemptCount ?? 0,
+    processingError: overrides.processingError ?? null,
+    processingFailedAt: overrides.processingFailedAt ?? null,
+    processingCompletedAt: overrides.processingCompletedAt ?? null,
     installationId: overrides.installationId ?? DEFAULT_INSTALLATION_ID,
   };
   store.messages.set(message.id, message);
@@ -556,6 +581,7 @@ export const seedInstallation = (overrides: Partial<FakeInstallation> = {}): Fak
     name: overrides.name ?? "Seeded installation",
     notes: overrides.notes ?? null,
     location: overrides.location ?? null,
+    defaultTranscriptionLanguage: overrides.defaultTranscriptionLanguage ?? null,
     startedAt: overrides.startedAt ?? new Date(),
     endedAt: overrides.endedAt ?? null,
     endedById: overrides.endedById ?? null,
@@ -660,6 +686,7 @@ export const resetFakeDb = (): void => {
     name: "Installation 1",
     notes: null,
     location: null,
+    defaultTranscriptionLanguage: null,
     startedAt: new Date("2026-01-01T00:00:00.000Z"),
     endedAt: null,
     endedById: null,
@@ -1061,6 +1088,7 @@ export const fakeDb = {
         id?: boolean;
         status?: boolean;
         installationId?: boolean;
+        processingAttemptCount?: boolean;
         audio?: boolean | { select?: Record<string, boolean> };
       };
     }) => {
@@ -1073,6 +1101,9 @@ export const fakeDb = {
         if (select.id) out.id = message.id;
         if (select.status) out.status = message.status;
         if (select.installationId) out.installationId = message.installationId ?? null;
+        if (select.processingAttemptCount) {
+          out.processingAttemptCount = message.processingAttemptCount;
+        }
         if (select.audio) {
           const audio = store.files.get(message.audioId) ?? null;
           if (audio === null) {
@@ -1169,6 +1200,18 @@ export const fakeDb = {
         receivedAt: null,
         decidedAt: null,
         decidedById: null,
+        reviewClassification: null,
+        reviewRecommendation: null,
+        reviewClassifiedAt: null,
+        reviewClassifiedById: null,
+        processingLeaseTokenHash: null,
+        processingLeaseExpiresAt: null,
+        processingLeasedAt: null,
+        processingLeasedById: null,
+        processingAttemptCount: 0,
+        processingError: null,
+        processingFailedAt: null,
+        processingCompletedAt: null,
         installationId: data.installationId ?? DEFAULT_INSTALLATION_ID,
       };
       store.messages.set(message.id, message);
@@ -1193,11 +1236,17 @@ export const fakeDb = {
       store.messages.set(where.id, message);
       return message;
     },
-    updateMany: async ({ where = {}, data }: { where?: Predicate; data: Partial<FakeMessage> }) => {
+    updateMany: async ({
+      where = {},
+      data,
+    }: {
+      where?: Predicate;
+      data: Record<string, unknown>;
+    }) => {
       let count = 0;
       for (const message of [...store.messages.values()]) {
         if (!matchesWhere(message, where ?? {})) continue;
-        store.messages.set(message.id, { ...message, ...data });
+        store.messages.set(message.id, applyUpdate(message, data));
         count += 1;
       }
       return { count };
@@ -2058,6 +2107,7 @@ export const fakeDb = {
         name: data.name,
         notes: data.notes ?? null,
         location: data.location ?? null,
+        defaultTranscriptionLanguage: data.defaultTranscriptionLanguage ?? null,
         startedAt: data.startedAt ?? now,
         endedAt: data.endedAt ?? null,
         endedById: data.endedById ?? null,

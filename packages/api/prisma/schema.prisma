@@ -58,6 +58,16 @@ enum ModerationRecommendation {
   reject
 }
 
+enum MessageReviewClassification {
+  likely_hangup
+  unclear
+}
+
+enum MessageReviewRecommendation {
+  delete
+  review
+}
+
 enum RuntimeMode {
   real
   mock
@@ -89,6 +99,9 @@ model Installation {
   name      String
   notes     String?
   location  String?
+  // Nullable means an on-device processor chooses its own language detection.
+  // When set, this BCP-47 tag is the installation-wide transcription default.
+  defaultTranscriptionLanguage String?
   startedAt DateTime      @default(now())
   endedAt   DateTime?
   endedById String?
@@ -167,6 +180,24 @@ model Message {
   decidedAt      DateTime?
   decidedById    String?
   decidedBy      OperatorUser?   @relation(fields: [decidedById], references: [id])
+  // No-speech classification is deliberately separate from content moderation.
+  // Both values are advisory; DELETE remains an explicit operator action.
+  reviewClassification MessageReviewClassification?
+  reviewRecommendation MessageReviewRecommendation?
+  reviewClassifiedAt   DateTime?
+  reviewClassifiedById String?
+  reviewClassifiedBy   OperatorUser? @relation("MessageReviewClassifier", fields: [reviewClassifiedById], references: [id])
+  // One OIDC-authenticated processor may lease a message at a time. The
+  // plaintext token never reaches Postgres; only its SHA-256 digest is stored.
+  processingLeaseTokenHash String?
+  processingLeaseExpiresAt DateTime?
+  processingLeasedAt       DateTime?
+  processingLeasedById     String?
+  processingLeasedBy       OperatorUser? @relation("MessageProcessingLeaseHolder", fields: [processingLeasedById], references: [id])
+  processingAttemptCount   Int      @default(0)
+  processingError          String?
+  processingFailedAt       DateTime?
+  processingCompletedAt    DateTime?
   transcriptions Transcription[]
   moderations    Moderation[]
   installationId String?         @db.Uuid
@@ -174,6 +205,7 @@ model Message {
 
   @@index([status, createdAt])
   @@index([installationId, status, createdAt])
+  @@index([installationId, status, processingLeaseExpiresAt, createdAt])
 }
 
 model File {
@@ -296,6 +328,8 @@ model OperatorUser {
   lastLoginAt             DateTime?
   apiTokens               ApiToken[]
   decisions               Message[]
+  reviewClassifications   Message[]         @relation("MessageReviewClassifier")
+  processingLeases        Message[]         @relation("MessageProcessingLeaseHolder")
   sessions                OperatorSession[]
   requestedTranscriptions Transcription[]   @relation("TranscriptionRequester")
   requestedModerations    Moderation[]      @relation("ModerationRequester")

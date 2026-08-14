@@ -23,6 +23,13 @@ import {
   InstructionStatusSchema,
   MessageSchema,
   MessageDecisionSchema,
+  MessageProcessingClaimRequestSchema,
+  MessageProcessingClaimResponseSchema,
+  MessageProcessingCompleteSchema,
+  MessageProcessingFailSchema,
+  MessageProcessingHeartbeatSchema,
+  MessageProcessingLeaseTokenSchema,
+  MessageProcessingSummarySchema,
   MessageStatusSchema,
   MetricFilterCreateSchema,
   MetricFilterSchema,
@@ -60,6 +67,12 @@ import type {
   InstructionStatus,
   Message,
   MessageDecision,
+  MessageProcessingClaimRequest,
+  MessageProcessingClaimResponse,
+  MessageProcessingComplete,
+  MessageProcessingFail,
+  MessageProcessingHeartbeat,
+  MessageProcessingSummary,
   MessageStatus,
   MetricFilter,
   MetricFilterCreate,
@@ -356,6 +369,39 @@ export const messages = {
       method: "POST",
       body: MessageDecisionSchema.parse(input),
       schema: MessageSchema,
+    }),
+};
+
+export const messageProcessing = {
+  summary: () =>
+    apiFetch<MessageProcessingSummary>("/v1/message-processing/summary", {
+      schema: MessageProcessingSummarySchema,
+    }),
+  claim: (input: Partial<MessageProcessingClaimRequest> = {}) =>
+    apiFetch<MessageProcessingClaimResponse>("/v1/message-processing/claim", {
+      method: "POST",
+      body: MessageProcessingClaimRequestSchema.parse(input),
+      schema: MessageProcessingClaimResponseSchema,
+    }),
+  heartbeat: (id: string, input: MessageProcessingHeartbeat) =>
+    apiFetch<{ ok: boolean; leaseExpiresAt: string }>(`/v1/message-processing/${id}/heartbeat`, {
+      method: "POST",
+      body: MessageProcessingHeartbeatSchema.parse(input),
+    }),
+  complete: (id: string, input: MessageProcessingComplete) =>
+    apiFetch<{ message: Message; needs: string[] }>(`/v1/message-processing/${id}/complete`, {
+      method: "POST",
+      body: MessageProcessingCompleteSchema.parse(input),
+    }),
+  release: (id: string, input: { readonly leaseToken: string }) =>
+    apiFetch<void>(`/v1/message-processing/${id}/release`, {
+      method: "POST",
+      body: MessageProcessingLeaseTokenSchema.parse(input),
+    }),
+  fail: (id: string, input: MessageProcessingFail) =>
+    apiFetch<{ ok: boolean; terminal: boolean }>(`/v1/message-processing/${id}/fail`, {
+      method: "POST",
+      body: MessageProcessingFailSchema.parse(input),
     }),
 };
 
@@ -915,6 +961,14 @@ export function useMessagesList(filter: MessageStatus | "all", options: Messages
 
 export function useMessage(id: string) {
   return useQuery({ queryKey: apiQueryKeys.message(id), queryFn: () => messages.get(id) });
+}
+
+export function useMessageProcessingSummary() {
+  return useQuery({
+    queryKey: ["message-processing", "summary"],
+    queryFn: messageProcessing.summary,
+    refetchInterval: 15_000,
+  });
 }
 
 export function useDeleteMessage() {

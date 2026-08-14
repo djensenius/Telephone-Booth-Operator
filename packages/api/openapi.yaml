@@ -32,6 +32,7 @@ tags:
   - name: monitor
   - name: installations
   - name: worker
+  - name: message-processing
   - name: audit
 paths:
   /healthz:
@@ -1399,6 +1400,125 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/ApiTokenUsageBucket" }
 
+  /v1/message-processing/summary:
+    get:
+      summary: Current-installation on-device processing queue counts.
+      tags: [message-processing]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      responses:
+        "200":
+          description: Queue progress; historical installations are never included.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageProcessingSummary" }
+
+  /v1/message-processing/claim:
+    post:
+      summary: Atomically lease one message for an OIDC operator device.
+      description: |
+        Returns one hydrated, current-installation message compatible with the
+        caller's local capabilities, or `claim: null` when none is available.
+        Lease tokens are opaque, expire automatically, and are required by all
+        follow-up writes.
+      tags: [message-processing]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MessageProcessingClaimRequest" }
+      responses:
+        "200":
+          description: Claimed message or an empty queue.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageProcessingClaimResponse" }
+
+  /v1/message-processing/{id}/heartbeat:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Extend an active processing lease.
+      tags: [message-processing]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MessageProcessingHeartbeat" }
+      responses:
+        "200": { description: lease extended }
+        "409": { description: lease lost or installation ended }
+
+  /v1/message-processing/{id}/release:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Release an active processing lease without changing the message.
+      tags: [message-processing]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MessageProcessingLeaseToken" }
+      responses:
+        "204": { description: released }
+        "409": { description: lease lost }
+
+  /v1/message-processing/{id}/fail:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Release a failed lease and record its safe retry state.
+      description: The third failed claim is terminal and will not be re-leased automatically.
+      tags: [message-processing]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MessageProcessingFail" }
+      responses:
+        "200": { description: failure recorded }
+        "409": { description: lease lost }
+
+  /v1/message-processing/{id}/complete:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Persist a leased device's processing result set and release it.
+      description: |
+        Transcription, translation, moderation, and no-speech review results
+        are optional parts of one result set. All suggestions are advisory:
+        a `likely_hangup`/`delete` review never auto-deletes a recording.
+      tags: [message-processing]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MessageProcessingComplete" }
+      responses:
+        "200":
+          description: Results stored; `needs` is empty when local processing is complete.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageProcessingCompleteResponse" }
+        "409": { description: lease lost, stale input, or installation ended }
+
   /v1/worker/messages/{id}/work:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2134,6 +2254,16 @@ components:
         receivedAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
         decidedAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
         decidedById: { anyOf: [{ type: string }, { type: "null" }] }
+        reviewClassification:
+          anyOf:
+            - { type: string, enum: [likely_hangup, unclear] }
+            - { type: "null" }
+        reviewRecommendation:
+          anyOf:
+            - { type: string, enum: [delete, review] }
+            - { type: "null" }
+        reviewClassifiedAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+        reviewClassifiedById: { anyOf: [{ type: string }, { type: "null" }] }
         audio: { $ref: "#/components/schemas/AudioRef" }
         latestTranscription:
           anyOf:
@@ -2177,6 +2307,119 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/Message" }
+    MessageProcessingClaimRequest:
+      type: object
+      properties:
+        capabilities:
+          type: array
+          items: { type: string, enum: [transcription, translation, moderation, review] }
+          default: [transcription, translation, moderation, review]
+        leaseSeconds: { type: integer, minimum: 30, maximum: 900, default: 300 }
+    MessageProcessingSummary:
+      type: object
+      required: [queued, leased, terminal, needs, generatedAt]
+      properties:
+        queued: { type: integer, minimum: 0 }
+        leased: { type: integer, minimum: 0 }
+        terminal: { type: integer, minimum: 0 }
+        needs:
+          type: object
+          required: [transcription, translation, moderation, review]
+          properties:
+            transcription: { type: integer, minimum: 0 }
+            translation: { type: integer, minimum: 0 }
+            moderation: { type: integer, minimum: 0 }
+            review: { type: integer, minimum: 0 }
+        generatedAt: { type: string, format: date-time }
+    MessageProcessingClaim:
+      type: object
+      required: [message, needs, leaseToken, leaseExpiresAt, defaultTranscriptionLanguage]
+      properties:
+        message: { $ref: "#/components/schemas/Message" }
+        needs:
+          type: array
+          minItems: 1
+          items: { type: string, enum: [transcription, translation, moderation, review] }
+        leaseToken: { type: string, minLength: 32 }
+        leaseExpiresAt: { type: string, format: date-time }
+        defaultTranscriptionLanguage: { type: [string, "null"], pattern: "^[A-Za-z0-9-]+$" }
+    MessageProcessingClaimResponse:
+      type: object
+      required: [claim]
+      properties:
+        claim:
+          anyOf:
+            - $ref: "#/components/schemas/MessageProcessingClaim"
+            - { type: "null" }
+    MessageProcessingLeaseToken:
+      type: object
+      required: [leaseToken]
+      properties:
+        leaseToken: { type: string, minLength: 32 }
+    MessageProcessingHeartbeat:
+      allOf:
+        - $ref: "#/components/schemas/MessageProcessingLeaseToken"
+        - type: object
+          properties:
+            leaseSeconds: { type: integer, minimum: 30, maximum: 900, default: 300 }
+    MessageProcessingFail:
+      allOf:
+        - $ref: "#/components/schemas/MessageProcessingLeaseToken"
+        - type: object
+          required: [errorCode]
+          properties:
+            errorCode: { type: string, minLength: 1, maxLength: 128 }
+            errorMessage: { type: string, maxLength: 2000 }
+    MessageProcessingComplete:
+      allOf:
+        - $ref: "#/components/schemas/MessageProcessingLeaseToken"
+        - type: object
+          minProperties: 2
+          properties:
+            transcription:
+              type: object
+              required: [text]
+              properties:
+                expectedLatestTranscriptionId: { type: [string, "null"], format: uuid }
+                expectedLatestTranscriptionSha256:
+                  { type: [string, "null"], pattern: "^[0-9a-fA-F]{64}$" }
+                text: { type: string, maxLength: 20000 }
+                language: { type: [string, "null"], maxLength: 64 }
+                model: { type: [string, "null"], maxLength: 128 }
+            translation:
+              type: object
+              required: [translatedText]
+              properties:
+                transcriptionId: { type: string, format: uuid }
+                expectedTranslationSha256: { type: [string, "null"], pattern: "^[0-9a-f]{64}$" }
+                translatedText: { type: string, minLength: 1, maxLength: 20000 }
+                translatedLanguage: { type: string, maxLength: 64 }
+                model: { type: [string, "null"], maxLength: 128 }
+            moderation:
+              type: object
+              required: [flagged, recommendation, maxScore]
+              properties:
+                inputSha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+                flagged: { type: boolean }
+                recommendation: { $ref: "#/components/schemas/ModerationRecommendation" }
+                maxScore: { type: number, minimum: 0, maximum: 1 }
+                categories: { type: object, additionalProperties: { type: number } }
+                reasonSummary: { type: [string, "null"], maxLength: 2000 }
+                model: { type: [string, "null"], maxLength: 128 }
+            review:
+              type: object
+              required: [classification, recommendation]
+              properties:
+                classification: { type: string, enum: [likely_hangup, unclear] }
+                recommendation: { type: string, enum: [delete, review] }
+    MessageProcessingCompleteResponse:
+      type: object
+      required: [message, needs]
+      properties:
+        message: { $ref: "#/components/schemas/Message" }
+        needs:
+          type: array
+          items: { type: string, enum: [transcription, translation, moderation, review] }
     UploadSasRequest:
       type: object
       required: [kind, sha256, sizeBytes, contentType]
@@ -2588,12 +2831,25 @@ components:
     Installation:
       type: object
       required:
-        [id, name, notes, location, startedAt, endedAt, endedById, summary, createdAt, isActive]
+        [
+          id,
+          name,
+          notes,
+          location,
+          defaultTranscriptionLanguage,
+          startedAt,
+          endedAt,
+          endedById,
+          summary,
+          createdAt,
+          isActive,
+        ]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
         notes: { type: [string, "null"] }
         location: { type: [string, "null"] }
+        defaultTranscriptionLanguage: { type: [string, "null"], pattern: "^[A-Za-z0-9-]+$" }
         startedAt: { type: string, format: date-time }
         endedAt: { type: [string, "null"], format: date-time }
         endedById: { type: [string, "null"] }
@@ -2612,6 +2868,8 @@ components:
         [
           calls,
           messages,
+          allRecordings,
+          byStatus,
           messagesApproved,
           messagesRejected,
           questions,
@@ -2623,6 +2881,8 @@ components:
       properties:
         calls: { type: integer, minimum: 0 }
         messages: { type: integer, minimum: 0 }
+        allRecordings: { type: integer, minimum: 0 }
+        byStatus: { type: object, additionalProperties: { type: integer, minimum: 0 } }
         messagesApproved: { type: integer, minimum: 0 }
         messagesRejected: { type: integer, minimum: 0 }
         questions: { type: integer, minimum: 0 }
@@ -2646,6 +2906,7 @@ components:
         name: { type: string, minLength: 1, maxLength: 120 }
         notes: { type: [string, "null"], maxLength: 2000 }
         location: { type: [string, "null"], maxLength: 200 }
+        defaultTranscriptionLanguage: { type: [string, "null"], maxLength: 64 }
         copyQuestions:
           type: boolean
           default: false
@@ -2659,6 +2920,7 @@ components:
         name: { type: string, minLength: 1, maxLength: 120 }
         notes: { type: [string, "null"], maxLength: 2000 }
         location: { type: [string, "null"], maxLength: 200 }
+        defaultTranscriptionLanguage: { type: [string, "null"], maxLength: 64 }
 
     InstallationEnd:
       type: object
@@ -2780,9 +3042,14 @@ components:
                   completed: { type: integer, minimum: 0 }
         messages:
           type: object
-          required: [total, byStatus, averageDurationMs]
+          required: [total, approved, allRecordings, byStatus, averageDurationMs]
           properties:
-            total: { type: integer, minimum: 0 }
+            total:
+              type: integer
+              minimum: 0
+              description: Approved/playable messages; retained for compatibility.
+            approved: { type: integer, minimum: 0 }
+            allRecordings: { type: integer, minimum: 0 }
             byStatus:
               type: object
               additionalProperties: { type: integer, minimum: 0 }
