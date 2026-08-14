@@ -134,13 +134,15 @@ export function EditInstructionDialog({
   if (instruction === null) return null;
   const instructionId = instruction.id;
 
-  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
+  function submit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
-    await updateInstruction.mutateAsync({
-      id: instructionId,
-      input: { description: description.trim() || null },
-    });
-    onClose();
+    updateInstruction.mutate(
+      {
+        id: instructionId,
+        input: { description: description.trim() || null },
+      },
+      { onSuccess: onClose },
+    );
   }
 
   return (
@@ -152,7 +154,7 @@ export function EditInstructionDialog({
         aria-labelledby="edit-instruction-heading"
       >
         <h2 id="edit-instruction-heading">Edit instruction description</h2>
-        <form className="feature-form" onSubmit={(event) => void submit(event)}>
+        <form className="feature-form" onSubmit={submit}>
           <label>
             Description
             <input
