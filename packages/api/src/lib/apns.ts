@@ -11,7 +11,8 @@
 // for example) without disturbing the route handlers.
 
 import { db } from "./db.js";
-import { Http2ApnsSender, loadApnsConfigFromEnv } from "./apns-http2.js";
+import { Http2ApnsSender, inspectApnsConfig, loadApnsConfigFromEnv } from "./apns-http2.js";
+import { log } from "./logger.js";
 import type { MobileDevicePreferences } from "@telephone-booth-operator/shared";
 
 export type ApnsNotification = {
@@ -131,9 +132,59 @@ export const fanOutNotification = async (notification: ApnsNotification): Promis
         distinct: ["userId"],
       })
       .then((rows) => Array.from(new Set(rows.map((row) => row.userId))));
-    await Promise.allSettled(userIds.map((userId) => apnsSender().send(userId, notification)));
-  } catch {
+    const results = await Promise.allSettled(
+      userIds.map((userId) => apnsSender().send(userId, notification)),
+    );
+    for (const [index, result] of results.entries()) {
+      if (result.status === "fulfilled") continue;
+      log.error(
+        {
+          component: "apns",
+          errorName: result.reason instanceof Error ? result.reason.name : "unknown",
+          preferenceKey: notification.preferenceKey,
+          userId: userIds[index],
+        },
+        "APNs sender rejected fan-out",
+      );
+    }
+  } catch (error) {
+    log.error(
+      { component: "apns", err: error, preferenceKey: notification.preferenceKey },
+      "APNs fan-out failed",
+    );
     // Push delivery is best-effort. Never let a failure here surface
     // to the request handler.
+  }
+};
+
+export const apnsHealthStatus = async (): Promise<{
+  status: "configured" | "disabled" | "misconfigured";
+  environment: "production" | "development" | null;
+  missing?: string[];
+  invalid?: string[];
+}> => {
+  const status = await inspectApnsConfig();
+  if (status.status === "configured") {
+    return { status: status.status, environment: status.environment };
+  }
+  return {
+    status: status.status,
+    environment: status.environment,
+    ...(status.missing.length > 0 ? { missing: status.missing } : {}),
+    ...(status.invalid.length > 0 ? { invalid: status.invalid } : {}),
+  };
+};
+
+export const logApnsConfiguration = async (): Promise<void> => {
+  const status = await apnsHealthStatus();
+  const fields = { component: "apns", ...status };
+  if (status.status === "configured") {
+    log.info(fields, "APNs configured");
+  } else if (status.status === "misconfigured") {
+    log.error(fields, "APNs configuration is incomplete or invalid; push delivery disabled");
+  } else if (process.env.NODE_ENV === "production") {
+    log.error(fields, "APNs is not configured in production; push delivery disabled");
+  } else {
+    log.warn(fields, "APNs is not configured; push delivery disabled");
   }
 };

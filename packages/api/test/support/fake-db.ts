@@ -157,6 +157,13 @@ export type FakeTranscription = {
   translationAttemptCount: number;
 };
 
+export type FakePushNotificationState = {
+  key: string;
+  active: boolean;
+  threshold: number;
+  updatedAt: Date;
+};
+
 export type FakeModeration = {
   id: string;
   messageId: string;
@@ -174,6 +181,7 @@ export type FakeModeration = {
   requestedById: string | null;
   createdAt: Date;
   completedAt: Date | null;
+  pushNotifiedAt: Date | null;
   // Pull-worker lease columns (moderation job).
   leasedAt: Date | null;
   leaseToken: string | null;
@@ -254,6 +262,7 @@ export const store = {
   callSessions: new Map<string, FakeCallSession>(),
   transcriptions: new Map<string, FakeTranscription>(),
   moderations: new Map<string, FakeModeration>(),
+  pushNotificationStates: new Map<string, FakePushNotificationState>(),
   mobileDevices: new Map<string, FakeMobileDevice>(),
   metricFilters: new Map<string, FakeMetricFilter>(),
   installations: new Map<string, FakeInstallation>(),
@@ -694,6 +703,7 @@ export const resetFakeDb = (): void => {
   store.callSessions.clear();
   store.transcriptions.clear();
   store.moderations.clear();
+  store.pushNotificationStates.clear();
   store.mobileDevices.clear();
   store.metricFilters.clear();
   store.installations.clear();
@@ -1578,6 +1588,7 @@ export const fakeDb = {
         requestedById: data.requestedById ?? null,
         createdAt: data.createdAt ?? new Date(),
         completedAt: data.completedAt ?? null,
+        pushNotifiedAt: data.pushNotifiedAt ?? null,
         leasedAt: data.leasedAt ?? null,
         leaseToken: data.leaseToken ?? null,
         leaseExpiresAt: data.leaseExpiresAt ?? null,
@@ -2276,6 +2287,38 @@ export const fakeDb = {
       store.auditLogs.length = 0;
       store.auditLogs.push(...kept);
       return { count: removed };
+    },
+  },
+  pushNotificationState: {
+    upsert: async ({
+      where,
+      create,
+    }: {
+      where: { key: string };
+      create: { key: string; active: boolean; threshold: number };
+      update: Record<string, never>;
+    }) => {
+      const existing = store.pushNotificationStates.get(where.key);
+      if (existing) return existing;
+      const row: FakePushNotificationState = {
+        ...create,
+        updatedAt: new Date(),
+      };
+      store.pushNotificationStates.set(row.key, row);
+      return row;
+    },
+    update: async ({
+      where,
+      data,
+    }: {
+      where: { key: string };
+      data: { active: boolean; threshold: number };
+    }) => {
+      const existing = store.pushNotificationStates.get(where.key);
+      if (!existing) throw new Error("push notification state not found");
+      const updated = { ...existing, ...data, updatedAt: new Date() };
+      store.pushNotificationStates.set(where.key, updated);
+      return updated;
     },
   },
   apiToken: {

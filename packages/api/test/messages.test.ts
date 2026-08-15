@@ -29,6 +29,7 @@ import { wsBroadcaster, type WsEnvelope } from "../src/lib/broadcaster.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { fakeBlobs, resetFakeAzure } from "./support/fake-azure.js";
 import {
+  fakeDb,
   resetFakeDb,
   seedFile,
   seedMessage,
@@ -44,6 +45,7 @@ const setup = () => {
   process.env.TRANSCRIPTION_PROVIDER = "disabled";
   resetSessionCryptoForTests();
   resetApnsSenderForTests();
+  delete process.env.MODERATION_QUEUE_HIGH_THRESHOLD;
   resetFakeDb();
   resetFakeAzure();
   return createApp();
@@ -333,6 +335,85 @@ describe("messages routes", () => {
       preferenceKey: "messageReceived",
       badge: 2,
     });
+  });
+
+  it("re-arms after the queue drops below the high threshold", async () => {
+    process.env.MODERATION_QUEUE_HIGH_THRESHOLD = "2";
+    const app = createApp();
+    seedMessage({ audioId: seedFile({ sha256: "1".repeat(64) }).id, status: "pending" });
+    seedMobileDevice({
+      userId: "operator-1",
+      platform: "ios",
+      preferences: { moderationQueueHigh: true },
+    });
+    const sent: Array<{ preferenceKey: string; badge?: number }> = [];
+    setApnsSenderForTests({
+      send: async (_userId, notification) => {
+        sent.push({ preferenceKey: notification.preferenceKey, badge: notification.badge });
+      },
+    });
+
+    const complete = async (sha256: string): Promise<string> => {
+      const initiated = await app.request("/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ durationMs: 2000, sha256 }),
+      });
+      const slot = await initiated.json();
+      fakeBlobs.set(slot.blobName, {
+        exists: true,
+        sizeBytes: 1234,
+        contentType: "audio/flac",
+        sha256,
+      });
+      const completed = await app.request(`/v1/messages/${slot.id}/complete`, {
+        method: "POST",
+        headers: phoneHeaders,
+      });
+      expect(completed.status).toBe(200);
+      return slot.id as string;
+    };
+
+    const first = await complete("2".repeat(64));
+    const second = await complete("3".repeat(64));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const cookie = operatorCookie();
+    const deleted = await app.request(`/v1/messages/${first}`, {
+      method: "DELETE",
+      headers: { cookie },
+    });
+    expect(deleted.status).toBe(204);
+    const decided = await app.request(`/v1/messages/${second}/decision`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ decision: "approve" }),
+    });
+    expect(decided.status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    await complete("4".repeat(64));
+    await complete("5".repeat(64));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(sent.filter((entry) => entry.preferenceKey === "moderationQueueHigh")).toEqual([
+      { preferenceKey: "moderationQueueHigh", badge: 2 },
+      { preferenceKey: "moderationQueueHigh", badge: 2 },
+    ]);
+  });
+
+  it("keeps a successful deletion successful when queue refresh fails", async () => {
+    const app = createApp();
+    const message = seedMessage({ status: "pending" });
+    vi.spyOn(fakeDb.message, "count").mockRejectedValueOnce(new Error("count unavailable"));
+
+    const deleted = await app.request(`/v1/messages/${message.id}`, {
+      method: "DELETE",
+      headers: { cookie: operatorCookie() },
+    });
+    expect(deleted.status).toBe(204);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(store.messages.has(message.id)).toBe(false);
   });
 
   it("returns a random approved message with audio sha for the phone client", async () => {

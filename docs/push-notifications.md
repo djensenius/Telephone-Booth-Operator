@@ -19,10 +19,15 @@ turn it on, and how to configure them in production.
    current **awaiting-moderation** count (messages with status `received` or
    `pending`) and fans out an alert push to every registered device whose
    preferences opt in.
-3. The push is an `alert` push (`apns-push-type: alert`, `apns-priority: 10`)
+3. A newly recorded moderation result with `flagged: true` sends a
+   `messageFlagged` alert. Re-delivery of the same moderation row is deduplicated.
+4. `moderationQueueHigh` fires once when the awaiting-moderation count crosses
+   `MODERATION_QUEUE_HIGH_THRESHOLD` (default `10`). It is re-armed only after
+   a decision or deletion brings the queue below the threshold.
+5. The push is an `alert` push (`apns-push-type: alert`, `apns-priority: 10`)
    carrying `aps.badge`. The OS sets the app-icon badge from `aps.badge`; the
    app also refreshes its in-app tab badge on foreground and on push receipt.
-4. The same count is exposed at `GET /v1/stats/summary`
+6. The same count is exposed at `GET /v1/stats/summary`
    (`messages.awaitingModeration`) so the app can poll and stay in sync even
    when a push is missed.
 
@@ -36,13 +41,14 @@ Push is **off** unless all four required variables are present
 (`apnsEnvConfigured()` gates the fan-out). Without them the API falls back to a
 no-op sender, so dev and CI never emit pushes.
 
-| Variable           | Required | Description                                                             |
-| ------------------ | -------- | ----------------------------------------------------------------------- |
-| `APNS_TEAM_ID`     | yes      | 10-char Apple Developer Team ID.                                        |
-| `APNS_KEY_ID`      | yes      | 10-char Key ID of the APNs Auth Key (`.p8`).                            |
-| `APNS_AUTH_KEY`    | yes      | PEM contents of the `.p8`. Literal `\n` escapes are accepted.           |
-| `APNS_BUNDLE_ID`   | yes      | App bundle id. The watch topic is derived as `<APNS_BUNDLE_ID>.watch`.  |
-| `APNS_ENVIRONMENT` | no       | `production` → `api.push.apple.com`; anything else → sandbox (default). |
+| Variable                          | Required | Description                                                            |
+| --------------------------------- | -------- | ---------------------------------------------------------------------- |
+| `APNS_TEAM_ID`                    | yes      | 10-char Apple Developer Team ID.                                       |
+| `APNS_KEY_ID`                     | yes      | 10-char Key ID of the APNs Auth Key (`.p8`).                           |
+| `APNS_AUTH_KEY`                   | yes      | PEM contents of the `.p8`. Literal `\n` escapes are accepted.          |
+| `APNS_BUNDLE_ID`                  | yes      | App bundle id. The watch topic is derived as `<APNS_BUNDLE_ID>.watch`. |
+| `APNS_ENVIRONMENT`                | no       | `production` or `development`; defaults to sandbox (`development`).    |
+| `MODERATION_QUEUE_HIGH_THRESHOLD` | no       | Queue count that triggers the opt-in high-queue alert (default `10`).  |
 
 ### About the APNs Auth Key
 
@@ -61,7 +67,7 @@ to the key (and is part of the downloaded filename, `AuthKey_<KEYID>.p8`).
 The APNs **host must match the environment that minted the device token**:
 
 - Xcode/debug builds installed directly on a device get **sandbox** tokens →
-  set `APNS_ENVIRONMENT` to anything other than `production` (sandbox host).
+  set `APNS_ENVIRONMENT=development` (sandbox host).
 - TestFlight and App Store builds get **production** tokens → set
   `APNS_ENVIRONMENT=production`.
 
@@ -116,6 +122,10 @@ The device re-registers the next time the app launches and calls
 - **No pushes at all** — confirm all four required vars are set
   (`apnsEnvConfigured()` must be true) and that at least one device row exists
   in `mobile_devices`.
+- **Configuration state** — `GET /healthz` reports `apns.status` as
+  `configured`, `disabled`, or `misconfigured`, plus missing/invalid variable
+  names only. Startup and delivery failures are logged as structured Pino
+  events without device tokens or notification payloads.
 - **`BadDeviceToken`** — `APNS_ENVIRONMENT` does not match how the app was
   installed (sandbox vs production). See the gotcha above.
 - **`DeviceTokenNotForTopic`** — `APNS_BUNDLE_ID` does not match the app's

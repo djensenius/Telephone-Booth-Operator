@@ -473,10 +473,20 @@ model Moderation {
   requestedBy     OperatorUser?             @relation("ModerationRequester", fields: [requestedById], references: [id])
   createdAt       DateTime                  @default(now())
   completedAt     DateTime?
+  pushNotifiedAt  DateTime?
 
   @@index([messageId, createdAt])
   @@index([recommendation, createdAt])
   @@index([status, provider, createdAt(sort: Desc), id(sort: Desc)], map: "Moderation_push_replay_idx")
+}
+
+// Durable singleton state for push conditions that must be coordinated across
+// API replicas. Queue-high uses one row keyed by "moderation-queue-high".
+model PushNotificationState {
+  key       String   @id
+  active    Boolean  @default(false)
+  threshold Int
+  updatedAt DateTime @updatedAt
 }
 
 // Mobile device registered for APNs / push notifications. One row per

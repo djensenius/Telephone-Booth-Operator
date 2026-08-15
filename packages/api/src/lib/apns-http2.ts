@@ -14,6 +14,7 @@ import { importPKCS8, SignJWT } from "jose";
 
 import { db } from "./db.js";
 import { findTargetDevices, type ApnsNotification } from "./apns.js";
+import { log } from "./logger.js";
 
 type ApnsSigningKey = Awaited<ReturnType<typeof importPKCS8>>;
 
@@ -32,15 +33,82 @@ const PRODUCTION_HOST = "https://api.push.apple.com";
 const SANDBOX_HOST = "https://api.sandbox.push.apple.com";
 const JWT_REFRESH_MS = 40 * 60 * 1000;
 
-/// Reads the APNs config from the environment. Returns null when any
-/// required variable is missing so callers can fall back to a no-op sender.
+export type ApnsConfigStatus =
+  | { status: "configured"; environment: ApnsConfig["environment"]; config: ApnsConfig }
+  | {
+      status: "disabled" | "misconfigured";
+      environment: ApnsConfig["environment"] | null;
+      missing: string[];
+      invalid: string[];
+    };
+
+/// Reports configuration state without exposing secret values. A completely
+/// absent configuration is disabled; partial or malformed configuration is a
+/// production-visible error.
+export const inspectApnsConfig = async (
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<ApnsConfigStatus> => {
+  const teamId = env.APNS_TEAM_ID?.trim();
+  const keyId = env.APNS_KEY_ID?.trim();
+  const authKey = normalizePemKey(env.APNS_AUTH_KEY);
+  const bundleId = env.APNS_BUNDLE_ID?.trim();
+  const rawEnvironment = env.APNS_ENVIRONMENT?.trim();
+  const environment =
+    rawEnvironment === undefined || rawEnvironment === ""
+      ? "development"
+      : rawEnvironment === "production" || rawEnvironment === "development"
+        ? rawEnvironment
+        : null;
+  const missing = [
+    ["APNS_TEAM_ID", teamId],
+    ["APNS_KEY_ID", keyId],
+    ["APNS_AUTH_KEY", env.APNS_AUTH_KEY?.trim()],
+    ["APNS_BUNDLE_ID", bundleId],
+  ]
+    .filter(([, configured]) => !configured)
+    .map(([name]) => name!);
+  const invalid = [
+    ...(env.APNS_AUTH_KEY?.trim() && !authKey ? ["APNS_AUTH_KEY"] : []),
+    ...(environment === null ? ["APNS_ENVIRONMENT"] : []),
+  ];
+  if (missing.length === 4 && invalid.length === 0 && !rawEnvironment) {
+    return { status: "disabled", environment: null, missing, invalid };
+  }
+  if (missing.length > 0 || invalid.length > 0 || environment === null) {
+    return { status: "misconfigured", environment, missing, invalid };
+  }
+  try {
+    await importPKCS8(authKey!, "ES256");
+  } catch {
+    return {
+      status: "misconfigured",
+      environment,
+      missing,
+      invalid: ["APNS_AUTH_KEY"],
+    };
+  }
+  return {
+    status: "configured",
+    environment,
+    config: { teamId: teamId!, keyId: keyId!, authKey: authKey!, bundleId: bundleId!, environment },
+  };
+};
+
+/// Reads the APNs config from the environment. Returns null unless the complete
+/// configuration is valid so callers can safely fall back to a no-op sender.
 export const loadApnsConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): ApnsConfig | null => {
   const teamId = env.APNS_TEAM_ID?.trim();
   const keyId = env.APNS_KEY_ID?.trim();
   const authKey = normalizePemKey(env.APNS_AUTH_KEY);
   const bundleId = env.APNS_BUNDLE_ID?.trim();
-  if (!teamId || !keyId || !authKey || !bundleId) return null;
-  const environment = env.APNS_ENVIRONMENT?.trim() === "production" ? "production" : "development";
+  const rawEnvironment = env.APNS_ENVIRONMENT?.trim();
+  const environment =
+    rawEnvironment === undefined || rawEnvironment === ""
+      ? "development"
+      : rawEnvironment === "production" || rawEnvironment === "development"
+        ? rawEnvironment
+        : null;
+  if (!teamId || !keyId || !authKey || !bundleId || environment === null) return null;
   return { teamId, keyId, authKey, bundleId, environment };
 };
 
@@ -101,6 +169,15 @@ export class Http2ApnsSender {
     const jwt = await this.providerToken();
     const payload = JSON.stringify(buildApnsPayload(notification));
     await Promise.allSettled(devices.map((device) => this.deliver(device, jwt, payload)));
+    log.debug(
+      {
+        component: "apns",
+        userId,
+        preferenceKey: notification.preferenceKey,
+        deviceCount: devices.length,
+      },
+      "APNs fan-out completed",
+    );
   }
 
   private async deliver(
@@ -113,13 +190,43 @@ export class Http2ApnsSender {
       if (result.status === 200) return;
       if (result.status === 410 || PERMANENT_TOKEN_FAILURES.has(result.reason ?? "")) {
         await this.revokeDevice(device.id);
+        log.warn(
+          {
+            component: "apns",
+            status: result.status,
+            reason: result.reason ?? "unknown",
+            apnsId: result.apnsId,
+            deviceId: device.id,
+            platform: device.platform,
+          },
+          "APNs rejected device token; device revoked",
+        );
       } else {
-        console.warn(
-          `[apns] push failed status=${result.status} reason=${result.reason ?? "?"} device=${device.id}`,
+        log.warn(
+          {
+            component: "apns",
+            status: result.status,
+            reason: result.reason ?? "unknown",
+            apnsId: result.apnsId,
+            deviceId: device.id,
+            platform: device.platform,
+          },
+          "APNs delivery failed",
         );
       }
     } catch (error) {
-      console.warn(`[apns] push error device=${device.id}: ${(error as Error).message}`);
+      const errorRecord =
+        error !== null && typeof error === "object" ? (error as Record<string, unknown>) : {};
+      log.warn(
+        {
+          component: "apns",
+          errorName: error instanceof Error ? error.name : "unknown",
+          errorCode: typeof errorRecord.code === "string" ? errorRecord.code : undefined,
+          deviceId: device.id,
+          platform: device.platform,
+        },
+        "APNs transport error",
+      );
       // A transport error often means the session is dead; drop it so the
       // next send reconnects.
       this.resetSession();
@@ -143,7 +250,7 @@ export class Http2ApnsSender {
     topic: string,
     jwt: string,
     payload: string,
-  ): Promise<{ status: number; reason?: string }> {
+  ): Promise<{ status: number; reason?: string; apnsId?: string }> {
     return new Promise((resolve, reject) => {
       const session = this.ensureSession();
       const req = session.request({
@@ -157,9 +264,12 @@ export class Http2ApnsSender {
       });
       let status = 0;
       let body = "";
+      let apnsId: string | undefined;
       req.setEncoding("utf8");
       req.on("response", (headers) => {
         status = Number(headers[":status"] ?? 0);
+        const header = headers["apns-id"];
+        apnsId = Array.isArray(header) ? header[0] : header;
       });
       req.on("data", (chunk: string | Buffer) => {
         body += typeof chunk === "string" ? chunk : chunk.toString("utf8");
@@ -174,7 +284,11 @@ export class Http2ApnsSender {
             // Non-JSON error body; leave reason undefined.
           }
         }
-        resolve(reason === undefined ? { status } : { status, reason });
+        resolve({
+          status,
+          ...(reason === undefined ? {} : { reason }),
+          ...(apnsId === undefined ? {} : { apnsId }),
+        });
       });
       req.end(payload);
     });

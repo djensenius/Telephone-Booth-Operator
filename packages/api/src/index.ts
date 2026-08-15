@@ -13,6 +13,7 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { pathToFileURL } from "node:url";
 import { startAiSweeper } from "./lib/ai/sweeper.js";
+import { apnsHealthStatus, logApnsConfiguration } from "./lib/apns.js";
 import { auditWrites, type AuditVariables } from "./lib/audit.js";
 import { startAuditPruner } from "./lib/audit-pruner.js";
 import { startSnapshotPruner } from "./lib/snapshot-pruner.js";
@@ -63,11 +64,12 @@ export const createApp = (): Hono<{ Variables: AuthVariables & AuditVariables }>
   // Mounted before every auth guard so rejected writes are audited too.
   app.use("/v1/*", auditWrites());
 
-  app.get("/healthz", (c) =>
+  app.get("/healthz", async (c) =>
     c.json({
       status: "ok",
       version: process.env.npm_package_version ?? "0.0.0",
       time: new Date().toISOString(),
+      apns: await apnsHealthStatus(),
     }),
   );
 
@@ -103,7 +105,7 @@ export const createApp = (): Hono<{ Variables: AuthVariables & AuditVariables }>
   return app;
 };
 
-const start = (): void => {
+const start = async (): Promise<void> => {
   try {
     const authConfig = resolveAuthConfig();
     if (authConfig.disabled && process.env.NODE_ENV === "production") {
@@ -118,6 +120,7 @@ const start = (): void => {
   }
 
   const port = Number.parseInt(process.env.API_PORT ?? "8787", 10);
+  await logApnsConfiguration();
   const server = serve({ fetch: app.fetch, port }, ({ port }) => {
     console.log(`telephone-booth-operator API listening on :${port}`);
   });
@@ -152,7 +155,7 @@ const start = (): void => {
 const app = createApp();
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  start();
+  void start();
 }
 
 export { app };
