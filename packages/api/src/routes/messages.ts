@@ -34,7 +34,7 @@ import {
   scopeWhere,
 } from "../lib/installation.js";
 import { countMessagesAwaitingModeration } from "../lib/moderation-badge.js";
-import { notifyMessageFlagged, observeModerationQueueCount } from "../lib/push-events.js";
+import { notifyMessageFlagged, observeModerationQueue } from "../lib/push-events.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 import {
   serializeMessage,
@@ -174,7 +174,7 @@ messagesRouter.delete("/:id", zValidator("param", idParamSchema), async (c) => {
   }
   recordAudit(c, { metadata: { previousStatus: existing.status } });
   if (existing.status === "received" || existing.status === "pending") {
-    observeModerationQueueCount(await countMessagesAwaitingModeration());
+    void observeModerationQueue("message.delete");
   }
   return c.body(null, 204);
 });
@@ -379,7 +379,7 @@ messagesRouter.post(
     // The badge reflects the number of messages awaiting moderation (this
     // one is now "pending", so it is already included in the count).
     const badge = await countMessagesAwaitingModeration();
-    observeModerationQueueCount(badge);
+    void observeModerationQueue("message.complete");
     void fanOutNotification({
       preferenceKey: "messageReceived",
       title: "New booth message",
@@ -619,7 +619,7 @@ messagesRouter.post(
       if (!row) return c.json({ error: "not_found" }, 404);
       await advanceMessageAfterModeration(id);
       await broadcastMessageById(id);
-      notifyMessageFlagged(id, row.id, row.flagged === true);
+      void notifyMessageFlagged(id, row.id, row.flagged === true);
       return c.json(serializeModeration(row), 202);
     }
     const result = await recordModerationResult({
@@ -758,7 +758,7 @@ messagesRouter.post(
     if (!message) return c.json({ error: "not_found" }, 404);
     wsBroadcaster.broadcast({ kind: "message", message: serializeMessage(message) });
     if (existing.status === "received" || existing.status === "pending") {
-      observeModerationQueueCount(await countMessagesAwaitingModeration());
+      void observeModerationQueue("message.decision");
     }
     return c.json(serializeMessage(message as never));
   },

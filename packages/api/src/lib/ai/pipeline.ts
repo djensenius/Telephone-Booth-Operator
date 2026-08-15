@@ -1013,7 +1013,7 @@ export const recordModerationResult = async (
 
   await advanceMessageAfterModeration(opts.messageId);
   await broadcastMessage(opts.messageId);
-  notifyMessageFlagged(opts.messageId, recorded.moderationId, opts.flagged);
+  void notifyMessageFlagged(opts.messageId, recorded.moderationId, opts.flagged);
   return recorded;
 };
 
@@ -1193,7 +1193,7 @@ export const runModeration = async (opts: RunModerationOptions): Promise<string 
     });
     await advanceMessageAfterModeration(opts.messageId);
     await broadcastMessage(opts.messageId);
-    notifyMessageFlagged(opts.messageId, pending.id, result.flagged);
+    void notifyMessageFlagged(opts.messageId, pending.id, result.flagged);
     return pending.id;
   } catch (error) {
     const reason = sanitizeError(error);

@@ -14,7 +14,6 @@ import {
 } from "../src/lib/ai/pipeline.js";
 import { resetApnsSenderForTests, setApnsSenderForTests } from "../src/lib/apns.js";
 import { wsBroadcaster, type WsEnvelope } from "../src/lib/broadcaster.js";
-import { resetPushEventStateForTests } from "../src/lib/push-events.js";
 import type { ModerationProvider, TranscriptionProvider } from "../src/lib/ai/types.js";
 import { fakeDb, seedMobileDevice, store } from "./support/fake-db.js";
 import { resetFakeAzure } from "./support/fake-azure.js";
@@ -100,7 +99,6 @@ describe("AI pipeline", () => {
     resetFakeDb();
     resetFakeAzure();
     resetApnsSenderForTests();
-    resetPushEventStateForTests();
   });
 
   it("runs transcription then moderation and always leaves the message pending for a human", async () => {

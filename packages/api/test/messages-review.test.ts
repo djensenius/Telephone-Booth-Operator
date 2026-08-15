@@ -27,7 +27,6 @@ vi.mock("../src/lib/require-api-token.js", () => ({
 import { createApp } from "../src/index.js";
 import { resetApnsSenderForTests, setApnsSenderForTests } from "../src/lib/apns.js";
 import { wsBroadcaster } from "../src/lib/broadcaster.js";
-import { resetPushEventStateForTests } from "../src/lib/push-events.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { fakeBlobs, resetFakeAzure } from "./support/fake-azure.js";
 import { fakeDb, resetFakeDb, seedMobileDevice, store } from "./support/fake-db.js";
@@ -42,7 +41,6 @@ const setup = () => {
   process.env.MODERATION_PROVIDER = "disabled";
   resetSessionCryptoForTests();
   resetApnsSenderForTests();
-  resetPushEventStateForTests();
   resetFakeDb();
   resetFakeAzure();
 };
@@ -115,6 +113,21 @@ describe("message review actions", () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body).toMatchObject({ id, status: "rejected", notes: "off-topic" });
+    });
+
+    it("keeps a successful decision successful when queue refresh fails", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      vi.spyOn(fakeDb.message, "count").mockRejectedValueOnce(new Error("count unavailable"));
+
+      const res = await app.request(`/v1/messages/${id}/decision`, {
+        method: "POST",
+        headers: { cookie: operatorCookie(), "content-type": "application/json" },
+        body: JSON.stringify({ decision: "approve" }),
+      });
+      expect(res.status).toBe(200);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(store.messages.get(id)?.status).toBe("approved");
     });
 
     it("returns 409 for a message still uploading", async () => {

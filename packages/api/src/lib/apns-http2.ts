@@ -45,7 +45,9 @@ export type ApnsConfigStatus =
 /// Reports configuration state without exposing secret values. A completely
 /// absent configuration is disabled; partial or malformed configuration is a
 /// production-visible error.
-export const inspectApnsConfig = (env: NodeJS.ProcessEnv = process.env): ApnsConfigStatus => {
+export const inspectApnsConfig = async (
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<ApnsConfigStatus> => {
   const teamId = env.APNS_TEAM_ID?.trim();
   const keyId = env.APNS_KEY_ID?.trim();
   const authKey = normalizePemKey(env.APNS_AUTH_KEY);
@@ -75,6 +77,16 @@ export const inspectApnsConfig = (env: NodeJS.ProcessEnv = process.env): ApnsCon
   if (missing.length > 0 || invalid.length > 0 || environment === null) {
     return { status: "misconfigured", environment, missing, invalid };
   }
+  try {
+    await importPKCS8(authKey!, "ES256");
+  } catch {
+    return {
+      status: "misconfigured",
+      environment,
+      missing,
+      invalid: ["APNS_AUTH_KEY"],
+    };
+  }
   return {
     status: "configured",
     environment,
@@ -85,8 +97,19 @@ export const inspectApnsConfig = (env: NodeJS.ProcessEnv = process.env): ApnsCon
 /// Reads the APNs config from the environment. Returns null unless the complete
 /// configuration is valid so callers can safely fall back to a no-op sender.
 export const loadApnsConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): ApnsConfig | null => {
-  const status = inspectApnsConfig(env);
-  return status.status === "configured" ? status.config : null;
+  const teamId = env.APNS_TEAM_ID?.trim();
+  const keyId = env.APNS_KEY_ID?.trim();
+  const authKey = normalizePemKey(env.APNS_AUTH_KEY);
+  const bundleId = env.APNS_BUNDLE_ID?.trim();
+  const rawEnvironment = env.APNS_ENVIRONMENT?.trim();
+  const environment =
+    rawEnvironment === undefined || rawEnvironment === ""
+      ? "development"
+      : rawEnvironment === "production" || rawEnvironment === "development"
+        ? rawEnvironment
+        : null;
+  if (!teamId || !keyId || !authKey || !bundleId || environment === null) return null;
+  return { teamId, keyId, authKey, bundleId, environment };
 };
 
 /// `.p8` keys are multi-line PEM. When carried through a `.env` file the

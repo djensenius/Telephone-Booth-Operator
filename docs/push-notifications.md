@@ -67,7 +67,7 @@ to the key (and is part of the downloaded filename, `AuthKey_<KEYID>.p8`).
 The APNs **host must match the environment that minted the device token**:
 
 - Xcode/debug builds installed directly on a device get **sandbox** tokens →
-  set `APNS_ENVIRONMENT` to anything other than `production` (sandbox host).
+  set `APNS_ENVIRONMENT=development` (sandbox host).
 - TestFlight and App Store builds get **production** tokens → set
   `APNS_ENVIRONMENT=production`.
 

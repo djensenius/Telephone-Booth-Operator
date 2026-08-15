@@ -132,7 +132,21 @@ export const fanOutNotification = async (notification: ApnsNotification): Promis
         distinct: ["userId"],
       })
       .then((rows) => Array.from(new Set(rows.map((row) => row.userId))));
-    await Promise.allSettled(userIds.map((userId) => apnsSender().send(userId, notification)));
+    const results = await Promise.allSettled(
+      userIds.map((userId) => apnsSender().send(userId, notification)),
+    );
+    for (const [index, result] of results.entries()) {
+      if (result.status === "fulfilled") continue;
+      log.error(
+        {
+          component: "apns",
+          errorName: result.reason instanceof Error ? result.reason.name : "unknown",
+          preferenceKey: notification.preferenceKey,
+          userId: userIds[index],
+        },
+        "APNs sender rejected fan-out",
+      );
+    }
   } catch (error) {
     log.error(
       { component: "apns", err: error, preferenceKey: notification.preferenceKey },
@@ -143,13 +157,13 @@ export const fanOutNotification = async (notification: ApnsNotification): Promis
   }
 };
 
-export const apnsHealthStatus = (): {
+export const apnsHealthStatus = async (): Promise<{
   status: "configured" | "disabled" | "misconfigured";
   environment: "production" | "development" | null;
   missing?: string[];
   invalid?: string[];
-} => {
-  const status = inspectApnsConfig();
+}> => {
+  const status = await inspectApnsConfig();
   if (status.status === "configured") {
     return { status: status.status, environment: status.environment };
   }
@@ -161,8 +175,8 @@ export const apnsHealthStatus = (): {
   };
 };
 
-export const logApnsConfiguration = (): void => {
-  const status = apnsHealthStatus();
+export const logApnsConfiguration = async (): Promise<void> => {
+  const status = await apnsHealthStatus();
   const fields = { component: "apns", ...status };
   if (status.status === "configured") {
     log.info(fields, "APNs configured");

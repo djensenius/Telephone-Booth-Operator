@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
+import { generateKeyPairSync } from "node:crypto";
 
 import {
   buildApnsPayload,
@@ -81,10 +82,15 @@ describe("normalizePemKey", () => {
 });
 
 describe("loadApnsConfigFromEnv", () => {
+  const { privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+  const validAuthKey = privateKey
+    .export({ format: "pem", type: "pkcs8" })
+    .toString()
+    .replace(/\n/g, "\\n");
   const base = {
     APNS_TEAM_ID: "TEAM123",
     APNS_KEY_ID: "KEY123",
-    APNS_AUTH_KEY: "-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----",
+    APNS_AUTH_KEY: validAuthKey,
     APNS_BUNDLE_ID: "com.example.app",
   } as NodeJS.ProcessEnv;
 
@@ -104,20 +110,34 @@ describe("loadApnsConfigFromEnv", () => {
     expect(config?.authKey).toContain("\n");
   });
 
-  it("distinguishes disabled and malformed configuration without exposing values", () => {
-    expect(inspectApnsConfig({})).toMatchObject({
+  it("distinguishes disabled and malformed configuration without exposing values", async () => {
+    await expect(inspectApnsConfig({})).resolves.toMatchObject({
       status: "disabled",
       environment: null,
       missing: ["APNS_TEAM_ID", "APNS_KEY_ID", "APNS_AUTH_KEY", "APNS_BUNDLE_ID"],
     });
-    expect(inspectApnsConfig({ ...base, APNS_ENVIRONMENT: "staging" })).toMatchObject({
+    await expect(
+      inspectApnsConfig({ ...base, APNS_ENVIRONMENT: "staging" }),
+    ).resolves.toMatchObject({
       status: "misconfigured",
       environment: null,
       invalid: ["APNS_ENVIRONMENT"],
     });
-    expect(inspectApnsConfig({ ...base, APNS_AUTH_KEY: "not-a-key" })).toMatchObject({
+    await expect(
+      inspectApnsConfig({
+        ...base,
+        APNS_AUTH_KEY: "-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----",
+      }),
+    ).resolves.toMatchObject({
       status: "misconfigured",
       invalid: ["APNS_AUTH_KEY"],
+    });
+  });
+
+  it("reports configured only after importing a valid ES256 PKCS#8 key", async () => {
+    await expect(inspectApnsConfig(base)).resolves.toMatchObject({
+      status: "configured",
+      environment: "development",
     });
   });
 });
