@@ -13,6 +13,7 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { pathToFileURL } from "node:url";
 import { startAiSweeper } from "./lib/ai/sweeper.js";
+import { apnsHealthStatus, logApnsConfiguration } from "./lib/apns.js";
 import { auditWrites, type AuditVariables } from "./lib/audit.js";
 import { startAuditPruner } from "./lib/audit-pruner.js";
 import { startSnapshotPruner } from "./lib/snapshot-pruner.js";
@@ -67,6 +68,7 @@ export const createApp = (): Hono<{ Variables: AuthVariables & AuditVariables }>
       status: "ok",
       version: process.env.npm_package_version ?? "0.0.0",
       time: new Date().toISOString(),
+      apns: apnsHealthStatus(),
     }),
   );
 
@@ -116,6 +118,7 @@ const start = (): void => {
   }
 
   const port = Number.parseInt(process.env.API_PORT ?? "8787", 10);
+  logApnsConfiguration();
   const server = serve({ fetch: app.fetch, port }, ({ port }) => {
     console.log(`telephone-booth-operator API listening on :${port}`);
   });

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildApnsPayload,
+  inspectApnsConfig,
   loadApnsConfigFromEnv,
   normalizePemKey,
   topicForPlatform,
@@ -101,5 +102,22 @@ describe("loadApnsConfigFromEnv", () => {
     expect(config?.environment).toBe("production");
     expect(config?.bundleId).toBe("com.example.app");
     expect(config?.authKey).toContain("\n");
+  });
+
+  it("distinguishes disabled and malformed configuration without exposing values", () => {
+    expect(inspectApnsConfig({})).toMatchObject({
+      status: "disabled",
+      environment: null,
+      missing: ["APNS_TEAM_ID", "APNS_KEY_ID", "APNS_AUTH_KEY", "APNS_BUNDLE_ID"],
+    });
+    expect(inspectApnsConfig({ ...base, APNS_ENVIRONMENT: "staging" })).toMatchObject({
+      status: "misconfigured",
+      environment: null,
+      invalid: ["APNS_ENVIRONMENT"],
+    });
+    expect(inspectApnsConfig({ ...base, APNS_AUTH_KEY: "not-a-key" })).toMatchObject({
+      status: "misconfigured",
+      invalid: ["APNS_AUTH_KEY"],
+    });
   });
 });

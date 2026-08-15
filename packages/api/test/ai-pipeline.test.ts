@@ -12,9 +12,11 @@ import {
   runTranscription,
   type PipelineDeps,
 } from "../src/lib/ai/pipeline.js";
+import { resetApnsSenderForTests, setApnsSenderForTests } from "../src/lib/apns.js";
 import { wsBroadcaster, type WsEnvelope } from "../src/lib/broadcaster.js";
+import { resetPushEventStateForTests } from "../src/lib/push-events.js";
 import type { ModerationProvider, TranscriptionProvider } from "../src/lib/ai/types.js";
-import { fakeDb, store } from "./support/fake-db.js";
+import { fakeDb, seedMobileDevice, store } from "./support/fake-db.js";
 import { resetFakeAzure } from "./support/fake-azure.js";
 import { resetFakeDb } from "./support/fake-db.js";
 
@@ -97,6 +99,8 @@ describe("AI pipeline", () => {
   beforeEach(() => {
     resetFakeDb();
     resetFakeAzure();
+    resetApnsSenderForTests();
+    resetPushEventStateForTests();
   });
 
   it("runs transcription then moderation and always leaves the message pending for a human", async () => {
@@ -204,6 +208,13 @@ describe("AI pipeline", () => {
 
   it("never auto-rejects even when moderation flags the transcript; a human still decides", async () => {
     const id = await seedReceivedMessage();
+    seedMobileDevice({ userId: "operator-1", platform: "ios" });
+    const pushes: string[] = [];
+    setApnsSenderForTests({
+      send: async (_userId, notification) => {
+        pushes.push(notification.preferenceKey);
+      },
+    });
     await runTranscription({
       messageId: id,
       deps: baseDeps({
@@ -233,6 +244,8 @@ describe("AI pipeline", () => {
     expect(withRelations.decidedAt).toBeNull();
     expect(withRelations.moderations[0]?.recommendation).toBe("reject");
     expect(withRelations.moderations[0]?.flagged).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(pushes).toContain("messageFlagged");
   });
 
   it("never auto-approves clean content; the suggestion is advisory only", async () => {

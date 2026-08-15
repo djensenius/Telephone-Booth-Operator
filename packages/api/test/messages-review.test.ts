@@ -25,10 +25,12 @@ vi.mock("../src/lib/require-api-token.js", () => ({
 }));
 
 import { createApp } from "../src/index.js";
+import { resetApnsSenderForTests, setApnsSenderForTests } from "../src/lib/apns.js";
 import { wsBroadcaster } from "../src/lib/broadcaster.js";
+import { resetPushEventStateForTests } from "../src/lib/push-events.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { fakeBlobs, resetFakeAzure } from "./support/fake-azure.js";
-import { fakeDb, resetFakeDb, store } from "./support/fake-db.js";
+import { fakeDb, resetFakeDb, seedMobileDevice, store } from "./support/fake-db.js";
 import { operatorCookie, phoneHeaders } from "./support/http.js";
 
 const setup = () => {
@@ -39,6 +41,8 @@ const setup = () => {
   process.env.TRANSCRIPTION_PROVIDER = "disabled";
   process.env.MODERATION_PROVIDER = "disabled";
   resetSessionCryptoForTests();
+  resetApnsSenderForTests();
+  resetPushEventStateForTests();
   resetFakeDb();
   resetFakeAzure();
 };
@@ -842,6 +846,7 @@ describe("message review actions", () => {
           completedAt: new Date(),
         },
       });
+
       const pending = await fakeDb.moderation.create({
         data: {
           messageId: id,
@@ -879,6 +884,31 @@ describe("message review actions", () => {
         requestedById: "operator-1",
       });
       expect(broadcasts).toContainEqual(expect.objectContaining({ kind: "message" }));
+    });
+
+    it("fans out one messageFlagged push for duplicate delivery of the same verdict", async () => {
+      const app = createApp();
+      const id = await seedReceivedMessage(app);
+      seedMobileDevice({ userId: "operator-1", platform: "ios" });
+      const sent: string[] = [];
+      setApnsSenderForTests({
+        send: async (_userId, notification) => {
+          sent.push(notification.preferenceKey);
+        },
+      });
+      const cookie = operatorCookie();
+      const request = () =>
+        app.request(`/v1/messages/${id}/moderation`, {
+          method: "POST",
+          headers: { cookie, "content-type": "application/json" },
+          body: JSON.stringify(verdict),
+        });
+
+      expect((await request()).status).toBe(202);
+      expect((await request()).status).toBe(202);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(sent.filter((key) => key === "messageFlagged")).toHaveLength(1);
     });
 
     it("records a new succeeded moderation when none is pending", async () => {

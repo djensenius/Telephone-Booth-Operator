@@ -18,6 +18,7 @@ import type { ModerationRecommendation } from "@telephone-booth-operator/shared"
 import { generateSasUrl } from "../azure-blob.js";
 import { broadcastWork, wsBroadcaster } from "../broadcaster.js";
 import { db } from "../db.js";
+import { notifyMessageFlagged } from "../push-events.js";
 import { serializeMessage } from "../serializers.js";
 import { normalizeTranslationText } from "../translation-text.js";
 import { isEnglishLanguage, resolveAiConfig, type AiConfig } from "./config.js";
@@ -1012,6 +1013,7 @@ export const recordModerationResult = async (
 
   await advanceMessageAfterModeration(opts.messageId);
   await broadcastMessage(opts.messageId);
+  notifyMessageFlagged(opts.messageId, recorded.moderationId, opts.flagged);
   return recorded;
 };
 
@@ -1191,6 +1193,7 @@ export const runModeration = async (opts: RunModerationOptions): Promise<string 
     });
     await advanceMessageAfterModeration(opts.messageId);
     await broadcastMessage(opts.messageId);
+    notifyMessageFlagged(opts.messageId, pending.id, result.flagged);
     return pending.id;
   } catch (error) {
     const reason = sanitizeError(error);

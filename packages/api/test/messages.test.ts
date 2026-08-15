@@ -26,6 +26,7 @@ vi.mock("../src/lib/require-api-token.js", () => ({
 import { createApp } from "../src/index.js";
 import { resetApnsSenderForTests, setApnsSenderForTests } from "../src/lib/apns.js";
 import { wsBroadcaster, type WsEnvelope } from "../src/lib/broadcaster.js";
+import { resetPushEventStateForTests } from "../src/lib/push-events.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { fakeBlobs, resetFakeAzure } from "./support/fake-azure.js";
 import {
@@ -44,6 +45,8 @@ const setup = () => {
   process.env.TRANSCRIPTION_PROVIDER = "disabled";
   resetSessionCryptoForTests();
   resetApnsSenderForTests();
+  resetPushEventStateForTests();
+  delete process.env.MODERATION_QUEUE_HIGH_THRESHOLD;
   resetFakeDb();
   resetFakeAzure();
   return createApp();
@@ -333,6 +336,48 @@ describe("messages routes", () => {
       preferenceKey: "messageReceived",
       badge: 2,
     });
+  });
+
+  it("alerts once when the moderation queue crosses the configured high threshold", async () => {
+    process.env.MODERATION_QUEUE_HIGH_THRESHOLD = "2";
+    const app = createApp();
+    seedMessage({ audioId: seedFile({ sha256: "1".repeat(64) }).id, status: "pending" });
+    seedMobileDevice({
+      userId: "operator-1",
+      platform: "ios",
+      preferences: { moderationQueueHigh: true },
+    });
+    const sent: Array<{ preferenceKey: string; badge?: number }> = [];
+    setApnsSenderForTests({
+      send: async (_userId, notification) => {
+        sent.push({ preferenceKey: notification.preferenceKey, badge: notification.badge });
+      },
+    });
+
+    for (const sha256 of ["2".repeat(64), "3".repeat(64)]) {
+      const initiated = await app.request("/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ durationMs: 2000, sha256 }),
+      });
+      const slot = await initiated.json();
+      fakeBlobs.set(slot.blobName, {
+        exists: true,
+        sizeBytes: 1234,
+        contentType: "audio/flac",
+        sha256,
+      });
+      const completed = await app.request(`/v1/messages/${slot.id}/complete`, {
+        method: "POST",
+        headers: phoneHeaders,
+      });
+      expect(completed.status).toBe(200);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(sent.filter((entry) => entry.preferenceKey === "moderationQueueHigh")).toEqual([
+      { preferenceKey: "moderationQueueHigh", badge: 2 },
+    ]);
   });
 
   it("returns a random approved message with audio sha for the phone client", async () => {
