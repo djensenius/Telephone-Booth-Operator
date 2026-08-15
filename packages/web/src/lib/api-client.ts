@@ -283,7 +283,10 @@ export async function uploadBlobToSas(
 }
 
 export const status = {
-  current: () => apiFetch<BoothStatus>("/v1/status", { schema: BoothStatusSchema }),
+  current: async (): Promise<BoothStatus | null> => {
+    const current = await apiFetch<BoothStatus>("/v1/status", { schema: BoothStatusSchema });
+    return current.isSynthetic === true ? null : current;
+  },
   history: (params: { readonly since?: string; readonly limit?: number } = {}) =>
     apiFetch<StatusHistory>(
       `/v1/status/history${query({ since: params.since, limit: params.limit ?? 50 })}`,
@@ -1135,6 +1138,7 @@ export function invalidateInstallationScopedQueries(
   void queryClient.invalidateQueries({ queryKey: ["sessions"] });
   void queryClient.invalidateQueries({ queryKey: ["events"] });
   void queryClient.invalidateQueries({ queryKey: ["questions"] });
+  void queryClient.invalidateQueries({ queryKey: ["status"] });
 }
 
 export function useCreateInstallation() {

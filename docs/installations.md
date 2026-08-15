@@ -104,7 +104,8 @@ this for you on the messages list and the message detail view.
 
 ## Reading history
 
-Every list and aggregate endpoint takes an optional `installationId`:
+Scoped collection, aggregate, and current-status endpoints take an optional
+`installationId`:
 
 | Value   | Scope                                     |
 | ------- | ----------------------------------------- |
@@ -113,7 +114,7 @@ Every list and aggregate endpoint takes an optional `installationId`:
 | `all`   | every installation                        |
 
 This applies to `/v1/stats/*`, `/v1/messages`, `/v1/sessions`, `/v1/events`,
-and `/v1/questions`.
+`/v1/questions`, `/v1/status`, and `/v1/status/history`.
 
 Between ending an era and the booth's next write there is no active
 installation. Reads in that window return an empty result rather than opening

@@ -48,15 +48,28 @@ paths:
 
   /v1/status:
     get:
-      summary: Current booth status as last reported by the phone client.
+      summary: Current booth status in an installation scope.
       tags: [status]
       security:
         - operatorSession: []
         - operatorBearer: []
         - apiToken: []
+      parameters:
+        - name: installationId
+          in: query
+          description: |
+            Installation scope. Omit for the currently active installation
+            (the default), pass a uuid for a historical one, or `all` to span
+            every installation.
+          schema:
+            oneOf:
+              - { type: string, format: uuid }
+              - { type: string, enum: [all] }
       responses:
         "200":
-          description: ok
+          description: |
+            Latest persisted status in the selected scope, or an id-less
+            synthetic status with `isSynthetic: true` when none exists.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/BoothStatus" }
@@ -81,6 +94,16 @@ paths:
         - operatorSession: []
         - operatorBearer: []
       parameters:
+        - name: installationId
+          in: query
+          description: |
+            Installation scope. Omit for the currently active installation
+            (the default), pass a uuid for a historical one, or `all` to span
+            every installation.
+          schema:
+            oneOf:
+              - { type: string, format: uuid }
+              - { type: string, enum: [all] }
         - name: since
           in: query
           schema: { type: string, format: date-time }
@@ -2149,7 +2172,7 @@ components:
         ]
     BoothStatus:
       type: object
-      required: [state, updatedAt]
+      required: [state, updatedAt, isSynthetic]
       properties:
         id:
           type: integer
@@ -2157,6 +2180,12 @@ components:
             Snapshot row id. Two runs of the same status can share a booth
             timestamp, so clients use this to tell rows apart; it increases with
             insertion order.
+        isSynthetic:
+          type: boolean
+          description: |
+            True only for the id-less placeholder returned when the selected
+            installation has no persisted booth status. Clients must not treat
+            its timestamp as a booth heartbeat.
         state: { $ref: "#/components/schemas/BoothState" }
         updatedAt: { type: string, format: date-time }
         firstSeenAt:

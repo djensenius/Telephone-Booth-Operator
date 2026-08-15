@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 // We test that the hook factories pass the correct refetchInterval.
 // Rather than rendering the hooks (which require a full QueryClient),
@@ -12,7 +12,49 @@ vi.mock("@tanstack/react-query", () => ({
 }));
 
 // Must import AFTER mock is registered
-const { useStatusCurrent, useStatusHistory } = await import("./api-client.js");
+const { status, useStatusCurrent, useStatusHistory } = await import("./api-client.js");
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("status.current", () => {
+  it("returns null for an explicit synthetic status", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            state: "idle",
+            updatedAt: "1970-01-01T00:00:00.000Z",
+            isSynthetic: true,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      ),
+    );
+
+    await expect(status.current()).resolves.toBeNull();
+  });
+
+  it("keeps real status from an older API that has no synthetic marker", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            id: 42,
+            state: "recording",
+            updatedAt: "2026-08-15T16:00:00.000Z",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      ),
+    );
+
+    await expect(status.current()).resolves.toMatchObject({ id: 42, state: "recording" });
+  });
+});
 
 describe("useStatusCurrent", () => {
   it("polls every 5 s when not paused", () => {

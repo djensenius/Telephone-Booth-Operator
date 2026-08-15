@@ -122,6 +122,10 @@ export type RuntimeMode = z.infer<typeof RuntimeModeSchema>;
 export const BoothStatusSchema = z.object({
   state: BoothStateSchema,
   updatedAt: z.string().datetime(),
+  // True only for the API's id-less placeholder when the selected
+  // installation has no persisted booth status yet. Optional so clients can
+  // still read responses from older API builds.
+  isSynthetic: z.boolean().optional(),
   currentQuestionId: z.guid().nullable().optional(),
   currentMessageId: z.guid().nullable().optional(),
   lastError: z.string().nullable().optional(),
@@ -157,6 +161,7 @@ export type MonitorSummary = z.infer<typeof MonitorSummarySchema>;
 // operator, never sent by the booth.
 export const StatusUpdateSchema = BoothStatusSchema.omit({
   updatedAt: true,
+  isSynthetic: true,
   firstSeenAt: true,
   repeatCount: true,
   id: true,

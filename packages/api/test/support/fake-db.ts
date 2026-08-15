@@ -1793,13 +1793,22 @@ export const fakeDb = {
       orderBy,
       select,
     }: {
-      where?: { updatedAt?: { gte?: Date; lt?: Date }; id?: { lt?: number } };
+      where?: {
+        updatedAt?: { gte?: Date; lt?: Date };
+        id?: { lt?: number };
+        installationId?: ScopeFilter;
+      };
       take?: number;
       skip?: number;
       orderBy?: StatusOrder | StatusOrder[];
       select?: { id?: boolean; updatedAt?: boolean };
     }) => {
       let statuses = [...store.statuses];
+      if (where.installationId !== undefined) {
+        statuses = statuses.filter((status) =>
+          matchesScope(status.installationId, where.installationId),
+        );
+      }
       if (where.updatedAt?.gte)
         statuses = statuses.filter((status) => status.updatedAt >= where.updatedAt!.gte!);
       if (where.updatedAt?.lt)
