@@ -1135,6 +1135,7 @@ export function invalidateInstallationScopedQueries(
   void queryClient.invalidateQueries({ queryKey: ["sessions"] });
   void queryClient.invalidateQueries({ queryKey: ["events"] });
   void queryClient.invalidateQueries({ queryKey: ["questions"] });
+  void queryClient.invalidateQueries({ queryKey: ["status"] });
 }
 
 export function useCreateInstallation() {

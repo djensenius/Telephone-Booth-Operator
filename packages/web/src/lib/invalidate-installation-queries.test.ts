@@ -18,6 +18,8 @@ describe("invalidateInstallationScopedQueries", () => {
     seed(["sessions", "list", null, null]);
     seed(["events", "list", { limit: 100 }]);
     seed(["questions", "list", "all", null]);
+    seed(["status", "current"]);
+    seed(["status", "history"]);
 
     invalidateInstallationScopedQueries(client);
 
@@ -30,5 +32,7 @@ describe("invalidateInstallationScopedQueries", () => {
     expect(stale(["sessions", "list", null, null])).toBe(true);
     expect(stale(["events", "list", { limit: 100 }])).toBe(true);
     expect(stale(["questions", "list", "all", null])).toBe(true);
+    expect(stale(["status", "current"])).toBe(true);
+    expect(stale(["status", "history"])).toBe(true);
   });
 });

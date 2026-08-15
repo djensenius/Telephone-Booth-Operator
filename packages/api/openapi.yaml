@@ -48,12 +48,23 @@ paths:
 
   /v1/status:
     get:
-      summary: Current booth status as last reported by the phone client.
+      summary: Current booth status in an installation scope.
       tags: [status]
       security:
         - operatorSession: []
         - operatorBearer: []
         - apiToken: []
+      parameters:
+        - name: installationId
+          in: query
+          description: |
+            Installation scope. Omit for the currently active installation
+            (the default), pass a uuid for a historical one, or `all` to span
+            every installation.
+          schema:
+            oneOf:
+              - { type: string, format: uuid }
+              - { type: string, enum: [all] }
       responses:
         "200":
           description: ok
@@ -81,6 +92,16 @@ paths:
         - operatorSession: []
         - operatorBearer: []
       parameters:
+        - name: installationId
+          in: query
+          description: |
+            Installation scope. Omit for the currently active installation
+            (the default), pass a uuid for a historical one, or `all` to span
+            every installation.
+          schema:
+            oneOf:
+              - { type: string, format: uuid }
+              - { type: string, enum: [all] }
         - name: since
           in: query
           schema: { type: string, format: date-time }

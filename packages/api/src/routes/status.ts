@@ -1,18 +1,27 @@
 import { zValidator } from "@hono/zod-validator";
-import { StatusUpdateSchema } from "@telephone-booth-operator/shared";
+import { InstallationScopeSchema, StatusUpdateSchema } from "@telephone-booth-operator/shared";
 import type { StatusUpdate } from "@telephone-booth-operator/shared";
 import { Hono } from "hono";
 import { z } from "zod";
 import { wsBroadcaster } from "../lib/broadcaster.js";
 import { db } from "../lib/db.js";
-import { requireActiveInstallation } from "../lib/installation.js";
+import {
+  requireActiveInstallation,
+  resolveInstallationScope,
+  scopeWhere,
+} from "../lib/installation.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 import { defaultStatus, serializeStatus } from "../lib/serializers.js";
 import { requireOperatorOrApiToken, type AuthVariables } from "../lib/session.js";
 
+const currentQuerySchema = z.object({
+  installationId: InstallationScopeSchema.optional(),
+});
+
 const historyQuerySchema = z.object({
   since: z.string().datetime().optional(),
   limit: z.coerce.number().int().min(1).max(500).default(100),
+  installationId: InstallationScopeSchema.optional(),
 });
 
 // On-hook reconciliation. The booth is a single-line phone, so when it reports
@@ -73,14 +82,21 @@ function isRepeatOf(
   );
 }
 
-statusRouter.get("/", requireOperatorOrApiToken(["operator", "monitor"]), async (c) => {
-  // Authenticated read of the latest booth snapshot. Operator clients use a
-  // session cookie or operator bearer; the booth/phone client uses its API token.
-  const latest = await db.boothStatusSnapshot.findFirst({
-    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-  });
-  return c.json(latest ? serializeStatus(latest) : defaultStatus());
-});
+statusRouter.get(
+  "/",
+  requireOperatorOrApiToken(["operator", "monitor"]),
+  zValidator("query", currentQuerySchema),
+  async (c) => {
+    // Authenticated read of the latest booth snapshot. Operator clients use a
+    // session cookie or operator bearer; the booth/phone client uses its API token.
+    const { installationId } = c.req.valid("query");
+    const latest = await db.boothStatusSnapshot.findFirst({
+      where: scopeWhere(await resolveInstallationScope(installationId)),
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+    });
+    return c.json(latest ? serializeStatus(latest) : defaultStatus());
+  },
+);
 
 statusRouter.put("/", requireApiToken(), zValidator("json", StatusUpdateSchema), async (c) => {
   const update = c.req.valid("json");
@@ -150,9 +166,12 @@ statusRouter.put("/", requireApiToken(), zValidator("json", StatusUpdateSchema),
 });
 
 statusRouter.get("/history", zValidator("query", historyQuerySchema), async (c) => {
-  const { since, limit } = c.req.valid("query");
+  const { since, limit, installationId } = c.req.valid("query");
   const snapshots = await db.boothStatusSnapshot.findMany({
-    where: since ? { updatedAt: { gte: new Date(since) } } : {},
+    where: {
+      ...scopeWhere(await resolveInstallationScope(installationId)),
+      ...(since ? { updatedAt: { gte: new Date(since) } } : {}),
+    },
     orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
     take: limit,
   });
