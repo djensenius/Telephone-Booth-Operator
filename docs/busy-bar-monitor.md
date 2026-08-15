@@ -54,6 +54,11 @@ reports them. `GET /v1/system/current` is deliberately not scoped: it describes
 the current booth hardware and process health, which carries across an
 installation rollover.
 
+If the active installation has not received a booth status yet, the status
+endpoint returns an id-less placeholder marked `isSynthetic: true`. Its
+timestamp is deliberately non-fresh, and the companion continues treating it
+as "no reported status" rather than a new idle heartbeat.
+
 ## Deployment order
 
 1. Deploy this Operator release so `/v1/monitor/summary` is available.

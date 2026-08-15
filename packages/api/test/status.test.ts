@@ -61,7 +61,11 @@ describe("status routes", () => {
     // An operator session (cookie) can read the snapshot.
     const initial = await app.request("/v1/status", { headers: { cookie: operatorCookie() } });
     expect(initial.status).toBe(200);
-    await expect(initial.json()).resolves.toMatchObject({ state: "idle" });
+    await expect(initial.json()).resolves.toMatchObject({
+      state: "idle",
+      updatedAt: "1970-01-01T00:00:00.000Z",
+      isSynthetic: true,
+    });
 
     const denied = await app.request("/v1/status", {
       method: "PUT",
@@ -80,7 +84,11 @@ describe("status routes", () => {
     // The booth/phone client can also read the snapshot with its API token.
     const latest = await app.request("/v1/status", { headers: { ...phoneHeaders } });
     expect(latest.status).toBe(200);
-    await expect(latest.json()).resolves.toMatchObject({ state: "recording", lastError: null });
+    await expect(latest.json()).resolves.toMatchObject({
+      state: "recording",
+      lastError: null,
+      isSynthetic: false,
+    });
 
     const noCookie = await app.request("/v1/status/history");
     expect(noCookie.status).toBe(401);

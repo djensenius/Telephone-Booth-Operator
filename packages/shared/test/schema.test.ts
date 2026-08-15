@@ -28,6 +28,15 @@ describe("BoothStatusSchema", () => {
     expect(parsed.state).toBe("callUnavailable");
   });
 
+  it("accepts the explicit synthetic-status marker", () => {
+    const parsed = BoothStatusSchema.parse({
+      state: "idle",
+      updatedAt: "1970-01-01T00:00:00.000Z",
+      isSynthetic: true,
+    });
+    expect(parsed.isSynthetic).toBe(true);
+  });
+
   describe("InstructionStatusSchema", () => {
     it("accepts the active/inactive lifecycle states", () => {
       expect(InstructionStatusSchema.parse("active")).toBe("active");

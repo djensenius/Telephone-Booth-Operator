@@ -67,7 +67,9 @@ paths:
               - { type: string, enum: [all] }
       responses:
         "200":
-          description: ok
+          description: |
+            Latest persisted status in the selected scope, or an id-less
+            synthetic status with `isSynthetic: true` when none exists.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/BoothStatus" }
@@ -2170,7 +2172,7 @@ components:
         ]
     BoothStatus:
       type: object
-      required: [state, updatedAt]
+      required: [state, updatedAt, isSynthetic]
       properties:
         id:
           type: integer
@@ -2178,6 +2180,12 @@ components:
             Snapshot row id. Two runs of the same status can share a booth
             timestamp, so clients use this to tell rows apart; it increases with
             insertion order.
+        isSynthetic:
+          type: boolean
+          description: |
+            True only for the id-less placeholder returned when the selected
+            installation has no persisted booth status. Clients must not treat
+            its timestamp as a booth heartbeat.
         state: { $ref: "#/components/schemas/BoothState" }
         updatedAt: { type: string, format: date-time }
         firstSeenAt:

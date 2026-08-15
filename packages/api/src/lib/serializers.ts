@@ -137,6 +137,7 @@ export const serializeMessage = (message: WithAudio<WithAi<Message>>): MessagePa
 
 export const serializeStatus = (snapshot: BoothStatusSnapshot): BoothStatusEvent => ({
   id: snapshot.id,
+  isSynthetic: false,
   state: snapshot.state,
   updatedAt: iso(snapshot.updatedAt),
   firstSeenAt: iso(snapshot.firstSeenAt),
@@ -148,11 +149,14 @@ export const serializeStatus = (snapshot: BoothStatusSnapshot): BoothStatusEvent
 });
 
 export const defaultStatus = (): BoothStatusEvent => {
-  const now = new Date().toISOString();
+  // Keep the required timestamps non-fresh for clients that predate the
+  // explicit marker. Any real booth report must outrank this placeholder.
+  const neverReportedAt = new Date(0).toISOString();
   return {
     state: "idle",
-    updatedAt: now,
-    firstSeenAt: now,
+    updatedAt: neverReportedAt,
+    isSynthetic: true,
+    firstSeenAt: neverReportedAt,
     repeatCount: 1,
     currentQuestionId: null,
     currentMessageId: null,

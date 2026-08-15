@@ -4,6 +4,7 @@ import { log } from "./logger.js";
 export type BoothStatusEvent = {
   // Snapshot row id; absent only for the synthetic default status.
   id?: number;
+  isSynthetic?: boolean;
   state:
     | "idle"
     | "dialTone"
