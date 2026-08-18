@@ -222,6 +222,7 @@ describe("durable push event coordination", () => {
     let state = store.pushNotificationStates.get("moderation-queue-high");
     expect(state?.badgeCount).toBe(1);
     expect(state?.badgeVersion).toBe(1);
+    expect(state?.badgeDeliveredVersion).toBe(1);
 
     await reconcilingCoordinator.reconcileModerationBadgeState();
     state = store.pushNotificationStates.get("moderation-queue-high");
@@ -229,13 +230,15 @@ describe("durable push event coordination", () => {
 
     store.messages.get(message.id)!.status = "approved";
     await reconcilingCoordinator.reconcileModerationBadgeState();
-    await reconcilingCoordinator.dispatchModerationBadges();
 
     state = store.pushNotificationStates.get("moderation-queue-high");
     expect(state?.badgeCount).toBe(0);
     expect(state?.badgeVersion).toBe(2);
     expect(state?.badgeDeliveredVersion).toBe(2);
-    expect(sent).toEqual([{ kind: "badge", badge: 0, data: { awaitingModeration: 0 } }]);
+    expect(sent).toEqual([
+      { kind: "badge", badge: 1, data: { awaitingModeration: 1 } },
+      { kind: "badge", badge: 0, data: { awaitingModeration: 0 } },
+    ]);
   });
 
   it("initializes delivery for a pre-dispatch badge state", async () => {
@@ -258,6 +261,29 @@ describe("durable push event coordination", () => {
     await migratedCoordinator.reconcileModerationBadgeState();
 
     expect(store.pushNotificationStates.get("moderation-queue-high")?.badgeVersion).toBe(1);
+  });
+
+  it("emits a queue-high alert when reconciliation observes the crossing first", async () => {
+    process.env.MODERATION_QUEUE_HIGH_THRESHOLD = "2";
+    seedMessage({ status: "pending" });
+    seedMessage({ status: "pending" });
+    const sent: ApnsNotification[] = [];
+    const reconcilingCoordinator = createPushEventCoordinator({
+      database: fakeDb as never,
+      send: async (notification) => {
+        sent.push(notification);
+      },
+    });
+
+    await reconcilingCoordinator.reconcileModerationBadgeState();
+    await reconcilingCoordinator.reconcileModerationBadgeState();
+
+    expect(
+      sent.filter(
+        (notification) =>
+          notification.kind === "alert" && notification.preferenceKey === "moderationQueueHigh",
+      ),
+    ).toHaveLength(1);
   });
 
   it("fences a claimed badge before submission after lease ownership is lost", async () => {

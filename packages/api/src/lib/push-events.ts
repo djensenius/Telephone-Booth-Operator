@@ -201,9 +201,22 @@ export const createPushEventCoordinator = ({
     }
   };
 
+  const sendQueueHighNotification = async (count: number, threshold: number): Promise<void> => {
+    log.info({ component: "apns", count, threshold }, "moderation queue reached high threshold");
+    await send({
+      kind: "alert",
+      preferenceKey: "moderationQueueHigh",
+      title: "Moderation queue is high",
+      body: `${count} booth recordings are waiting for review.`,
+      threadId: "moderation-queue",
+      category: "BOOTH_MESSAGE",
+      data: { awaitingModeration: count, threshold },
+    });
+  };
+
   const reconcileModerationBadgeState = async (): Promise<void> => {
     const threshold = moderationQueueHighThreshold();
-    await database.$transaction(async (tx) => {
+    const result = await database.$transaction(async (tx) => {
       await tx.$queryRaw`
         SELECT pg_advisory_xact_lock(hashtext(${QUEUE_HIGH_STATE_KEY}))
       `;
@@ -215,7 +228,7 @@ export const createPushEventCoordinator = ({
         where: { key: QUEUE_HIGH_STATE_KEY },
         create: {
           key: QUEUE_HIGH_STATE_KEY,
-          active: nextActive,
+          active: false,
           threshold,
           badgeCount: count,
           badgeVersion: 1,
@@ -223,6 +236,7 @@ export const createPushEventCoordinator = ({
         },
         update: {},
       });
+      const activeAtThisThreshold = state.threshold === threshold && state.active;
       const data: Record<string, unknown> = {};
       if (state.active !== nextActive || state.threshold !== threshold) {
         data.active = nextActive;
@@ -233,12 +247,21 @@ export const createPushEventCoordinator = ({
         data.badgeCount = count;
         data.badgeVersion = { increment: 1 };
       }
-      if (Object.keys(data).length === 0) return;
-      await tx.pushNotificationState.update({
-        where: { key: QUEUE_HIGH_STATE_KEY },
-        data,
-      });
+      if (Object.keys(data).length > 0) {
+        await tx.pushNotificationState.update({
+          where: { key: QUEUE_HIGH_STATE_KEY },
+          data,
+        });
+      }
+      return {
+        count,
+        shouldNotify: nextActive && !activeAtThisThreshold,
+      };
     });
+    await dispatchModerationBadges();
+    if (result.shouldNotify) {
+      await sendQueueHighNotification(result.count, threshold);
+    }
   };
 
   return {
@@ -316,19 +339,7 @@ export const createPushEventCoordinator = ({
         });
         await dispatchModerationBadges();
         if (!result.shouldNotify) return;
-        log.info(
-          { component: "apns", count: result.count, threshold },
-          "moderation queue reached high threshold",
-        );
-        await send({
-          kind: "alert",
-          preferenceKey: "moderationQueueHigh",
-          title: "Moderation queue is high",
-          body: `${result.count} booth recordings are waiting for review.`,
-          threadId: "moderation-queue",
-          category: "BOOTH_MESSAGE",
-          data: { awaitingModeration: result.count, threshold },
-        });
+        await sendQueueHighNotification(result.count, threshold);
       } catch (error) {
         log.warn(
           { component: "apns", err: error, operation, threshold },
@@ -371,7 +382,6 @@ export const startModerationBadgeDispatcher = (): { stop: () => void } => {
     running = true;
     try {
       await reconcileModerationBadgeState();
-      await dispatchModerationBadges();
     } catch (error) {
       log.warn({ component: "apns", err: error }, "moderation badge dispatcher failed");
     } finally {
