@@ -13,7 +13,12 @@ import http2 from "node:http2";
 import { importPKCS8, SignJWT } from "jose";
 
 import { db } from "./db.js";
-import { findTargetDevices, type ApnsDeliveryFence, type ApnsNotification } from "./apns.js";
+import {
+  APNS_DELIVERY_FENCE_MINIMUM_MS,
+  findTargetDevices,
+  type ApnsDeliveryFence,
+  type ApnsNotification,
+} from "./apns.js";
 import { log } from "./logger.js";
 
 type ApnsSigningKey = Awaited<ReturnType<typeof importPKCS8>>;
@@ -181,7 +186,10 @@ export class Http2ApnsSender {
     const payload = JSON.stringify(buildApnsPayload(notification));
     const collapseId = notification.kind === "badge" ? MODERATION_BADGE_COLLAPSE_ID : undefined;
     const leaseExpiresAt = beforeSubmit ? await beforeSubmit() : null;
-    if (beforeSubmit && (!leaseExpiresAt || leaseExpiresAt.getTime() <= Date.now())) {
+    if (
+      beforeSubmit &&
+      (!leaseExpiresAt || leaseExpiresAt.getTime() - Date.now() < APNS_DELIVERY_FENCE_MINIMUM_MS)
+    ) {
       throw new Error("APNs delivery fence rejected a stale badge claim");
     }
     const results = await Promise.allSettled(
@@ -221,7 +229,7 @@ export class Http2ApnsSender {
     collapseId: string | undefined,
     leaseExpiresAt: Date | null,
   ): Promise<void> {
-    if (leaseExpiresAt && leaseExpiresAt.getTime() <= Date.now()) {
+    if (leaseExpiresAt && leaseExpiresAt.getTime() - Date.now() < APNS_DELIVERY_FENCE_MINIMUM_MS) {
       throw new Error("APNs delivery fence expired before submission");
     }
 

@@ -43,6 +43,8 @@ export type ApnsBadgeNotification = {
 
 export type ApnsNotification = ApnsAlertNotification | ApnsBadgeNotification;
 
+export const APNS_DELIVERY_FENCE_MINIMUM_MS = 25_000;
+
 export type ApnsDeliveryFence = () => Promise<Date | null>;
 
 export type ApnsSender = {

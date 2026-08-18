@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { ApnsDeliveryFence, ApnsNotification } from "./apns.js";
-import { fanOutBadgeNotification, fanOutNotification, isApnsDeliveryConfigured } from "./apns.js";
+import {
+  APNS_DELIVERY_FENCE_MINIMUM_MS,
+  fanOutBadgeNotification,
+  fanOutNotification,
+  isApnsDeliveryConfigured,
+} from "./apns.js";
 import { db } from "./db.js";
 import { log } from "./logger.js";
 import { AWAITING_MODERATION_STATUSES } from "./moderation-badge.js";
@@ -153,7 +158,10 @@ export const createPushEventCoordinator = ({
       where: { key: QUEUE_HIGH_STATE_KEY, badgeLeaseToken: leaseToken },
       data: { badgeLeaseExpiresAt: leaseExpiresAt },
     });
-    return renewed.count === 1 ? leaseExpiresAt : null;
+    if (renewed.count !== 1) return null;
+    return leaseExpiresAt.getTime() - now().getTime() >= APNS_DELIVERY_FENCE_MINIMUM_MS
+      ? leaseExpiresAt
+      : null;
   };
 
   const dispatchModerationBadges = async (): Promise<void> => {

@@ -333,4 +333,27 @@ describe("durable push event coordination", () => {
       sent.filter((notification) => notification.kind === "badge").map(({ badge }) => badge),
     ).toEqual([1, 1]);
   });
+
+  it("rejects a renewal that consumed the APNs submission window", async () => {
+    seedMessage({ status: "pending" });
+    const timestamps = [0, 0, 119_000];
+    let submitted = false;
+    const slowRenewalCoordinator = createPushEventCoordinator({
+      database: fakeDb as never,
+      now: () => new Date(timestamps.shift() ?? 119_000),
+      send: async (notification, beforeSubmit) => {
+        if (notification.kind !== "badge") return;
+        const leaseExpiresAt = await beforeSubmit?.();
+        if (!leaseExpiresAt) throw new Error("insufficient badge lease");
+        submitted = true;
+      },
+    });
+
+    await slowRenewalCoordinator.observeModerationQueue("slow-renewal");
+
+    const state = store.pushNotificationStates.get("moderation-queue-high");
+    expect(submitted).toBe(false);
+    expect(state?.badgeDeliveredVersion).toBe(0);
+    expect(state?.badgeLeaseToken).toBeNull();
+  });
 });
