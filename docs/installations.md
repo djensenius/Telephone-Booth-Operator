@@ -82,9 +82,9 @@ The checkbox is **off by default**; most new installations want a fresh set.
 
 If the booth is powered on when you end an era, it keeps posting events, and a
 booth write with no active installation lazily opens one — a recording must
-never be dropped over admin bookkeeping. Starting a named installation
-therefore **adopts** an active era that has no activity in it yet, rather than
-failing. An era the booth has actually recorded into still returns `409`.
+never be dropped over admin bookkeeping. Starting a named installation therefore
+ends whichever era is active and opens the new one in a single rollover, rather
+than making the operator fight the heartbeat race.
 
 A recording that was already uploading when the era ended is left alone by the
 close-out and re-filed into the open era when the booth calls
@@ -92,9 +92,8 @@ close-out and re-filed into the open era when the booth calls
 started after the rollover, and for the same reason: a finished recording must
 not end up in a queue nobody is watching.
 
-Copy-forward skips a prompt the new era already holds — prompts are unique per
-installation, and an adopted era can already contain questions the operator
-wrote before naming it.
+Copy-forward uses the era the start request just ended when there was one, or
+the last previously ended era otherwise.
 
 Because the rollover archives an era's questions, resolving the prompts of a
 historical message needs `GET /v1/questions?status=any` — the bare list hides

@@ -143,18 +143,16 @@ installationsRouter.post(
               ],
             },
           });
-          // An adopted era can already hold prompts the operator wrote before
-          // naming it. Prompts are unique per era, so re-creating one would
-          // trip the constraint and fail the whole start over a duplicate the
-          // operator already has.
+          // The destination has just been created, but keep the duplicate
+          // guards local so a future source path cannot trip per-era uniqueness
+          // over a prompt or recording it already holds.
           const existing = await tx.question.findMany({
             where: { installationId: installation.id },
             select: { prompt: true, audioId: true },
           });
           const existingPrompts = new Set(existing.map((row) => row.prompt));
-          // Audio is unique per era too, so an adopted era that already reuses
-          // one of these recordings under a different prompt would trip that
-          // constraint instead.
+          // Audio is unique per era too, so skip a recording that is already
+          // present under a different prompt.
           const existingAudio = new Set(existing.map((row) => row.audioId));
           for (const question of source) {
             if (existingPrompts.has(question.prompt)) continue;
@@ -420,9 +418,6 @@ installationsRouter.delete(
   },
 );
 
-// Whether an installation has recorded anything yet. Used to tell a freshly
-// auto-created era (which the operator can safely adopt and name) apart from
-// one the booth has actually been running in.
 type OwnedFile = { id: string; blobKey: string };
 
 const filesOwnedByInstallation = async (installationId: string): Promise<OwnedFile[]> => {
