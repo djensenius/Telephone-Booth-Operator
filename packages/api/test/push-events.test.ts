@@ -310,4 +310,27 @@ describe("durable push event coordination", () => {
     expect(state?.badgeDeliveredVersion).toBe(0);
     expect(state?.badgeLeaseToken).toBe("newer-replica");
   });
+
+  it("queues the current count again for a newly registered device", async () => {
+    seedMessage({ status: "pending" });
+    const sent: ApnsNotification[] = [];
+    const registrationCoordinator = createPushEventCoordinator({
+      database: fakeDb as never,
+      send: async (notification) => {
+        sent.push(notification);
+      },
+    });
+
+    await registrationCoordinator.observeModerationQueue("initial-delivery");
+    await registrationCoordinator.queueModerationBadgeRefresh();
+    await registrationCoordinator.dispatchModerationBadges();
+
+    const state = store.pushNotificationStates.get("moderation-queue-high");
+    expect(state?.badgeCount).toBe(1);
+    expect(state?.badgeVersion).toBe(2);
+    expect(state?.badgeDeliveredVersion).toBe(2);
+    expect(
+      sent.filter((notification) => notification.kind === "badge").map(({ badge }) => badge),
+    ).toEqual([1, 1]);
+  });
 });

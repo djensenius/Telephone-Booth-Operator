@@ -102,6 +102,7 @@ export const createPushEventCoordinator = ({
   dispatchModerationBadges(): Promise<void>;
   notifyMessageFlagged(messageId: string, moderationId: string, flagged: boolean): Promise<void>;
   observeModerationQueue(operation: string): Promise<void>;
+  queueModerationBadgeRefresh(): Promise<void>;
   reconcileModerationBadgeState(): Promise<void>;
 } => {
   const claimModerationBadge = async (): Promise<BadgeClaim | null> => {
@@ -214,6 +215,37 @@ export const createPushEventCoordinator = ({
     });
   };
 
+  const queueModerationBadgeRefresh = async (): Promise<void> => {
+    const threshold = moderationQueueHighThreshold();
+    await database.$transaction(async (tx) => {
+      await tx.$queryRaw`
+        SELECT pg_advisory_xact_lock(hashtext(${QUEUE_HIGH_STATE_KEY}))
+      `;
+      const count = await tx.message.count({
+        where: { status: { in: [...AWAITING_MODERATION_STATUSES] } },
+      });
+      await tx.pushNotificationState.upsert({
+        where: { key: QUEUE_HIGH_STATE_KEY },
+        create: {
+          key: QUEUE_HIGH_STATE_KEY,
+          active: false,
+          threshold,
+          badgeCount: 0,
+          badgeVersion: 0,
+          badgeDeliveredVersion: 0,
+        },
+        update: {},
+      });
+      await tx.pushNotificationState.update({
+        where: { key: QUEUE_HIGH_STATE_KEY },
+        data: {
+          badgeCount: count,
+          badgeVersion: { increment: 1 },
+        },
+      });
+    });
+  };
+
   const reconcileModerationBadgeState = async (): Promise<void> => {
     const threshold = moderationQueueHighThreshold();
     const result = await database.$transaction(async (tx) => {
@@ -266,6 +298,7 @@ export const createPushEventCoordinator = ({
 
   return {
     dispatchModerationBadges,
+    queueModerationBadgeRefresh,
     reconcileModerationBadgeState,
 
     async notifyMessageFlagged(messageId, moderationId, flagged) {
@@ -372,6 +405,9 @@ export const dispatchModerationBadges = (): Promise<void> => coordinator.dispatc
 
 export const reconcileModerationBadgeState = (): Promise<void> =>
   coordinator.reconcileModerationBadgeState();
+
+export const queueModerationBadgeRefresh = (): Promise<void> =>
+  coordinator.queueModerationBadgeRefresh();
 
 export const startModerationBadgeDispatcher = (): { stop: () => void } => {
   let running = false;

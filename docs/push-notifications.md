@@ -28,8 +28,8 @@ turn it on, and how to configure them in production.
    Transient APNs failures leave the newest version pending for retry. These
    pushes carry no banner or sound and go to every registered device even when
    new-message alerts are disabled. Decisions, deletions, installation
-   rollovers, and data restores therefore lower or reset the icon badge while
-   the app is backgrounded or closed.
+   rollovers, data restores, and device registrations therefore lower, reset,
+   or refresh the icon badge while the app is backgrounded or closed.
 4. A newly recorded moderation result with `flagged: true` sends a
    `messageFlagged` alert. Re-delivery of the same moderation row is deduplicated.
 5. `moderationQueueHigh` fires once when the awaiting-moderation count crosses
@@ -134,8 +134,8 @@ The device re-registers the next time the app launches and calls
 ## Troubleshooting
 
 - **No pushes at all** — confirm all four required vars are set
-  (`apnsEnvConfigured()` must be true) and that at least one device row exists
-  in `mobile_devices`.
+  (`isApnsDeliveryConfigured()` must be true) and that at least one device row
+  exists in `mobile_devices`.
 - **Configuration state** — `GET /healthz` reports `apns.status` as
   `configured`, `disabled`, or `misconfigured`, plus missing/invalid variable
   names only. Startup and delivery failures are logged as structured Pino
