@@ -191,6 +191,11 @@ export const QuestionCreateSchema = z.object({
 });
 export type QuestionCreate = z.infer<typeof QuestionCreateSchema>;
 
+export const QuestionUpdateSchema = z.object({
+  prompt: z.string().min(1).max(280),
+});
+export type QuestionUpdate = z.infer<typeof QuestionUpdateSchema>;
+
 export const InstructionSchema = z.object({
   id: z.guid(),
   description: z.string().max(280).nullable(),

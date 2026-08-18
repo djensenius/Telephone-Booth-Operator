@@ -3,6 +3,7 @@ import {
   InstallationScopeSchema,
   QuestionCreateSchema,
   QuestionStatusSchema,
+  QuestionUpdateSchema,
 } from "@telephone-booth-operator/shared";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -130,6 +131,7 @@ questionsRouter.post("/", requireAdmin(), zValidator("json", QuestionCreateSchem
 // era row is held shared for the write, so a rollover cannot commit between
 // the check and the change.
 class InstallationEndedError extends Error {}
+class QuestionArchivedError extends Error {}
 
 const withOpenEra = async <T>(
   installationId: string | null,
@@ -143,6 +145,49 @@ const withOpenEra = async <T>(
   });
 
 const endedEraResponse = { error: "installation_ended" } as const;
+
+questionsRouter.patch(
+  "/:id",
+  requireAdmin(),
+  zValidator("param", idParamSchema),
+  zValidator("json", QuestionUpdateSchema),
+  async (c) => {
+    const { id } = c.req.valid("param");
+    const { prompt } = c.req.valid("json");
+    recordAudit(c, {
+      action: "question.update",
+      targetType: "question",
+      targetId: id,
+      metadata: { prompt },
+    });
+    const question = await db.question.findUnique({ where: { id } });
+    if (!question || question.status === "archived") return c.json({ error: "not_found" }, 404);
+
+    try {
+      const updated = await withOpenEra(question.installationId, async (tx) => {
+        const result = await tx.question.updateMany({
+          where: { id, status: { not: "archived" } },
+          data: { prompt },
+        });
+        if (result.count === 0) throw new QuestionArchivedError();
+        const current = await tx.question.findUnique({
+          where: { id },
+          include: { audio: true },
+        });
+        if (!current) throw new QuestionArchivedError();
+        return current;
+      });
+      return c.json(serializeQuestion(updated));
+    } catch (error) {
+      if (error instanceof QuestionArchivedError) return c.json({ error: "not_found" }, 404);
+      if (error instanceof InstallationEndedError) return c.json(endedEraResponse, 409);
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        return c.json({ error: "question_conflict" }, 409);
+      }
+      throw error;
+    }
+  },
+);
 
 questionsRouter.post(
   "/:id/activate",

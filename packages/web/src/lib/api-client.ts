@@ -40,6 +40,7 @@ import {
   QuestionCreateSchema,
   QuestionSchema,
   QuestionStatusSchema,
+  QuestionUpdateSchema,
   StatsOverviewSchema,
   TelemetrySourceEnvelopeSchema,
   ThermalHistorySchema,
@@ -86,6 +87,7 @@ import type {
   OperatorMe,
   Question,
   QuestionCreate,
+  QuestionUpdate,
   QuestionStatus,
   StatsOverview,
   StatsWindow,
@@ -338,6 +340,12 @@ export const questions = {
     apiFetch<Question>("/v1/questions", {
       method: "POST",
       body: QuestionCreateSchema.parse(input),
+      schema: QuestionSchema,
+    }),
+  update: (id: string, input: QuestionUpdate) =>
+    apiFetch<Question>(`/v1/questions/${id}`, {
+      method: "PATCH",
+      body: QuestionUpdateSchema.parse(input),
       schema: QuestionSchema,
     }),
   activate: (id: string) =>
@@ -1034,6 +1042,15 @@ export function useDeleteQuestion() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: questions.delete,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["questions", "list"] }),
+  });
+}
+
+export function useUpdateQuestion() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { readonly id: string; readonly input: QuestionUpdate }) =>
+      questions.update(id, input),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["questions", "list"] }),
   });
 }

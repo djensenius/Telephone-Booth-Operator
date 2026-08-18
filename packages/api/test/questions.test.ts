@@ -51,6 +51,29 @@ describe("questions routes", () => {
     expect(res.status).toBe(401);
   });
 
+  it("requires admin auth for question updates", async () => {
+    const app = createApp();
+    const id = crypto.randomUUID();
+    const body = JSON.stringify({ prompt: "Can you hear me?" });
+
+    const unauthenticated = await app.request(`/v1/questions/${id}`, {
+      method: "PATCH",
+      body,
+      headers: { "content-type": "application/json" },
+    });
+    expect(unauthenticated.status).toBe(401);
+
+    const forbidden = await app.request(`/v1/questions/${id}`, {
+      method: "PATCH",
+      body,
+      headers: {
+        "content-type": "application/json",
+        cookie: operatorCookie({ isAdmin: false }),
+      },
+    });
+    expect(forbidden.status).toBe(403);
+  });
+
   it("creates as draft, activates, randomly selects, deactivates, and archives", async () => {
     const app = createApp();
     const cookie = operatorCookie();
@@ -65,6 +88,17 @@ describe("questions routes", () => {
     const question = await create.json();
     expect(question).toMatchObject({ prompt: "What did you hear?", status: "draft" });
     expect(question.audio).toMatchObject({ sha256: "1".repeat(64), durationMs: 2500 });
+
+    const update = await app.request(`/v1/questions/${question.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ prompt: "What can you hear?" }),
+    });
+    expect(update.status, await update.clone().text()).toBe(200);
+    await expect(update.json()).resolves.toMatchObject({
+      id: question.id,
+      prompt: "What can you hear?",
+    });
 
     // Drafts are listed for management but not served to the phone.
     const list = await app.request("/v1/questions?limit=10", { headers: { cookie } });
@@ -112,6 +146,13 @@ describe("questions routes", () => {
       headers: { cookie },
     });
     expect(deleted.status).toBe(204);
+
+    const archivedUpdate = await app.request(`/v1/questions/${question.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ prompt: "Too late to change" }),
+    });
+    expect(archivedUpdate.status).toBe(404);
 
     const afterArchive = await app.request("/v1/questions?limit=10", { headers: { cookie } });
     await expect(afterArchive.json()).resolves.toMatchObject({ items: [], nextCursor: null });

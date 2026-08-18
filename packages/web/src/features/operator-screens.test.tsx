@@ -104,6 +104,7 @@ let lastQuestionsUrl = "";
 let questionsUrls: string[] = [];
 let activatedQuestionId = "";
 let deactivatedQuestionId = "";
+let updatedQuestionPrompt = "";
 let deletedMessages: string[] = [];
 let revokedToken = false;
 let lastCreatedTokenScope: string | undefined;
@@ -177,6 +178,11 @@ const server = setupServer(
   http.post("http://localhost/v1/questions", () => {
     createdQuestion = true;
     return HttpResponse.json(questionTwo, { status: 201 });
+  }),
+  http.patch("http://localhost/v1/questions/:id", async ({ params, request }) => {
+    const body = (await request.json()) as { prompt: string };
+    updatedQuestionPrompt = body.prompt;
+    return HttpResponse.json({ ...question, id: String(params.id), prompt: body.prompt });
   }),
   http.delete("http://localhost/v1/questions/:id", () => new HttpResponse(null, { status: 204 })),
   http.post("http://localhost/v1/questions/:id/activate", ({ params }) => {
@@ -363,6 +369,7 @@ beforeEach(() => {
   questionsUrls = [];
   activatedQuestionId = "";
   deactivatedQuestionId = "";
+  updatedQuestionPrompt = "";
   deletedMessages = [];
   revokedToken = false;
   lastCreatedTokenScope = undefined;
@@ -594,6 +601,37 @@ describe("Questions feature", () => {
     expect(screen.getByText("Retire this question?")).toBeTruthy();
   });
 
+  it("edits a question prompt", async () => {
+    renderPath("/questions");
+    const trigger = await screen.findByText("Edit prompt");
+    fireEvent.click(trigger);
+    const input = screen.getByLabelText("Prompt");
+    expect(document.activeElement).toBe(input);
+    fireEvent.change(input, { target: { value: "What can you hear right now?" } });
+    fireEvent.click(screen.getByText("Save prompt"));
+    await waitFor(() => expect(updatedQuestionPrompt).toBe("What can you hear right now?"), {
+      timeout: 3_000,
+    });
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
+  it("reads missing duration from audio metadata", async () => {
+    server.use(
+      http.get("http://localhost/v1/questions", () =>
+        HttpResponse.json({
+          items: [{ ...question, audio: { ...question.audio, durationMs: null } }],
+          nextCursor: null,
+        }),
+      ),
+    );
+    renderPath("/questions");
+    const audio = await screen.findByText("Reading length…");
+    const player = audio.previousElementSibling as HTMLAudioElement;
+    Object.defineProperty(player, "duration", { configurable: true, value: 12 });
+    fireEvent.loadedMetadata(player);
+    expect(await screen.findByText("12s")).toBeTruthy();
+  });
+
   it("deactivates an active question", async () => {
     renderPath("/questions");
     fireEvent.click(await screen.findByText("Deactivate"));
@@ -643,7 +681,7 @@ describe("Questions feature", () => {
 
   it("has no critical axe violations", async () => {
     const { container } = renderPath("/questions");
-    await screen.findByText("Question library");
+    await screen.findByText("What did the city sound like today?");
     await expectNoCriticalAxe(container);
   });
 });
