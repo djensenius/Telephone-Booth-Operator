@@ -114,10 +114,9 @@ export function thermalSeriesLabel(
 export function shapeThermalCharts(history: ThermalHistory | null): ThermalChartGroups {
   if (!history) return { combined: [], cpu: [], battery: [], zones: [] };
   const combined = history.series.map<ThermalChartSeries>((series, index) => ({
-    id: `${series.metric}:${Object.entries(series.labels)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([name, value]) => `${name}=${value}`)
-      .join(",")}`,
+    id: `${series.metric}:${JSON.stringify(
+      Object.entries(series.labels).sort(([left], [right]) => left.localeCompare(right)),
+    )}`,
     label: thermalSeriesLabel(series.metric, series.labels, index),
     metric: series.metric,
     labels: series.labels,

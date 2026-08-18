@@ -29,7 +29,7 @@ external VictoriaMetrics instance; Grafana dashboards live under
 | `GET /v1/sessions/:id`              | Operator cookie   | Session + ordered events.                       |
 | `PUT /v1/system`                    | API token         | Upsert current row + WS broadcast.              |
 | `GET /v1/system/current`            | Cookie or bearer  | Latest persisted host snapshot.                 |
-| `GET /v1/system/components/current` | Operator cookie   | Latest router component snapshots.              |
+| `GET /v1/system/components/current` | Cookie or bearer  | Latest router component snapshots.              |
 | `GET /v1/system/thermals/history`   | Session or bearer | Fixed CPU, battery, and zone history.           |
 | `GET /v1/monitor/summary`           | Monitor token     | Daily and active-installation aggregate counts. |
 | `GET /v1/ws/status`                 | Cookie or bearer  | Discriminated `{kind,…}` envelope.              |

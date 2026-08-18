@@ -35,6 +35,36 @@ describe("ThermalChart", () => {
     expect(commands.match(/\bL\b/g)).toHaveLength(1);
   });
 
+  it("renders a marker for every isolated singleton segment", () => {
+    const series: ThermalChartSeries[] = [
+      {
+        id: "isolated-cpu",
+        label: "Pi CPU",
+        metric: "booth_cpu_temperature_celsius",
+        labels: { booth_id: "booth-01" },
+        points: [
+          { timestamp: 0, value: 47 },
+          { timestamp: 180, value: 48 },
+          { timestamp: 360, value: 49 },
+        ],
+      },
+    ];
+    const { container } = render(
+      <ThermalChart
+        title="Pi CPU"
+        description="CPU history"
+        series={series}
+        from="1970-01-01T00:00:00.000Z"
+        to="1970-01-01T01:00:00.000Z"
+        stepSeconds={60}
+      />,
+    );
+
+    const group = container.querySelector('g[data-series-id="isolated-cpu"]');
+    expect(group?.querySelectorAll(".thermal-chart__point")).toHaveLength(3);
+    expect(group?.querySelector("path")?.getAttribute("d")?.match(/\bM\b/g)).toHaveLength(3);
+  });
+
   it("assigns stable color, dash, and marker combinations across 128 series", () => {
     const series: ThermalChartSeries[] = Array.from({ length: 128 }, (_, index) => ({
       id: `series-${String(index).padStart(3, "0")}`,

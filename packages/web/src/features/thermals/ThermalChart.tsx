@@ -49,6 +49,11 @@ interface SeriesVisualCue {
   readonly dashPattern: string | undefined;
 }
 
+interface SeriesGeometry {
+  readonly path: string;
+  readonly singletonPoints: readonly TelemetryHistoryPoint[];
+}
+
 const temperatureFormatter = new Intl.NumberFormat(undefined, {
   minimumFractionDigits: 0,
   maximumFractionDigits: 1,
@@ -108,23 +113,33 @@ const pointCoordinates = (
   y: PLOT_TOP + ((domain.yMax - point.value) / (domain.yMax - domain.yMin)) * PLOT_HEIGHT,
 });
 
-const pathForSeries = (
+const geometryForSeries = (
   series: ThermalChartSeries,
   domain: ChartDomain,
   stepSeconds: number,
-): string => {
+): SeriesGeometry => {
   let previousTimestamp: number | null = null;
-  return [...series.points]
-    .sort((left, right) => left.timestamp - right.timestamp)
-    .map((point) => {
-      const { x, y } = pointCoordinates(point, domain);
-      const startsSegment =
-        previousTimestamp === null ||
-        point.timestamp - previousTimestamp > stepSeconds * PROMETHEUS_GAP_MULTIPLIER;
-      previousTimestamp = point.timestamp;
-      return `${startsSegment ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
-    })
-    .join(" ");
+  let segmentStart: TelemetryHistoryPoint | null = null;
+  let segmentPointCount = 0;
+  const commands: string[] = [];
+  const singletonPoints: TelemetryHistoryPoint[] = [];
+  for (const point of [...series.points].sort((left, right) => left.timestamp - right.timestamp)) {
+    const startsSegment =
+      previousTimestamp === null ||
+      point.timestamp - previousTimestamp > stepSeconds * PROMETHEUS_GAP_MULTIPLIER;
+    if (startsSegment) {
+      if (segmentPointCount === 1 && segmentStart) singletonPoints.push(segmentStart);
+      segmentStart = point;
+      segmentPointCount = 1;
+    } else {
+      segmentPointCount += 1;
+    }
+    const { x, y } = pointCoordinates(point, domain);
+    commands.push(`${startsSegment ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`);
+    previousTimestamp = point.timestamp;
+  }
+  if (segmentPointCount === 1 && segmentStart) singletonPoints.push(segmentStart);
+  return { path: commands.join(" "), singletonPoints };
 };
 
 const timeLabel = (timestampSeconds: number): string =>
@@ -203,14 +218,20 @@ export const ThermalChart = memo(function ThermalChart({
       }
       const latest = latestThermalPoint(item);
       const visualCue = visualCueForIndex(index);
+      const geometry = geometryForSeries(item, domain, stepSeconds);
+      const markerPoints = [...geometry.singletonPoints];
+      if (latest && !markerPoints.includes(latest)) markerPoints.push(latest);
       return {
         item,
         latest,
         minimum,
         maximum,
         ...visualCue,
-        path: pathForSeries(item, domain, stepSeconds),
-        latestCoordinates: latest === null ? null : pointCoordinates(latest, domain),
+        path: geometry.path,
+        markerCoordinates: markerPoints.map((point) => ({
+          ...pointCoordinates(point, domain),
+          timestamp: point.timestamp,
+        })),
       };
     });
   }, [domain, orderedSeries, stepSeconds]);
@@ -280,7 +301,7 @@ export const ThermalChart = memo(function ThermalChart({
               </text>
               <g clipPath={`url(#${clipId})`}>
                 {preparedSeries.map(
-                  ({ item, latestCoordinates, paletteIndex, markerIndex, dashPattern, path }) => {
+                  ({ item, markerCoordinates, paletteIndex, markerIndex, dashPattern, path }) => {
                     return (
                       <g key={item.id} data-series-id={item.id}>
                         <path
@@ -288,14 +309,15 @@ export const ThermalChart = memo(function ThermalChart({
                           d={path}
                           strokeDasharray={dashPattern}
                         />
-                        {latestCoordinates === null ? null : (
+                        {markerCoordinates.map((coordinates, markerPosition) => (
                           <SeriesMarker
-                            x={latestCoordinates.x}
-                            y={latestCoordinates.y}
+                            key={`${coordinates.timestamp}:${markerPosition}`}
+                            x={coordinates.x}
+                            y={coordinates.y}
                             markerIndex={markerIndex}
                             paletteIndex={paletteIndex}
                           />
-                        )}
+                        ))}
                       </g>
                     );
                   },

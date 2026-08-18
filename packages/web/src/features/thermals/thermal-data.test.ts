@@ -190,4 +190,37 @@ describe("thermal chart shaping", () => {
     expect(charts.battery.map((series) => series.label)).toEqual(["Router battery"]);
     expect(charts.zones.map((series) => series.label)).toEqual(["soc", "wifi"]);
   });
+
+  it("encodes label tuples without delimiter collisions", () => {
+    const history: ThermalHistory = {
+      boothId: "booth-01",
+      source: {
+        boothId: "booth-01",
+        componentId: "router",
+        displayName: "Router",
+        kind: "router",
+        prometheusJob: "glinet-router",
+        prometheusInstance: "router-01",
+      },
+      from: "2026-08-17T00:00:00.000Z",
+      to: "2026-08-18T00:00:00.000Z",
+      stepSeconds: 60,
+      series: [
+        {
+          metric: "glinet_thermal_temperature_celsius",
+          labels: { a: "b,c=d" },
+          points: [{ timestamp: 1, value: 50 }],
+        },
+        {
+          metric: "glinet_thermal_temperature_celsius",
+          labels: { a: "b", c: "d" },
+          points: [{ timestamp: 1, value: 51 }],
+        },
+      ],
+    };
+
+    const ids = shapeThermalCharts(history).zones.map((series) => series.id);
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+  });
 });
