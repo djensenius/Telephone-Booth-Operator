@@ -1950,7 +1950,7 @@ paths:
         "204": { description: snapshot accepted }
         "401": { description: missing or invalid API token }
         "403": { description: API token does not have telemetry scope }
-        "413": { description: request body exceeds 65, 536 bytes }
+        "413": { description: "request body exceeds 65,536 bytes" }
     get:
       summary: List current router component snapshots.
       tags: [system]
@@ -2012,7 +2012,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ComponentTelemetryHistory" }
-        "400": { description: invalid range, ordering, or point count }
+        "400": { description: "invalid range, ordering, or point count" }
         "401": { description: operator authentication required }
         "404": { description: telemetry source not found }
         "502":
