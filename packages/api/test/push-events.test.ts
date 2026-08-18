@@ -63,7 +63,297 @@ describe("durable push event coordination", () => {
     seedMessage({ status: "pending" });
     await coordinator(send).observeModerationQueue("instance-5");
 
-    expect(send).toHaveBeenCalledTimes(2);
-    expect(sent.map((notification) => notification.badge)).toEqual([2, 2]);
+    expect(
+      sent
+        .filter((notification) => notification.kind === "badge")
+        .map((notification) => notification.badge),
+    ).toEqual([2, 2, 3, 1, 2, 3]);
+    expect(
+      sent
+        .filter(
+          (notification) =>
+            notification.kind === "alert" && notification.preferenceKey === "moderationQueueHigh",
+        )
+        .map((notification) => notification.data?.awaitingModeration),
+    ).toEqual([2, 2]);
+  });
+
+  it("serializes in-flight badge delivery and coalesces newer counts", async () => {
+    const sentBadges: number[] = [];
+    let releaseFirstSend = (): void => undefined;
+    let markFirstSendStarted = (): void => undefined;
+    const firstSendStarted = new Promise<void>((resolve) => {
+      markFirstSendStarted = resolve;
+    });
+    const firstSendGate = new Promise<void>((resolve) => {
+      releaseFirstSend = resolve;
+    });
+    const send = vi.fn(async (notification: ApnsNotification) => {
+      if (notification.kind !== "badge") return;
+      sentBadges.push(notification.badge);
+      if (sentBadges.length === 1) {
+        markFirstSendStarted();
+        await firstSendGate;
+      }
+    });
+
+    const first = seedMessage({ status: "pending" });
+    const second = seedMessage({ status: "pending" });
+    const firstObservation = coordinator(send).observeModerationQueue("replica-1");
+    await firstSendStarted;
+
+    store.messages.get(first.id)!.status = "approved";
+    await coordinator(send).observeModerationQueue("replica-2");
+    store.messages.get(second.id)!.status = "approved";
+    await coordinator(send).observeModerationQueue("replica-3");
+
+    expect(sentBadges).toEqual([2]);
+    releaseFirstSend();
+    await firstObservation;
+
+    expect(sentBadges).toEqual([2, 0]);
+    const state = store.pushNotificationStates.get("moderation-queue-high");
+    expect(state?.badgeDeliveredVersion).toBe(state?.badgeVersion);
+    expect(state?.badgeLeaseToken).toBeNull();
+  });
+
+  it("recovers pending badge delivery after a stale lease and coordinator restart", async () => {
+    const now = new Date("2026-08-18T12:00:00.000Z");
+    store.pushNotificationStates.set("moderation-queue-high", {
+      key: "moderation-queue-high",
+      active: false,
+      threshold: 10,
+      badgeCount: 4,
+      badgeVersion: 3,
+      badgeDeliveredVersion: 2,
+      badgeLeaseToken: "crashed-replica",
+      badgeLeaseExpiresAt: new Date(now.getTime() - 1),
+      updatedAt: new Date(now.getTime() - 60_000),
+    });
+    const sent: ApnsNotification[] = [];
+    const restartedCoordinator = createPushEventCoordinator({
+      database: fakeDb as never,
+      send: async (notification) => {
+        sent.push(notification);
+      },
+      now: () => now,
+      createLeaseToken: () => "recovered-replica",
+    });
+
+    await restartedCoordinator.dispatchModerationBadges();
+
+    expect(sent).toEqual([{ kind: "badge", badge: 4, data: { awaitingModeration: 4 } }]);
+    const state = store.pushNotificationStates.get("moderation-queue-high");
+    expect(state?.badgeDeliveredVersion).toBe(3);
+    expect(state?.badgeLeaseToken).toBeNull();
+    expect(state?.badgeLeaseExpiresAt).toBeNull();
+  });
+
+  it("retains a badge version after delivery failure and retries it", async () => {
+    seedMessage({ status: "pending" });
+    let badgeAttempts = 0;
+    const retryingCoordinator = createPushEventCoordinator({
+      database: fakeDb as never,
+      send: async (notification) => {
+        if (notification.kind !== "badge") return;
+        badgeAttempts += 1;
+        if (badgeAttempts === 1) throw new Error("APNs unavailable");
+      },
+    });
+
+    await retryingCoordinator.observeModerationQueue("first-attempt");
+
+    let state = store.pushNotificationStates.get("moderation-queue-high");
+    expect(state?.badgeDeliveredVersion).toBe(0);
+    expect(state?.badgeVersion).toBe(1);
+    expect(state?.badgeLeaseToken).toBeNull();
+
+    await retryingCoordinator.dispatchModerationBadges();
+
+    state = store.pushNotificationStates.get("moderation-queue-high");
+    expect(badgeAttempts).toBe(2);
+    expect(state?.badgeDeliveredVersion).toBe(1);
+    expect(state?.badgeLeaseToken).toBeNull();
+  });
+
+  it("keeps delivery pending while APNs is disabled and sends when enabled", async () => {
+    seedMessage({ status: "pending" });
+    let enabled = false;
+    const send = vi.fn(async (_notification: ApnsNotification) => undefined);
+    const gatedCoordinator = createPushEventCoordinator({
+      database: fakeDb as never,
+      send,
+      badgeDeliveryEnabled: () => enabled,
+    });
+
+    await gatedCoordinator.observeModerationQueue("disabled");
+
+    let state = store.pushNotificationStates.get("moderation-queue-high");
+    expect(send).not.toHaveBeenCalled();
+    expect(state?.badgeDeliveredVersion).toBe(0);
+    expect(state?.badgeVersion).toBe(1);
+
+    enabled = true;
+    await gatedCoordinator.dispatchModerationBadges();
+
+    state = store.pushNotificationStates.get("moderation-queue-high");
+    expect(send).toHaveBeenCalledWith(
+      {
+        kind: "badge",
+        badge: 1,
+        data: { awaitingModeration: 1 },
+      },
+      expect.any(Function),
+    );
+    expect(state?.badgeDeliveredVersion).toBe(1);
+  });
+
+  it("reconciles missed queue changes without versioning unchanged counts", async () => {
+    const message = seedMessage({ status: "pending" });
+    const sent: ApnsNotification[] = [];
+    const reconcilingCoordinator = createPushEventCoordinator({
+      database: fakeDb as never,
+      send: async (notification) => {
+        sent.push(notification);
+      },
+    });
+
+    await reconcilingCoordinator.reconcileModerationBadgeState();
+    let state = store.pushNotificationStates.get("moderation-queue-high");
+    expect(state?.badgeCount).toBe(1);
+    expect(state?.badgeVersion).toBe(1);
+    expect(state?.badgeDeliveredVersion).toBe(1);
+
+    await reconcilingCoordinator.reconcileModerationBadgeState();
+    state = store.pushNotificationStates.get("moderation-queue-high");
+    expect(state?.badgeVersion).toBe(1);
+
+    store.messages.get(message.id)!.status = "approved";
+    await reconcilingCoordinator.reconcileModerationBadgeState();
+
+    state = store.pushNotificationStates.get("moderation-queue-high");
+    expect(state?.badgeCount).toBe(0);
+    expect(state?.badgeVersion).toBe(2);
+    expect(state?.badgeDeliveredVersion).toBe(2);
+    expect(sent).toEqual([
+      { kind: "badge", badge: 1, data: { awaitingModeration: 1 } },
+      { kind: "badge", badge: 0, data: { awaitingModeration: 0 } },
+    ]);
+  });
+
+  it("initializes delivery for a pre-dispatch badge state", async () => {
+    store.pushNotificationStates.set("moderation-queue-high", {
+      key: "moderation-queue-high",
+      active: false,
+      threshold: 10,
+      badgeCount: 0,
+      badgeVersion: 0,
+      badgeDeliveredVersion: 0,
+      badgeLeaseToken: null,
+      badgeLeaseExpiresAt: null,
+      updatedAt: new Date(),
+    });
+    const migratedCoordinator = createPushEventCoordinator({
+      database: fakeDb as never,
+      send: async (_notification) => undefined,
+    });
+
+    await migratedCoordinator.reconcileModerationBadgeState();
+
+    expect(store.pushNotificationStates.get("moderation-queue-high")?.badgeVersion).toBe(1);
+  });
+
+  it("emits a queue-high alert when reconciliation observes the crossing first", async () => {
+    process.env.MODERATION_QUEUE_HIGH_THRESHOLD = "2";
+    seedMessage({ status: "pending" });
+    seedMessage({ status: "pending" });
+    const sent: ApnsNotification[] = [];
+    const reconcilingCoordinator = createPushEventCoordinator({
+      database: fakeDb as never,
+      send: async (notification) => {
+        sent.push(notification);
+      },
+    });
+
+    await reconcilingCoordinator.reconcileModerationBadgeState();
+    await reconcilingCoordinator.reconcileModerationBadgeState();
+
+    expect(
+      sent.filter(
+        (notification) =>
+          notification.kind === "alert" && notification.preferenceKey === "moderationQueueHigh",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("fences a claimed badge before submission after lease ownership is lost", async () => {
+    seedMessage({ status: "pending" });
+    let submitted = false;
+    const fencedCoordinator = createPushEventCoordinator({
+      database: fakeDb as never,
+      send: async (notification, beforeSubmit) => {
+        if (notification.kind !== "badge") return;
+        const state = store.pushNotificationStates.get("moderation-queue-high");
+        if (!state) throw new Error("missing badge state");
+        state.badgeLeaseToken = "newer-replica";
+        state.badgeLeaseExpiresAt = new Date(Date.now() + 60_000);
+        const leaseExpiresAt = await beforeSubmit?.();
+        if (!leaseExpiresAt) throw new Error("stale badge claim");
+        submitted = true;
+      },
+    });
+
+    await fencedCoordinator.observeModerationQueue("lost-lease");
+
+    const state = store.pushNotificationStates.get("moderation-queue-high");
+    expect(submitted).toBe(false);
+    expect(state?.badgeDeliveredVersion).toBe(0);
+    expect(state?.badgeLeaseToken).toBe("newer-replica");
+  });
+
+  it("queues the current count again for a newly registered device", async () => {
+    seedMessage({ status: "pending" });
+    const sent: ApnsNotification[] = [];
+    const registrationCoordinator = createPushEventCoordinator({
+      database: fakeDb as never,
+      send: async (notification) => {
+        sent.push(notification);
+      },
+    });
+
+    await registrationCoordinator.observeModerationQueue("initial-delivery");
+    await registrationCoordinator.queueModerationBadgeRefresh();
+    await registrationCoordinator.dispatchModerationBadges();
+
+    const state = store.pushNotificationStates.get("moderation-queue-high");
+    expect(state?.badgeCount).toBe(1);
+    expect(state?.badgeVersion).toBe(2);
+    expect(state?.badgeDeliveredVersion).toBe(2);
+    expect(
+      sent.filter((notification) => notification.kind === "badge").map(({ badge }) => badge),
+    ).toEqual([1, 1]);
+  });
+
+  it("rejects a renewal that consumed the APNs submission window", async () => {
+    seedMessage({ status: "pending" });
+    const timestamps = [0, 0, 119_000];
+    let submitted = false;
+    const slowRenewalCoordinator = createPushEventCoordinator({
+      database: fakeDb as never,
+      now: () => new Date(timestamps.shift() ?? 119_000),
+      send: async (notification, beforeSubmit) => {
+        if (notification.kind !== "badge") return;
+        const leaseExpiresAt = await beforeSubmit?.();
+        if (!leaseExpiresAt) throw new Error("insufficient badge lease");
+        submitted = true;
+      },
+    });
+
+    await slowRenewalCoordinator.observeModerationQueue("slow-renewal");
+
+    const state = store.pushNotificationStates.get("moderation-queue-high");
+    expect(submitted).toBe(false);
+    expect(state?.badgeDeliveredVersion).toBe(0);
+    expect(state?.badgeLeaseToken).toBeNull();
   });
 });

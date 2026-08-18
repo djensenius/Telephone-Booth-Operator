@@ -13,7 +13,12 @@ import http2 from "node:http2";
 import { importPKCS8, SignJWT } from "jose";
 
 import { db } from "./db.js";
-import { findTargetDevices, type ApnsNotification } from "./apns.js";
+import {
+  APNS_DELIVERY_FENCE_MINIMUM_MS,
+  findTargetDevices,
+  type ApnsDeliveryFence,
+  type ApnsNotification,
+} from "./apns.js";
 import { log } from "./logger.js";
 
 type ApnsSigningKey = Awaited<ReturnType<typeof importPKCS8>>;
@@ -32,6 +37,8 @@ export type ApnsConfig = {
 const PRODUCTION_HOST = "https://api.push.apple.com";
 const SANDBOX_HOST = "https://api.sandbox.push.apple.com";
 const JWT_REFRESH_MS = 40 * 60 * 1000;
+const MODERATION_BADGE_COLLAPSE_ID = "moderation-badge";
+const REQUEST_TIMEOUT_MS = 20_000;
 
 export type ApnsConfigStatus =
   | { status: "configured"; environment: ApnsConfig["environment"]; config: ApnsConfig }
@@ -126,13 +133,17 @@ export const normalizePemKey = (raw: string | undefined): string | undefined => 
 /// (matching the existing mobile contract) but `aps` always wins so custom
 /// keys can never clobber the reserved envelope.
 export const buildApnsPayload = (notification: ApnsNotification): Record<string, unknown> => {
-  const aps: Record<string, unknown> = {
-    alert: { title: notification.title, body: notification.body },
-    sound: "default",
-  };
-  if (typeof notification.badge === "number") aps.badge = notification.badge;
-  if (notification.threadId) aps["thread-id"] = notification.threadId;
-  if (notification.category) aps.category = notification.category;
+  const aps: Record<string, unknown> =
+    notification.kind === "alert"
+      ? {
+          alert: { title: notification.title, body: notification.body },
+          sound: "default",
+        }
+      : { badge: notification.badge };
+  if (notification.kind === "alert") {
+    if (notification.threadId) aps["thread-id"] = notification.threadId;
+    if (notification.category) aps.category = notification.category;
+  }
   return { ...notification.data, aps };
 };
 
@@ -163,17 +174,48 @@ export class Http2ApnsSender {
     this.host = config.environment === "production" ? PRODUCTION_HOST : SANDBOX_HOST;
   }
 
-  async send(userId: string, notification: ApnsNotification): Promise<void> {
-    const devices = await findTargetDevices(userId, notification.preferenceKey);
+  async send(
+    userId: string,
+    notification: ApnsNotification,
+    beforeSubmit?: ApnsDeliveryFence,
+  ): Promise<void> {
+    const preferenceKey = notification.kind === "alert" ? notification.preferenceKey : null;
+    const devices = await findTargetDevices(userId, preferenceKey);
     if (devices.length === 0) return;
     const jwt = await this.providerToken();
     const payload = JSON.stringify(buildApnsPayload(notification));
-    await Promise.allSettled(devices.map((device) => this.deliver(device, jwt, payload)));
+    const collapseId = notification.kind === "badge" ? MODERATION_BADGE_COLLAPSE_ID : undefined;
+    const leaseExpiresAt = beforeSubmit ? await beforeSubmit() : null;
+    if (
+      beforeSubmit &&
+      (!leaseExpiresAt || leaseExpiresAt.getTime() - Date.now() < APNS_DELIVERY_FENCE_MINIMUM_MS)
+    ) {
+      throw new Error("APNs delivery fence rejected a stale badge claim");
+    }
+    const results = await Promise.allSettled(
+      devices.map((device) => this.deliver(device, jwt, payload, collapseId, leaseExpiresAt)),
+    );
+    const failures = results.flatMap((result) =>
+      result.status === "rejected"
+        ? [
+            result.reason instanceof Error
+              ? result.reason
+              : new Error("APNs device delivery failed", { cause: result.reason }),
+          ]
+        : [],
+    );
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures,
+        `APNs delivery failed for ${failures.length} of ${devices.length} devices`,
+      );
+    }
     log.debug(
       {
         component: "apns",
         userId,
-        preferenceKey: notification.preferenceKey,
+        notificationKind: notification.kind,
+        ...(preferenceKey === null ? {} : { preferenceKey }),
         deviceCount: devices.length,
       },
       "APNs fan-out completed",
@@ -184,36 +226,22 @@ export class Http2ApnsSender {
     device: { id: string; apnsToken: string; platform: string },
     jwt: string,
     payload: string,
+    collapseId: string | undefined,
+    leaseExpiresAt: Date | null,
   ): Promise<void> {
+    if (leaseExpiresAt && leaseExpiresAt.getTime() - Date.now() < APNS_DELIVERY_FENCE_MINIMUM_MS) {
+      throw new Error("APNs delivery fence expired before submission");
+    }
+
+    let result: { status: number; reason?: string; apnsId?: string };
     try {
-      const result = await this.post(device.apnsToken, this.topic(device.platform), jwt, payload);
-      if (result.status === 200) return;
-      if (result.status === 410 || PERMANENT_TOKEN_FAILURES.has(result.reason ?? "")) {
-        await this.revokeDevice(device.id);
-        log.warn(
-          {
-            component: "apns",
-            status: result.status,
-            reason: result.reason ?? "unknown",
-            apnsId: result.apnsId,
-            deviceId: device.id,
-            platform: device.platform,
-          },
-          "APNs rejected device token; device revoked",
-        );
-      } else {
-        log.warn(
-          {
-            component: "apns",
-            status: result.status,
-            reason: result.reason ?? "unknown",
-            apnsId: result.apnsId,
-            deviceId: device.id,
-            platform: device.platform,
-          },
-          "APNs delivery failed",
-        );
-      }
+      result = await this.post(
+        device.apnsToken,
+        this.topic(device.platform),
+        jwt,
+        payload,
+        collapseId,
+      );
     } catch (error) {
       const errorRecord =
         error !== null && typeof error === "object" ? (error as Record<string, unknown>) : {};
@@ -230,7 +258,38 @@ export class Http2ApnsSender {
       // A transport error often means the session is dead; drop it so the
       // next send reconnects.
       this.resetSession();
+      throw error instanceof Error ? error : new Error("APNs transport failed", { cause: error });
     }
+
+    if (result.status === 200) return;
+    if (result.status === 410 || PERMANENT_TOKEN_FAILURES.has(result.reason ?? "")) {
+      await this.revokeDevice(device.id);
+      log.warn(
+        {
+          component: "apns",
+          status: result.status,
+          reason: result.reason ?? "unknown",
+          apnsId: result.apnsId,
+          deviceId: device.id,
+          platform: device.platform,
+        },
+        "APNs rejected device token; device revoked",
+      );
+      return;
+    }
+
+    log.warn(
+      {
+        component: "apns",
+        status: result.status,
+        reason: result.reason ?? "unknown",
+        apnsId: result.apnsId,
+        deviceId: device.id,
+        platform: device.platform,
+      },
+      "APNs delivery failed",
+    );
+    throw new Error(`APNs delivery failed with status ${result.status}`);
   }
 
   private topic(platform: string): string {
@@ -245,11 +304,12 @@ export class Http2ApnsSender {
     }
   }
 
-  private post(
+  protected post(
     token: string,
     topic: string,
     jwt: string,
     payload: string,
+    collapseId: string | undefined,
   ): Promise<{ status: number; reason?: string; apnsId?: string }> {
     return new Promise((resolve, reject) => {
       const session = this.ensureSession();
@@ -261,10 +321,25 @@ export class Http2ApnsSender {
         "apns-push-type": "alert",
         "apns-priority": "10",
         "content-type": "application/json",
+        ...(collapseId === undefined ? {} : { "apns-collapse-id": collapseId }),
       });
       let status = 0;
       let body = "";
       let apnsId: string | undefined;
+      let settled = false;
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error(`APNs request timed out after ${REQUEST_TIMEOUT_MS}ms`));
+        req.close(http2.constants.NGHTTP2_CANCEL);
+      }, REQUEST_TIMEOUT_MS);
+      const settle = (callback: () => void): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        callback();
+      };
+      timeout.unref();
       req.setEncoding("utf8");
       req.on("response", (headers) => {
         status = Number(headers[":status"] ?? 0);
@@ -274,7 +349,13 @@ export class Http2ApnsSender {
       req.on("data", (chunk: string | Buffer) => {
         body += typeof chunk === "string" ? chunk : chunk.toString("utf8");
       });
-      req.on("error", reject);
+      req.on("error", (error) =>
+        settle(() =>
+          reject(
+            error instanceof Error ? error : new Error("APNs request failed", { cause: error }),
+          ),
+        ),
+      );
       req.on("end", () => {
         let reason: string | undefined;
         if (body) {
@@ -284,11 +365,13 @@ export class Http2ApnsSender {
             // Non-JSON error body; leave reason undefined.
           }
         }
-        resolve({
-          status,
-          ...(reason === undefined ? {} : { reason }),
-          ...(apnsId === undefined ? {} : { apnsId }),
-        });
+        settle(() =>
+          resolve({
+            status,
+            ...(reason === undefined ? {} : { reason }),
+            ...(apnsId === undefined ? {} : { apnsId }),
+          }),
+        );
       });
       req.end(payload);
     });

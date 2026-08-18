@@ -24,6 +24,7 @@ vi.mock("../src/lib/require-api-token.js", () => ({
 }));
 
 import { createApp } from "../src/index.js";
+import type { ApnsNotification } from "../src/lib/apns.js";
 import { resetApnsSenderForTests, setApnsSenderForTests } from "../src/lib/apns.js";
 import { wsBroadcaster, type WsEnvelope } from "../src/lib/broadcaster.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
@@ -294,13 +295,20 @@ describe("messages routes", () => {
     seedMessage({ audioId: seedFile({ sha256: "f".repeat(64) }).id, status: "pending" });
     seedMobileDevice({ userId: "operator-1", platform: "ios" });
 
-    const sent: Array<{ userId: string; badge?: number; preferenceKey: string }> = [];
+    const sent: Array<{
+      userId: string;
+      kind: ApnsNotification["kind"];
+      badge?: number;
+      preferenceKey?: string;
+    }> = [];
     setApnsSenderForTests({
       send: async (userId, notification) => {
         sent.push({
           userId,
-          badge: notification.badge,
-          preferenceKey: notification.preferenceKey,
+          kind: notification.kind,
+          ...(notification.kind === "alert"
+            ? { preferenceKey: notification.preferenceKey }
+            : { badge: notification.badge }),
         });
       },
     });
@@ -329,12 +337,53 @@ describe("messages routes", () => {
     // The push is fire-and-forget; let the microtask queue drain.
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({
+    expect(sent).toEqual(
+      expect.arrayContaining([
+        {
+          userId: "operator-1",
+          kind: "alert",
+          preferenceKey: "messageReceived",
+        },
+        {
+          userId: "operator-1",
+          kind: "badge",
+          badge: 2,
+        },
+      ]),
+    );
+  });
+
+  it("pushes badge decrements after decisions and deletions", async () => {
+    const app = createApp();
+    const first = seedMessage({ status: "pending" });
+    const second = seedMessage({ status: "pending" });
+    seedMobileDevice({
       userId: "operator-1",
-      preferenceKey: "messageReceived",
-      badge: 2,
+      preferences: { messageReceived: false },
     });
+    const badges: number[] = [];
+    setApnsSenderForTests({
+      send: async (_userId, notification) => {
+        if (notification.kind === "badge") badges.push(notification.badge);
+      },
+    });
+
+    const decided = await app.request(`/v1/messages/${first.id}/decision`, {
+      method: "POST",
+      headers: { cookie: operatorCookie(), "content-type": "application/json" },
+      body: JSON.stringify({ decision: "approve" }),
+    });
+    expect(decided.status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(badges.at(-1)).toBe(1);
+
+    const deleted = await app.request(`/v1/messages/${second.id}`, {
+      method: "DELETE",
+      headers: { cookie: operatorCookie() },
+    });
+    expect(deleted.status).toBe(204);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(badges.at(-1)).toBe(0);
   });
 
   it("re-arms after the queue drops below the high threshold", async () => {
@@ -346,10 +395,10 @@ describe("messages routes", () => {
       platform: "ios",
       preferences: { moderationQueueHigh: true },
     });
-    const sent: Array<{ preferenceKey: string; badge?: number }> = [];
+    const sent: ApnsNotification[] = [];
     setApnsSenderForTests({
       send: async (_userId, notification) => {
-        sent.push({ preferenceKey: notification.preferenceKey, badge: notification.badge });
+        sent.push(notification);
       },
     });
 
@@ -396,10 +445,11 @@ describe("messages routes", () => {
     await complete("5".repeat(64));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(sent.filter((entry) => entry.preferenceKey === "moderationQueueHigh")).toEqual([
-      { preferenceKey: "moderationQueueHigh", badge: 2 },
-      { preferenceKey: "moderationQueueHigh", badge: 2 },
-    ]);
+    expect(
+      sent
+        .filter((entry) => entry.kind === "alert" && entry.preferenceKey === "moderationQueueHigh")
+        .map((entry) => entry.data?.awaitingModeration),
+    ).toEqual([2, 2]);
   });
 
   it("keeps a successful deletion successful when queue refresh fails", async () => {

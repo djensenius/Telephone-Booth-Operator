@@ -32,6 +32,7 @@ import {
   requireActiveInstallation,
   resetInstallationCacheForTests,
 } from "../src/lib/installation.js";
+import { resetApnsSenderForTests, setApnsSenderForTests } from "../src/lib/apns.js";
 import { resetStatsCacheForTests, statsCacheSizesForTests } from "../src/routes/stats.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { fakeBlobs, resetFakeAzure, seedBlobData } from "./support/fake-azure.js";
@@ -56,6 +57,7 @@ const setup = (): void => {
   resetSessionCryptoForTests();
   resetFakeDb();
   resetFakeAzure();
+  resetApnsSenderForTests();
   resetInstallationCacheForTests();
   resetStatsCacheForTests();
 };
@@ -304,6 +306,25 @@ describe("installations", () => {
       expect(store.boothEvents).toHaveLength(1);
     });
 
+    it("resets the badge after ending an installation", async () => {
+      seedMessage({ status: "pending" });
+      seedMobileDevice({
+        userId: "operator-1",
+        preferences: { messageReceived: false },
+      });
+      const badges: number[] = [];
+      setApnsSenderForTests({
+        send: async (_userId, notification) => {
+          if (notification.kind === "badge") badges.push(notification.badge);
+        },
+      });
+
+      expect((await endDefault(createApp())).status).toBe(200);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(badges.at(-1)).toBe(0);
+    });
+
     it("rejects ending an already-ended installation", async () => {
       const app = createApp();
       expect((await endDefault(app)).status).toBe(200);
@@ -340,6 +361,13 @@ describe("installations", () => {
     it("ends the active installation before starting the new one", async () => {
       seedCallSession({ id: "live-call" });
       const pending = seedMessage({ status: "pending" });
+      seedMobileDevice({ userId: "operator-1" });
+      const badges: number[] = [];
+      setApnsSenderForTests({
+        send: async (_userId, notification) => {
+          if (notification.kind === "badge") badges.push(notification.badge);
+        },
+      });
 
       const res = await createApp().request("/v1/installations", {
         method: "POST",
@@ -360,6 +388,8 @@ describe("installations", () => {
       expect([...store.installations.values()].filter((row) => row.endedAt === null)).toHaveLength(
         1,
       );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(badges.at(-1)).toBe(0);
     });
 
     it("records one rollover audit entry with both installation ids", async () => {

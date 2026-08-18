@@ -523,9 +523,22 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
     </main>
   </div>
   <footer
-    aria-label="Build information"
+    aria-label="Application information"
     class="build-footer"
   >
+    <a
+      aria-label="Download Telephone Booth Operator on the App Store"
+      href="https://apps.apple.com/us/app/telephone-booth-operator/id6775110084"
+      rel="noreferrer"
+      target="_blank"
+    >
+      App Store
+    </a>
+    <span
+      aria-hidden="true"
+    >
+      ·
+    </span>
     <span>
       Build date
     </span>

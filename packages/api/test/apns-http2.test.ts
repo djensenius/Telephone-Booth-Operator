@@ -1,21 +1,32 @@
-import { describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { generateKeyPairSync } from "node:crypto";
+
+vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.js")).fakeDb }));
 
 import {
   buildApnsPayload,
+  Http2ApnsSender,
   inspectApnsConfig,
   loadApnsConfigFromEnv,
   normalizePemKey,
   topicForPlatform,
 } from "../src/lib/apns-http2.js";
+import { resetFakeDb, seedMobileDevice } from "./support/fake-db.js";
+
+const { privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+const validAuthKey = privateKey.export({ format: "pem", type: "pkcs8" }).toString();
+
+beforeEach(() => {
+  resetFakeDb();
+});
 
 describe("buildApnsPayload", () => {
-  it("builds a standard alert envelope with badge, thread, and category", () => {
+  it("builds a standard alert envelope with thread and category", () => {
     const payload = buildApnsPayload({
+      kind: "alert",
       preferenceKey: "messageReceived",
       title: "New booth message",
       body: "A new recording is ready to moderate.",
-      badge: 3,
       threadId: "message:abc",
       category: "BOOTH_MESSAGE",
       data: { messageId: "abc" },
@@ -26,15 +37,15 @@ describe("buildApnsPayload", () => {
       aps: {
         alert: { title: "New booth message", body: "A new recording is ready to moderate." },
         sound: "default",
-        badge: 3,
         "thread-id": "message:abc",
         category: "BOOTH_MESSAGE",
       },
     });
   });
 
-  it("omits badge when not provided", () => {
+  it("keeps alert envelopes badge-free", () => {
     const payload = buildApnsPayload({
+      kind: "alert",
       preferenceKey: "callStarted",
       title: "t",
       body: "b",
@@ -44,14 +55,27 @@ describe("buildApnsPayload", () => {
 
   it("never lets custom data overwrite the reserved aps envelope", () => {
     const payload = buildApnsPayload({
+      kind: "alert",
       preferenceKey: "messageReceived",
       title: "t",
       body: "b",
-      badge: 1,
       data: { aps: { badge: 999 }, extra: "x" },
     });
-    expect((payload.aps as Record<string, unknown>).badge).toBe(1);
+    expect((payload.aps as Record<string, unknown>).badge).toBeUndefined();
     expect(payload.extra).toBe("x");
+  });
+
+  it("builds a badge-only envelope without an alert or sound", () => {
+    const payload = buildApnsPayload({
+      kind: "badge",
+      badge: 4,
+      data: { awaitingModeration: 4 },
+    });
+
+    expect(payload).toEqual({
+      awaitingModeration: 4,
+      aps: { badge: 4 },
+    });
   });
 });
 
@@ -82,15 +106,11 @@ describe("normalizePemKey", () => {
 });
 
 describe("loadApnsConfigFromEnv", () => {
-  const { privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
-  const validAuthKey = privateKey
-    .export({ format: "pem", type: "pkcs8" })
-    .toString()
-    .replace(/\n/g, "\\n");
+  const escapedAuthKey = validAuthKey.replace(/\n/g, "\\n");
   const base = {
     APNS_TEAM_ID: "TEAM123",
     APNS_KEY_ID: "KEY123",
-    APNS_AUTH_KEY: validAuthKey,
+    APNS_AUTH_KEY: escapedAuthKey,
     APNS_BUNDLE_ID: "com.example.app",
   } as NodeJS.ProcessEnv;
 
@@ -139,5 +159,90 @@ describe("loadApnsConfigFromEnv", () => {
       status: "configured",
       environment: "development",
     });
+  });
+});
+
+describe("Http2ApnsSender", () => {
+  it("waits for device attempts and propagates transient APNs failures", async () => {
+    seedMobileDevice({ userId: "operator-1", platform: "ios" });
+    class TransientFailureSender extends Http2ApnsSender {
+      protected override post(): Promise<{ status: number; reason: string }> {
+        return Promise.resolve({ status: 503, reason: "ServiceUnavailable" });
+      }
+    }
+    const sender = new TransientFailureSender({
+      teamId: "TEAM123",
+      keyId: "KEY123",
+      authKey: validAuthKey,
+      bundleId: "com.example.app",
+      environment: "development",
+    });
+
+    await expect(
+      sender.send("operator-1", {
+        kind: "badge",
+        badge: 2,
+      }),
+    ).rejects.toThrow("APNs delivery failed for 1 of 1 devices");
+  });
+
+  it("does not submit after the badge delivery fence is lost", async () => {
+    seedMobileDevice({ userId: "operator-1", platform: "ios" });
+    let postCalls = 0;
+    class FencedSender extends Http2ApnsSender {
+      protected override post(): Promise<{ status: number }> {
+        postCalls += 1;
+        return Promise.resolve({ status: 200 });
+      }
+    }
+    const sender = new FencedSender({
+      teamId: "TEAM123",
+      keyId: "KEY123",
+      authKey: validAuthKey,
+      bundleId: "com.example.app",
+      environment: "development",
+    });
+
+    await expect(
+      sender.send(
+        "operator-1",
+        {
+          kind: "badge",
+          badge: 2,
+        },
+        async () => null,
+      ),
+    ).rejects.toThrow("APNs delivery fence rejected a stale badge claim");
+    expect(postCalls).toBe(0);
+  });
+
+  it("does not submit without a full APNs request window remaining", async () => {
+    seedMobileDevice({ userId: "operator-1", platform: "ios" });
+    let postCalls = 0;
+    class ExpiringSender extends Http2ApnsSender {
+      protected override post(): Promise<{ status: number }> {
+        postCalls += 1;
+        return Promise.resolve({ status: 200 });
+      }
+    }
+    const sender = new ExpiringSender({
+      teamId: "TEAM123",
+      keyId: "KEY123",
+      authKey: validAuthKey,
+      bundleId: "com.example.app",
+      environment: "development",
+    });
+
+    await expect(
+      sender.send(
+        "operator-1",
+        {
+          kind: "badge",
+          badge: 2,
+        },
+        async () => new Date(Date.now() + 1_000),
+      ),
+    ).rejects.toThrow("APNs delivery fence rejected a stale badge claim");
+    expect(postCalls).toBe(0);
   });
 });

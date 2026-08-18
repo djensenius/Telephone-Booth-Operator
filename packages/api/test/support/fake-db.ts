@@ -176,6 +176,11 @@ export type FakePushNotificationState = {
   key: string;
   active: boolean;
   threshold: number;
+  badgeCount: number;
+  badgeVersion: number;
+  badgeDeliveredVersion: number;
+  badgeLeaseToken: string | null;
+  badgeLeaseExpiresAt: Date | null;
   updatedAt: Date;
 };
 
@@ -2429,35 +2434,65 @@ export const fakeDb = {
     },
   },
   pushNotificationState: {
+    findUnique: async ({ where }: { where: { key: string } }) =>
+      store.pushNotificationStates.get(where.key) ?? null,
     upsert: async ({
       where,
       create,
     }: {
       where: { key: string };
-      create: { key: string; active: boolean; threshold: number };
+      create: {
+        key: string;
+        active: boolean;
+        threshold: number;
+        badgeCount?: number;
+        badgeVersion?: number;
+        badgeDeliveredVersion?: number;
+      };
       update: Record<string, never>;
     }) => {
       const existing = store.pushNotificationStates.get(where.key);
       if (existing) return existing;
       const row: FakePushNotificationState = {
         ...create,
+        badgeCount: create.badgeCount ?? 0,
+        badgeVersion: create.badgeVersion ?? 0,
+        badgeDeliveredVersion: create.badgeDeliveredVersion ?? 0,
+        badgeLeaseToken: null,
+        badgeLeaseExpiresAt: null,
         updatedAt: new Date(),
       };
       store.pushNotificationStates.set(row.key, row);
       return row;
     },
-    update: async ({
+    update: async ({ where, data }: { where: { key: string }; data: Record<string, unknown> }) => {
+      const existing = store.pushNotificationStates.get(where.key);
+      if (!existing) throw new Error("push notification state not found");
+      const updated = {
+        ...applyUpdate(existing as unknown as Record<string, unknown>, data),
+        updatedAt: new Date(),
+      } as FakePushNotificationState;
+      store.pushNotificationStates.set(where.key, updated);
+      return updated;
+    },
+    updateMany: async ({
       where,
       data,
     }: {
-      where: { key: string };
-      data: { active: boolean; threshold: number };
+      where: Record<string, unknown>;
+      data: Record<string, unknown>;
     }) => {
-      const existing = store.pushNotificationStates.get(where.key);
-      if (!existing) throw new Error("push notification state not found");
-      const updated = { ...existing, ...data, updatedAt: new Date() };
-      store.pushNotificationStates.set(where.key, updated);
-      return updated;
+      let count = 0;
+      for (const [key, existing] of store.pushNotificationStates) {
+        if (!matchesWhere(existing as unknown as Record<string, unknown>, where)) continue;
+        const updated = {
+          ...applyUpdate(existing as unknown as Record<string, unknown>, data),
+          updatedAt: new Date(),
+        } as FakePushNotificationState;
+        store.pushNotificationStates.set(key, updated);
+        count += 1;
+      }
+      return { count };
     },
   },
   apiToken: {

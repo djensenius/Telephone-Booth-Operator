@@ -34,7 +34,6 @@ import {
   resolveInstallationScope,
   scopeWhere,
 } from "../lib/installation.js";
-import { countMessagesAwaitingModeration } from "../lib/moderation-badge.js";
 import { notifyMessageFlagged, observeModerationQueue } from "../lib/push-events.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 import {
@@ -376,16 +375,15 @@ messagesRouter.post(
     // In push/disabled transcription modes this is a no-op — the external app
     // decides when to transcribe and posts the result back.
     kickPipelineForMessage(id);
-    // Push fan-out: notify mobile devices that a new message has landed.
-    // The badge reflects the number of messages awaiting moderation (this
-    // one is now "pending", so it is already included in the count).
-    const badge = await countMessagesAwaitingModeration();
+    // Push fan-out: notify mobile devices that a new message has landed. Badge
+    // updates use the separate queue observer so visible alerts can never
+    // overwrite a newer count.
     void observeModerationQueue("message.complete");
     void fanOutNotification({
+      kind: "alert",
       preferenceKey: "messageReceived",
       title: "New booth message",
       body: "A new recording is ready to moderate.",
-      badge,
       threadId: `message:${id}`,
       category: "BOOTH_MESSAGE",
       data: { messageId: id },

@@ -1,0 +1,6 @@
+ALTER TABLE "PushNotificationState"
+ADD COLUMN "badgeCount" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN "badgeVersion" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN "badgeDeliveredVersion" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN "badgeLeaseToken" TEXT,
+ADD COLUMN "badgeLeaseExpiresAt" TIMESTAMP(3);
