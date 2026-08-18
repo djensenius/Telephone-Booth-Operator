@@ -60,7 +60,7 @@ const noopSender = new NoopApnsSender();
 let testSender: ApnsSender | null = null;
 let productionSender: ApnsSender | null = null;
 
-const apnsDeliveryConfigured = (): boolean =>
+export const isApnsDeliveryConfigured = (): boolean =>
   testSender !== null || loadApnsConfigFromEnv() !== null;
 
 export const setApnsSenderForTests = (sender: ApnsSender): void => {
@@ -141,7 +141,7 @@ const sendToOperatorUsers = async (
 /// invoked from request handlers that must not fail if APNs (or the
 /// mobile_devices table) is unavailable.
 export const fanOutNotification = async (notification: ApnsNotification): Promise<void> => {
-  if (!apnsDeliveryConfigured()) return;
+  if (!isApnsDeliveryConfigured()) return;
   const preferenceKey = notification.kind === "alert" ? notification.preferenceKey : undefined;
   try {
     const { userIds, results } = await sendToOperatorUsers(notification);
@@ -179,12 +179,7 @@ export const fanOutNotification = async (notification: ApnsNotification): Promis
 export const fanOutBadgeNotification = async (
   notification: ApnsBadgeNotification,
 ): Promise<void> => {
-  if (!apnsDeliveryConfigured()) {
-    if (process.env.NODE_ENV === "production") {
-      throw new Error("APNs badge delivery is unavailable because APNs is not configured");
-    }
-    return;
-  }
+  if (!isApnsDeliveryConfigured()) return;
 
   const { results } = await sendToOperatorUsers(notification);
   const failures = results.flatMap((result) =>

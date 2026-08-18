@@ -175,4 +175,85 @@ describe("durable push event coordination", () => {
     expect(state?.badgeDeliveredVersion).toBe(1);
     expect(state?.badgeLeaseToken).toBeNull();
   });
+
+  it("keeps delivery pending while APNs is disabled and sends when enabled", async () => {
+    seedMessage({ status: "pending" });
+    let enabled = false;
+    const send = vi.fn(async (_notification: ApnsNotification) => undefined);
+    const gatedCoordinator = createPushEventCoordinator({
+      database: fakeDb as never,
+      send,
+      badgeDeliveryEnabled: () => enabled,
+    });
+
+    await gatedCoordinator.observeModerationQueue("disabled");
+
+    let state = store.pushNotificationStates.get("moderation-queue-high");
+    expect(send).not.toHaveBeenCalled();
+    expect(state?.badgeDeliveredVersion).toBe(0);
+    expect(state?.badgeVersion).toBe(1);
+
+    enabled = true;
+    await gatedCoordinator.dispatchModerationBadges();
+
+    state = store.pushNotificationStates.get("moderation-queue-high");
+    expect(send).toHaveBeenCalledWith({
+      kind: "badge",
+      badge: 1,
+      data: { awaitingModeration: 1 },
+    });
+    expect(state?.badgeDeliveredVersion).toBe(1);
+  });
+
+  it("reconciles missed queue changes without versioning unchanged counts", async () => {
+    const message = seedMessage({ status: "pending" });
+    const sent: ApnsNotification[] = [];
+    const reconcilingCoordinator = createPushEventCoordinator({
+      database: fakeDb as never,
+      send: async (notification) => {
+        sent.push(notification);
+      },
+    });
+
+    await reconcilingCoordinator.reconcileModerationBadgeState();
+    let state = store.pushNotificationStates.get("moderation-queue-high");
+    expect(state?.badgeCount).toBe(1);
+    expect(state?.badgeVersion).toBe(1);
+
+    await reconcilingCoordinator.reconcileModerationBadgeState();
+    state = store.pushNotificationStates.get("moderation-queue-high");
+    expect(state?.badgeVersion).toBe(1);
+
+    store.messages.get(message.id)!.status = "approved";
+    await reconcilingCoordinator.reconcileModerationBadgeState();
+    await reconcilingCoordinator.dispatchModerationBadges();
+
+    state = store.pushNotificationStates.get("moderation-queue-high");
+    expect(state?.badgeCount).toBe(0);
+    expect(state?.badgeVersion).toBe(2);
+    expect(state?.badgeDeliveredVersion).toBe(2);
+    expect(sent).toEqual([{ kind: "badge", badge: 0, data: { awaitingModeration: 0 } }]);
+  });
+
+  it("initializes delivery for a pre-dispatch badge state", async () => {
+    store.pushNotificationStates.set("moderation-queue-high", {
+      key: "moderation-queue-high",
+      active: false,
+      threshold: 10,
+      badgeCount: 0,
+      badgeVersion: 0,
+      badgeDeliveredVersion: 0,
+      badgeLeaseToken: null,
+      badgeLeaseExpiresAt: null,
+      updatedAt: new Date(),
+    });
+    const migratedCoordinator = createPushEventCoordinator({
+      database: fakeDb as never,
+      send: async (_notification) => undefined,
+    });
+
+    await migratedCoordinator.reconcileModerationBadgeState();
+
+    expect(store.pushNotificationStates.get("moderation-queue-high")?.badgeVersion).toBe(1);
+  });
 });

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ApnsNotification } from "./apns.js";
-import { fanOutBadgeNotification, fanOutNotification } from "./apns.js";
+import { fanOutBadgeNotification, fanOutNotification, isApnsDeliveryConfigured } from "./apns.js";
 import { db } from "./db.js";
 import { log } from "./logger.js";
 import { AWAITING_MODERATION_STATUSES } from "./moderation-badge.js";
@@ -77,6 +77,7 @@ type PushEventCoordinatorOptions = {
   now?: () => Date;
   createLeaseToken?: () => string;
   badgeLeaseDurationMs?: number;
+  badgeDeliveryEnabled?: () => boolean;
 };
 
 type BadgeClaim = {
@@ -96,10 +97,12 @@ export const createPushEventCoordinator = ({
   now = () => new Date(),
   createLeaseToken = randomUUID,
   badgeLeaseDurationMs = BADGE_LEASE_DURATION_MS,
+  badgeDeliveryEnabled = () => true,
 }: PushEventCoordinatorOptions): {
   dispatchModerationBadges(): Promise<void>;
   notifyMessageFlagged(messageId: string, moderationId: string, flagged: boolean): Promise<void>;
   observeModerationQueue(operation: string): Promise<void>;
+  reconcileModerationBadgeState(): Promise<void>;
 } => {
   const claimModerationBadge = async (): Promise<BadgeClaim | null> => {
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -144,6 +147,8 @@ export const createPushEventCoordinator = ({
   };
 
   const dispatchModerationBadges = async (): Promise<void> => {
+    if (!badgeDeliveryEnabled()) return;
+
     for (let delivered = 0; delivered < BADGE_DISPATCH_BATCH_SIZE; delivered += 1) {
       const claim = await claimModerationBadge();
       if (!claim) return;
@@ -184,8 +189,49 @@ export const createPushEventCoordinator = ({
     }
   };
 
+  const reconcileModerationBadgeState = async (): Promise<void> => {
+    const threshold = moderationQueueHighThreshold();
+    await database.$transaction(async (tx) => {
+      await tx.$queryRaw`
+        SELECT pg_advisory_xact_lock(hashtext(${QUEUE_HIGH_STATE_KEY}))
+      `;
+      const count = await tx.message.count({
+        where: { status: { in: [...AWAITING_MODERATION_STATUSES] } },
+      });
+      const nextActive = count >= threshold;
+      const state = await tx.pushNotificationState.upsert({
+        where: { key: QUEUE_HIGH_STATE_KEY },
+        create: {
+          key: QUEUE_HIGH_STATE_KEY,
+          active: nextActive,
+          threshold,
+          badgeCount: count,
+          badgeVersion: 1,
+          badgeDeliveredVersion: 0,
+        },
+        update: {},
+      });
+      const data: Record<string, unknown> = {};
+      if (state.active !== nextActive || state.threshold !== threshold) {
+        data.active = nextActive;
+        data.threshold = threshold;
+      }
+      const badgeStateUninitialized = state.badgeVersion === 0 && state.badgeDeliveredVersion === 0;
+      if (state.badgeCount !== count || badgeStateUninitialized) {
+        data.badgeCount = count;
+        data.badgeVersion = { increment: 1 };
+      }
+      if (Object.keys(data).length === 0) return;
+      await tx.pushNotificationState.update({
+        where: { key: QUEUE_HIGH_STATE_KEY },
+        data,
+      });
+    });
+  };
+
   return {
     dispatchModerationBadges,
+    reconcileModerationBadgeState,
 
     async notifyMessageFlagged(messageId, moderationId, flagged) {
       if (!flagged) return;
@@ -283,6 +329,7 @@ export const createPushEventCoordinator = ({
 
 const coordinator = createPushEventCoordinator({
   database: db as unknown as PushEventDatabase,
+  badgeDeliveryEnabled: isApnsDeliveryConfigured,
   send: (notification) =>
     notification.kind === "badge"
       ? fanOutBadgeNotification(notification)
@@ -300,6 +347,9 @@ export const observeModerationQueue = (operation: string): Promise<void> =>
 
 export const dispatchModerationBadges = (): Promise<void> => coordinator.dispatchModerationBadges();
 
+export const reconcileModerationBadgeState = (): Promise<void> =>
+  coordinator.reconcileModerationBadgeState();
+
 export const startModerationBadgeDispatcher = (): { stop: () => void } => {
   let running = false;
   let stopped = false;
@@ -308,6 +358,7 @@ export const startModerationBadgeDispatcher = (): { stop: () => void } => {
     if (running || stopped) return;
     running = true;
     try {
+      await reconcileModerationBadgeState();
       await dispatchModerationBadges();
     } catch (error) {
       log.warn({ component: "apns", err: error }, "moderation badge dispatcher failed");
