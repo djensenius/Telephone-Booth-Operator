@@ -66,6 +66,17 @@ describe("questions routes", () => {
     expect(question).toMatchObject({ prompt: "What did you hear?", status: "draft" });
     expect(question.audio).toMatchObject({ sha256: "1".repeat(64), durationMs: 2500 });
 
+    const update = await app.request(`/v1/questions/${question.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ prompt: "What can you hear?" }),
+    });
+    expect(update.status, await update.clone().text()).toBe(200);
+    await expect(update.json()).resolves.toMatchObject({
+      id: question.id,
+      prompt: "What can you hear?",
+    });
+
     // Drafts are listed for management but not served to the phone.
     const list = await app.request("/v1/questions?limit=10", { headers: { cookie } });
     expect(list.status).toBe(200);

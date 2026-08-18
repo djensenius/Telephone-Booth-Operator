@@ -3,6 +3,7 @@ import {
   InstallationScopeSchema,
   QuestionCreateSchema,
   QuestionStatusSchema,
+  QuestionUpdateSchema,
 } from "@telephone-booth-operator/shared";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -143,6 +144,42 @@ const withOpenEra = async <T>(
   });
 
 const endedEraResponse = { error: "installation_ended" } as const;
+
+questionsRouter.patch(
+  "/:id",
+  requireAdmin(),
+  zValidator("param", idParamSchema),
+  zValidator("json", QuestionUpdateSchema),
+  async (c) => {
+    const { id } = c.req.valid("param");
+    const { prompt } = c.req.valid("json");
+    recordAudit(c, {
+      action: "question.update",
+      targetType: "question",
+      targetId: id,
+      metadata: { prompt },
+    });
+    const question = await db.question.findUnique({ where: { id } });
+    if (!question || question.status === "archived") return c.json({ error: "not_found" }, 404);
+
+    try {
+      const updated = await withOpenEra(question.installationId, (tx) =>
+        tx.question.update({
+          where: { id },
+          data: { prompt },
+          include: { audio: true },
+        }),
+      );
+      return c.json(serializeQuestion(updated));
+    } catch (error) {
+      if (error instanceof InstallationEndedError) return c.json(endedEraResponse, 409);
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        return c.json({ error: "question_conflict" }, 409);
+      }
+      throw error;
+    }
+  },
+);
 
 questionsRouter.post(
   "/:id/activate",

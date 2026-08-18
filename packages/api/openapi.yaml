@@ -207,6 +207,25 @@ paths:
   /v1/questions/{id}:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      summary: Update a question prompt.
+      tags: [questions]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuestionUpdate" }
+      responses:
+        "200":
+          description: updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Question" }
+        "404": { description: not found }
+        "409": { description: duplicate prompt or the question's installation has ended }
     delete:
       summary: Archive a question (soft-delete; stops the booth offering it).
       tags: [questions]
@@ -2457,6 +2476,11 @@ components:
           allOf:
             - $ref: "#/components/schemas/QuestionStatus"
           description: Defaults to draft when omitted.
+    QuestionUpdate:
+      type: object
+      required: [prompt]
+      properties:
+        prompt: { type: string, minLength: 1, maxLength: 280 }
     QuestionList:
       type: object
       required: [items, nextCursor]
