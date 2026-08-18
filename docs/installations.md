@@ -55,9 +55,11 @@ hand is still refused — that is a deliberate withdrawal. Late `call_ended`
 events are the mirror image: they are attributed to their session's era and can
 never rewrite a closed era's outcome or frozen summary.
 
-Starting one is settled the same way: naming an auto-created era claims it, so
-two admins starting at once produce one era and one `409` rather than silently
-overwriting each other's metadata.
+Starting one is also a rollover: `POST /v1/installations` first ends whichever
+era is active, then creates the requested era in the same transaction. This
+keeps a powered-on booth from blocking the operator by auto-opening an unnamed
+era between the manual "end" and "start" steps. If no era is active, the new one
+is simply created.
 
 Two admins ending the same era at once is settled inside the transaction: the
 first to claim it wins and the second gets `409`, so `retiredAt` and `endedAt`
@@ -166,10 +168,8 @@ the change when the cache lapses.
 GET    /v1/installations             → every era, newest first
 GET    /v1/installations/current     → the active era (404 if none)
 GET    /v1/installations/:id
-POST   /v1/installations             ← start a new era               (admin)
+POST   /v1/installations             ← end active era, start a new one (admin)
 PATCH  /v1/installations/:id         ← edit name/notes/location      (admin)
-                                       (also how you rename the era the
-                                        booth opened by itself)
 POST   /v1/installations/:id/end     ← close out the active era      (admin)
 GET    /v1/installations/:id/export  → scoped tar archive            (admin)
 DELETE /v1/installations/:id         ← irreversible hard purge       (admin)

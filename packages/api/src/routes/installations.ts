@@ -22,12 +22,10 @@ import { deleteBlob } from "../lib/azure-blob.js";
 import { wsBroadcaster } from "../lib/broadcaster.js";
 import { buildExportArchive } from "../lib/data-archive.js";
 import { db } from "../lib/db.js";
-import { Prisma } from "../generated/prisma/client.js";
+import { Prisma, type Installation } from "../generated/prisma/client.js";
 import {
   closeOutInstallation,
   findActiveInstallation,
-  installationHasActivity,
-  lockInstallationExclusively,
   invalidateActiveInstallationCache,
   nextInstallationName,
   serializeInstallation,
@@ -75,35 +73,19 @@ installationsRouter.get(
   },
 );
 
-// Start a new installation. The previous one must already be ended — the
-// partial unique index guarantees this, but we check first so the caller gets
-// a useful 409 rather than a constraint error.
-//
-// One wrinkle: a booth that is powered on keeps posting events, and a write
-// with no active installation lazily creates one (a booth must never fail to
-// record a call over admin bookkeeping). So between the operator ending an era
-// and naming the next one, the booth can quietly open an unnamed era. Rather
-// than making the operator fight that race, an active era with no activity in
-// it yet is *adopted*: named, described, and used as the new era.
+// Start a new installation. If one is active, close it out first in the same
+// transaction so booth heartbeats cannot leave the operator stuck between
+// "ended the old era" and "named the new one".
 installationsRouter.post(
   "/",
   requireAdmin(),
   zValidator("json", InstallationCreateSchema),
   async (c) => {
     const body = c.req.valid("json");
-    const active = await findActiveInstallation();
-    if (active && (await installationHasActivity(active.id))) {
-      return c.json({ error: "installation_already_active", installationId: active.id }, 409);
-    }
+    const user = c.get("user");
+    const endedAt = new Date();
 
-    // Questions carry forward from the last era that was actually closed, not
-    // from an empty one we are about to adopt.
-    const previous = await db.installation.findFirst({
-      where: { endedAt: { not: null } },
-      orderBy: [{ endedAt: "desc" }],
-    });
-
-    const created = await db
+    const result = await db
       .$transaction(async (tx) => {
         const data = {
           name: body.name.length > 0 ? body.name : await nextInstallationName(),
@@ -111,43 +93,39 @@ installationsRouter.post(
           location: body.location ?? null,
           defaultTranscriptionLanguage: body.defaultTranscriptionLanguage ?? null,
         };
-        // Creating is arbitrated by the single-active index, but adopting is
-        // just an update, so two admins naming the same auto-created era would
-        // both succeed and the loser's metadata would vanish. Claim it on the
-        // era as it stands: whoever writes first wins, the other is told an era
-        // is already open. `startedAt` is advanced past its current value so
-        // the predicate is falsified even when both admins submit the same
-        // name — matching on the name alone would let the second through.
-        let installation;
+
+        let previous = await tx.installation.findFirst({
+          where: { endedAt: { not: null } },
+          orderBy: [{ endedAt: "desc" }],
+        });
+        let ended: Installation | undefined;
+        const active = await tx.installation.findFirst({
+          where: { endedAt: null },
+          orderBy: [{ startedAt: "desc" }],
+        });
         if (active) {
-          // The emptiness check above ran outside this transaction, so a booth
-          // write could have committed since. Hold the era exclusively — booth
-          // writers take it shared — and ask again, or the adopted era could
-          // arrive already carrying calls it would then present as fresh.
-          if (!(await lockInstallationExclusively(tx, active.id))) return null;
-          if (await installationHasActivity(active.id, tx)) return null;
-          const claimedAt = new Date(Math.max(Date.now(), active.startedAt.getTime() + 1));
           const claimed = await tx.installation.updateMany({
-            where: {
-              id: active.id,
-              endedAt: null,
-              name: active.name,
-              startedAt: active.startedAt,
-            },
-            data: { ...data, startedAt: claimedAt },
+            where: { id: active.id, endedAt: null },
+            data: { endedAt },
           });
           if (claimed.count === 0) return null;
-          installation = await tx.installation.findUnique({ where: { id: active.id } });
-          if (!installation) return null;
-        } else {
-          installation = await tx.installation.create({ data });
+          const summary = await closeOutInstallation(tx, active.id, endedAt);
+          ended = await tx.installation.update({
+            where: { id: active.id },
+            data: { endedAt, endedById: user?.id ?? null, summary },
+          });
+          previous = ended;
         }
+
+        const installation = await tx.installation.create({ data });
 
         // Copied questions point at the *same* `File` row as the original, so
         // the audio is shared rather than re-uploaded and SHA-256 dedupe is
         // preserved. This is why `Question.audioId` is not unique, and why the
         // purge below refcounts `File` rows before deleting any blob.
         //
+        // If this request closed an active era, questions carry from that era;
+        // otherwise they carry from the last era that had already been closed.
         // Ending an installation archives the questions that were live at the
         // time, stamping `retiredAt` with the era's `endedAt`. That stamp is
         // what lets us tell "was live when the era ended" apart from "the
@@ -196,8 +174,8 @@ installationsRouter.post(
           }
         }
 
-        return installation;
-      })
+        return { created: installation, ended };
+      }, BULK_TRANSACTION)
       .catch((err: unknown) => {
         // Two admins starting an era at once: the loser trips the partial unique
         // index that keeps exactly one era open. That is the same situation the
@@ -206,7 +184,7 @@ installationsRouter.post(
         throw err;
       });
 
-    if (!created) {
+    if (!result) {
       const winner = await findActiveInstallation();
       return c.json(
         { error: "installation_already_active", ...(winner ? { installationId: winner.id } : {}) },
@@ -215,6 +193,19 @@ installationsRouter.post(
     }
 
     invalidateActiveInstallationCache();
+    invalidateStatsCaches();
+    if (result.ended) {
+      const endedDto = serializeInstallation(result.ended);
+      wsBroadcaster.broadcast({ kind: "installation", installation: endedDto });
+      log.info({ installationId: result.ended.id }, "installation ended before start");
+      recordAudit(c, {
+        action: "installation.end",
+        targetType: "installation",
+        targetId: result.ended.id,
+        metadata: { name: result.ended.name, reason: "new_installation_started" },
+      });
+    }
+    const created = result.created;
     const dto = serializeInstallation(created);
     wsBroadcaster.broadcast({ kind: "installation", installation: dto });
     log.info(

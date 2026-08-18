@@ -45,10 +45,9 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
-// The Start endpoint returns 409 when an active era already has activity and
-// therefore can't be adopted (renamed). The Start form can't fix that on its
-// own, but the operator now can — the active card exposes a rename control —
-// so surface a message that points them at it instead of the raw API code.
+// The Start endpoint can still return 409 if another rollover wins the same
+// race. Keep the operator-facing message actionable instead of surfacing the
+// raw API code.
 function startInstallationErrorMessage(error: unknown): string {
   if (error instanceof ApiError && error.status === 409) {
     const details = error.details;
@@ -58,7 +57,7 @@ function startInstallationErrorMessage(error: unknown): string {
         : undefined;
     const code = typeof rawCode === "string" ? rawCode : "";
     if (code === "installation_already_active") {
-      return "An installation is already running and the booth has recorded into it, so it can't be renamed automatically. Rename the active installation below instead, or end it before starting a new one.";
+      return "Another installation rollover completed first. Refresh the list, confirm the active installation, and try again if you still need a new era.";
     }
     return error.message || "That action conflicts with the current state.";
   }
@@ -401,10 +400,12 @@ function StartInstallationForm(): JSX.Element {
   const [location, setLocation] = useState("");
   const [defaultTranscriptionLanguage, setDefaultTranscriptionLanguage] = useState("");
   const [copyQuestions, setCopyQuestions] = useState(false);
+  const [startStatus, setStartStatus] = useState<string | null>(null);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
     if (name.trim().length === 0 || createInstallation.isPending) return;
+    setStartStatus(null);
     createInstallation.mutate(
       {
         name: name.trim(),
@@ -417,12 +418,15 @@ function StartInstallationForm(): JSX.Element {
         copyQuestions,
       },
       {
-        onSuccess: () => {
+        onSuccess: (installation) => {
           setName("");
           setNotes("");
           setLocation("");
           setDefaultTranscriptionLanguage("");
           setCopyQuestions(false);
+          setStartStatus(
+            `Started ${installation.name}. Any previously active installation was ended automatically.`,
+          );
         },
       },
     );
@@ -431,8 +435,7 @@ function StartInstallationForm(): JSX.Element {
     <section className="feature-card">
       <h2>Start a new installation</h2>
       <p>
-        Opening a new era ends nothing on its own — end the active installation first if one is
-        already running.
+        Opening a new era automatically ends the current installation first, then starts this one.
       </p>
       <form className="settings-list" onSubmit={handleSubmit}>
         <label>
@@ -490,6 +493,11 @@ function StartInstallationForm(): JSX.Element {
         {createInstallation.isError ? (
           <p className="settings-status settings-status--error" role="status">
             {startInstallationErrorMessage(createInstallation.error)}
+          </p>
+        ) : null}
+        {startStatus ? (
+          <p className="settings-status" role="status">
+            {startStatus}
           </p>
         ) : null}
         <div className="debug-button-row">

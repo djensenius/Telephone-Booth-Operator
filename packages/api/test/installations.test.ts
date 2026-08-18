@@ -337,15 +337,29 @@ describe("installations", () => {
   });
 
   describe("starting a new installation", () => {
-    it("refuses while one is still active and has recorded something", async () => {
+    it("ends the active installation before starting the new one", async () => {
       seedCallSession({ id: "live-call" });
+      const pending = seedMessage({ status: "pending" });
+
       const res = await createApp().request("/v1/installations", {
         method: "POST",
         headers: jsonHeaders(adminHeaders()),
         body: JSON.stringify({ name: "Second" }),
       });
-      expect(res.status).toBe(409);
-      expect(await res.json()).toMatchObject({ error: "installation_already_active" });
+
+      expect(res.status, await res.clone().text()).toBe(201);
+      const body = (await res.json()) as { id: string; name: string; isActive: boolean };
+      expect(body).toMatchObject({ name: "Second", isActive: true });
+      expect(body.id).not.toBe(DEFAULT_INSTALLATION_ID);
+
+      const previous = store.installations.get(DEFAULT_INSTALLATION_ID);
+      expect(previous?.endedAt).toBeInstanceOf(Date);
+      expect(previous?.summary).toMatchObject({ calls: 1, allRecordings: 1 });
+      expect(store.callSessions.get("live-call")?.outcome).toBe("installation_ended");
+      expect(store.messages.get(pending.id)?.status).toBe("rejected");
+      expect([...store.installations.values()].filter((row) => row.endedAt === null)).toHaveLength(
+        1,
+      );
     });
 
     it("starts a blank slate once the previous era ended", async () => {
@@ -367,7 +381,7 @@ describe("installations", () => {
       expect(carried).toHaveLength(0);
     });
 
-    it("adopts an era the booth auto-created before the operator named one", async () => {
+    it("closes an era the booth auto-created before the operator named one", async () => {
       const app = createApp();
       expect((await endDefault(app)).status).toBe(200);
 
@@ -378,7 +392,7 @@ describe("installations", () => {
       const opened = [...store.installations.values()].find((row) => row.endedAt === null);
       expect(opened).toBeDefined();
 
-      // Naming the era must not collide with the one the booth just opened.
+      // Starting a named era must not collide with the one the booth just opened.
       const res = await app.request("/v1/installations", {
         method: "POST",
         headers: jsonHeaders(adminHeaders()),
@@ -387,7 +401,8 @@ describe("installations", () => {
       expect(res.status, await res.clone().text()).toBe(201);
       const body = (await res.json()) as { id: string; name: string };
       expect(body.name).toBe("Nuit Blanche");
-      expect(body.id).toBe(opened?.id);
+      expect(body.id).not.toBe(opened?.id);
+      expect(store.installations.get(opened?.id ?? "")?.endedAt).toBeInstanceOf(Date);
       expect([...store.installations.values()].filter((r) => r.endedAt === null)).toHaveLength(1);
     });
 
@@ -791,11 +806,8 @@ describe("installations", () => {
     });
   });
 
-  describe("concurrent adoption", () => {
-    // Adoption is an update, not a create, so the single-active index does not
-    // arbitrate it. Without a conditional claim both requests would return 201
-    // and the loser's name would quietly replace the winner's.
-    it("lets only one of two concurrent starts adopt the same era", async () => {
+  describe("concurrent starts", () => {
+    it("keeps exactly one active era when two starts race", async () => {
       const app = createApp();
       expect((await endDefault(app)).status).toBe(200);
       await requireActiveInstallation();
@@ -816,65 +828,30 @@ describe("installations", () => {
     });
   });
 
-  describe("copy-forward collisions", () => {
-    // Prompts are unique per era, so a prompt the operator already wrote into
-    // the era being adopted must not be re-created underneath them.
-    it("skips a prompt the adopted era already holds", async () => {
+  describe("copy-forward during start rollover", () => {
+    it("copies questions from the active era it automatically ends", async () => {
       const app = createApp();
-      seedQuestion({ status: "active", prompt: "Shared prompt" });
-      expect((await endDefault(app)).status).toBe(200);
-
-      // The booth opens a fresh era, and the operator writes the same prompt
-      // into it before naming the installation.
-      const active = await requireActiveInstallation();
-      seedQuestion({
+      const activeQuestion = seedQuestion({ status: "active", prompt: "Shared prompt" });
+      const draftQuestion = seedQuestion({
         id: "cccccccc-0000-4000-8000-0000000000b1",
         status: "draft",
-        prompt: "Shared prompt",
-        installationId: active,
+        prompt: "Draft prompt",
       });
 
       const res = await app.request("/v1/installations", {
         method: "POST",
         headers: jsonHeaders(adminHeaders()),
-        body: JSON.stringify({ name: "Third run", copyQuestions: true }),
+        body: JSON.stringify({ name: "Second run", copyQuestions: true }),
       });
 
       expect(res.status, await res.clone().text()).toBe(201);
+      const created = (await res.json()) as { id: string };
       const prompts = [...store.questions.values()]
-        .filter((row) => row.installationId === active)
+        .filter((row) => row.installationId === created.id)
         .map((row) => row.prompt);
-      expect(prompts).toEqual(["Shared prompt"]);
-    });
-
-    // Audio is unique per era as well, so a recording the adopted era already
-    // uses under a different prompt would trip that constraint instead.
-    it("skips a question whose audio the adopted era already uses", async () => {
-      const app = createApp();
-      const shared = seedFile();
-      seedQuestion({ status: "active", prompt: "Original prompt", audioId: shared.id });
-      expect((await endDefault(app)).status).toBe(200);
-
-      const active = await requireActiveInstallation();
-      seedQuestion({
-        id: "cccccccc-0000-4000-8000-0000000000b2",
-        status: "draft",
-        prompt: "Rewritten prompt",
-        audioId: shared.id,
-        installationId: active,
-      });
-
-      const res = await app.request("/v1/installations", {
-        method: "POST",
-        headers: jsonHeaders(adminHeaders()),
-        body: JSON.stringify({ name: "Fourth run", copyQuestions: true }),
-      });
-
-      expect(res.status, await res.clone().text()).toBe(201);
-      const audioIds = [...store.questions.values()]
-        .filter((row) => row.installationId === active)
-        .map((row) => row.audioId);
-      expect(audioIds).toEqual([shared.id]);
+      expect(prompts).toEqual(["Shared prompt", "Draft prompt"]);
+      expect(store.questions.get(activeQuestion.id)?.status).toBe("archived");
+      expect(store.questions.get(draftQuestion.id)?.status).toBe("draft");
     });
   });
 
