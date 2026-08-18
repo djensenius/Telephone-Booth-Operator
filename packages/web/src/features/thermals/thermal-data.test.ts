@@ -7,6 +7,8 @@ import type {
 import { thermalRangeBounds } from "../../lib/api-client.js";
 import {
   buildFleetThermalSummaries,
+  formatWeatherCondition,
+  isCurrentWeatherFresh,
   selectPreferredTelemetrySource,
   shapeThermalCharts,
 } from "./thermal-data.js";
@@ -222,5 +224,18 @@ describe("thermal chart shaping", () => {
     const ids = shapeThermalCharts(history).zones.map((series) => series.id);
     expect(ids).toHaveLength(2);
     expect(new Set(ids).size).toBe(2);
+  });
+});
+
+describe("current weather presentation", () => {
+  it("formats bounded condition labels for people", () => {
+    expect(formatWeatherCondition("clear_sky")).toBe("Clear sky");
+    expect(formatWeatherCondition("thunderstorm_with_hail")).toBe("Thunderstorm with hail");
+  });
+
+  it("ages weather independently from five-minute hardware telemetry", () => {
+    const now = Date.parse("2026-08-18T15:00:00.000Z");
+    expect(isCurrentWeatherFresh("2026-08-18T14:31:00.000Z", now)).toBe(true);
+    expect(isCurrentWeatherFresh("2026-08-18T14:29:59.000Z", now)).toBe(false);
   });
 });

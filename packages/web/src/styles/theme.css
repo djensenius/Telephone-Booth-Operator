@@ -2261,6 +2261,7 @@ textarea:focus-visible,
 
 .thermals-screen__header,
 .thermal-selected-current > header,
+.thermal-weather > header,
 .thermal-fleet > header,
 .thermal-history__header {
   display: flex;
@@ -2272,6 +2273,7 @@ textarea:focus-visible,
 
 .thermals-screen__header p,
 .thermal-selected-current header p,
+.thermal-weather header p,
 .thermal-fleet header p,
 .thermal-history__header p {
   margin: 4px 0 0;
@@ -2351,6 +2353,7 @@ textarea:focus-visible,
 }
 
 .thermal-selected-current,
+.thermal-weather,
 .thermal-fleet,
 .thermal-history {
   display: grid;
@@ -2364,7 +2367,15 @@ textarea:focus-visible,
   border-radius: var(--radius-lg);
 }
 
+.thermal-weather {
+  padding: 18px;
+  background: color-mix(in srgb, var(--surface-panel-raised) 84%, transparent);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+
 .thermal-selected-current h2,
+.thermal-weather h2,
 .thermal-fleet h2,
 .thermal-history h2 {
   margin: 0;
@@ -2403,6 +2414,10 @@ textarea:focus-visible,
   gap: 12px;
 }
 
+.thermal-weather-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .thermal-current-tile {
   display: grid;
   gap: 5px;
@@ -2423,6 +2438,17 @@ textarea:focus-visible,
   font-family: var(--font-mono);
   font-size: clamp(1.35rem, 3vw, 2rem);
   font-variant-numeric: tabular-nums;
+}
+
+.thermal-current-tile--text strong {
+  font-family: var(--font-body);
+  font-size: clamp(1.1rem, 2.5vw, 1.65rem);
+  line-height: 1.15;
+}
+
+.thermal-weather__freshness {
+  color: var(--text-muted);
+  font-size: 0.75rem;
 }
 
 .thermal-fleet-grid {

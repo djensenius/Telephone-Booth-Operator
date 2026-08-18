@@ -1,10 +1,13 @@
 import {
+  CurrentWeatherConditionSchema,
+  CurrentWeatherSchema,
   ROUTER_TELEMETRY_METRICS,
   RouterTelemetryMetricNameSchema,
   TELEMETRY_HISTORY_MAX_POINTS_PER_SERIES,
   TELEMETRY_HISTORY_MAX_SERIES,
   TELEMETRY_HISTORY_MAX_TOTAL_SAMPLES,
   ThermalMetricNameSchema,
+  type CurrentWeather,
   type TelemetryHistorySeries,
   type ThermalHistorySeries,
 } from "@telephone-booth-operator/shared";
@@ -29,6 +32,10 @@ type ThermalQueryRangeInput = QueryRangeInput & {
   boothId: string;
 };
 
+type CurrentWeatherQueryInput = {
+  boothId: string;
+};
+
 type GrafanaQueryRangeInput = {
   query: string;
   from: string;
@@ -44,7 +51,23 @@ export type GrafanaThermalHistoryResult =
   | { ok: true; series: ThermalHistorySeries[] }
   | { ok: false; reason: "not_configured" | "upstream" };
 
+export type GrafanaCurrentWeatherResult =
+  | { ok: true; weather: CurrentWeather }
+  | { ok: false; reason: "not_configured" | "not_found" | "upstream" };
+
 export const GRAFANA_HISTORY_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
+
+const CURRENT_WEATHER_METRICS = [
+  "booth_outdoor_weather_temperature_celsius",
+  "booth_outdoor_weather_relative_humidity_percent",
+  "booth_outdoor_weather_cloud_cover_percent",
+  "booth_outdoor_weather_condition_info",
+  "booth_outdoor_weather_observation_timestamp_seconds",
+  "booth_outdoor_weather_last_success_timestamp_seconds",
+] as const;
+
+const CurrentWeatherMetricNameSchema = z.enum(CURRENT_WEATHER_METRICS);
+type CurrentWeatherMetricName = z.infer<typeof CurrentWeatherMetricNameSchema>;
 
 const prometheusSampleSchema = z.tuple([
   z.union([z.number(), z.string()]),
@@ -63,6 +86,21 @@ const prometheusResponseSchema = z.object({
         }),
       )
       .max(TELEMETRY_HISTORY_MAX_SERIES),
+  }),
+});
+
+const prometheusInstantResponseSchema = z.object({
+  status: z.literal("success"),
+  data: z.object({
+    resultType: z.literal("vector"),
+    result: z
+      .array(
+        z.object({
+          metric: z.record(z.string(), z.string()),
+          value: prometheusSampleSchema,
+        }),
+      )
+      .max(CURRENT_WEATHER_METRICS.length + 20),
   }),
 });
 
@@ -119,6 +157,13 @@ export const buildThermalHistoryQuery = (
   ].join(" or ");
 };
 
+export const buildCurrentWeatherQuery = (boothId: string): string => {
+  const metricPattern = CURRENT_WEATHER_METRICS.join("|");
+  return `{__name__=~"^(${metricPattern})$",booth_id="${escapePrometheusLabelValue(
+    boothId,
+  )}",source="open_meteo"}`;
+};
+
 const queryRangeUrl = (config: GrafanaPrometheusConfig, input: GrafanaQueryRangeInput): URL => {
   const url = new URL(config.url);
   const basePath = url.pathname.replace(/\/+$/, "");
@@ -131,6 +176,18 @@ const queryRangeUrl = (config: GrafanaPrometheusConfig, input: GrafanaQueryRange
   url.searchParams.set("start", input.from);
   url.searchParams.set("end", input.to);
   url.searchParams.set("step", String(input.stepSeconds));
+  return url;
+};
+
+const instantQueryUrl = (config: GrafanaPrometheusConfig, query: string): URL => {
+  const url = new URL(config.url);
+  const basePath = url.pathname.replace(/\/+$/, "");
+  url.pathname = `${basePath}/api/datasources/proxy/uid/${encodeURIComponent(
+    config.datasourceUid,
+  )}/api/v1/query`;
+  url.search = "";
+  url.hash = "";
+  url.searchParams.set("query", query);
   return url;
 };
 
@@ -190,6 +247,53 @@ const readBoundedJson = async (response: Response): Promise<BoundedJsonResult> =
   }
 };
 
+const fetchGrafanaPayload = async (
+  config: GrafanaPrometheusConfig,
+  url: URL,
+): Promise<{ ok: true; payload: unknown } | { ok: false; reason: "upstream" }> => {
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${config.serviceAccountToken}`,
+      },
+      redirect: "error",
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (error) {
+    log.error({
+      event: "telemetry.grafana_request_failed",
+      error: error instanceof Error ? error.name : "unknown",
+    });
+    return { ok: false, reason: "upstream" };
+  }
+
+  if (!response.ok) {
+    if (response.body) await response.body.cancel().catch(() => undefined);
+    log.error({
+      event: "telemetry.grafana_bad_status",
+      status: response.status,
+      datasourceUid: config.datasourceUid,
+    });
+    return { ok: false, reason: "upstream" };
+  }
+
+  const boundedJson = await readBoundedJson(response);
+  if (!boundedJson.ok) {
+    log.error({
+      event:
+        boundedJson.reason === "too_large"
+          ? "telemetry.grafana_response_too_large"
+          : "telemetry.grafana_response_unreadable",
+      limitBytes: GRAFANA_HISTORY_MAX_RESPONSE_BYTES,
+      error: boundedJson.error,
+    });
+    return { ok: false, reason: "upstream" };
+  }
+  return boundedJson;
+};
+
 type NormalizedHistorySeries<Metric extends string> = {
   metric: Metric;
   labels: Record<string, string>;
@@ -238,48 +342,10 @@ const queryGrafanaHistory = async <Metric extends string>(
   const config = resolveGrafanaConfig();
   if (!config) return { ok: false, reason: "not_configured" };
 
-  let response: Response;
-  try {
-    response = await fetch(queryRangeUrl(config, input), {
-      headers: {
-        accept: "application/json",
-        authorization: `Bearer ${config.serviceAccountToken}`,
-      },
-      redirect: "error",
-      signal: AbortSignal.timeout(10_000),
-    });
-  } catch (error) {
-    log.error({
-      event: "telemetry.grafana_request_failed",
-      error: error instanceof Error ? error.name : "unknown",
-    });
-    return { ok: false, reason: "upstream" };
-  }
+  const payload = await fetchGrafanaPayload(config, queryRangeUrl(config, input));
+  if (!payload.ok) return payload;
 
-  if (!response.ok) {
-    if (response.body) await response.body.cancel().catch(() => undefined);
-    log.error({
-      event: "telemetry.grafana_bad_status",
-      status: response.status,
-      datasourceUid: config.datasourceUid,
-    });
-    return { ok: false, reason: "upstream" };
-  }
-
-  const boundedJson = await readBoundedJson(response);
-  if (!boundedJson.ok) {
-    log.error({
-      event:
-        boundedJson.reason === "too_large"
-          ? "telemetry.grafana_response_too_large"
-          : "telemetry.grafana_response_unreadable",
-      limitBytes: GRAFANA_HISTORY_MAX_RESPONSE_BYTES,
-      error: boundedJson.error,
-    });
-    return { ok: false, reason: "upstream" };
-  }
-
-  const parsed = prometheusResponseSchema.safeParse(boundedJson.payload);
+  const parsed = prometheusResponseSchema.safeParse(payload.payload);
   if (!parsed.success) {
     log.error({
       event: "telemetry.grafana_invalid_response",
@@ -294,6 +360,86 @@ const queryGrafanaHistory = async <Metric extends string>(
     return { ok: false, reason: "upstream" };
   }
   return { ok: true, series };
+};
+
+const normalizeCurrentWeather = (
+  response: z.infer<typeof prometheusInstantResponseSchema>,
+  boothId: string,
+): GrafanaCurrentWeatherResult => {
+  if (response.data.result.length === 0) return { ok: false, reason: "not_found" };
+
+  const scalarValues = new Map<CurrentWeatherMetricName, number>();
+  let condition: z.infer<typeof CurrentWeatherConditionSchema> | null = null;
+  for (const result of response.data.result) {
+    const metricResult = CurrentWeatherMetricNameSchema.safeParse(result.metric.__name__);
+    if (
+      !metricResult.success ||
+      result.metric.booth_id !== boothId ||
+      result.metric.source !== "open_meteo"
+    ) {
+      return { ok: false, reason: "upstream" };
+    }
+
+    const sampleTimestamp = Number(result.value[0]);
+    const value = Number(result.value[1]);
+    if (!Number.isFinite(sampleTimestamp) || sampleTimestamp < 0 || !Number.isFinite(value)) {
+      return { ok: false, reason: "upstream" };
+    }
+
+    if (metricResult.data === "booth_outdoor_weather_condition_info") {
+      if (value !== 0 && value !== 1) return { ok: false, reason: "upstream" };
+      if (value === 1) {
+        const parsedCondition = CurrentWeatherConditionSchema.safeParse(result.metric.condition);
+        if (!parsedCondition.success || condition !== null) {
+          return { ok: false, reason: "upstream" };
+        }
+        condition = parsedCondition.data;
+      }
+    } else {
+      if (scalarValues.has(metricResult.data)) return { ok: false, reason: "upstream" };
+      scalarValues.set(metricResult.data, value);
+    }
+  }
+
+  const temperatureCelsius = scalarValues.get("booth_outdoor_weather_temperature_celsius");
+  const relativeHumidityPercent = scalarValues.get(
+    "booth_outdoor_weather_relative_humidity_percent",
+  );
+  const cloudCoverPercent = scalarValues.get("booth_outdoor_weather_cloud_cover_percent");
+  const observationTimestamp = scalarValues.get(
+    "booth_outdoor_weather_observation_timestamp_seconds",
+  );
+  const fetchTimestamp = scalarValues.get("booth_outdoor_weather_last_success_timestamp_seconds");
+  if (
+    temperatureCelsius === undefined ||
+    relativeHumidityPercent === undefined ||
+    cloudCoverPercent === undefined ||
+    observationTimestamp === undefined ||
+    fetchTimestamp === undefined ||
+    observationTimestamp <= 0 ||
+    fetchTimestamp <= 0 ||
+    condition === null
+  ) {
+    return { ok: false, reason: "upstream" };
+  }
+
+  const observedAt = new Date(observationTimestamp * 1000);
+  const fetchedAt = new Date(fetchTimestamp * 1000);
+  if (!Number.isFinite(observedAt.getTime()) || !Number.isFinite(fetchedAt.getTime())) {
+    return { ok: false, reason: "upstream" };
+  }
+
+  const weather = CurrentWeatherSchema.safeParse({
+    boothId,
+    source: "open_meteo",
+    temperatureCelsius,
+    relativeHumidityPercent,
+    cloudCoverPercent,
+    condition,
+    observedAt: observedAt.toISOString(),
+    fetchedAt: fetchedAt.toISOString(),
+  });
+  return weather.success ? { ok: true, weather: weather.data } : { ok: false, reason: "upstream" };
 };
 
 export const queryRouterTelemetryHistory = (
@@ -321,3 +467,31 @@ export const queryThermalHistory = (
     },
     ThermalMetricNameSchema,
   );
+
+export const queryCurrentWeather = async (
+  input: CurrentWeatherQueryInput,
+): Promise<GrafanaCurrentWeatherResult> => {
+  const config = resolveGrafanaConfig();
+  if (!config) return { ok: false, reason: "not_configured" };
+
+  const payload = await fetchGrafanaPayload(
+    config,
+    instantQueryUrl(config, buildCurrentWeatherQuery(input.boothId)),
+  );
+  if (!payload.ok) return payload;
+
+  const parsed = prometheusInstantResponseSchema.safeParse(payload.payload);
+  if (!parsed.success) {
+    log.error({
+      event: "telemetry.grafana_invalid_weather_response",
+      issueCount: parsed.error.issues.length,
+    });
+    return { ok: false, reason: "upstream" };
+  }
+
+  const weather = normalizeCurrentWeather(parsed.data, input.boothId);
+  if (!weather.ok && weather.reason === "upstream") {
+    log.error({ event: "telemetry.grafana_invalid_weather_series" });
+  }
+  return weather;
+};

@@ -12,6 +12,7 @@ import {
   CallSessionDetailSchema,
   CallSessionListSchema,
   CreateApiTokenRequestSchema,
+  CurrentWeatherSchema,
   InstallationCreateSchema,
   InstallationEndSchema,
   InstallationPurgeResultSchema,
@@ -59,6 +60,7 @@ import type {
   CallSessionDetail,
   CallSessionList,
   CreateApiTokenRequest,
+  CurrentWeather,
   Installation,
   InstallationCreate,
   InstallationEnd,
@@ -604,6 +606,10 @@ export const system = {
       })}`,
       { schema: TelemetrySourceListSchema },
     ),
+  currentWeather: (boothId: string) =>
+    apiFetch<CurrentWeather>(`/v1/system/weather/current${query({ boothId })}`, {
+      schema: CurrentWeatherSchema,
+    }),
   thermalHistory: (params: ThermalHistoryParams) =>
     apiFetch<ThermalHistory>(
       `/v1/system/thermals/history${query({
@@ -780,6 +786,7 @@ export const apiQueryKeys = {
   systemAll: ["system", "current", "all"] as const,
   systemComponents: (boothId?: string, componentId?: string) =>
     ["system", "components", boothId ?? null, componentId ?? null] as const,
+  currentWeather: (boothId: string) => ["system", "weather", "current", boothId] as const,
   thermalHistory: (boothId: string, componentId: string, range: ThermalRange) =>
     ["system", "thermals", "history", boothId, componentId, range] as const,
   statsOverview: (selection: StatsRangeSelection, scope?: InstallationScope) =>
@@ -868,6 +875,15 @@ export function useComponentTelemetryCurrent(params: ComponentTelemetryCurrentPa
     queryKey: apiQueryKeys.systemComponents(params.boothId, params.componentId),
     queryFn: () => system.componentsCurrent(params),
     refetchInterval: 5_000,
+  });
+}
+
+export function useCurrentWeather(boothId: string | undefined) {
+  return useQuery({
+    queryKey: apiQueryKeys.currentWeather(boothId ?? ""),
+    queryFn: () => system.currentWeather(boothId ?? ""),
+    enabled: boothId !== undefined,
+    refetchInterval: 60_000,
   });
 }
 

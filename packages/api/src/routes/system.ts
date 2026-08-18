@@ -7,6 +7,8 @@ import { zValidator } from "@hono/zod-validator";
 import {
   BoothSystemSnapshotSchema,
   BOOTH_CLIENT_VERSION_MAX,
+  CurrentWeatherQuerySchema,
+  CurrentWeatherSchema,
   ThermalHistoryQuerySchema,
   ThermalHistorySchema,
 } from "@telephone-booth-operator/shared";
@@ -14,7 +16,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { wsBroadcaster } from "../lib/broadcaster.js";
 import { db } from "../lib/db.js";
-import { queryThermalHistory } from "../lib/grafana-prometheus.js";
+import { queryCurrentWeather, queryThermalHistory } from "../lib/grafana-prometheus.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 import { requireOperatorOrApiToken, type AuthVariables } from "../lib/session.js";
 import type { Prisma } from "../generated/prisma/client.js";
@@ -102,6 +104,21 @@ systemRouter.get(
     });
   },
 );
+
+systemRouter.get("/weather/current", zValidator("query", CurrentWeatherQuerySchema), async (c) => {
+  const { boothId } = c.req.valid("query");
+  const current = await queryCurrentWeather({ boothId });
+  if (!current.ok) {
+    if (current.reason === "not_configured") {
+      return c.json({ error: "weather_not_configured" }, 503);
+    }
+    if (current.reason === "not_found") {
+      return c.json({ error: "weather_not_found" }, 404);
+    }
+    return c.json({ error: "weather_upstream" }, 502);
+  }
+  return c.json(CurrentWeatherSchema.parse(current.weather));
+});
 
 systemRouter.get("/thermals/history", zValidator("query", ThermalHistoryQuerySchema), async (c) => {
   const { boothId, componentId, from, to, stepSeconds } = c.req.valid("query");
