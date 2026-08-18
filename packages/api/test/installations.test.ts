@@ -362,6 +362,30 @@ describe("installations", () => {
       );
     });
 
+    it("records one rollover audit entry with both installation ids", async () => {
+      const res = await createApp().request("/v1/installations", {
+        method: "POST",
+        headers: jsonHeaders(adminHeaders()),
+        body: JSON.stringify({ name: "Second" }),
+      });
+
+      expect(res.status, await res.clone().text()).toBe(201);
+      const created = (await res.json()) as { id: string };
+      expect(store.auditLogs).toHaveLength(1);
+      expect(store.auditLogs[0]).toMatchObject({
+        action: "installation.rollover",
+        targetType: "installation",
+        targetId: created.id,
+        metadata: {
+          startedInstallationId: created.id,
+          startedInstallationName: "Second",
+          endedInstallationId: DEFAULT_INSTALLATION_ID,
+          endedInstallationName: "Installation 1",
+          copyQuestions: false,
+        },
+      });
+    });
+
     it("starts a blank slate once the previous era ended", async () => {
       seedQuestion({ status: "active", prompt: "Old prompt" });
       const app = createApp();

@@ -71,8 +71,9 @@ one, and the Installations screen offers it per era.
 
 ## Starting a new one
 
-`POST /v1/installations` opens a fresh era. It returns `409` if one is still
-active — end the current one first.
+`POST /v1/installations` opens a fresh era. If one is still active, the request
+ends it and starts the new era in the same transaction. A `409` means another
+admin's concurrent rollover completed first.
 
 `copyQuestions: true` carries the previous era's questions forward. A copy
 points at the **same `File` row** as the original, so no audio is re-uploaded

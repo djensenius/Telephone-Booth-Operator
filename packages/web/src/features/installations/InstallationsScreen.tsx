@@ -393,19 +393,26 @@ function EditActiveInstallationForm({
   );
 }
 
-function StartInstallationForm(): JSX.Element {
+type StartInstallationFormProps = {
+  readonly startStatus: string | null;
+  readonly onStartStatusChange: (status: string | null) => void;
+};
+
+function StartInstallationForm({
+  startStatus,
+  onStartStatusChange,
+}: StartInstallationFormProps): JSX.Element {
   const createInstallation = useCreateInstallation();
   const [name, setName] = useState("");
   const [notes, setNotes] = useState("");
   const [location, setLocation] = useState("");
   const [defaultTranscriptionLanguage, setDefaultTranscriptionLanguage] = useState("");
   const [copyQuestions, setCopyQuestions] = useState(false);
-  const [startStatus, setStartStatus] = useState<string | null>(null);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
     if (name.trim().length === 0 || createInstallation.isPending) return;
-    setStartStatus(null);
+    onStartStatusChange(null);
     createInstallation.mutate(
       {
         name: name.trim(),
@@ -424,7 +431,7 @@ function StartInstallationForm(): JSX.Element {
           setLocation("");
           setDefaultTranscriptionLanguage("");
           setCopyQuestions(false);
-          setStartStatus(
+          onStartStatusChange(
             `Started ${installation.name}. Any previously active installation was ended automatically.`,
           );
         },
@@ -595,6 +602,7 @@ function InstallationCard({ installation }: { readonly installation: Installatio
 
 export function InstallationsScreen(): JSX.Element {
   const listQuery = useInstallationsList();
+  const [startStatus, setStartStatus] = useState<string | null>(null);
   const ordered = useMemo(() => {
     const items = listQuery.data?.items ?? [];
     return [...items].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
@@ -610,7 +618,9 @@ export function InstallationsScreen(): JSX.Element {
         ending one and the booth&rsquo;s next call, which starts the next. Ending an era freezes its
         counters and archives its questions without deleting anything.
       </p>
-      {hasActive ? null : <StartInstallationForm />}
+      {hasActive ? null : (
+        <StartInstallationForm startStatus={startStatus} onStartStatusChange={setStartStatus} />
+      )}
       {listQuery.isError ? (
         <FeatureError
           message={
@@ -631,7 +641,9 @@ export function InstallationsScreen(): JSX.Element {
           <InstallationCard key={installation.id} installation={installation} />
         ))}
       </div>
-      {hasActive ? <StartInstallationForm /> : null}
+      {hasActive ? (
+        <StartInstallationForm startStatus={startStatus} onStartStatusChange={setStartStatus} />
+      ) : null}
     </GlassPanel>
   );
 }

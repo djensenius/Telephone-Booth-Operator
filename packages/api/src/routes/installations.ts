@@ -196,12 +196,6 @@ installationsRouter.post(
       const endedDto = serializeInstallation(result.ended);
       wsBroadcaster.broadcast({ kind: "installation", installation: endedDto });
       log.info({ installationId: result.ended.id }, "installation ended before start");
-      recordAudit(c, {
-        action: "installation.end",
-        targetType: "installation",
-        targetId: result.ended.id,
-        metadata: { name: result.ended.name, reason: "new_installation_started" },
-      });
     }
     const created = result.created;
     const dto = serializeInstallation(created);
@@ -211,10 +205,18 @@ installationsRouter.post(
       "installation started",
     );
     recordAudit(c, {
-      action: "installation.start",
+      action: result.ended ? "installation.rollover" : "installation.start",
       targetType: "installation",
       targetId: created.id,
-      metadata: { name: created.name, copyQuestions: body.copyQuestions === true },
+      metadata: result.ended
+        ? {
+            startedInstallationId: created.id,
+            startedInstallationName: created.name,
+            endedInstallationId: result.ended.id,
+            endedInstallationName: result.ended.name,
+            copyQuestions: body.copyQuestions === true,
+          }
+        : { name: created.name, copyQuestions: body.copyQuestions === true },
     });
     return c.json(dto, 201);
   },
