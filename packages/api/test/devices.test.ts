@@ -14,7 +14,7 @@ type DeviceRow = {
   revokedAt: Date | null;
 };
 
-const { fakeDb, store } = vi.hoisted(() => {
+const { fakeDb, pushEvents, store } = vi.hoisted(() => {
   const users = new Map<string, Record<string, unknown>>();
   const sessions = new Map<string, Record<string, unknown>>();
   const devices = new Map<string, DeviceRow>();
@@ -39,6 +39,12 @@ const { fakeDb, store } = vi.hoisted(() => {
 
   return {
     store: { users, sessions, devices },
+    pushEvents: {
+      notifyMessageFlagged: vi.fn(async () => undefined),
+      observeModerationQueue: vi.fn(async () => undefined),
+      queueModerationBadgeRefresh: vi.fn(async () => undefined),
+      startModerationBadgeDispatcher: vi.fn(() => ({ stop: vi.fn() })),
+    },
     fakeDb: {
       // Audit rows are written by middleware on every write; these suites do
       // not assert on them, they just need the delegate to exist.
@@ -117,6 +123,7 @@ const { fakeDb, store } = vi.hoisted(() => {
 });
 
 vi.mock("../src/lib/db.js", () => ({ db: fakeDb }));
+vi.mock("../src/lib/push-events.js", () => pushEvents);
 
 const sessionSecret = "test-session-secret";
 const cookieForSession = (sessionId: string): string => {
@@ -144,6 +151,7 @@ describe("mobile device registry", () => {
     store.users.clear();
     store.sessions.clear();
     store.devices.clear();
+    vi.clearAllMocks();
   });
 
   it("registers, lists, updates, and revokes a device", async () => {
@@ -169,6 +177,7 @@ describe("mobile device registry", () => {
     expect(created.platform).toBe("ios");
     expect(created.preferences.messageReceived).toBe(false);
     expect(created.preferences.callStarted).toBe(true);
+    expect(pushEvents.queueModerationBadgeRefresh).toHaveBeenCalledTimes(1);
 
     const list = await app.request("/v1/devices", { headers: { cookie } });
     expect(list.status).toBe(200);
@@ -229,6 +238,7 @@ describe("mobile device registry", () => {
     expect(reregistered.deviceName).toBe("Borrowed");
     expect(store.devices.get(created.id)?.userId).toBe("user-b");
     expect(store.devices.get(created.id)?.revokedAt).toBeNull();
+    expect(pushEvents.queueModerationBadgeRefresh).toHaveBeenCalledTimes(2);
   });
 
   it("isolates devices between users", async () => {

@@ -61,10 +61,10 @@ exists rather than rejecting the write. A missing admin record is not a good
 reason to drop somebody's recording.
 
 The cost is a race: a booth that is powered on will open an unnamed era within
-seconds of the operator ending one, so naming the next era would always collide.
-Starting an installation therefore adopts an active era with no activity in it
-instead of returning `409`. Only an era the booth has actually recorded into is
-treated as a genuine conflict.
+seconds of the operator ending one, so naming the next era could collide with
+status or event writes. Starting an installation therefore closes whichever era
+is active and opens the requested one in the same transaction instead of asking
+the operator to win that timing window.
 
 ### Accepted: two write paths stay unserialised
 

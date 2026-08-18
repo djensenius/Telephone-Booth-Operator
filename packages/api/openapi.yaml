@@ -32,7 +32,9 @@ tags:
   - name: monitor
   - name: installations
   - name: worker
+  - name: message-processing
   - name: audit
+  - name: system
 paths:
   /healthz:
     get:
@@ -47,15 +49,28 @@ paths:
 
   /v1/status:
     get:
-      summary: Current booth status as last reported by the phone client.
+      summary: Current booth status in an installation scope.
       tags: [status]
       security:
         - operatorSession: []
         - operatorBearer: []
         - apiToken: []
+      parameters:
+        - name: installationId
+          in: query
+          description: |
+            Installation scope. Omit for the currently active installation
+            (the default), pass a uuid for a historical one, or `all` to span
+            every installation.
+          schema:
+            oneOf:
+              - { type: string, format: uuid }
+              - { type: string, enum: [all] }
       responses:
         "200":
-          description: ok
+          description: |
+            Latest persisted status in the selected scope, or an id-less
+            synthetic status with `isSynthetic: true` when none exists.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/BoothStatus" }
@@ -80,6 +95,16 @@ paths:
         - operatorSession: []
         - operatorBearer: []
       parameters:
+        - name: installationId
+          in: query
+          description: |
+            Installation scope. Omit for the currently active installation
+            (the default), pass a uuid for a historical one, or `all` to span
+            every installation.
+          schema:
+            oneOf:
+              - { type: string, format: uuid }
+              - { type: string, enum: [all] }
         - name: since
           in: query
           schema: { type: string, format: date-time }
@@ -273,9 +298,24 @@ paths:
         "404": { description: audio file not found }
         "409": { description: audio already attached }
 
+  /v1/instructions/random:
+    get:
+      summary: A random active instruction clip for the phone client to play.
+      tags: [instructions]
+      security:
+        - apiToken: []
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Instruction" }
+        "404": { description: no instructions available }
+
   /v1/instructions/current:
     get:
-      summary: The most recent active instruction clip for the phone client to play.
+      summary: Compatibility alias for a random active instruction clip.
+      deprecated: true
       tags: [instructions]
       security:
         - apiToken: []
@@ -290,6 +330,24 @@ paths:
   /v1/instructions/{id}:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      summary: Update an instruction clip's description.
+      tags: [instructions]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InstructionUpdate" }
+      responses:
+        "200":
+          description: updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Instruction" }
+        "404": { description: not found }
     delete:
       summary: Delete an instruction clip.
       tags: [instructions]
@@ -521,11 +579,13 @@ paths:
         finalized, otherwise a new succeeded row is recorded (a redelivery of
         the latest succeeded transcript — same `text`, `language`, `model` and
         submitter — is a no-op, while a correction records a new row). The row is
-        attributed to the submitting operator (`requestedById`). Like all
-        pushed transcripts the text is still translated and moderated
-        server-side before it can be acted on. `text` may be empty for a silent
-        recording. The resulting `Transcription` row is returned and broadcast
-        on `/v1/ws/status` as a `{kind:"message"}` envelope.
+        attributed to the submitting operator (`requestedById`) and stamped
+        with provider `on_device`. By default the server still translates and
+        moderates the text; clients submitting their own complete local result
+        set `processDownstream: false` to prevent any downstream provider
+        call. `text` may be empty for a silent recording. The resulting
+        `Transcription` row is returned and broadcast on `/v1/ws/status` as a
+        `{kind:"message"}` envelope.
       tags: [transcriptions]
       security:
         - operatorSession: []
@@ -539,8 +599,23 @@ paths:
               required: [text]
               properties:
                 text: { type: string, maxLength: 20000 }
+                expectedLatestTranscriptionId:
+                  type: [string, "null"]
+                  format: uuid
+                  description: >-
+                    Latest transcription observed by the client. When present,
+                    the write is rejected if that snapshot has changed.
+                expectedLatestTranscriptionSha256:
+                  type: [string, "null"]
+                  pattern: "^[0-9a-fA-F]{64}$"
+                  description: >-
+                    SHA-256 of the observed latest transcription status, a
+                    newline, and its ECMAScript-trimmed text. Null represents
+                    no latest transcription. When present, the write is
+                    rejected if the row changed even when its ID is unchanged.
                 language: { type: [string, "null"], minLength: 1, maxLength: 64 }
                 model: { type: [string, "null"], minLength: 1, maxLength: 128 }
+                processDownstream: { type: boolean, default: true }
       responses:
         "202":
           description: transcription recorded
@@ -548,6 +623,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Transcription" }
         "404": { description: message not found }
+        "409": { description: latest transcription snapshot changed }
 
   /v1/messages/{id}/moderate:
     parameters:
@@ -603,8 +679,22 @@ paths:
             schema:
               type: object
               required: [flagged, recommendation, maxScore]
+              oneOf:
+                - properties:
+                    transcriptionId: { type: "null" }
+                    inputSha256: false
+                - required: [transcriptionId, inputSha256]
+                  properties:
+                    transcriptionId: { type: string, format: uuid }
+                    inputSha256: { type: string, pattern: "^[a-f0-9]{64}$" }
               properties:
                 transcriptionId: { type: [string, "null"], format: uuid }
+                inputSha256:
+                  type: string
+                  pattern: "^[a-f0-9]{64}$"
+                  description: >-
+                    SHA-256 of the ECMAScript-trimmed transcript or translation
+                    moderated; required when transcriptionId is supplied.
                 flagged: { type: boolean }
                 recommendation: { $ref: "#/components/schemas/ModerationRecommendation" }
                 maxScore: { type: number, minimum: 0, maximum: 1 }
@@ -620,6 +710,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Moderation" }
         "404": { description: message or transcription not found }
+        "409": { description: moderation input no longer matches the transcription }
 
   /v1/messages/{id}/decision:
     parameters:
@@ -663,14 +754,19 @@ paths:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     post:
-      summary: Attach a human translation to the latest succeeded transcription.
+      summary: Attach a translation to a succeeded transcription.
       description: |
-        Lets a logged-in operator supply an English translation for a
-        transcription the translation worker could not produce. Updates the
-        message's latest succeeded transcription, marking `translationStatus`
-        as `succeeded` with a null `translationProvider` (consumers infer a
-        manual translation from a succeeded translation with no provider).
-        Returns `409` when the message has no succeeded transcription yet.
+        Without `transcriptionId`, records a human English correction on the
+        latest succeeded transcription with null provider/model.
+        `expectedTranscriptionId` conditionally targets that human correction
+        without changing its provenance. `expectedTranslationSha256` binds
+        either form to the translation content the client observed. With
+        `transcriptionId`, requires that row to still be latest and records an
+        on-device generated translation with provider `on_device` and its
+        optional model. Moderation is invalidated only when the effective
+        reviewed text changes.
+        Returns `409` when no succeeded transcription exists or the targeted
+        transcription has been superseded.
       tags: [messages]
       security:
         - operatorSession: []
@@ -683,8 +779,22 @@ paths:
               type: object
               required: [translatedText]
               properties:
+                transcriptionId: { type: string, format: uuid }
+                expectedTranscriptionId:
+                  type: string
+                  format: uuid
+                  description: >-
+                    Latest transcription observed while editing a human
+                    correction; rejected if it is no longer latest.
+                expectedTranslationSha256:
+                  type: [string, "null"]
+                  pattern: "^[a-f0-9]{64}$"
+                  description: >-
+                    SHA-256 of the trimmed translation observed by the client,
+                    or null when no succeeded translation existed.
                 translatedText: { type: string, minLength: 1, maxLength: 20000 }
                 translatedLanguage: { type: string, minLength: 1, maxLength: 64 }
+                model: { type: [string, "null"], minLength: 1, maxLength: 128 }
       responses:
         "200":
           description: translation recorded
@@ -692,7 +802,8 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Transcription" }
         "404": { description: message not found }
-        "409": { description: no succeeded transcription to translate }
+        "409":
+          { description: "no succeeded transcription, or stale transcription or translation input" }
 
   /v1/uploads/sas:
     post:
@@ -747,10 +858,11 @@ paths:
 
   /v1/monitor/summary:
     get:
-      summary: Least-privilege daily counters for the physical booth monitor.
+      summary: Least-privilege counters for the physical booth monitor.
       description: |
-        Returns only aggregate call and message counts for the active
-        installation. Calendar-day boundaries use the requested IANA time zone.
+        Returns aggregate call and message counts for today and for the active
+        installation overall. Calendar-day boundaries use the requested IANA
+        time zone.
       tags: [monitor]
       security:
         - apiToken: []
@@ -765,7 +877,7 @@ paths:
             default: America/Toronto
       responses:
         "200":
-          description: current local-day counters
+          description: current local-day and overall counters
           content:
             application/json:
               schema: { $ref: "#/components/schemas/MonitorSummary" }
@@ -1016,10 +1128,8 @@ paths:
     post:
       summary: Start a new installation.
       description: |
-        Fails with 409 if an installation is still active *and* the booth has
-        recorded into it — end it first. An active era with no activity yet
-        (one the booth opened automatically while the operator was between
-        steps) is adopted and renamed instead.
+        If an installation is still active, it is ended first in the same
+        rollover and the requested installation becomes the new active era.
 
         Set `copyQuestions` to carry the last ended era's questions forward;
         copies share the original audio file so nothing is re-uploaded.
@@ -1040,7 +1150,7 @@ paths:
               schema: { $ref: "#/components/schemas/Installation" }
         "401": { description: missing or invalid credentials }
         "403": { description: operator is not an admin }
-        "409": { description: an installation is already active and in use }
+        "409": { description: a concurrent rollover already opened another installation }
 
   /v1/installations/current:
     get:
@@ -1310,6 +1420,18 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ApiTokenCreated" }
+        "409":
+          description: Existing telemetry source metadata conflicts with the request.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    const: telemetry_source_metadata_conflict
 
   /v1/api-tokens/{id}:
     parameters:
@@ -1344,6 +1466,129 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/ApiTokenUsageBucket" }
+
+  /v1/message-processing/summary:
+    get:
+      summary: Current-installation on-device processing queue counts.
+      tags: [message-processing]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      responses:
+        "200":
+          description: Queue progress; historical installations are never included.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageProcessingSummary" }
+
+  /v1/message-processing/claim:
+    post:
+      summary: Atomically lease one message for an OIDC operator device.
+      description: |
+        Returns one hydrated, current-installation message compatible with the
+        caller's local capabilities, or `claim: null` when none is available.
+        Lease tokens are opaque, expire automatically, and are required by all
+        follow-up writes. The lease is bound to the message's processing
+        snapshot, so a result superseded by a pipeline or operator write is
+        rejected rather than overwriting newer state.
+      tags: [message-processing]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MessageProcessingClaimRequest" }
+      responses:
+        "200":
+          description: Claimed message or an empty queue.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageProcessingClaimResponse" }
+
+  /v1/message-processing/{id}/heartbeat:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Extend an active processing lease.
+      tags: [message-processing]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MessageProcessingHeartbeat" }
+      responses:
+        "200": { description: lease extended }
+        "409": { description: lease lost or installation ended }
+
+  /v1/message-processing/{id}/release:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Release an active processing lease without changing the message.
+      tags: [message-processing]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MessageProcessingLeaseToken" }
+      responses:
+        "204": { description: released }
+        "409": { description: lease lost }
+
+  /v1/message-processing/{id}/fail:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Release a failed lease and record its safe retry state.
+      description: The third failed claim is terminal and will not be re-leased automatically.
+      tags: [message-processing]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MessageProcessingFail" }
+      responses:
+        "200": { description: failure recorded }
+        "409": { description: lease lost }
+
+  /v1/message-processing/{id}/complete:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Persist a leased device's processing result set and release it.
+      description: |
+        Transcription, translation, moderation, and no-speech review results
+        are optional parts of one atomic result set. A stale claim snapshot or
+        invalid later component rejects the entire set without persisting an
+        earlier component. All suggestions are advisory:
+        a `likely_hangup`/`delete` review never auto-deletes a recording.
+      tags: [message-processing]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MessageProcessingComplete" }
+      responses:
+        "200":
+          description: Results stored; `needs` is empty when local processing is complete.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageProcessingCompleteResponse" }
+        "409": { description: "lease lost, stale claim/input, or installation ended" }
 
   /v1/worker/messages/{id}/work:
     parameters:
@@ -1397,6 +1642,7 @@ paths:
       responses:
         "200": { description: Result accepted. }
         "404": { description: Message not found. }
+        "409": { description: A newer transcription was recorded while the worker was processing. }
 
   /v1/worker/messages/{id}/translation:
     parameters:
@@ -1418,6 +1664,10 @@ paths:
       responses:
         "200": { description: Result accepted. }
         "404": { description: Message or transcription not found. }
+        "409":
+          {
+            description: The transcription or its source text changed while the worker was translating.,
+          }
 
   /v1/worker/messages/{id}/moderation:
     parameters:
@@ -1441,6 +1691,7 @@ paths:
       responses:
         "200": { description: Suggestion accepted. }
         "404": { description: Message not found. }
+        "409": { description: The moderated text was superseded before the callback arrived. }
 
   /v1/ws/status:
     get:
@@ -1689,6 +1940,178 @@ paths:
           description: snapshot or list of snapshots
         "404": { description: no snapshot persisted for the given booth }
 
+  /v1/system/weather/current:
+    get:
+      summary: Get current modeled outdoor weather for one booth.
+      description: |
+        The server builds a fixed PromQL selector for the booth's Open-Meteo
+        temperature, humidity, cloud-cover, condition, observation-time, and
+        last-success metrics. Clients cannot submit arbitrary PromQL.
+      tags: [system]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      parameters:
+        - name: boothId
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+      responses:
+        "200":
+          description: Current modeled outdoor weather and freshness timestamps.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CurrentWeather" }
+        "400": { description: invalid booth id }
+        "401": { description: operator authentication required }
+        "404": { description: no current weather samples for the booth }
+        "502": { description: Grafana/Prometheus returned an invalid or failed response }
+        "503": { description: Grafana weather proxy is missing valid HTTPS configuration }
+
+  /v1/system/thermals/history:
+    get:
+      summary: Query fixed booth and router thermal history through Grafana.
+      description: |
+        The API resolves one router telemetry source for the requested booth,
+        preferring `componentId=router` and otherwise using deterministic
+        component ordering. Callers may select an exact component with the
+        optional `componentId` parameter. The server constructs PromQL from
+        exactly the booth CPU temperature metric plus router battery and
+        thermal-zone temperature metrics pinned to the source's Prometheus
+        job and instance. Clients cannot submit arbitrary PromQL.
+        Ranges are limited to 31 days and 10,000 points per series. Grafana
+        responses retain the 4 MiB, 128-series, and 100,000-sample limits.
+      tags: [system]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      parameters:
+        - name: boothId
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+        - name: componentId
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 128 }
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+        - name: stepSeconds
+          in: query
+          schema: { type: integer, minimum: 15, default: 60 }
+      responses:
+        "200":
+          description: Normalized thermal history for the resolved source.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ThermalHistory" }
+        "400": { description: "invalid range, ordering, or point count" }
+        "401": { description: operator authentication required }
+        "404": { description: telemetry source not found }
+        "502":
+          description: >-
+            Grafana/Prometheus failed, returned malformed data, or exceeded
+            response/cardinality limits.
+        "503": { description: Grafana history proxy is missing valid HTTPS configuration }
+
+  /v1/system/components/current:
+    put:
+      summary: Push the latest snapshot for the component bound to a telemetry token.
+      description: |
+        The API resolves component identity exclusively from the authenticated
+        telemetry token's persistent source binding. The request cannot select
+        a booth or component. Request bodies are limited to 65,536 bytes before
+        JSON parsing. A delivery older than the stored `capturedAt` is
+        acknowledged without replacing the current snapshot.
+      tags: [system]
+      security:
+        - apiToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RouterComponentSnapshotUpdate" }
+      responses:
+        "204": { description: snapshot accepted }
+        "401": { description: missing or invalid API token }
+        "403": { description: API token lacks telemetry scope or a source binding }
+        "413": { description: "request body exceeds 65,536 bytes" }
+    get:
+      summary: List current router component snapshots.
+      tags: [system]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      parameters:
+        - name: boothId
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 128 }
+        - name: componentId
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 128 }
+      responses:
+        "200":
+          description: Matching component sources and their latest snapshots.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/TelemetrySourceEnvelope" }
+        "401": { description: operator authentication required }
+
+  /v1/system/components/history:
+    get:
+      summary: Query allowlisted router component history through Grafana.
+      description: |
+        The API builds the PromQL selector internally from an allowlisted metric
+        set and the source's exact Prometheus job/instance labels. Clients
+        cannot submit arbitrary PromQL. The configured Grafana base URL must
+        use HTTPS. Grafana responses are limited to 4 MiB, 128 series, 10,000
+        samples per series, and 100,000 samples total.
+      tags: [system]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      parameters:
+        - name: boothId
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+        - name: componentId
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+        - name: stepSeconds
+          in: query
+          schema: { type: integer, minimum: 15, default: 60 }
+      responses:
+        "200":
+          description: Normalized Prometheus matrix response.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComponentTelemetryHistory" }
+        "400": { description: "invalid range, ordering, or point count" }
+        "401": { description: operator authentication required }
+        "404": { description: telemetry source not found }
+        "502":
+          description: >-
+            Grafana/Prometheus failed, returned malformed data, or exceeded
+            response/cardinality limits.
+        "503": { description: Grafana history proxy is missing valid HTTPS configuration }
+
   /v1/devices:
     get:
       summary: List the caller's mobile devices (active only).
@@ -1854,7 +2277,7 @@ components:
           oneOf:
             - type: "null"
             - type: object
-              required: [id, text, moderationText]
+              required: [id, text, translationInputSha256, moderationText, moderationInputSha256]
               properties:
                 id: { type: string, format: uuid }
                 text: { type: string }
@@ -1862,21 +2285,32 @@ components:
                 model: { type: [string, "null"] }
                 translationStatus: { type: [string, "null"] }
                 translatedText: { type: [string, "null"] }
+                translationInputSha256:
+                  type: string
+                  pattern: "^[0-9a-f]{64}$"
+                  description: "SHA-256 of the ECMAScript-trimmed transcript; translation callbacks must return it."
                 moderationText:
                   type: string
                   description: "Text the moderation step should score (English translation when available, else the transcript)."
+                moderationInputSha256:
+                  type: string
+                  pattern: "^[0-9a-f]{64}$"
+                  description: "SHA-256 of moderationText; new workers should return it with the verdict."
     WorkerTranscriptionBody:
       type: object
       required: [text]
       properties:
+        transcriptionId: { type: [string, "null"], format: uuid }
+        expectedLatestTranscriptionId: { type: [string, "null"], format: uuid }
         text: { type: string }
         language: { type: [string, "null"] }
         model: { type: [string, "null"] }
     WorkerTranslationBody:
       type: object
-      required: [transcriptionId, translatedText]
+      required: [transcriptionId, inputSha256, translatedText]
       properties:
         transcriptionId: { type: string, format: uuid }
+        inputSha256: { type: string, pattern: "^[0-9a-f]{64}$" }
         translatedText: { type: string }
         sourceLanguage: { type: [string, "null"] }
         targetLanguage: { type: [string, "null"] }
@@ -1884,8 +2318,17 @@ components:
     WorkerModerationBody:
       type: object
       required: [flagged, recommendation, maxScore]
+      oneOf:
+        - properties:
+            transcriptionId: { type: "null" }
+            inputSha256: false
+        - required: [transcriptionId, inputSha256]
+          properties:
+            transcriptionId: { type: string, format: uuid }
+            inputSha256: { type: string, pattern: "^[0-9a-f]{64}$" }
       properties:
         transcriptionId: { type: [string, "null"], format: uuid }
+        inputSha256: { type: string, pattern: "^[0-9a-f]{64}$" }
         flagged: { type: boolean }
         recommendation: { type: string, enum: [approve, review, reject] }
         maxScore: { type: number, minimum: 0, maximum: 1 }
@@ -1912,7 +2355,7 @@ components:
         ]
     BoothStatus:
       type: object
-      required: [state, updatedAt]
+      required: [state, updatedAt, isSynthetic]
       properties:
         id:
           type: integer
@@ -1920,6 +2363,12 @@ components:
             Snapshot row id. Two runs of the same status can share a booth
             timestamp, so clients use this to tell rows apart; it increases with
             insertion order.
+        isSynthetic:
+          type: boolean
+          description: |
+            True only for the id-less placeholder returned when the selected
+            installation has no persisted booth status. Clients must not treat
+            its timestamp as a booth heartbeat.
         state: { $ref: "#/components/schemas/BoothState" }
         updatedAt: { type: string, format: date-time }
         firstSeenAt:
@@ -1971,6 +2420,14 @@ components:
     Sha256:
       type: string
       pattern: "^[a-f0-9]{64}$"
+    Bcp47LanguageTag:
+      type: string
+      minLength: 1
+      maxLength: 64
+      format: bcp47
+      description: >-
+        RFC 5646 / BCP-47 language tag, including registered extensions and
+        private-use tags. The API returns its canonical casing.
     AudioRef:
       type: object
       required: [url, sha256, durationMs]
@@ -2030,6 +2487,11 @@ components:
           allOf:
             - $ref: "#/components/schemas/InstructionStatus"
           description: Defaults to active when omitted.
+    InstructionUpdate:
+      type: object
+      required: [description]
+      properties:
+        description: { anyOf: [{ type: string, maxLength: 280 }, { type: "null" }] }
     InstructionList:
       type: object
       required: [items, nextCursor]
@@ -2054,6 +2516,16 @@ components:
         receivedAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
         decidedAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
         decidedById: { anyOf: [{ type: string }, { type: "null" }] }
+        reviewClassification:
+          anyOf:
+            - { type: string, enum: [likely_hangup, unclear] }
+            - { type: "null" }
+        reviewRecommendation:
+          anyOf:
+            - { type: string, enum: [delete, review] }
+            - { type: "null" }
+        reviewClassifiedAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+        reviewClassifiedById: { anyOf: [{ type: string }, { type: "null" }] }
         audio: { $ref: "#/components/schemas/AudioRef" }
         latestTranscription:
           anyOf:
@@ -2097,6 +2569,122 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/Message" }
+    MessageProcessingClaimRequest:
+      type: object
+      properties:
+        capabilities:
+          type: array
+          items: { type: string, enum: [transcription, translation, moderation, review] }
+          default: [transcription, translation, moderation, review]
+        leaseSeconds: { type: integer, minimum: 30, maximum: 900, default: 300 }
+    MessageProcessingSummary:
+      type: object
+      required: [queued, leased, terminal, needs, generatedAt]
+      properties:
+        queued: { type: integer, minimum: 0 }
+        leased: { type: integer, minimum: 0 }
+        terminal: { type: integer, minimum: 0 }
+        needs:
+          type: object
+          required: [transcription, translation, moderation, review]
+          properties:
+            transcription: { type: integer, minimum: 0 }
+            translation: { type: integer, minimum: 0 }
+            moderation: { type: integer, minimum: 0 }
+            review: { type: integer, minimum: 0 }
+        generatedAt: { type: string, format: date-time }
+    MessageProcessingClaim:
+      type: object
+      required: [message, needs, leaseToken, leaseExpiresAt, defaultTranscriptionLanguage]
+      properties:
+        message: { $ref: "#/components/schemas/Message" }
+        needs:
+          type: array
+          minItems: 1
+          items: { type: string, enum: [transcription, translation, moderation, review] }
+        leaseToken: { type: string, minLength: 32 }
+        leaseExpiresAt: { type: string, format: date-time }
+        defaultTranscriptionLanguage:
+          anyOf:
+            - $ref: "#/components/schemas/Bcp47LanguageTag"
+            - { type: "null" }
+    MessageProcessingClaimResponse:
+      type: object
+      required: [claim]
+      properties:
+        claim:
+          anyOf:
+            - $ref: "#/components/schemas/MessageProcessingClaim"
+            - { type: "null" }
+    MessageProcessingLeaseToken:
+      type: object
+      required: [leaseToken]
+      properties:
+        leaseToken: { type: string, minLength: 32 }
+    MessageProcessingHeartbeat:
+      allOf:
+        - $ref: "#/components/schemas/MessageProcessingLeaseToken"
+        - type: object
+          properties:
+            leaseSeconds: { type: integer, minimum: 30, maximum: 900, default: 300 }
+    MessageProcessingFail:
+      allOf:
+        - $ref: "#/components/schemas/MessageProcessingLeaseToken"
+        - type: object
+          required: [errorCode]
+          properties:
+            errorCode: { type: string, minLength: 1, maxLength: 128 }
+            errorMessage: { type: string, maxLength: 2000 }
+    MessageProcessingComplete:
+      allOf:
+        - $ref: "#/components/schemas/MessageProcessingLeaseToken"
+        - type: object
+          minProperties: 2
+          properties:
+            transcription:
+              type: object
+              required: [text]
+              properties:
+                expectedLatestTranscriptionId: { type: [string, "null"], format: uuid }
+                expectedLatestTranscriptionSha256:
+                  { type: [string, "null"], pattern: "^[0-9a-fA-F]{64}$" }
+                text: { type: string, maxLength: 20000 }
+                language: { type: [string, "null"], maxLength: 64 }
+                model: { type: [string, "null"], maxLength: 128 }
+            translation:
+              type: object
+              required: [translatedText]
+              properties:
+                transcriptionId: { type: string, format: uuid }
+                expectedTranslationSha256: { type: [string, "null"], pattern: "^[0-9a-f]{64}$" }
+                translatedText: { type: string, minLength: 1, maxLength: 20000 }
+                translatedLanguage: { $ref: "#/components/schemas/Bcp47LanguageTag" }
+                model: { type: [string, "null"], maxLength: 128 }
+            moderation:
+              type: object
+              required: [flagged, recommendation, maxScore]
+              properties:
+                inputSha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+                flagged: { type: boolean }
+                recommendation: { $ref: "#/components/schemas/ModerationRecommendation" }
+                maxScore: { type: number, minimum: 0, maximum: 1 }
+                categories: { type: object, additionalProperties: { type: number } }
+                reasonSummary: { type: [string, "null"], maxLength: 2000 }
+                model: { type: [string, "null"], maxLength: 128 }
+            review:
+              type: object
+              required: [classification, recommendation]
+              properties:
+                classification: { type: string, enum: [likely_hangup, unclear] }
+                recommendation: { type: string, enum: [delete, review] }
+    MessageProcessingCompleteResponse:
+      type: object
+      required: [message, needs]
+      properties:
+        message: { $ref: "#/components/schemas/Message" }
+        needs:
+          type: array
+          items: { type: string, enum: [transcription, translation, moderation, review] }
     UploadSasRequest:
       type: object
       required: [kind, sha256, sizeBytes, contentType]
@@ -2104,7 +2692,22 @@ components:
         kind: { type: string, enum: [message, question-audio, instruction-audio] }
         sha256: { $ref: "#/components/schemas/Sha256" }
         sizeBytes: { type: integer, minimum: 1 }
-        contentType: { type: string, enum: [audio/flac] }
+        contentType:
+          {
+            type: string,
+            enum:
+              [
+                audio/flac,
+                audio/wav,
+                audio/x-wav,
+                audio/aiff,
+                audio/x-aiff,
+                audio/mpeg,
+                audio/mp4,
+                audio/x-m4a,
+                audio/ogg,
+              ],
+          }
     UploadSlot:
       type: object
       required: [uploadUrl, blobName, expiresAt]
@@ -2134,33 +2737,44 @@ components:
         picture: { type: string, format: uri }
         providerName: { type: string, description: "OIDC_PROVIDER_NAME — drives UI copy." }
     CreateApiTokenRequest:
-      type: object
-      required: [name]
-      properties:
-        name: { type: string, minLength: 1, maxLength: 64 }
-        scope:
-          type: string
-          enum: [operator, worker, monitor]
-          default: operator
-          description: >-
-            Capability scope. "operator" (default) authenticates booth/phone and
-            native operator clients; "worker" is limited to the push-worker
-            callback routes and receives only `work` events on the status
-            WebSocket; "monitor" is limited to read-only status/system routes
-            and receives only those envelopes.
-        expiresInDays: { type: integer, minimum: 1, maximum: 3650 }
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [name, scope, telemetrySource]
+          properties:
+            name: { type: string, minLength: 1, maxLength: 64 }
+            scope: { type: string, const: telemetry }
+            expiresInDays: { type: integer, minimum: 1, maximum: 3650 }
+            telemetrySource: { $ref: "#/components/schemas/TelemetrySourceMetadata" }
+        - type: object
+          additionalProperties: false
+          required: [name]
+          properties:
+            name: { type: string, minLength: 1, maxLength: 64 }
+            scope:
+              type: string
+              enum: [operator, worker, monitor]
+              default: operator
+              description: >-
+                Capability scope. "operator" (default) authenticates booth/phone
+                and native operator clients; "worker" is limited to the
+                push-worker callback routes and receives only `work` events on
+                the status WebSocket; "monitor" is limited to read-only
+                status/system routes and receives only those envelopes.
+            expiresInDays: { type: integer, minimum: 1, maximum: 3650 }
     ApiToken:
       type: object
       required: [id, name, scope, last4, createdAt, expiresAt, lastUsedAt, revokedAt]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
-        scope: { type: string, enum: [operator, worker, monitor] }
+        scope: { type: string, enum: [operator, worker, monitor, telemetry] }
         last4: { type: string, minLength: 4, maxLength: 4 }
         createdAt: { type: string, format: date-time }
         expiresAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
         lastUsedAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
         revokedAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+        telemetrySource: { $ref: "#/components/schemas/TelemetrySourceMetadata" }
     ApiTokenCreated:
       allOf:
         - $ref: "#/components/schemas/ApiToken"
@@ -2275,6 +2889,233 @@ components:
             events:
               type: array
               items: { $ref: "#/components/schemas/BoothEventRecord" }
+    TelemetrySourceMetadata:
+      type: object
+      additionalProperties: false
+      required: [boothId, componentId, displayName, kind, prometheusJob, prometheusInstance]
+      properties:
+        boothId: { type: string, minLength: 1, maxLength: 128 }
+        componentId: { type: string, minLength: 1, maxLength: 128 }
+        displayName: { type: string, minLength: 1, maxLength: 128 }
+        kind: { type: string, minLength: 1, maxLength: 64 }
+        prometheusJob: { type: string, minLength: 1, maxLength: 256 }
+        prometheusInstance: { type: string, minLength: 1, maxLength: 256 }
+    RouterBatterySnapshot:
+      type: object
+      additionalProperties: true
+      properties:
+        present: { type: [boolean, "null"] }
+        chargePercent: { type: [number, "null"], minimum: 0, maximum: 100 }
+        temperatureCelsius: { type: [number, "null"], minimum: -100, maximum: 250 }
+        voltageVolts: { type: [number, "null"], minimum: 0, maximum: 1000 }
+        currentAmperes: { type: [number, "null"], minimum: -1000, maximum: 1000 }
+        health: { type: [string, "null"], maxLength: 128 }
+        technology: { type: [string, "null"], maxLength: 128 }
+        cycleCount:
+          type: [integer, "null"]
+          minimum: 0
+          maximum: 10000000
+          description: Kernel-reported battery cycle count.
+        chargeCount:
+          type: [integer, "null"]
+          minimum: 0
+          maximum: 10000000
+          description: GL.iNet MCU `charge_cnt`, distinct from the kernel cycle count.
+        abnormal: { type: [boolean, "null"] }
+        abnormalType:
+          type: [integer, "null"]
+          minimum: -1
+          maximum: 255
+          description: Integer abnormal-type code reported by the GL.iNet MCU.
+    RouterChargerSnapshot:
+      type: object
+      additionalProperties: true
+      properties:
+        present: { type: [boolean, "null"] }
+        online: { type: [boolean, "null"] }
+        status: { type: [string, "null"], maxLength: 128 }
+        usbType: { type: [string, "null"], maxLength: 128 }
+        manufacturer: { type: [string, "null"], maxLength: 256 }
+        model: { type: [string, "null"], maxLength: 256 }
+        chargeType: { type: [string, "null"], maxLength: 128 }
+        inputVoltageLimitVolts: { type: [number, "null"], minimum: 0, maximum: 1000 }
+        inputCurrentLimitAmperes: { type: [number, "null"], minimum: 0, maximum: 1000 }
+        constantChargeVoltageVolts: { type: [number, "null"], minimum: 0, maximum: 1000 }
+        constantChargeCurrentMaxAmperes: { type: [number, "null"], minimum: 0, maximum: 1000 }
+        fastCharge: { type: [boolean, "null"] }
+        chargingStatus:
+          type: [integer, "null"]
+          minimum: -1
+          maximum: 255
+          description: Integer status code reported by the GL.iNet MCU.
+    RouterThermalZoneSnapshot:
+      type: object
+      additionalProperties: true
+      required: [name, temperatureCelsius]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 128 }
+        temperatureCelsius: { type: number, minimum: -100, maximum: 250 }
+    RouterComponentSnapshot:
+      type: object
+      additionalProperties: true
+      required: [thermalZones]
+      properties:
+        battery: { $ref: "#/components/schemas/RouterBatterySnapshot" }
+        charger: { $ref: "#/components/schemas/RouterChargerSnapshot" }
+        thermalZones:
+          type: array
+          maxItems: 64
+          items: { $ref: "#/components/schemas/RouterThermalZoneSnapshot" }
+    RouterComponentSnapshotUpdate:
+      type: object
+      additionalProperties: false
+      required: [capturedAt, snapshot]
+      properties:
+        capturedAt: { type: string, format: date-time }
+        snapshot: { $ref: "#/components/schemas/RouterComponentSnapshot" }
+    TelemetrySourceEnvelope:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - boothId
+        - componentId
+        - displayName
+        - kind
+        - prometheusJob
+        - prometheusInstance
+        - latestSnapshot
+        - capturedAt
+        - receivedAt
+        - createdAt
+        - updatedAt
+      properties:
+        id: { type: string, format: uuid }
+        boothId: { type: string, minLength: 1, maxLength: 128 }
+        componentId: { type: string, minLength: 1, maxLength: 128 }
+        displayName: { type: string, minLength: 1, maxLength: 128 }
+        kind: { type: string, minLength: 1, maxLength: 64 }
+        prometheusJob: { type: string, minLength: 1, maxLength: 256 }
+        prometheusInstance: { type: string, minLength: 1, maxLength: 256 }
+        latestSnapshot:
+          anyOf:
+            - { $ref: "#/components/schemas/RouterComponentSnapshot" }
+            - { type: "null" }
+        capturedAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+        receivedAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    TelemetryHistoryPoint:
+      type: object
+      required: [timestamp, value]
+      properties:
+        timestamp: { type: number, minimum: 0 }
+        value: { type: number }
+    TelemetryHistorySeries:
+      type: object
+      required: [metric, labels, points]
+      properties:
+        metric: { type: string }
+        labels:
+          type: object
+          additionalProperties: { type: string }
+        points:
+          type: array
+          maxItems: 10000
+          items: { $ref: "#/components/schemas/TelemetryHistoryPoint" }
+    ComponentTelemetryHistory:
+      type: object
+      required: [source, from, to, stepSeconds, series]
+      properties:
+        source: { $ref: "#/components/schemas/TelemetrySourceMetadata" }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        stepSeconds: { type: integer, minimum: 15 }
+        series:
+          type: array
+          maxItems: 128
+          description: At most 100,000 samples across all series.
+          items: { $ref: "#/components/schemas/TelemetryHistorySeries" }
+    ThermalMetricName:
+      type: string
+      enum:
+        - booth_cpu_temperature_celsius
+        - glinet_battery_temperature_celsius
+        - glinet_thermal_temperature_celsius
+    ThermalHistorySeries:
+      type: object
+      additionalProperties: false
+      required: [metric, labels, points]
+      properties:
+        metric: { $ref: "#/components/schemas/ThermalMetricName" }
+        labels:
+          type: object
+          additionalProperties: { type: string }
+        points:
+          type: array
+          maxItems: 10000
+          items: { $ref: "#/components/schemas/TelemetryHistoryPoint" }
+    ThermalHistory:
+      type: object
+      additionalProperties: false
+      required: [boothId, source, from, to, stepSeconds, series]
+      properties:
+        boothId: { type: string, minLength: 1, maxLength: 128 }
+        source: { $ref: "#/components/schemas/TelemetrySourceMetadata" }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        stepSeconds: { type: integer, minimum: 15 }
+        series:
+          type: array
+          maxItems: 128
+          description: At most 100,000 samples across all series.
+          items: { $ref: "#/components/schemas/ThermalHistorySeries" }
+    CurrentWeather:
+      type: object
+      additionalProperties: false
+      required:
+        - boothId
+        - source
+        - temperatureCelsius
+        - relativeHumidityPercent
+        - cloudCoverPercent
+        - condition
+        - observedAt
+        - fetchedAt
+      properties:
+        boothId: { type: string, minLength: 1, maxLength: 128 }
+        source: { type: string, enum: [open_meteo] }
+        temperatureCelsius: { type: number, minimum: -100, maximum: 100 }
+        relativeHumidityPercent: { type: number, minimum: 0, maximum: 100 }
+        cloudCoverPercent: { type: number, minimum: 0, maximum: 100 }
+        condition:
+          type: string
+          enum:
+            - clear_sky
+            - mainly_clear
+            - partly_cloudy
+            - overcast
+            - fog
+            - rime_fog
+            - drizzle
+            - freezing_drizzle
+            - rain
+            - freezing_rain
+            - snowfall
+            - snow_grains
+            - rain_showers
+            - snow_showers
+            - thunderstorm
+            - thunderstorm_with_hail
+            - unknown
+        observedAt:
+          type: string
+          format: date-time
+          description: Timestamp of the Open-Meteo modeled observation.
+        fetchedAt:
+          type: string
+          format: date-time
+          description: Timestamp of the booth's latest successful weather fetch.
     BoothSystemSnapshot:
       type: object
       description: |
@@ -2495,22 +3336,41 @@ components:
         generatedAt: { type: string, format: date-time }
     MonitorSummary:
       type: object
-      required: [callsToday, messagesToday, dayStartedAt, generatedAt, timeZone]
+      required:
+        [callsToday, messagesToday, callsTotal, messagesTotal, dayStartedAt, generatedAt, timeZone]
       properties:
         callsToday: { type: integer, minimum: 0 }
         messagesToday: { type: integer, minimum: 0 }
+        callsTotal: { type: integer, minimum: 0 }
+        messagesTotal: { type: integer, minimum: 0 }
         dayStartedAt: { type: string, format: date-time }
         generatedAt: { type: string, format: date-time }
         timeZone: { type: string, minLength: 1, maxLength: 64 }
     Installation:
       type: object
       required:
-        [id, name, notes, location, startedAt, endedAt, endedById, summary, createdAt, isActive]
+        [
+          id,
+          name,
+          notes,
+          location,
+          defaultTranscriptionLanguage,
+          startedAt,
+          endedAt,
+          endedById,
+          summary,
+          createdAt,
+          isActive,
+        ]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
         notes: { type: [string, "null"] }
         location: { type: [string, "null"] }
+        defaultTranscriptionLanguage:
+          anyOf:
+            - $ref: "#/components/schemas/Bcp47LanguageTag"
+            - { type: "null" }
         startedAt: { type: string, format: date-time }
         endedAt: { type: [string, "null"], format: date-time }
         endedById: { type: [string, "null"] }
@@ -2529,6 +3389,8 @@ components:
         [
           calls,
           messages,
+          allRecordings,
+          byStatus,
           messagesApproved,
           messagesRejected,
           questions,
@@ -2540,6 +3402,8 @@ components:
       properties:
         calls: { type: integer, minimum: 0 }
         messages: { type: integer, minimum: 0 }
+        allRecordings: { type: integer, minimum: 0 }
+        byStatus: { type: object, additionalProperties: { type: integer, minimum: 0 } }
         messagesApproved: { type: integer, minimum: 0 }
         messagesRejected: { type: integer, minimum: 0 }
         questions: { type: integer, minimum: 0 }
@@ -2563,6 +3427,10 @@ components:
         name: { type: string, minLength: 1, maxLength: 120 }
         notes: { type: [string, "null"], maxLength: 2000 }
         location: { type: [string, "null"], maxLength: 200 }
+        defaultTranscriptionLanguage:
+          anyOf:
+            - $ref: "#/components/schemas/Bcp47LanguageTag"
+            - { type: "null" }
         copyQuestions:
           type: boolean
           default: false
@@ -2576,6 +3444,10 @@ components:
         name: { type: string, minLength: 1, maxLength: 120 }
         notes: { type: [string, "null"], maxLength: 2000 }
         location: { type: [string, "null"], maxLength: 200 }
+        defaultTranscriptionLanguage:
+          anyOf:
+            - $ref: "#/components/schemas/Bcp47LanguageTag"
+            - { type: "null" }
 
     InstallationEnd:
       type: object
@@ -2697,9 +3569,14 @@ components:
                   completed: { type: integer, minimum: 0 }
         messages:
           type: object
-          required: [total, byStatus, averageDurationMs]
+          required: [total, approved, allRecordings, byStatus, averageDurationMs]
           properties:
-            total: { type: integer, minimum: 0 }
+            total:
+              type: integer
+              minimum: 0
+              description: Approved/playable messages; retained for compatibility.
+            approved: { type: integer, minimum: 0 }
+            allRecordings: { type: integer, minimum: 0 }
             byStatus:
               type: object
               additionalProperties: { type: integer, minimum: 0 }

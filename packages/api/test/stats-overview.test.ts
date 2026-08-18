@@ -82,7 +82,13 @@ describe("GET /v1/stats/overview", () => {
         longestDurationMs: null,
         outcomes: {},
       },
-      messages: { total: 0, byStatus: {}, averageDurationMs: null },
+      messages: {
+        total: 0,
+        approved: 0,
+        allRecordings: 0,
+        byStatus: {},
+        averageDurationMs: null,
+      },
       playback: { totalPlaybacks: 0 },
       pickupsHangups: { pickups: 0, hangups: 0 },
       uploads: { succeeded: 0, failed: 0, failureRate: null },
@@ -200,13 +206,15 @@ describe("GET /v1/stats/overview", () => {
     expect(body.calls.averageDurationMs).toBeCloseTo((2000 + 8000 + 100) / 3, 5);
     expect(body.calls.longestDurationMs).toBe(8000);
 
-    expect(body.messages.total).toBe(4);
+    expect(body.messages.total).toBe(2);
+    expect(body.messages.approved).toBe(2);
+    expect(body.messages.allRecordings).toBe(4);
     expect(body.messages.byStatus).toMatchObject({
       approved: 2,
       pending: 1,
       rejected: 1,
     });
-    expect(body.messages.averageDurationMs).toBe((1000 + 2000 + 3000 + 4000) / 4);
+    expect(body.messages.averageDurationMs).toBe((1000 + 2000) / 2);
 
     expect(body.playback.totalPlaybacks).toBe(2);
 
@@ -221,15 +229,11 @@ describe("GET /v1/stats/overview", () => {
       failureRate: 1 / 3,
     });
 
-    expect(body.topQuestions).toHaveLength(2);
     expect(body.topQuestions[0]).toMatchObject({
       questionId: q2.id,
-      messageCount: 3,
+      messageCount: 2,
     });
-    expect(body.topQuestions[1]).toMatchObject({
-      questionId: q1.id,
-      messageCount: 1,
-    });
+    expect(body.topQuestions).toHaveLength(1);
 
     expect(body.boothBreakdown.length).toBeGreaterThanOrEqual(2);
     const boothIds = body.boothBreakdown.map((entry: { boothId: string }) => entry.boothId).sort();

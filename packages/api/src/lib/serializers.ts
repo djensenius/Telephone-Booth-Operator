@@ -67,8 +67,7 @@ export const serializeTranscription = (row: PrismaTranscription): TranscriptionP
   createdAt: iso(row.createdAt),
   completedAt: row.completedAt ? iso(row.completedAt) : null,
   translationStatus: row.translationStatus,
-  translatedText:
-    row.translatedText === null ? null : normalizeTranslationText(row.translatedText),
+  translatedText: row.translatedText === null ? null : normalizeTranslationText(row.translatedText),
   translatedLanguage: row.translatedLanguage,
   translationProvider: row.translationProvider ? (row.translationProvider as AiProvider) : null,
   translationModel: row.translationModel,
@@ -126,6 +125,10 @@ export const serializeMessage = (message: WithAudio<WithAi<Message>>): MessagePa
     receivedAt: message.receivedAt ? iso(message.receivedAt) : null,
     decidedAt: message.decidedAt ? iso(message.decidedAt) : null,
     decidedById: message.decidedById,
+    reviewClassification: message.reviewClassification,
+    reviewRecommendation: message.reviewRecommendation,
+    reviewClassifiedAt: message.reviewClassifiedAt ? iso(message.reviewClassifiedAt) : null,
+    reviewClassifiedById: message.reviewClassifiedById,
     audio: audioRef(message.audio),
     latestTranscription: latestTranscription ? serializeTranscription(latestTranscription) : null,
     latestModeration: latestModeration ? serializeModeration(latestModeration) : null,
@@ -134,6 +137,7 @@ export const serializeMessage = (message: WithAudio<WithAi<Message>>): MessagePa
 
 export const serializeStatus = (snapshot: BoothStatusSnapshot): BoothStatusEvent => ({
   id: snapshot.id,
+  isSynthetic: false,
   state: snapshot.state,
   updatedAt: iso(snapshot.updatedAt),
   firstSeenAt: iso(snapshot.firstSeenAt),
@@ -145,11 +149,14 @@ export const serializeStatus = (snapshot: BoothStatusSnapshot): BoothStatusEvent
 });
 
 export const defaultStatus = (): BoothStatusEvent => {
-  const now = new Date().toISOString();
+  // Keep the required timestamps non-fresh for clients that predate the
+  // explicit marker. Any real booth report must outrank this placeholder.
+  const neverReportedAt = new Date(0).toISOString();
   return {
     state: "idle",
-    updatedAt: now,
-    firstSeenAt: now,
+    updatedAt: neverReportedAt,
+    isSynthetic: true,
+    firstSeenAt: neverReportedAt,
     repeatCount: 1,
     currentQuestionId: null,
     currentMessageId: null,

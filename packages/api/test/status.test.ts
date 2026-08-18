@@ -32,6 +32,8 @@ import {
   fakeDb,
   resetFakeDb,
   seedCallSession,
+  seedInstallation,
+  seedStatus,
   store,
 } from "./support/fake-db.js";
 import { operatorCookie, phoneHeaders } from "./support/http.js";
@@ -59,7 +61,11 @@ describe("status routes", () => {
     // An operator session (cookie) can read the snapshot.
     const initial = await app.request("/v1/status", { headers: { cookie: operatorCookie() } });
     expect(initial.status).toBe(200);
-    await expect(initial.json()).resolves.toMatchObject({ state: "idle" });
+    await expect(initial.json()).resolves.toMatchObject({
+      state: "idle",
+      updatedAt: "1970-01-01T00:00:00.000Z",
+      isSynthetic: true,
+    });
 
     const denied = await app.request("/v1/status", {
       method: "PUT",
@@ -78,7 +84,11 @@ describe("status routes", () => {
     // The booth/phone client can also read the snapshot with its API token.
     const latest = await app.request("/v1/status", { headers: { ...phoneHeaders } });
     expect(latest.status).toBe(200);
-    await expect(latest.json()).resolves.toMatchObject({ state: "recording", lastError: null });
+    await expect(latest.json()).resolves.toMatchObject({
+      state: "recording",
+      lastError: null,
+      isSynthetic: false,
+    });
 
     const noCookie = await app.request("/v1/status/history");
     expect(noCookie.status).toBe(401);
@@ -90,6 +100,48 @@ describe("status routes", () => {
     const body = await history.json();
     expect(body.items).toHaveLength(1);
     expect(body.items[0]).toMatchObject({ state: "recording" });
+  });
+
+  it("scopes current status and history to the active installation by default", async () => {
+    const app = createApp();
+    const historical = seedInstallation({
+      startedAt: new Date("2025-01-01T00:00:00.000Z"),
+      endedAt: new Date("2025-12-31T23:59:59.000Z"),
+    });
+    seedStatus({
+      state: "idle",
+      installationId: DEFAULT_INSTALLATION_ID,
+      updatedAt: new Date("2026-08-15T12:00:00.000Z"),
+    });
+    seedStatus({
+      state: "recording",
+      installationId: historical.id,
+      updatedAt: new Date("2026-08-15T12:30:00.000Z"),
+    });
+
+    // The monitor's unqualified read follows the active era even when a newer
+    // snapshot exists in an ended one.
+    const current = await app.request("/v1/status", { headers: { ...phoneHeaders } });
+    await expect(current.json()).resolves.toMatchObject({ state: "idle" });
+
+    const activeHistory = await app.request("/v1/status/history?limit=10", {
+      headers: { cookie: operatorCookie() },
+    });
+    await expect(activeHistory.json()).resolves.toMatchObject({
+      items: [{ state: "idle" }],
+    });
+
+    const historicalCurrent = await app.request(`/v1/status?installationId=${historical.id}`, {
+      headers: { cookie: operatorCookie() },
+    });
+    await expect(historicalCurrent.json()).resolves.toMatchObject({ state: "recording" });
+
+    const allHistory = await app.request("/v1/status/history?installationId=all&limit=10", {
+      headers: { cookie: operatorCookie() },
+    });
+    await expect(allHistory.json()).resolves.toMatchObject({
+      items: [{ state: "recording" }, { state: "idle" }],
+    });
   });
 
   it("collapses repeated identical status reports into one counted snapshot", async () => {

@@ -13,8 +13,10 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { pathToFileURL } from "node:url";
 import { startAiSweeper } from "./lib/ai/sweeper.js";
+import { apnsHealthStatus, logApnsConfiguration } from "./lib/apns.js";
 import { auditWrites, type AuditVariables } from "./lib/audit.js";
 import { startAuditPruner } from "./lib/audit-pruner.js";
+import { startModerationBadgeDispatcher } from "./lib/push-events.js";
 import { startSnapshotPruner } from "./lib/snapshot-pruner.js";
 import {
   AuthConfigurationError,
@@ -32,11 +34,13 @@ import { eventsRouter } from "./routes/events.js";
 import { installationsRouter } from "./routes/installations.js";
 import { instructionsRouter } from "./routes/instructions.js";
 import { messagesRouter } from "./routes/messages.js";
+import { messageProcessingRouter } from "./routes/message-processing.js";
 import { monitorRouter } from "./routes/monitor.js";
 import { questionsRouter } from "./routes/questions.js";
 import { sessionsRouter } from "./routes/sessions.js";
 import { statsRouter } from "./routes/stats.js";
 import { statusRouter } from "./routes/status.js";
+import { componentTelemetryRouter } from "./routes/system-components.js";
 import { systemRouter } from "./routes/system.js";
 import { uploadsRouter } from "./routes/uploads.js";
 import { workerRouter } from "./routes/worker.js";
@@ -62,11 +66,12 @@ export const createApp = (): Hono<{ Variables: AuthVariables & AuditVariables }>
   // Mounted before every auth guard so rejected writes are audited too.
   app.use("/v1/*", auditWrites());
 
-  app.get("/healthz", (c) =>
+  app.get("/healthz", async (c) =>
     c.json({
       status: "ok",
       version: process.env.npm_package_version ?? "0.0.0",
       time: new Date().toISOString(),
+      apns: await apnsHealthStatus(),
     }),
   );
 
@@ -86,12 +91,14 @@ export const createApp = (): Hono<{ Variables: AuthVariables & AuditVariables }>
   app.route("/v1/installations", installationsRouter);
   app.route("/v1/instructions", instructionsRouter);
   app.route("/v1/messages", messagesRouter);
+  app.route("/v1/message-processing", messageProcessingRouter);
   app.route("/v1/monitor", monitorRouter);
   app.route("/v1/status", statusRouter);
   app.route("/v1/events", eventsRouter);
   app.route("/v1/sessions", sessionsRouter);
   app.route("/v1/stats", statsRouter);
   app.route("/v1/system", systemRouter);
+  app.route("/v1/system/components", componentTelemetryRouter);
   app.route("/v1/uploads", uploadsRouter);
   app.route("/v1/devices", devicesRouter);
   app.route("/v1/admin/data", adminDataRouter);
@@ -101,7 +108,7 @@ export const createApp = (): Hono<{ Variables: AuthVariables & AuditVariables }>
   return app;
 };
 
-const start = (): void => {
+const start = async (): Promise<void> => {
   try {
     const authConfig = resolveAuthConfig();
     if (authConfig.disabled && process.env.NODE_ENV === "production") {
@@ -116,14 +123,17 @@ const start = (): void => {
   }
 
   const port = Number.parseInt(process.env.API_PORT ?? "8787", 10);
+  await logApnsConfiguration();
   const server = serve({ fetch: app.fetch, port }, ({ port }) => {
     console.log(`telephone-booth-operator API listening on :${port}`);
   });
   const statusWebSocket = attachStatusWebSocket(server);
+  const badgeDispatcher = startModerationBadgeDispatcher();
   let stopping = false;
   const shutdown = (): void => {
     if (stopping) return;
     stopping = true;
+    badgeDispatcher.stop();
     void statusWebSocket.close().finally(() => {
       const forceClose = setTimeout(() => {
         if ("closeAllConnections" in server && typeof server.closeAllConnections === "function") {
@@ -150,7 +160,7 @@ const start = (): void => {
 const app = createApp();
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  start();
+  void start();
 }
 
 export { app };

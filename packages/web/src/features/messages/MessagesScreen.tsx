@@ -10,6 +10,7 @@ import {
   useMessagesList,
   useQuestionsByIds,
   useRetranscribeMessage,
+  useMessageProcessingSummary,
 } from "../../lib/api-client.js";
 import {
   InstallationScopePicker,
@@ -123,6 +124,7 @@ export function MessagesScreen(): JSX.Element {
   const deleteMessage = useDeleteMessage();
   const decideMessage = useDecideMessage();
   const retranscribe = useRetranscribeMessage();
+  const processingSummary = useMessageProcessingSummary();
 
   const queries = needsReview ? [received, pending] : [listed];
   const isLoading = queries.some((query) => query.isLoading);
@@ -178,6 +180,12 @@ export function MessagesScreen(): JSX.Element {
       <p className="screen-kicker">Digit 2</p>
       <h1>Messages</h1>
       <p>Review recordings from the booth, approve or reject them, and clear crossed lines.</p>
+      {scope === undefined && processingSummary.data ? (
+        <p className="settings-status" role="status">
+          On-device processing: {processingSummary.data.queued} queued,{" "}
+          {processingSummary.data.leased} leased, {processingSummary.data.terminal} terminal.
+        </p>
+      ) : null}
       <div className="feature-toolbar" role="toolbar" aria-label="Message filters">
         {MESSAGE_ROUTE_FILTERS.map((option) => (
           <button

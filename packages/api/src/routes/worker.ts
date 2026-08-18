@@ -13,6 +13,7 @@
 // cannot create a newer row or downgrade a finalized one.
 
 import { zValidator } from "@hono/zod-validator";
+import { createHash } from "node:crypto";
 import { Hono } from "hono";
 import { z } from "zod";
 import { recordAudit } from "../lib/audit.js";
@@ -31,6 +32,8 @@ import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-toke
 const idParamSchema = z.object({ id: z.guid() });
 
 const transcriptionBody = z.object({
+  transcriptionId: z.guid().nullable().optional(),
+  expectedLatestTranscriptionId: z.guid().nullable().optional(),
   text: z.string(),
   language: z.string().nullable().optional(),
   model: z.string().nullable().optional(),
@@ -38,21 +41,31 @@ const transcriptionBody = z.object({
 
 const translationBody = z.object({
   transcriptionId: z.string().min(1),
+  inputSha256: z.string().regex(/^[0-9a-f]{64}$/),
   translatedText: z.string(),
   sourceLanguage: z.string().nullable().optional(),
   targetLanguage: z.string().nullable().optional(),
   model: z.string().nullable().optional(),
 });
 
-const moderationBody = z.object({
-  transcriptionId: z.string().min(1).nullable().optional(),
-  flagged: z.boolean(),
-  recommendation: z.enum(["approve", "review", "reject"]),
-  maxScore: z.number().min(0).max(1),
-  categories: z.record(z.string(), z.number()).optional(),
-  reasonSummary: z.string().optional(),
-  model: z.string().nullable().optional(),
-});
+const moderationBody = z
+  .object({
+    transcriptionId: z.guid().nullable().optional(),
+    inputSha256: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
+    flagged: z.boolean(),
+    recommendation: z.enum(["approve", "review", "reject"]),
+    maxScore: z.number().min(0).max(1),
+    categories: z.record(z.string(), z.number()).optional(),
+    reasonSummary: z.string().optional(),
+    model: z.string().nullable().optional(),
+  })
+  .refine((body) => (body.inputSha256 == null) === (body.transcriptionId == null), {
+    message: "transcriptionId and inputSha256 must be supplied together",
+    path: ["transcriptionId"],
+  });
 
 // Broadcast the latest serialized message so connected operators see status
 // changes immediately. Mirrors the helper in pipeline.ts / messages.ts.
@@ -102,7 +115,7 @@ workerRouter.get("/messages/:id/work", zValidator("param", idParamSchema), async
         sha256: audio.sha256,
         durationMs: audio.durationMs,
         contentType: audio.contentType,
-        filename: `${audio.sha256}.flac`,
+        filename: audio.blobKey.split("/").at(-1) ?? audio.sha256,
       }
     : null;
 
@@ -112,12 +125,17 @@ workerRouter.get("/messages/:id/work", zValidator("param", idParamSchema), async
     transcription?.translatedText === null || transcription?.translatedText === undefined
       ? null
       : normalizeTranslationText(transcription.translatedText);
-  const moderationText =
+  const moderationText = (
     transcription?.translationStatus === "succeeded" &&
     translatedText !== null &&
     translatedText.length > 0
       ? translatedText
-      : (transcription?.text ?? "");
+      : (transcription?.text ?? "")
+  ).trim();
+  const moderationInputSha256 = createHash("sha256").update(moderationText, "utf8").digest("hex");
+  const translationInputSha256 = createHash("sha256")
+    .update((transcription?.text ?? "").trim(), "utf8")
+    .digest("hex");
 
   return c.json({
     id: message.id,
@@ -131,7 +149,9 @@ workerRouter.get("/messages/:id/work", zValidator("param", idParamSchema), async
           model: transcription.model,
           translationStatus: transcription.translationStatus,
           translatedText,
+          translationInputSha256,
           moderationText,
+          moderationInputSha256,
         }
       : null,
   });
@@ -167,11 +187,18 @@ workerRouter.post(
     });
     const result = await recordTranscriptionResult({
       messageId: id,
+      transcriptionId: data.transcriptionId ?? null,
+      ...("expectedLatestTranscriptionId" in data
+        ? { expectedLatestTranscriptionId: data.expectedLatestTranscriptionId ?? null }
+        : {}),
       text: data.text,
       language: data.language ?? null,
       model: data.model ?? null,
     });
     if (result.outcome === "not_found") return c.json({ error: "not_found" }, 404);
+    if (result.outcome === "stale_transcription") {
+      return c.json({ error: "stale_transcription" }, 409);
+    }
     return c.json({ ok: true });
   },
 );
@@ -206,22 +233,67 @@ workerRouter.post(
     if (!existing || existing.messageId !== id) {
       return c.json({ error: "not_found" }, 404);
     }
-    const now = new Date();
-    const startedAt = existing.createdAt;
-    // Guard: only the pending push row can be finalized. Duplicate or stale
-    // callbacks for already-finalized / non-pending rows are idempotent no-ops.
-    const updated = await db.transcription.updateMany({
-      where: { id: existing.id, translationStatus: "pending" },
-      data: {
-        translationStatus: "succeeded",
-        translatedText,
-        translatedLanguage: data.targetLanguage ?? "en",
-        translationModel: data.model ?? existing.translationModel,
-        translationLatencyMs: now.getTime() - startedAt.getTime(),
-        translationCompletedAt: now,
-        translationError: null,
-      },
+    const updated = await db.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "Message" WHERE "id" = ${id}::uuid FOR UPDATE
+      `;
+      if (rows.length === 0) return { outcome: "not_found" } as const;
+      const current = await tx.transcription.findUnique({ where: { id: existing.id } });
+      const latest = await tx.transcription.findFirst({
+        where: { messageId: id, status: "succeeded" },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!current || !latest || latest.id !== current.id) {
+        return { outcome: "stale_transcription" } as const;
+      }
+      const actualInputSha256 = createHash("sha256")
+        .update((current.text ?? "").trim(), "utf8")
+        .digest("hex");
+      if (actualInputSha256 !== data.inputSha256) {
+        return { outcome: "stale_input" } as const;
+      }
+      const previousReviewText =
+        current.translationStatus === "succeeded" &&
+        typeof current.translatedText === "string" &&
+        current.translatedText.trim().length > 0
+          ? normalizeTranslationText(current.translatedText)
+          : current.text?.trim();
+      const now = new Date();
+      const result = await tx.transcription.updateMany({
+        where: { id: current.id, translationStatus: "pending" },
+        data: {
+          translationStatus: "succeeded",
+          translatedText,
+          translatedLanguage: data.targetLanguage ?? "en",
+          translationModel: data.model ?? current.translationModel,
+          translationLatencyMs: now.getTime() - current.createdAt.getTime(),
+          translationCompletedAt: now,
+          translationError: null,
+        },
+      });
+      if (result.count > 0 && previousReviewText !== translatedText) {
+        await tx.moderation.updateMany({
+          where: {
+            messageId: id,
+            OR: [{ transcriptionId: current.id }, { transcriptionId: null }],
+            status: { in: ["pending", "succeeded"] },
+          },
+          data: {
+            status: "failed",
+            error: "superseded_by_translation",
+            completedAt: new Date(),
+          },
+        });
+      }
+      return { outcome: "recorded", count: result.count } as const;
     });
+    if (updated.outcome === "not_found") return c.json({ error: "not_found" }, 404);
+    if (updated.outcome === "stale_transcription") {
+      return c.json({ error: "stale_transcription" }, 409);
+    }
+    if (updated.outcome === "stale_input") {
+      return c.json({ error: "stale_translation_input" }, 409);
+    }
     if (updated.count === 0) return c.json({ ok: true });
     await broadcastMessageById(id);
     // Translation done — provider-aware moderation can now run against English
@@ -259,13 +331,14 @@ workerRouter.post(
     });
     const result = await recordModerationResult({
       messageId: id,
-      transcriptionId: data.transcriptionId ?? null,
+      ...(data.transcriptionId !== undefined ? { transcriptionId: data.transcriptionId } : {}),
       flagged: data.flagged,
       recommendation: data.recommendation,
       maxScore: data.maxScore,
       categories: data.categories ?? null,
       reasonSummary: data.reasonSummary ?? null,
       model: data.model ?? null,
+      ...(data.inputSha256 !== undefined ? { inputSha256: data.inputSha256 } : {}),
       // Worker moderation is solicited: `runModeration` creates the pending
       // row before emitting the `work` event, so a callback with nothing
       // pending is stale and is dropped rather than resurrected.
@@ -273,6 +346,12 @@ workerRouter.post(
     });
     if (result.outcome === "not_found" || result.outcome === "transcription_not_found") {
       return c.json({ error: "not_found" }, 404);
+    }
+    if (result.outcome === "stale_transcription") {
+      return c.json({ error: "stale_transcription" }, 409);
+    }
+    if (result.outcome === "stale_input") {
+      return c.json({ error: "stale_moderation_input" }, 409);
     }
     return c.json({ ok: true });
   },

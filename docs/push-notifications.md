@@ -4,8 +4,8 @@ The operator sends Apple Push Notification service (APNs) alerts to the
 [`Telephone-Booth-Operator-Mobile`](https://github.com/djensenius/Telephone-Booth-Operator-Mobile)
 clients (iOS, iPadOS, macOS, watchOS, visionOS, tvOS) when something notable
 happens — most importantly when a new message is received and is awaiting
-moderation. The push carries an `aps.badge` count so the app icon and the
-**Messages** tab show the number of messages awaiting moderation.
+moderation. Separate badge-only pushes carry an `aps.badge` count so the app
+icon and the **Messages** tab show the number of messages awaiting moderation.
 
 This document covers how the pipeline works, the environment variables that
 turn it on, and how to configure them in production.
@@ -19,10 +19,28 @@ turn it on, and how to configure them in production.
    current **awaiting-moderation** count (messages with status `received` or
    `pending`) and fans out an alert push to every registered device whose
    preferences opt in.
-3. The push is an `alert` push (`apns-push-type: alert`, `apns-priority: 10`)
-   carrying `aps.badge`. The OS sets the app-icon badge from `aps.badge`; the
-   app also refreshes its in-app tab badge on foreground and on push receipt.
-4. The same count is exposed at `GET /v1/stats/summary`
+3. Every queue-changing operation records the latest badge count in durable
+   delivery state. A database lease serializes badge-only pushes across API
+   replicas, coalesces changes that arrive during an in-flight send, and lets a
+   restarted process recover pending work. The worker also recounts the queue
+   periodically so a change missed between a request commit and its observer is
+   recovered without creating duplicate versions for unchanged counts.
+   Transient APNs failures leave the newest version pending for retry. These
+   pushes carry no banner or sound and go to every registered device even when
+   new-message alerts are disabled. Decisions, deletions, installation
+   rollovers, data restores, and device registrations therefore lower, reset,
+   or refresh the icon badge while the app is backgrounded or closed.
+4. A newly recorded moderation result with `flagged: true` sends a
+   `messageFlagged` alert. Re-delivery of the same moderation row is deduplicated.
+5. `moderationQueueHigh` fires once when the awaiting-moderation count crosses
+   `MODERATION_QUEUE_HIGH_THRESHOLD` (default `10`). It is re-armed whenever a
+   decision, deletion, installation close-out, data restore, or other queue
+   transition brings the count below the threshold.
+6. Alert and badge-only notifications use `apns-push-type: alert` and
+   `apns-priority: 10`; badge-only payloads contain just `aps.badge`. The OS
+   updates the app icon without launching the app or showing an alert. The app
+   also refreshes its in-app tab badge on foreground and on push receipt.
+7. The same count is exposed at `GET /v1/stats/summary`
    (`messages.awaitingModeration`) so the app can poll and stay in sync even
    when a push is missed.
 
@@ -33,16 +51,18 @@ ES256-signed sender). The awaiting-moderation count is centralized in
 ## Environment variables
 
 Push is **off** unless all four required variables are present
-(`apnsEnvConfigured()` gates the fan-out). Without them the API falls back to a
-no-op sender, so dev and CI never emit pushes.
+(`isApnsDeliveryConfigured()` gates the fan-out and badge dispatcher). Without
+them the API falls back to a no-op sender, so dev and CI never emit pushes.
+Pending badge state is retained and delivered after APNs is configured.
 
-| Variable           | Required | Description                                                             |
-| ------------------ | -------- | ----------------------------------------------------------------------- |
-| `APNS_TEAM_ID`     | yes      | 10-char Apple Developer Team ID.                                        |
-| `APNS_KEY_ID`      | yes      | 10-char Key ID of the APNs Auth Key (`.p8`).                            |
-| `APNS_AUTH_KEY`    | yes      | PEM contents of the `.p8`. Literal `\n` escapes are accepted.           |
-| `APNS_BUNDLE_ID`   | yes      | App bundle id. The watch topic is derived as `<APNS_BUNDLE_ID>.watch`.  |
-| `APNS_ENVIRONMENT` | no       | `production` → `api.push.apple.com`; anything else → sandbox (default). |
+| Variable                          | Required | Description                                                            |
+| --------------------------------- | -------- | ---------------------------------------------------------------------- |
+| `APNS_TEAM_ID`                    | yes      | 10-char Apple Developer Team ID.                                       |
+| `APNS_KEY_ID`                     | yes      | 10-char Key ID of the APNs Auth Key (`.p8`).                           |
+| `APNS_AUTH_KEY`                   | yes      | PEM contents of the `.p8`. Literal `\n` escapes are accepted.          |
+| `APNS_BUNDLE_ID`                  | yes      | App bundle id. The watch topic is derived as `<APNS_BUNDLE_ID>.watch`. |
+| `APNS_ENVIRONMENT`                | no       | `production` or `development`; defaults to sandbox (`development`).    |
+| `MODERATION_QUEUE_HIGH_THRESHOLD` | no       | Queue count that triggers the opt-in high-queue alert (default `10`).  |
 
 ### About the APNs Auth Key
 
@@ -61,7 +81,7 @@ to the key (and is part of the downloaded filename, `AuthKey_<KEYID>.p8`).
 The APNs **host must match the environment that minted the device token**:
 
 - Xcode/debug builds installed directly on a device get **sandbox** tokens →
-  set `APNS_ENVIRONMENT` to anything other than `production` (sandbox host).
+  set `APNS_ENVIRONMENT=development` (sandbox host).
 - TestFlight and App Store builds get **production** tokens → set
   `APNS_ENVIRONMENT=production`.
 
@@ -114,8 +134,12 @@ The device re-registers the next time the app launches and calls
 ## Troubleshooting
 
 - **No pushes at all** — confirm all four required vars are set
-  (`apnsEnvConfigured()` must be true) and that at least one device row exists
-  in `mobile_devices`.
+  (`isApnsDeliveryConfigured()` must be true) and that at least one device row
+  exists in `mobile_devices`.
+- **Configuration state** — `GET /healthz` reports `apns.status` as
+  `configured`, `disabled`, or `misconfigured`, plus missing/invalid variable
+  names only. Startup and delivery failures are logged as structured Pino
+  events without device tokens or notification payloads.
 - **`BadDeviceToken`** — `APNS_ENVIRONMENT` does not match how the app was
   installed (sandbox vs production). See the gotcha above.
 - **`DeviceTokenNotForTopic`** — `APNS_BUNDLE_ID` does not match the app's

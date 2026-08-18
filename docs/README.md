@@ -11,6 +11,7 @@ rebuilds it from the filesystem; CI fails if it drifts.
 
 - [Authentik setup](authentik-setup.md) — full Authentik walkthrough (default provider)
 - [Authentik onboarding](authentik-onboarding.md) — invite-only, passwordless (passkey) self-serve enrollment
+- [API tokens](api-tokens.md) — scopes, secure storage, lifecycle, and rotation
 - [Other providers](other-providers/) — Keycloak / Auth0 / Google / Dex / generic OIDC
 
 ## Inside the box
@@ -21,6 +22,7 @@ rebuilds it from the filesystem; CI fails if it drifts.
 - [Theme](theme.md) — operator-console visual system, components, accessibility
 - [Transcription providers](transcription-providers.md) — AI transcription + moderation pipeline
 - [Push-mode worker](operator-push.md) — WebSocket/REST contract for app-run transcription, translation, and moderation
+- [Claimed message processing](message-processing.md) — OIDC device leases, no-speech review, and queue progress
 - [Push notifications](push-notifications.md) — APNs setup, badge pipeline, sandbox vs production
 - [Audit log](audit-log.md) — who did what, from where, and when
 - [UI routing](ui-routing.md) — digit shortcuts, keyboard nav, reduced motion
@@ -51,3 +53,4 @@ rebuilds it from the filesystem; CI fails if it drifts.
 - [0011 — Audit trail for write actions](adr/0011-audit-trail-for-write-actions.md)
 - [0012 — Refresh-token rotation across API replicas](adr/0012-refresh-token-rotation-race.md)
 - [0013 — Installations as the data scope](adr/0013-installations-as-data-scope.md)
+- [0014 — Router component telemetry through Grafana](adr/0014-router-component-telemetry.md)

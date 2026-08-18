@@ -12,6 +12,7 @@ import {
   CallSessionDetailSchema,
   CallSessionListSchema,
   CreateApiTokenRequestSchema,
+  CurrentWeatherSchema,
   InstallationCreateSchema,
   InstallationEndSchema,
   InstallationPurgeResultSchema,
@@ -21,8 +22,16 @@ import {
   InstructionCreateSchema,
   InstructionSchema,
   InstructionStatusSchema,
+  InstructionUpdateSchema,
   MessageSchema,
   MessageDecisionSchema,
+  MessageProcessingClaimRequestSchema,
+  MessageProcessingClaimResponseSchema,
+  MessageProcessingCompleteSchema,
+  MessageProcessingFailSchema,
+  MessageProcessingHeartbeatSchema,
+  MessageProcessingLeaseTokenSchema,
+  MessageProcessingSummarySchema,
   MessageStatusSchema,
   MetricFilterCreateSchema,
   MetricFilterSchema,
@@ -32,6 +41,8 @@ import {
   QuestionSchema,
   QuestionStatusSchema,
   StatsOverviewSchema,
+  TelemetrySourceEnvelopeSchema,
+  ThermalHistorySchema,
   TranscriptionListSchema,
   TranscriptionSchema,
   UploadSasRequestSchema,
@@ -49,6 +60,7 @@ import type {
   CallSessionDetail,
   CallSessionList,
   CreateApiTokenRequest,
+  CurrentWeather,
   Installation,
   InstallationCreate,
   InstallationEnd,
@@ -58,8 +70,15 @@ import type {
   Instruction,
   InstructionCreate,
   InstructionStatus,
+  InstructionUpdate,
   Message,
   MessageDecision,
+  MessageProcessingClaimRequest,
+  MessageProcessingClaimResponse,
+  MessageProcessingComplete,
+  MessageProcessingFail,
+  MessageProcessingHeartbeat,
+  MessageProcessingSummary,
   MessageStatus,
   MetricFilter,
   MetricFilterCreate,
@@ -70,6 +89,8 @@ import type {
   QuestionStatus,
   StatsOverview,
   StatsWindow,
+  TelemetrySourceEnvelope,
+  ThermalHistory,
   Transcription,
   TranscriptionList,
   UploadSasRequest,
@@ -104,6 +125,10 @@ const InstructionListSchema = z.object({
 });
 const MessageListSchema = z.object({ items: z.array(MessageSchema) });
 const InstallationListSchema = z.object({ items: z.array(InstallationSchema) });
+const SystemCurrentListSchema = z.object({
+  items: z.array(BoothSystemSnapshotEnvelopeSchema),
+});
+const TelemetrySourceListSchema = z.array(TelemetrySourceEnvelopeSchema);
 // The `/v1/stats/summary` response is an API-internal shape (not exported from
 // `shared`), so we parse the small subset the UI actually reads. Unknown keys
 // (booth snapshot, realtime) are dropped by Zod's default strip behaviour.
@@ -128,6 +153,7 @@ export type QuestionList = z.infer<typeof QuestionListSchema>;
 export type InstructionList = z.infer<typeof InstructionListSchema>;
 export type MessageList = z.infer<typeof MessageListSchema>;
 export type InstallationList = z.infer<typeof InstallationListSchema>;
+export type SystemCurrentList = z.infer<typeof SystemCurrentListSchema>;
 export type StatsSummary = z.infer<typeof StatsSummarySchema>;
 
 const rawApiBaseUrl =
@@ -225,11 +251,41 @@ export async function sha256Hex(file: Blob): Promise<string> {
   return Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export async function uploadBlobToSas(uploadUrl: string, file: Blob): Promise<void> {
+const AUDIO_CONTENT_TYPES_BY_EXTENSION = {
+  aif: "audio/aiff",
+  aiff: "audio/aiff",
+  flac: "audio/flac",
+  m4a: "audio/mp4",
+  mp3: "audio/mpeg",
+  ogg: "audio/ogg",
+  wav: "audio/wav",
+} as const;
+
+export const AUDIO_UPLOAD_ACCEPT =
+  ".flac,.wav,.aif,.aiff,.mp3,.m4a,.ogg,audio/flac,audio/wav,audio/x-wav,audio/aiff,audio/x-aiff,audio/mpeg,audio/mp4,audio/x-m4a,audio/ogg";
+
+export function audioUploadContentType(file: File): UploadSasRequest["contentType"] {
+  const parsedType = UploadSasRequestSchema.shape.contentType.safeParse(file.type.toLowerCase());
+  if (parsedType.success) return parsedType.data;
+
+  const extension = file.name.split(".").at(-1)?.toLowerCase();
+  if (extension && extension in AUDIO_CONTENT_TYPES_BY_EXTENSION) {
+    return AUDIO_CONTENT_TYPES_BY_EXTENSION[
+      extension as keyof typeof AUDIO_CONTENT_TYPES_BY_EXTENSION
+    ];
+  }
+  throw new Error("Unsupported audio file type.");
+}
+
+export async function uploadBlobToSas(
+  uploadUrl: string,
+  file: Blob,
+  contentType: UploadSasRequest["contentType"] = "audio/flac",
+): Promise<void> {
   const response = await fetch(uploadUrl, {
     method: "PUT",
     headers: {
-      "Content-Type": file.type || "audio/flac",
+      "Content-Type": contentType,
       "x-ms-blob-type": "BlockBlob",
     },
     body: file,
@@ -238,7 +294,10 @@ export async function uploadBlobToSas(uploadUrl: string, file: Blob): Promise<vo
 }
 
 export const status = {
-  current: () => apiFetch<BoothStatus>("/v1/status", { schema: BoothStatusSchema }),
+  current: async (): Promise<BoothStatus | null> => {
+    const current = await apiFetch<BoothStatus>("/v1/status", { schema: BoothStatusSchema });
+    return current.isSynthetic === true ? null : current;
+  },
   history: (params: { readonly since?: string; readonly limit?: number } = {}) =>
     apiFetch<StatusHistory>(
       `/v1/status/history${query({ since: params.since, limit: params.limit ?? 50 })}`,
@@ -309,6 +368,12 @@ export const instructions = {
       body: InstructionCreateSchema.parse(input),
       schema: InstructionSchema,
     }),
+  update: (id: string, input: InstructionUpdate) =>
+    apiFetch<Instruction>(`/v1/instructions/${id}`, {
+      method: "PATCH",
+      body: InstructionUpdateSchema.parse(input),
+      schema: InstructionSchema,
+    }),
   activate: (id: string) =>
     apiFetch<Instruction>(`/v1/instructions/${id}/activate`, {
       method: "POST",
@@ -356,6 +421,39 @@ export const messages = {
       method: "POST",
       body: MessageDecisionSchema.parse(input),
       schema: MessageSchema,
+    }),
+};
+
+export const messageProcessing = {
+  summary: () =>
+    apiFetch<MessageProcessingSummary>("/v1/message-processing/summary", {
+      schema: MessageProcessingSummarySchema,
+    }),
+  claim: (input: Partial<MessageProcessingClaimRequest> = {}) =>
+    apiFetch<MessageProcessingClaimResponse>("/v1/message-processing/claim", {
+      method: "POST",
+      body: MessageProcessingClaimRequestSchema.parse(input),
+      schema: MessageProcessingClaimResponseSchema,
+    }),
+  heartbeat: (id: string, input: MessageProcessingHeartbeat) =>
+    apiFetch<{ ok: boolean; leaseExpiresAt: string }>(`/v1/message-processing/${id}/heartbeat`, {
+      method: "POST",
+      body: MessageProcessingHeartbeatSchema.parse(input),
+    }),
+  complete: (id: string, input: MessageProcessingComplete) =>
+    apiFetch<{ message: Message; needs: string[] }>(`/v1/message-processing/${id}/complete`, {
+      method: "POST",
+      body: MessageProcessingCompleteSchema.parse(input),
+    }),
+  release: (id: string, input: { readonly leaseToken: string }) =>
+    apiFetch<void>(`/v1/message-processing/${id}/release`, {
+      method: "POST",
+      body: MessageProcessingLeaseTokenSchema.parse(input),
+    }),
+  fail: (id: string, input: MessageProcessingFail) =>
+    apiFetch<{ ok: boolean; terminal: boolean }>(`/v1/message-processing/${id}/fail`, {
+      method: "POST",
+      body: MessageProcessingFailSchema.parse(input),
     }),
 };
 
@@ -480,11 +578,49 @@ export const auditLogs = {
     ),
 };
 
+export interface ComponentTelemetryCurrentParams {
+  readonly boothId?: string;
+  readonly componentId?: string;
+}
+
+export interface ThermalHistoryParams {
+  readonly boothId: string;
+  readonly componentId?: string;
+  readonly from: string;
+  readonly to: string;
+  readonly stepSeconds?: number;
+}
+
 export const system = {
   current: (boothId: string) =>
     apiFetch<BoothSystemSnapshotEnvelope>(`/v1/system/current${query({ boothId })}`, {
       schema: BoothSystemSnapshotEnvelopeSchema,
     }),
+  currentAll: () =>
+    apiFetch<SystemCurrentList>("/v1/system/current", { schema: SystemCurrentListSchema }),
+  componentsCurrent: (params: ComponentTelemetryCurrentParams = {}) =>
+    apiFetch<readonly TelemetrySourceEnvelope[]>(
+      `/v1/system/components/current${query({
+        boothId: params.boothId,
+        componentId: params.componentId,
+      })}`,
+      { schema: TelemetrySourceListSchema },
+    ),
+  currentWeather: (boothId: string) =>
+    apiFetch<CurrentWeather>(`/v1/system/weather/current${query({ boothId })}`, {
+      schema: CurrentWeatherSchema,
+    }),
+  thermalHistory: (params: ThermalHistoryParams) =>
+    apiFetch<ThermalHistory>(
+      `/v1/system/thermals/history${query({
+        boothId: params.boothId,
+        componentId: params.componentId,
+        from: params.from,
+        to: params.to,
+        stepSeconds: params.stepSeconds,
+      })}`,
+      { schema: ThermalHistorySchema },
+    ),
 };
 
 // A metrics time selection: either a preset window, or an explicit custom
@@ -604,6 +740,30 @@ export const installations = {
   },
 };
 
+export const THERMAL_RANGE_VALUES = ["24h", "7d", "30d"] as const;
+export type ThermalRange = (typeof THERMAL_RANGE_VALUES)[number];
+
+const THERMAL_RANGE_CONFIG: Record<
+  ThermalRange,
+  { readonly durationMs: number; readonly stepSeconds: number }
+> = {
+  "24h": { durationMs: 24 * 60 * 60 * 1000, stepSeconds: 60 },
+  "7d": { durationMs: 7 * 24 * 60 * 60 * 1000, stepSeconds: 300 },
+  "30d": { durationMs: 30 * 24 * 60 * 60 * 1000, stepSeconds: 900 },
+};
+
+export function thermalRangeBounds(
+  range: ThermalRange,
+  now: Date = new Date(),
+): { readonly from: string; readonly to: string; readonly stepSeconds: number } {
+  const config = THERMAL_RANGE_CONFIG[range];
+  return {
+    from: new Date(now.getTime() - config.durationMs).toISOString(),
+    to: now.toISOString(),
+    stepSeconds: config.stepSeconds,
+  };
+}
+
 export const apiQueryKeys = {
   me: ["auth", "me"] as const,
   status: ["status", "current"] as const,
@@ -622,7 +782,13 @@ export const apiQueryKeys = {
   sessions: (boothId?: string, scope?: InstallationScope) =>
     ["sessions", "list", boothId ?? null, scope ?? null] as const,
   session: (id: string) => ["sessions", id] as const,
-  system: (boothId: string) => ["system", boothId] as const,
+  system: (boothId: string) => ["system", "current", "booth", boothId] as const,
+  systemAll: ["system", "current", "all"] as const,
+  systemComponents: (boothId?: string, componentId?: string) =>
+    ["system", "components", boothId ?? null, componentId ?? null] as const,
+  currentWeather: (boothId: string) => ["system", "weather", "current", boothId] as const,
+  thermalHistory: (boothId: string, componentId: string, range: ThermalRange) =>
+    ["system", "thermals", "history", boothId, componentId, range] as const,
   statsOverview: (selection: StatsRangeSelection, scope?: InstallationScope) =>
     ["stats", "overview", selection, scope ?? null] as const,
   statsSummary: (scope?: InstallationScope) => ["stats", "summary", scope ?? null] as const,
@@ -693,6 +859,50 @@ export function useSystemCurrent(boothId: string | undefined) {
     queryFn: () => system.current(boothId ?? ""),
     enabled: typeof boothId === "string" && boothId.length > 0,
     refetchInterval: 5_000,
+  });
+}
+
+export function useSystemCurrentAll() {
+  return useQuery({
+    queryKey: apiQueryKeys.systemAll,
+    queryFn: system.currentAll,
+    refetchInterval: 5_000,
+  });
+}
+
+export function useComponentTelemetryCurrent(params: ComponentTelemetryCurrentParams = {}) {
+  return useQuery({
+    queryKey: apiQueryKeys.systemComponents(params.boothId, params.componentId),
+    queryFn: () => system.componentsCurrent(params),
+    refetchInterval: 5_000,
+  });
+}
+
+export function useCurrentWeather(boothId: string | undefined) {
+  return useQuery({
+    queryKey: apiQueryKeys.currentWeather(boothId ?? ""),
+    queryFn: () => system.currentWeather(boothId ?? ""),
+    enabled: boothId !== undefined,
+    refetchInterval: 60_000,
+  });
+}
+
+export function useThermalHistory(
+  source: Pick<TelemetrySourceEnvelope, "boothId" | "componentId"> | undefined,
+  range: ThermalRange,
+) {
+  return useQuery({
+    queryKey: apiQueryKeys.thermalHistory(source?.boothId ?? "", source?.componentId ?? "", range),
+    queryFn: () => {
+      const bounds = thermalRangeBounds(range);
+      return system.thermalHistory({
+        boothId: source?.boothId ?? "",
+        ...(source ? { componentId: source.componentId } : {}),
+        ...bounds,
+      });
+    },
+    enabled: source !== undefined,
+    refetchInterval: 60_000,
   });
 }
 
@@ -874,6 +1084,15 @@ export function useDeleteInstruction() {
   });
 }
 
+export function useUpdateInstruction() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { readonly id: string; readonly input: InstructionUpdate }) =>
+      instructions.update(id, input),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["instructions", "list"] }),
+  });
+}
+
 export function useActivateInstruction() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -896,6 +1115,11 @@ export interface MessagesListOptions {
   readonly installationId?: InstallationScope;
 }
 
+// The status socket is process-local. This bounded REST refresh lets a console
+// connected to another API replica converge promptly when it misses a message
+// envelope, while the socket remains the low-latency path.
+const MESSAGE_INVALIDATION_POLL_MS = 5_000;
+
 export function useMessagesList(filter: MessageStatus | "all", options: MessagesListOptions = {}) {
   const limit = options.limit ?? 100;
   const statusFilter = MessageStatusSchema.safeParse(filter).success
@@ -910,11 +1134,24 @@ export function useMessagesList(filter: MessageStatus | "all", options: Messages
         limit,
       }),
     enabled: options.enabled ?? true,
+    refetchInterval: MESSAGE_INVALIDATION_POLL_MS,
   });
 }
 
 export function useMessage(id: string) {
-  return useQuery({ queryKey: apiQueryKeys.message(id), queryFn: () => messages.get(id) });
+  return useQuery({
+    queryKey: apiQueryKeys.message(id),
+    queryFn: () => messages.get(id),
+    refetchInterval: MESSAGE_INVALIDATION_POLL_MS,
+  });
+}
+
+export function useMessageProcessingSummary() {
+  return useQuery({
+    queryKey: ["message-processing", "summary"],
+    queryFn: messageProcessing.summary,
+    refetchInterval: MESSAGE_INVALIDATION_POLL_MS,
+  });
 }
 
 export function useDeleteMessage() {
@@ -931,6 +1168,7 @@ export function useMessageTranscriptions(id: string) {
   return useQuery({
     queryKey: apiQueryKeys.transcriptions(id),
     queryFn: () => messages.transcriptions(id),
+    refetchInterval: MESSAGE_INVALIDATION_POLL_MS,
   });
 }
 
@@ -1023,6 +1261,7 @@ export function invalidateInstallationScopedQueries(
   void queryClient.invalidateQueries({ queryKey: ["sessions"] });
   void queryClient.invalidateQueries({ queryKey: ["events"] });
   void queryClient.invalidateQueries({ queryKey: ["questions"] });
+  void queryClient.invalidateQueries({ queryKey: ["status"] });
 }
 
 export function useCreateInstallation() {

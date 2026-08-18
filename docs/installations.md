@@ -55,9 +55,11 @@ hand is still refused — that is a deliberate withdrawal. Late `call_ended`
 events are the mirror image: they are attributed to their session's era and can
 never rewrite a closed era's outcome or frozen summary.
 
-Starting one is settled the same way: naming an auto-created era claims it, so
-two admins starting at once produce one era and one `409` rather than silently
-overwriting each other's metadata.
+Starting one is also a rollover: `POST /v1/installations` first ends whichever
+era is active, then creates the requested era in the same transaction. This
+keeps a powered-on booth from blocking the operator by auto-opening an unnamed
+era between the manual "end" and "start" steps. If no era is active, the new one
+is simply created.
 
 Two admins ending the same era at once is settled inside the transaction: the
 first to claim it wins and the second gets `409`, so `retiredAt` and `endedAt`
@@ -69,8 +71,9 @@ one, and the Installations screen offers it per era.
 
 ## Starting a new one
 
-`POST /v1/installations` opens a fresh era. It returns `409` if one is still
-active — end the current one first.
+`POST /v1/installations` opens a fresh era. If one is still active, the request
+ends it and starts the new era in the same transaction. A `409` means another
+admin's concurrent rollover completed first.
 
 `copyQuestions: true` carries the previous era's questions forward. A copy
 points at the **same `File` row** as the original, so no audio is re-uploaded
@@ -80,9 +83,9 @@ The checkbox is **off by default**; most new installations want a fresh set.
 
 If the booth is powered on when you end an era, it keeps posting events, and a
 booth write with no active installation lazily opens one — a recording must
-never be dropped over admin bookkeeping. Starting a named installation
-therefore **adopts** an active era that has no activity in it yet, rather than
-failing. An era the booth has actually recorded into still returns `409`.
+never be dropped over admin bookkeeping. Starting a named installation therefore
+ends whichever era is active and opens the new one in a single rollover, rather
+than making the operator fight the heartbeat race.
 
 A recording that was already uploading when the era ended is left alone by the
 close-out and re-filed into the open era when the booth calls
@@ -90,9 +93,8 @@ close-out and re-filed into the open era when the booth calls
 started after the rollover, and for the same reason: a finished recording must
 not end up in a queue nobody is watching.
 
-Copy-forward skips a prompt the new era already holds — prompts are unique per
-installation, and an adopted era can already contain questions the operator
-wrote before naming it.
+Copy-forward uses the era the start request just ended when there was one, or
+the last previously ended era otherwise.
 
 Because the rollover archives an era's questions, resolving the prompts of a
 historical message needs `GET /v1/questions?status=any` — the bare list hides
@@ -104,7 +106,8 @@ this for you on the messages list and the message detail view.
 
 ## Reading history
 
-Every list and aggregate endpoint takes an optional `installationId`:
+Scoped collection, aggregate, and current-status endpoints take an optional
+`installationId`:
 
 | Value   | Scope                                     |
 | ------- | ----------------------------------------- |
@@ -113,7 +116,7 @@ Every list and aggregate endpoint takes an optional `installationId`:
 | `all`   | every installation                        |
 
 This applies to `/v1/stats/*`, `/v1/messages`, `/v1/sessions`, `/v1/events`,
-and `/v1/questions`.
+`/v1/questions`, `/v1/status`, and `/v1/status/history`.
 
 Between ending an era and the booth's next write there is no active
 installation. Reads in that window return an empty result rather than opening
@@ -165,10 +168,8 @@ the change when the cache lapses.
 GET    /v1/installations             → every era, newest first
 GET    /v1/installations/current     → the active era (404 if none)
 GET    /v1/installations/:id
-POST   /v1/installations             ← start a new era               (admin)
+POST   /v1/installations             ← end active era, start a new one (admin)
 PATCH  /v1/installations/:id         ← edit name/notes/location      (admin)
-                                       (also how you rename the era the
-                                        booth opened by itself)
 POST   /v1/installations/:id/end     ← close out the active era      (admin)
 GET    /v1/installations/:id/export  → scoped tar archive            (admin)
 DELETE /v1/installations/:id         ← irreversible hard purge       (admin)

@@ -5,6 +5,7 @@ import {
   restoreImportArchive,
 } from "../lib/data-archive.js";
 import { recordAudit } from "../lib/audit.js";
+import { observeModerationQueue } from "../lib/push-events.js";
 import { requireAdmin, type AuthVariables } from "../lib/session.js";
 
 export const adminDataRouter = new Hono<{ Variables: AuthVariables }>();
@@ -33,6 +34,7 @@ adminDataRouter.post("/import", requireAdmin(), async (c) => {
   if (body.byteLength === 0) return c.json({ error: "empty_body" }, 400);
   try {
     const summary = await restoreImportArchive(body);
+    void observeModerationQueue("admin.data.import");
     recordAudit(c, { metadata: { summary: JSON.stringify(summary) } });
     return c.json(summary);
   } catch (error) {

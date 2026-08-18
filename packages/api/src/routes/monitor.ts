@@ -2,6 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import { MonitorSummarySchema } from "@telephone-booth-operator/shared";
 import { Hono } from "hono";
 import { z } from "zod";
+import { Prisma } from "../generated/prisma/client.js";
 import { db } from "../lib/db.js";
 import { resolveInstallationScope, scopeWhere } from "../lib/installation.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
@@ -27,15 +28,23 @@ monitorRouter.get(
     const generatedAt = new Date();
     const dayStartedAt = startOfDayInTimeZone(generatedAt, timeZone);
     const scoped = scopeWhere(await resolveInstallationScope(undefined));
-    const [callsToday, messagesToday] = await Promise.all([
-      db.callSession.count({ where: { ...scoped, startedAt: { gte: dayStartedAt } } }),
-      db.message.count({ where: { ...scoped, receivedAt: { gte: dayStartedAt } } }),
-    ]);
+    const [callsToday, messagesToday, callsTotal, messagesTotal] = await db.$transaction(
+      (tx) =>
+        Promise.all([
+          tx.callSession.count({ where: { ...scoped, startedAt: { gte: dayStartedAt } } }),
+          tx.message.count({ where: { ...scoped, receivedAt: { gte: dayStartedAt } } }),
+          tx.callSession.count({ where: scoped }),
+          tx.message.count({ where: { ...scoped, receivedAt: { not: null } } }),
+        ]),
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
 
     return c.json(
       MonitorSummarySchema.parse({
         callsToday,
         messagesToday,
+        callsTotal,
+        messagesTotal,
         dayStartedAt: dayStartedAt.toISOString(),
         generatedAt: generatedAt.toISOString(),
         timeZone,

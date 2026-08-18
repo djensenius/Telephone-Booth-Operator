@@ -40,6 +40,19 @@ export type FakeMessage = {
   receivedAt: Date | null;
   decidedAt: Date | null;
   decidedById: string | null;
+  reviewClassification: "likely_hangup" | "unclear" | null;
+  reviewRecommendation: "delete" | "review" | null;
+  reviewClassifiedAt: Date | null;
+  reviewClassifiedById: string | null;
+  processingLeaseTokenHash: string | null;
+  processingLeaseExpiresAt: Date | null;
+  processingLeasedAt: Date | null;
+  processingLeasedById: string | null;
+  processingSnapshotHash: string | null;
+  processingAttemptCount: number;
+  processingError: string | null;
+  processingFailedAt: Date | null;
+  processingCompletedAt: Date | null;
   installationId: string | null;
 };
 
@@ -61,6 +74,21 @@ export type FakeSystemSnapshot = {
   snapshot: unknown;
   receivedAt: Date;
   version: string | null;
+};
+
+export type FakeTelemetrySource = {
+  id: string;
+  boothId: string;
+  componentId: string;
+  displayName: string;
+  kind: string;
+  prometheusJob: string;
+  prometheusInstance: string;
+  latestSnapshot: unknown | null;
+  capturedAt: Date | null;
+  receivedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
 };
 
 type FakeSession = {
@@ -144,6 +172,18 @@ export type FakeTranscription = {
   translationAttemptCount: number;
 };
 
+export type FakePushNotificationState = {
+  key: string;
+  active: boolean;
+  threshold: number;
+  badgeCount: number;
+  badgeVersion: number;
+  badgeDeliveredVersion: number;
+  badgeLeaseToken: string | null;
+  badgeLeaseExpiresAt: Date | null;
+  updatedAt: Date;
+};
+
 export type FakeModeration = {
   id: string;
   messageId: string;
@@ -161,6 +201,7 @@ export type FakeModeration = {
   requestedById: string | null;
   createdAt: Date;
   completedAt: Date | null;
+  pushNotifiedAt: Date | null;
   // Pull-worker lease columns (moderation job).
   leasedAt: Date | null;
   leaseToken: string | null;
@@ -199,6 +240,7 @@ export type FakeInstallation = {
   name: string;
   notes: string | null;
   location: string | null;
+  defaultTranscriptionLanguage: string | null;
   startedAt: Date;
   endedAt: Date | null;
   endedById: string | null;
@@ -234,12 +276,14 @@ export const store = {
   messages: new Map<string, FakeMessage>(),
   statuses: [] as FakeStatus[],
   systemSnapshots: new Map<string, FakeSystemSnapshot>(),
+  telemetrySources: new Map<string, FakeTelemetrySource>(),
   sessions: new Map<string, FakeSession>(),
   users: new Map<string, Record<string, unknown>>(),
   boothEvents: [] as FakeBoothEvent[],
   callSessions: new Map<string, FakeCallSession>(),
   transcriptions: new Map<string, FakeTranscription>(),
   moderations: new Map<string, FakeModeration>(),
+  pushNotificationStates: new Map<string, FakePushNotificationState>(),
   mobileDevices: new Map<string, FakeMobileDevice>(),
   metricFilters: new Map<string, FakeMetricFilter>(),
   installations: new Map<string, FakeInstallation>(),
@@ -323,6 +367,20 @@ const matchScalar = (value: unknown, expected: unknown): boolean => {
         return value.localeCompare(expObj.lt) < 0;
       }
       return (value as number) < (expObj.lt as number);
+    }
+    if ("lte" in expObj) {
+      if (value === null || value === undefined) return false;
+      if (value instanceof Date && expObj.lte instanceof Date) {
+        return value.getTime() <= expObj.lte.getTime();
+      }
+      return (value as number) <= (expObj.lte as number);
+    }
+    if ("gt" in expObj) {
+      if (value === null || value === undefined) return false;
+      if (value instanceof Date && expObj.gt instanceof Date) {
+        return value.getTime() > expObj.gt.getTime();
+      }
+      return (value as number) > (expObj.gt as number);
     }
     if ("in" in expObj && Array.isArray(expObj.in)) {
       return expObj.in.includes(value);
@@ -544,6 +602,19 @@ export const seedMessage = (overrides: Partial<FakeMessage> = {}): FakeMessage =
     receivedAt: overrides.receivedAt ?? null,
     decidedAt: overrides.decidedAt ?? null,
     decidedById: overrides.decidedById ?? null,
+    reviewClassification: overrides.reviewClassification ?? null,
+    reviewRecommendation: overrides.reviewRecommendation ?? null,
+    reviewClassifiedAt: overrides.reviewClassifiedAt ?? null,
+    reviewClassifiedById: overrides.reviewClassifiedById ?? null,
+    processingLeaseTokenHash: overrides.processingLeaseTokenHash ?? null,
+    processingLeaseExpiresAt: overrides.processingLeaseExpiresAt ?? null,
+    processingLeasedAt: overrides.processingLeasedAt ?? null,
+    processingLeasedById: overrides.processingLeasedById ?? null,
+    processingSnapshotHash: overrides.processingSnapshotHash ?? null,
+    processingAttemptCount: overrides.processingAttemptCount ?? 0,
+    processingError: overrides.processingError ?? null,
+    processingFailedAt: overrides.processingFailedAt ?? null,
+    processingCompletedAt: overrides.processingCompletedAt ?? null,
     installationId: overrides.installationId ?? DEFAULT_INSTALLATION_ID,
   };
   store.messages.set(message.id, message);
@@ -556,6 +627,7 @@ export const seedInstallation = (overrides: Partial<FakeInstallation> = {}): Fak
     name: overrides.name ?? "Seeded installation",
     notes: overrides.notes ?? null,
     location: overrides.location ?? null,
+    defaultTranscriptionLanguage: overrides.defaultTranscriptionLanguage ?? null,
     startedAt: overrides.startedAt ?? new Date(),
     endedAt: overrides.endedAt ?? null,
     endedById: overrides.endedById ?? null,
@@ -580,6 +652,29 @@ export const seedMobileDevice = (overrides: Partial<FakeMobileDevice> = {}): Fak
   };
   store.mobileDevices.set(device.id, device);
   return device;
+};
+
+export const seedTelemetrySource = (
+  overrides: Partial<FakeTelemetrySource> = {},
+): FakeTelemetrySource => {
+  const now = new Date();
+  const source: FakeTelemetrySource = {
+    id: randomUUID(),
+    boothId: "booth-01",
+    componentId: "router-01",
+    displayName: "Router",
+    kind: "router",
+    prometheusJob: "glinet-router",
+    prometheusInstance: "router-01",
+    latestSnapshot: null,
+    capturedAt: null,
+    receivedAt: null,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  };
+  store.telemetrySources.set(source.id, source);
+  return source;
 };
 
 export const seedStatus = (overrides: Partial<FakeStatus> = {}): FakeStatus => {
@@ -646,12 +741,14 @@ export const resetFakeDb = (): void => {
   store.messages.clear();
   store.statuses.length = 0;
   store.systemSnapshots.clear();
+  store.telemetrySources.clear();
   store.sessions.clear();
   store.users.clear();
   store.boothEvents.length = 0;
   store.callSessions.clear();
   store.transcriptions.clear();
   store.moderations.clear();
+  store.pushNotificationStates.clear();
   store.mobileDevices.clear();
   store.metricFilters.clear();
   store.installations.clear();
@@ -660,6 +757,7 @@ export const resetFakeDb = (): void => {
     name: "Installation 1",
     notes: null,
     location: null,
+    defaultTranscriptionLanguage: null,
     startedAt: new Date("2026-01-01T00:00:00.000Z"),
     endedAt: null,
     endedById: null,
@@ -667,6 +765,31 @@ export const resetFakeDb = (): void => {
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
   });
   store.auditLogs.length = 0;
+};
+
+type FakeStoreSnapshot = Record<string, Map<unknown, unknown> | unknown[]>;
+
+const snapshotFakeStore = (): FakeStoreSnapshot =>
+  Object.fromEntries(
+    Object.entries(store).map(([key, value]) => [
+      key,
+      value instanceof Map ? new Map(value) : [...value],
+    ]),
+  );
+
+const restoreFakeStore = (snapshot: FakeStoreSnapshot): void => {
+  for (const [key, saved] of Object.entries(snapshot)) {
+    const current = store[key as keyof typeof store] as unknown;
+    if (current instanceof Map && saved instanceof Map) {
+      current.clear();
+      for (const [entryKey, value] of saved) current.set(entryKey, value);
+      continue;
+    }
+    if (Array.isArray(current) && Array.isArray(saved)) {
+      current.length = 0;
+      current.push(...saved);
+    }
+  }
 };
 
 // Supports the `transcriptions: { none: {} } | { some: {...} }` relation
@@ -705,32 +828,34 @@ const attachAi = (
   }
   if (include?.transcriptions !== undefined) {
     const tConfig = include.transcriptions as
-      | { orderBy?: { createdAt?: "asc" | "desc" }; take?: number }
+      | {
+          orderBy?:
+            | { createdAt?: "asc" | "desc"; id?: "asc" | "desc" }
+            | Array<{ createdAt?: "asc" | "desc"; id?: "asc" | "desc" }>;
+          take?: number;
+        }
       | true;
     let transcriptions = [...store.transcriptions.values()].filter(
       (row) => row.messageId === message.id,
     );
-    const tOrder = typeof tConfig === "object" ? tConfig.orderBy?.createdAt : undefined;
-    transcriptions = transcriptions.sort((a, b) =>
-      tOrder === "asc"
-        ? a.createdAt.getTime() - b.createdAt.getTime()
-        : b.createdAt.getTime() - a.createdAt.getTime(),
-    );
+    const tOrderBy = typeof tConfig === "object" ? tConfig.orderBy : undefined;
+    transcriptions = sortByCreatedIdOrder(transcriptions, tOrderBy as CreatedIdOrder | undefined);
     const take = typeof tConfig === "object" ? tConfig.take : undefined;
     if (typeof take === "number") transcriptions = transcriptions.slice(0, take);
     (base as Record<string, unknown>).transcriptions = transcriptions;
   }
   if (include?.moderations !== undefined) {
     const mConfig = include.moderations as
-      | { orderBy?: { createdAt?: "asc" | "desc" }; take?: number }
+      | {
+          orderBy?:
+            | { createdAt?: "asc" | "desc"; id?: "asc" | "desc" }
+            | Array<{ createdAt?: "asc" | "desc"; id?: "asc" | "desc" }>;
+          take?: number;
+        }
       | true;
     let moderations = [...store.moderations.values()].filter((row) => row.messageId === message.id);
-    const mOrder = typeof mConfig === "object" ? mConfig.orderBy?.createdAt : undefined;
-    moderations = moderations.sort((a, b) =>
-      mOrder === "asc"
-        ? a.createdAt.getTime() - b.createdAt.getTime()
-        : b.createdAt.getTime() - a.createdAt.getTime(),
-    );
+    const mOrderBy = typeof mConfig === "object" ? mConfig.orderBy : undefined;
+    moderations = sortByCreatedIdOrder(moderations, mOrderBy as CreatedIdOrder | undefined);
     const take = typeof mConfig === "object" ? mConfig.take : undefined;
     if (typeof take === "number") moderations = moderations.slice(0, take);
     (base as Record<string, unknown>).moderations = moderations;
@@ -990,19 +1115,24 @@ export const fakeDb = {
       const selected = typeof take === "number" ? instructions.slice(0, take) : instructions;
       return include?.audio ? selected.map(attachAudio) : selected;
     },
+    count: async ({ where = {} }: { where?: Record<string, unknown> } = {}) =>
+      [...store.instructions.values()].filter((instruction) => matchesWhere(instruction, where))
+        .length,
     findFirst: async ({
       where = {},
+      skip = 0,
       include,
       orderBy,
     }: {
       where?: Record<string, unknown>;
+      skip?: number;
       include?: { audio?: boolean };
       orderBy?: CreatedIdOrder;
     }) => {
       const instruction = sortByCreatedIdOrder(
         [...store.instructions.values()].filter((item) => matchesWhere(item, where)),
         orderBy,
-      )[0];
+      )[skip];
       if (!instruction) return null;
       return include?.audio ? attachAudio(instruction) : instruction;
     },
@@ -1061,6 +1191,7 @@ export const fakeDb = {
         id?: boolean;
         status?: boolean;
         installationId?: boolean;
+        processingAttemptCount?: boolean;
         audio?: boolean | { select?: Record<string, boolean> };
       };
     }) => {
@@ -1073,6 +1204,9 @@ export const fakeDb = {
         if (select.id) out.id = message.id;
         if (select.status) out.status = message.status;
         if (select.installationId) out.installationId = message.installationId ?? null;
+        if (select.processingAttemptCount) {
+          out.processingAttemptCount = message.processingAttemptCount;
+        }
         if (select.audio) {
           const audio = store.files.get(message.audioId) ?? null;
           if (audio === null) {
@@ -1097,6 +1231,7 @@ export const fakeDb = {
       where = {},
       include,
       take,
+      skip = 0,
       orderBy,
       select,
     }: {
@@ -1108,10 +1243,10 @@ export const fakeDb = {
       };
       include?: { audio?: boolean; transcriptions?: unknown; moderations?: unknown };
       take?: number;
+      skip?: number;
       orderBy?: unknown;
       select?: { audio?: { select?: Record<string, boolean> } };
     }) => {
-      void orderBy;
       let messages = [...store.messages.values()];
       if (where.installationId !== undefined) {
         messages = messages.filter((message) =>
@@ -1132,7 +1267,8 @@ export const fakeDb = {
           clauses.some((clause) => matchesTranscriptionFilter(message, clause)),
         );
       }
-      messages = messages.sort(byCreatedDesc);
+      messages = sortByCreatedIdOrder(messages, orderBy as CreatedIdOrder | undefined);
+      if (skip > 0) messages = messages.slice(skip);
       if (take !== undefined) messages = messages.slice(0, take);
       if (select?.audio) return messages.map((message) => projectAudio(message, select.audio));
       if (include) return messages.map((message) => attachAi(message, include));
@@ -1169,6 +1305,19 @@ export const fakeDb = {
         receivedAt: null,
         decidedAt: null,
         decidedById: null,
+        reviewClassification: null,
+        reviewRecommendation: null,
+        reviewClassifiedAt: null,
+        reviewClassifiedById: null,
+        processingLeaseTokenHash: null,
+        processingLeaseExpiresAt: null,
+        processingLeasedAt: null,
+        processingLeasedById: null,
+        processingSnapshotHash: null,
+        processingAttemptCount: 0,
+        processingError: null,
+        processingFailedAt: null,
+        processingCompletedAt: null,
         installationId: data.installationId ?? DEFAULT_INSTALLATION_ID,
       };
       store.messages.set(message.id, message);
@@ -1193,11 +1342,17 @@ export const fakeDb = {
       store.messages.set(where.id, message);
       return message;
     },
-    updateMany: async ({ where = {}, data }: { where?: Predicate; data: Partial<FakeMessage> }) => {
+    updateMany: async ({
+      where = {},
+      data,
+    }: {
+      where?: Predicate;
+      data: Record<string, unknown>;
+    }) => {
       let count = 0;
       for (const message of [...store.messages.values()]) {
         if (!matchesWhere(message, where ?? {})) continue;
-        store.messages.set(message.id, { ...message, ...data });
+        store.messages.set(message.id, applyUpdate(message, data));
         count += 1;
       }
       return { count };
@@ -1244,7 +1399,7 @@ export const fakeDb = {
       where?: {
         status?: string | { in?: string[]; not?: string };
         createdAt?: { gte: Date };
-        receivedAt?: { gte: Date };
+        receivedAt?: { gte?: Date; not?: null };
         installationId?: ScopeFilter;
       };
     } = {}) => {
@@ -1273,6 +1428,9 @@ export const fakeDb = {
         messages = messages.filter(
           (message) => message.receivedAt !== null && message.receivedAt >= receivedAfter,
         );
+      }
+      if (where.receivedAt?.not === null) {
+        messages = messages.filter((message) => message.receivedAt !== null);
       }
       return messages.length;
     },
@@ -1475,6 +1633,7 @@ export const fakeDb = {
         requestedById: data.requestedById ?? null,
         createdAt: data.createdAt ?? new Date(),
         completedAt: data.completedAt ?? null,
+        pushNotifiedAt: data.pushNotifiedAt ?? null,
         leasedAt: data.leasedAt ?? null,
         leaseToken: data.leaseToken ?? null,
         leaseExpiresAt: data.leaseExpiresAt ?? null,
@@ -1679,13 +1838,22 @@ export const fakeDb = {
       orderBy,
       select,
     }: {
-      where?: { updatedAt?: { gte?: Date; lt?: Date }; id?: { lt?: number } };
+      where?: {
+        updatedAt?: { gte?: Date; lt?: Date };
+        id?: { lt?: number };
+        installationId?: ScopeFilter;
+      };
       take?: number;
       skip?: number;
       orderBy?: StatusOrder | StatusOrder[];
       select?: { id?: boolean; updatedAt?: boolean };
     }) => {
       let statuses = [...store.statuses];
+      if (where.installationId !== undefined) {
+        statuses = statuses.filter((status) =>
+          matchesScope(status.installationId, where.installationId),
+        );
+      }
       if (where.updatedAt?.gte)
         statuses = statuses.filter((status) => status.updatedAt >= where.updatedAt!.gte!);
       if (where.updatedAt?.lt)
@@ -1757,6 +1925,96 @@ export const fakeDb = {
       [...store.systemSnapshots.values()]
         .sort((a, b) => a.boothId.localeCompare(b.boothId))
         .map((row) => ({ ...row, receivedAt: cloneDate(row.receivedAt) })),
+  },
+  telemetrySource: {
+    findUnique: async ({
+      where,
+    }: {
+      where: {
+        id?: string;
+        boothId_componentId?: { boothId: string; componentId: string };
+      };
+    }) => {
+      const source = where.id
+        ? store.telemetrySources.get(where.id)
+        : [...store.telemetrySources.values()].find(
+            (row) =>
+              row.boothId === where.boothId_componentId?.boothId &&
+              row.componentId === where.boothId_componentId.componentId,
+          );
+      return source ? { ...source } : null;
+    },
+    findMany: async ({
+      where = {},
+    }: {
+      where?: { boothId?: string; componentId?: string; id?: { in?: string[] } };
+      orderBy?: unknown;
+    } = {}) =>
+      [...store.telemetrySources.values()]
+        .filter((source) => {
+          if (where.boothId !== undefined && source.boothId !== where.boothId) return false;
+          if (where.componentId !== undefined && source.componentId !== where.componentId) {
+            return false;
+          }
+          if (where.id?.in !== undefined && !where.id.in.includes(source.id)) return false;
+          return true;
+        })
+        .sort(
+          (a, b) =>
+            a.boothId.localeCompare(b.boothId) || a.componentId.localeCompare(b.componentId),
+        )
+        .map((source) => ({ ...source })),
+    updateMany: async ({
+      where,
+      data,
+    }: {
+      where: {
+        id: string;
+        OR?: Array<{ capturedAt: null } | { capturedAt: { lte: Date } }>;
+      };
+      data: Partial<FakeTelemetrySource>;
+    }) => {
+      const source = store.telemetrySources.get(where.id);
+      if (!source) return { count: 0 };
+      const timestampMatches =
+        where.OR?.some((condition) =>
+          condition.capturedAt === null
+            ? source.capturedAt === null
+            : source.capturedAt !== null && source.capturedAt <= condition.capturedAt.lte,
+        ) ?? true;
+      if (!timestampMatches) return { count: 0 };
+      store.telemetrySources.set(where.id, {
+        ...source,
+        ...data,
+        updatedAt: new Date(),
+      });
+      return { count: 1 };
+    },
+    upsert: async ({
+      where,
+      create,
+      update,
+    }: {
+      where: { id: string };
+      create: FakeTelemetrySource;
+      update: Partial<FakeTelemetrySource>;
+    }) => {
+      const existing = store.telemetrySources.get(where.id);
+      const normalizedCreate = {
+        ...create,
+        latestSnapshot:
+          create.latestSnapshot === Prisma.DbNull ? null : (create.latestSnapshot ?? null),
+      };
+      const normalizedUpdate = {
+        ...update,
+        ...(update.latestSnapshot === Prisma.DbNull ? { latestSnapshot: null } : {}),
+      };
+      const source = existing
+        ? { ...existing, ...normalizedUpdate, updatedAt: new Date() }
+        : { ...normalizedCreate, id: where.id };
+      store.telemetrySources.set(where.id, source);
+      return source;
+    },
   },
   operatorSession: {
     findUnique: async ({
@@ -2055,6 +2313,7 @@ export const fakeDb = {
         name: data.name,
         notes: data.notes ?? null,
         location: data.location ?? null,
+        defaultTranscriptionLanguage: data.defaultTranscriptionLanguage ?? null,
         startedAt: data.startedAt ?? now,
         endedAt: data.endedAt ?? null,
         endedById: data.endedById ?? null,
@@ -2174,6 +2433,68 @@ export const fakeDb = {
       return { count: removed };
     },
   },
+  pushNotificationState: {
+    findUnique: async ({ where }: { where: { key: string } }) =>
+      store.pushNotificationStates.get(where.key) ?? null,
+    upsert: async ({
+      where,
+      create,
+    }: {
+      where: { key: string };
+      create: {
+        key: string;
+        active: boolean;
+        threshold: number;
+        badgeCount?: number;
+        badgeVersion?: number;
+        badgeDeliveredVersion?: number;
+      };
+      update: Record<string, never>;
+    }) => {
+      const existing = store.pushNotificationStates.get(where.key);
+      if (existing) return existing;
+      const row: FakePushNotificationState = {
+        ...create,
+        badgeCount: create.badgeCount ?? 0,
+        badgeVersion: create.badgeVersion ?? 0,
+        badgeDeliveredVersion: create.badgeDeliveredVersion ?? 0,
+        badgeLeaseToken: null,
+        badgeLeaseExpiresAt: null,
+        updatedAt: new Date(),
+      };
+      store.pushNotificationStates.set(row.key, row);
+      return row;
+    },
+    update: async ({ where, data }: { where: { key: string }; data: Record<string, unknown> }) => {
+      const existing = store.pushNotificationStates.get(where.key);
+      if (!existing) throw new Error("push notification state not found");
+      const updated = {
+        ...applyUpdate(existing as unknown as Record<string, unknown>, data),
+        updatedAt: new Date(),
+      } as FakePushNotificationState;
+      store.pushNotificationStates.set(where.key, updated);
+      return updated;
+    },
+    updateMany: async ({
+      where,
+      data,
+    }: {
+      where: Record<string, unknown>;
+      data: Record<string, unknown>;
+    }) => {
+      let count = 0;
+      for (const [key, existing] of store.pushNotificationStates) {
+        if (!matchesWhere(existing as unknown as Record<string, unknown>, where)) continue;
+        const updated = {
+          ...applyUpdate(existing as unknown as Record<string, unknown>, data),
+          updatedAt: new Date(),
+        } as FakePushNotificationState;
+        store.pushNotificationStates.set(key, updated);
+        count += 1;
+      }
+      return { count };
+    },
+  },
   apiToken: {
     findMany: async () => [] as Record<string, unknown>[],
     upsert: async ({
@@ -2184,16 +2505,44 @@ export const fakeDb = {
       update: Record<string, unknown>;
     }) => create,
   },
-  $transaction: async <T>(fn: (tx: typeof fakeDb) => Promise<T>): Promise<T> => fn(fakeDb),
+  $transaction: async <T>(
+    fn: (tx: typeof fakeDb) => Promise<T>,
+    _options?: { isolationLevel?: string; maxWait?: number; timeout?: number },
+  ): Promise<T> => {
+    const snapshot = snapshotFakeStore();
+    try {
+      return await fn(fakeDb);
+    } catch (error) {
+      restoreFakeStore(snapshot);
+      throw error;
+    }
+  },
   // The era row is locked with raw SQL — `FOR SHARE` for a writer, `FOR UPDATE`
   // for the close-out — because Prisma has no first-class row lock. There is no
   // concurrency to serialise in a test, so the fake only has to answer the
   // question the lock asks: is this era still open?
   $queryRaw: async (
-    _strings: TemplateStringsArray,
+    strings: TemplateStringsArray,
     ...values: unknown[]
-  ): Promise<{ endedAt: Date | null }[]> => {
+  ): Promise<Array<{ endedAt: Date | null } | { id: string }>> => {
     const id = values.find((value) => typeof value === "string");
+    if (strings.join("").includes('FROM "Message"')) {
+      const message = typeof id === "string" ? store.messages.get(id) : undefined;
+      if (strings.join("").includes('"processingLeaseTokenHash"')) {
+        const [messageId, tokenHash, expiresAt, userId] = values;
+        const leaseMatches =
+          typeof messageId === "string" &&
+          typeof tokenHash === "string" &&
+          expiresAt instanceof Date &&
+          typeof userId === "string" &&
+          message?.processingLeaseTokenHash === tokenHash &&
+          message.processingLeaseExpiresAt !== null &&
+          message.processingLeaseExpiresAt > expiresAt &&
+          message.processingLeasedById === userId;
+        return leaseMatches && message ? [{ id: message.id }] : [];
+      }
+      return message ? [{ id: message.id }] : [];
+    }
     const era = typeof id === "string" ? store.installations.get(id) : undefined;
     return era ? [{ endedAt: era.endedAt }] : [];
   },

@@ -113,6 +113,8 @@ let sessionsUrls: string[] = [];
 let eventsUrls: string[] = [];
 let statsUrls: string[] = [];
 let lastDecision: { decision: string; notes?: string } | null = null;
+let uploadReservationBody: unknown;
+let blobUploadContentType: string | null = null;
 let writeTextMock: ReturnType<typeof vi.fn>;
 
 const server = setupServer(
@@ -147,6 +149,7 @@ const server = setupServer(
   http.get("http://localhost/v1/system/current", () =>
     HttpResponse.json({ error: "no snapshot" }, { status: 404 }),
   ),
+  http.get("http://localhost/v1/system/components/current", () => HttpResponse.json([])),
   http.get("http://localhost/v1/questions", ({ request }) => {
     lastQuestionsUrl = request.url;
     questionsUrls.push(request.url);
@@ -155,8 +158,9 @@ const server = setupServer(
       nextCursor: null,
     });
   }),
-  http.post("http://localhost/v1/uploads/sas", () =>
-    HttpResponse.json(
+  http.post("http://localhost/v1/uploads/sas", async ({ request }) => {
+    uploadReservationBody = await request.json();
+    return HttpResponse.json(
       {
         uploadUrl: "https://blob.example/upload",
         blobName: "questions/aa/file.flac",
@@ -164,9 +168,12 @@ const server = setupServer(
         audioFileId,
       },
       { status: 201 },
-    ),
-  ),
-  http.put("https://blob.example/upload", () => new HttpResponse(null, { status: 201 })),
+    );
+  }),
+  http.put("https://blob.example/upload", ({ request }) => {
+    blobUploadContentType = request.headers.get("content-type");
+    return new HttpResponse(null, { status: 201 });
+  }),
   http.post("http://localhost/v1/questions", () => {
     createdQuestion = true;
     return HttpResponse.json(questionTwo, { status: 201 });
@@ -365,6 +372,8 @@ beforeEach(() => {
   eventsUrls = [];
   statsUrls = [];
   lastDecision = null;
+  uploadReservationBody = undefined;
+  blobUploadContentType = null;
   installBrowserStubs();
   window.localStorage.clear();
   document.documentElement.className = "";
@@ -552,13 +561,31 @@ describe("Questions feature", () => {
     fireEvent.change(screen.getByLabelText("Prompt"), {
       target: { value: "Who lifted the receiver?" },
     });
-    fireEvent.change(screen.getByLabelText("Audio file (FLAC)"), {
-      target: { files: [new File(["audio"], "q.flac", { type: "audio/flac" })] },
+    fireEvent.change(screen.getByLabelText("Audio file"), {
+      target: { files: [new File(["audio"], "q.wav", { type: "audio/wav" })] },
     });
     const form = screen.getByRole("dialog", { name: "New question" }).querySelector("form");
     expect(form).not.toBeNull();
     fireEvent.submit(form as HTMLFormElement);
     await waitFor(() => expect(createdQuestion).toBe(true), { timeout: 3_000 });
+    expect(uploadReservationBody).toMatchObject({ contentType: "audio/wav" });
+    expect(blobUploadContentType).toBe("audio/wav");
+  });
+
+  it("reports unsupported question audio without leaving upload status active", async () => {
+    renderPath("/questions");
+    fireEvent.click(await screen.findByText("New question"));
+    fireEvent.change(screen.getByLabelText("Prompt"), {
+      target: { value: "Who lifted the receiver?" },
+    });
+    fireEvent.change(screen.getByLabelText("Audio file"), {
+      target: { files: [new File(["audio"], "q.aac", { type: "audio/aac" })] },
+    });
+    const form = screen.getByRole("dialog", { name: "New question" }).querySelector("form");
+    expect(form).not.toBeNull();
+    fireEvent.submit(form as HTMLFormElement);
+    expect(await screen.findByText("The question could not be filed.")).toBeTruthy();
+    expect(screen.queryByText("Reserving a clean line for the audio…")).toBeNull();
   });
 
   it("shows the delete confirmation", async () => {

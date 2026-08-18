@@ -30,6 +30,7 @@ import { StatsScreen } from "../features/stats/StatsScreen.js";
 import { StatusScreen } from "../features/status/StatusScreen.js";
 import { LiveSystemPanel } from "../features/system/LiveSystemPanel.js";
 import { SystemVitalsStrip } from "../features/system/SystemVitalsStrip.js";
+import { ThermalsScreen } from "../features/thermals/ThermalsScreen.js";
 import { TokensScreen } from "../features/tokens/TokensScreen.js";
 import { useNumericNavigation } from "../hooks/useNumericNavigation.js";
 import { BoothEnvelopeBridge, BoothWebSocketProvider } from "../lib/booth-websocket.js";
@@ -79,13 +80,24 @@ const buildDateFormatter = new Intl.DateTimeFormat(undefined, {
   timeStyle: "short",
 });
 
+const MOBILE_APP_STORE_URL = "https://apps.apple.com/us/app/telephone-booth-operator/id6775110084";
+
 function BuildFooter(): JSX.Element {
   const buildDateIso = import.meta.env.VITE_BUILD_DATE ?? "1970-01-01T00:00:00.000Z";
   const buildDate = new Date(buildDateIso);
   const formattedBuildDate = buildDateFormatter.format(buildDate);
 
   return (
-    <footer className="build-footer" aria-label="Build information">
+    <footer className="build-footer" aria-label="Application information">
+      <a
+        href={MOBILE_APP_STORE_URL}
+        target="_blank"
+        rel="noreferrer"
+        aria-label="Download Telephone Booth Operator on the App Store"
+      >
+        App Store
+      </a>
+      <span aria-hidden="true">·</span>
       <span>Build date</span>
       <time dateTime={buildDateIso}>{formattedBuildDate}</time>
     </footer>
@@ -142,6 +154,9 @@ function AppLayout(): JSX.Element {
                   </li>
                   <li>
                     <Link to="/system">Live system</Link>
+                  </li>
+                  <li>
+                    <Link to="/thermals">Thermals</Link>
                   </li>
                   <li>
                     <Link to="/events">Events</Link>
@@ -262,6 +277,12 @@ const systemRoute = createRoute({
   component: () => protectedScreen(<LiveSystemPanel />),
 });
 
+const thermalsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/thermals",
+  component: () => protectedScreen(<ThermalsScreen />),
+});
+
 const eventsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/events",
@@ -338,6 +359,7 @@ const routeTree = rootRoute.addChildren([
   debugRoute,
   instructionsRoute,
   systemRoute,
+  thermalsRoute,
   eventsRoute,
   sessionsRoute,
   statsRoute,

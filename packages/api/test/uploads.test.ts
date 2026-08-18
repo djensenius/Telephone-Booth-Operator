@@ -66,6 +66,23 @@ describe("uploads routes", () => {
     expect(body.audioFileId).toEqual(expect.any(String));
   });
 
+  it("uses an extension matching non-FLAC operator audio", async () => {
+    const app = createApp();
+    const sha256 = "e".repeat(64);
+    const res = await app.request("/v1/uploads/sas", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: operatorCookie() },
+      body: JSON.stringify({
+        kind: "question-audio",
+        sha256,
+        sizeBytes: 100,
+        contentType: "audio/wav",
+      }),
+    });
+    expect(res.status, await res.clone().text()).toBe(201);
+    expect(await res.json()).toMatchObject({ blobName: `questions/ee/${sha256}.wav` });
+  });
+
   it("rejects malformed sha256 values", async () => {
     const app = createApp();
     const res = await app.request("/v1/uploads/sas", {

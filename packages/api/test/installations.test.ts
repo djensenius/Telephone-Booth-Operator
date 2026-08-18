@@ -32,6 +32,7 @@ import {
   requireActiveInstallation,
   resetInstallationCacheForTests,
 } from "../src/lib/installation.js";
+import { resetApnsSenderForTests, setApnsSenderForTests } from "../src/lib/apns.js";
 import { resetStatsCacheForTests, statsCacheSizesForTests } from "../src/routes/stats.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { fakeBlobs, resetFakeAzure, seedBlobData } from "./support/fake-azure.js";
@@ -56,6 +57,7 @@ const setup = (): void => {
   resetSessionCryptoForTests();
   resetFakeDb();
   resetFakeAzure();
+  resetApnsSenderForTests();
   resetInstallationCacheForTests();
   resetStatsCacheForTests();
 };
@@ -128,10 +130,74 @@ describe("installations", () => {
       const res = await createApp().request("/v1/installations/current", {
         headers: operatorHeaders(),
       });
+
       expect(res.status).toBe(200);
       const body = (await res.json()) as { id: string; endedAt: string | null };
       expect(body.id).toBe(DEFAULT_INSTALLATION_ID);
       expect(body.endedAt).toBeNull();
+    });
+
+    describe("default transcription language", () => {
+      it("lets an admin set a nullable BCP-47 default", async () => {
+        const app = createApp();
+        const update = await app.request(`/v1/installations/${DEFAULT_INSTALLATION_ID}`, {
+          method: "PATCH",
+          headers: jsonHeaders(adminHeaders()),
+          body: JSON.stringify({ defaultTranscriptionLanguage: "fr-CA" }),
+        });
+        expect(update.status, await update.clone().text()).toBe(200);
+        expect(await update.json()).toMatchObject({ defaultTranscriptionLanguage: "fr-CA" });
+
+        const invalid = await app.request(`/v1/installations/${DEFAULT_INSTALLATION_ID}`, {
+          method: "PATCH",
+          headers: jsonHeaders(adminHeaders()),
+          body: JSON.stringify({ defaultTranscriptionLanguage: "not a language" }),
+        });
+        expect(invalid.status).toBe(400);
+      });
+
+      it("canonicalizes extension and private-use BCP-47 tags", async () => {
+        const app = createApp();
+        const extension = await app.request(`/v1/installations/${DEFAULT_INSTALLATION_ID}`, {
+          method: "PATCH",
+          headers: jsonHeaders(adminHeaders()),
+          body: JSON.stringify({ defaultTranscriptionLanguage: "EN-u-ca-gregory" }),
+        });
+        expect(extension.status, await extension.clone().text()).toBe(200);
+        expect(await extension.json()).toMatchObject({
+          defaultTranscriptionLanguage: "en-u-ca-gregory",
+        });
+
+        const privateUse = await app.request(`/v1/installations/${DEFAULT_INSTALLATION_ID}`, {
+          method: "PATCH",
+          headers: jsonHeaders(adminHeaders()),
+          body: JSON.stringify({ defaultTranscriptionLanguage: "x-Private-Operator" }),
+        });
+        expect(privateUse.status, await privateUse.clone().text()).toBe(200);
+        expect(await privateUse.json()).toMatchObject({
+          defaultTranscriptionLanguage: "x-private-operator",
+        });
+
+        const grandfathered = await app.request(`/v1/installations/${DEFAULT_INSTALLATION_ID}`, {
+          method: "PATCH",
+          headers: jsonHeaders(adminHeaders()),
+          body: JSON.stringify({ defaultTranscriptionLanguage: "cel-gaulish" }),
+        });
+        expect(grandfathered.status, await grandfathered.clone().text()).toBe(200);
+        expect(await grandfathered.json()).toMatchObject({
+          defaultTranscriptionLanguage: "xtg-x-cel-gaulish",
+        });
+
+        const malformedExtension = await app.request(
+          `/v1/installations/${DEFAULT_INSTALLATION_ID}`,
+          {
+            method: "PATCH",
+            headers: jsonHeaders(adminHeaders()),
+            body: JSON.stringify({ defaultTranscriptionLanguage: "en-u" }),
+          },
+        );
+        expect(malformedExtension.status).toBe(400);
+      });
     });
 
     it("404s once the era has been closed and none restarted", async () => {
@@ -166,7 +232,13 @@ describe("installations", () => {
       };
       expect(body.isActive).toBe(false);
       expect(body.endedAt).not.toBeNull();
-      expect(body.summary).toMatchObject({ calls: 2, messages: 2, questions: 1, events: 1 });
+      expect(body.summary).toMatchObject({
+        calls: 2,
+        messages: 1,
+        allRecordings: 2,
+        questions: 1,
+        events: 1,
+      });
 
       // Open sessions are closed out with a distinguishable outcome.
       expect(store.callSessions.get("open-session")?.endedAt).not.toBeNull();
@@ -182,6 +254,46 @@ describe("installations", () => {
       expect(store.questions.get(question.id)?.status).toBe("archived");
     });
 
+    it("normalizes frozen summaries written before recording labels changed", async () => {
+      const legacy = store.installations.get(DEFAULT_INSTALLATION_ID);
+      if (!legacy) throw new Error("expected default installation");
+      legacy.endedAt = new Date("2026-02-01T00:00:00.000Z");
+      legacy.summary = {
+        calls: 3,
+        messages: 12,
+        messagesApproved: 7,
+        messagesRejected: 4,
+        questions: 2,
+        events: 9,
+        recordedMs: 20_000,
+        firstActivityAt: null,
+        lastActivityAt: null,
+      };
+
+      const response = await createApp().request("/v1/installations", {
+        headers: operatorHeaders(),
+      });
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        items: Array<{
+          summary: {
+            messages: number;
+            allRecordings: number;
+            messagesApproved: number;
+            byStatus: Record<string, number>;
+          } | null;
+        }>;
+      };
+      expect(body.items[0]?.summary).toEqual(
+        expect.objectContaining({
+          messages: 7,
+          allRecordings: 12,
+          messagesApproved: 7,
+          byStatus: {},
+        }),
+      );
+    });
+
     it("does not delete any data", async () => {
       const message = seedMessage({ status: "pending" });
       seedCallSession({ id: "s1" });
@@ -192,6 +304,25 @@ describe("installations", () => {
       expect(store.messages.get(message.id)).toBeDefined();
       expect(store.callSessions.get("s1")).toBeDefined();
       expect(store.boothEvents).toHaveLength(1);
+    });
+
+    it("resets the badge after ending an installation", async () => {
+      seedMessage({ status: "pending" });
+      seedMobileDevice({
+        userId: "operator-1",
+        preferences: { messageReceived: false },
+      });
+      const badges: number[] = [];
+      setApnsSenderForTests({
+        send: async (_userId, notification) => {
+          if (notification.kind === "badge") badges.push(notification.badge);
+        },
+      });
+
+      expect((await endDefault(createApp())).status).toBe(200);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(badges.at(-1)).toBe(0);
     });
 
     it("rejects ending an already-ended installation", async () => {
@@ -227,15 +358,62 @@ describe("installations", () => {
   });
 
   describe("starting a new installation", () => {
-    it("refuses while one is still active and has recorded something", async () => {
+    it("ends the active installation before starting the new one", async () => {
       seedCallSession({ id: "live-call" });
+      const pending = seedMessage({ status: "pending" });
+      seedMobileDevice({ userId: "operator-1" });
+      const badges: number[] = [];
+      setApnsSenderForTests({
+        send: async (_userId, notification) => {
+          if (notification.kind === "badge") badges.push(notification.badge);
+        },
+      });
+
       const res = await createApp().request("/v1/installations", {
         method: "POST",
         headers: jsonHeaders(adminHeaders()),
         body: JSON.stringify({ name: "Second" }),
       });
-      expect(res.status).toBe(409);
-      expect(await res.json()).toMatchObject({ error: "installation_already_active" });
+
+      expect(res.status, await res.clone().text()).toBe(201);
+      const body = (await res.json()) as { id: string; name: string; isActive: boolean };
+      expect(body).toMatchObject({ name: "Second", isActive: true });
+      expect(body.id).not.toBe(DEFAULT_INSTALLATION_ID);
+
+      const previous = store.installations.get(DEFAULT_INSTALLATION_ID);
+      expect(previous?.endedAt).toBeInstanceOf(Date);
+      expect(previous?.summary).toMatchObject({ calls: 1, allRecordings: 1 });
+      expect(store.callSessions.get("live-call")?.outcome).toBe("installation_ended");
+      expect(store.messages.get(pending.id)?.status).toBe("rejected");
+      expect([...store.installations.values()].filter((row) => row.endedAt === null)).toHaveLength(
+        1,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(badges.at(-1)).toBe(0);
+    });
+
+    it("records one rollover audit entry with both installation ids", async () => {
+      const res = await createApp().request("/v1/installations", {
+        method: "POST",
+        headers: jsonHeaders(adminHeaders()),
+        body: JSON.stringify({ name: "Second" }),
+      });
+
+      expect(res.status, await res.clone().text()).toBe(201);
+      const created = (await res.json()) as { id: string };
+      expect(store.auditLogs).toHaveLength(1);
+      expect(store.auditLogs[0]).toMatchObject({
+        action: "installation.rollover",
+        targetType: "installation",
+        targetId: created.id,
+        metadata: {
+          startedInstallationId: created.id,
+          startedInstallationName: "Second",
+          endedInstallationId: DEFAULT_INSTALLATION_ID,
+          endedInstallationName: "Installation 1",
+          copyQuestions: false,
+        },
+      });
     });
 
     it("starts a blank slate once the previous era ended", async () => {
@@ -257,7 +435,7 @@ describe("installations", () => {
       expect(carried).toHaveLength(0);
     });
 
-    it("adopts an era the booth auto-created before the operator named one", async () => {
+    it("closes an era the booth auto-created before the operator named one", async () => {
       const app = createApp();
       expect((await endDefault(app)).status).toBe(200);
 
@@ -268,7 +446,7 @@ describe("installations", () => {
       const opened = [...store.installations.values()].find((row) => row.endedAt === null);
       expect(opened).toBeDefined();
 
-      // Naming the era must not collide with the one the booth just opened.
+      // Starting a named era must not collide with the one the booth just opened.
       const res = await app.request("/v1/installations", {
         method: "POST",
         headers: jsonHeaders(adminHeaders()),
@@ -277,7 +455,8 @@ describe("installations", () => {
       expect(res.status, await res.clone().text()).toBe(201);
       const body = (await res.json()) as { id: string; name: string };
       expect(body.name).toBe("Nuit Blanche");
-      expect(body.id).toBe(opened?.id);
+      expect(body.id).not.toBe(opened?.id);
+      expect(store.installations.get(opened?.id ?? "")?.endedAt).toBeInstanceOf(Date);
       expect([...store.installations.values()].filter((r) => r.endedAt === null)).toHaveLength(1);
     });
 
@@ -671,6 +850,8 @@ describe("installations", () => {
         body: JSON.stringify({ durationMs: 3000, sha256: "e".repeat(64), questionId: question.id }),
       });
       expect(created.status, await created.clone().text()).toBe(201);
+      const messageId = ((await created.json()) as { id: string }).id;
+      await fakeDb.message.update({ where: { id: messageId }, data: { status: "approved" } });
 
       const res = await app.request("/v1/stats/overview", { headers: operatorHeaders() });
       expect(res.status, await res.clone().text()).toBe(200);
@@ -679,11 +860,8 @@ describe("installations", () => {
     });
   });
 
-  describe("concurrent adoption", () => {
-    // Adoption is an update, not a create, so the single-active index does not
-    // arbitrate it. Without a conditional claim both requests would return 201
-    // and the loser's name would quietly replace the winner's.
-    it("lets only one of two concurrent starts adopt the same era", async () => {
+  describe("concurrent starts", () => {
+    it("keeps exactly one active era when two starts race", async () => {
       const app = createApp();
       expect((await endDefault(app)).status).toBe(200);
       await requireActiveInstallation();
@@ -704,65 +882,31 @@ describe("installations", () => {
     });
   });
 
-  describe("copy-forward collisions", () => {
-    // Prompts are unique per era, so a prompt the operator already wrote into
-    // the era being adopted must not be re-created underneath them.
-    it("skips a prompt the adopted era already holds", async () => {
+  describe("copy-forward during start rollover", () => {
+    it("copies questions from the active era it automatically ends", async () => {
       const app = createApp();
-      seedQuestion({ status: "active", prompt: "Shared prompt" });
-      expect((await endDefault(app)).status).toBe(200);
-
-      // The booth opens a fresh era, and the operator writes the same prompt
-      // into it before naming the installation.
-      const active = await requireActiveInstallation();
-      seedQuestion({
+      const activeQuestion = seedQuestion({ status: "active", prompt: "Shared prompt" });
+      const draftQuestion = seedQuestion({
         id: "cccccccc-0000-4000-8000-0000000000b1",
         status: "draft",
-        prompt: "Shared prompt",
-        installationId: active,
+        prompt: "Draft prompt",
       });
 
       const res = await app.request("/v1/installations", {
         method: "POST",
         headers: jsonHeaders(adminHeaders()),
-        body: JSON.stringify({ name: "Third run", copyQuestions: true }),
+        body: JSON.stringify({ name: "Second run", copyQuestions: true }),
       });
 
       expect(res.status, await res.clone().text()).toBe(201);
+      const created = (await res.json()) as { id: string };
       const prompts = [...store.questions.values()]
-        .filter((row) => row.installationId === active)
-        .map((row) => row.prompt);
-      expect(prompts).toEqual(["Shared prompt"]);
-    });
-
-    // Audio is unique per era as well, so a recording the adopted era already
-    // uses under a different prompt would trip that constraint instead.
-    it("skips a question whose audio the adopted era already uses", async () => {
-      const app = createApp();
-      const shared = seedFile();
-      seedQuestion({ status: "active", prompt: "Original prompt", audioId: shared.id });
-      expect((await endDefault(app)).status).toBe(200);
-
-      const active = await requireActiveInstallation();
-      seedQuestion({
-        id: "cccccccc-0000-4000-8000-0000000000b2",
-        status: "draft",
-        prompt: "Rewritten prompt",
-        audioId: shared.id,
-        installationId: active,
-      });
-
-      const res = await app.request("/v1/installations", {
-        method: "POST",
-        headers: jsonHeaders(adminHeaders()),
-        body: JSON.stringify({ name: "Fourth run", copyQuestions: true }),
-      });
-
-      expect(res.status, await res.clone().text()).toBe(201);
-      const audioIds = [...store.questions.values()]
-        .filter((row) => row.installationId === active)
-        .map((row) => row.audioId);
-      expect(audioIds).toEqual([shared.id]);
+        .filter((row) => row.installationId === created.id)
+        .map((row) => row.prompt)
+        .sort();
+      expect(prompts).toEqual(["Draft prompt", "Shared prompt"]);
+      expect(store.questions.get(activeQuestion.id)?.status).toBe("archived");
+      expect(store.questions.get(draftQuestion.id)?.status).toBe("draft");
     });
   });
 

@@ -7,9 +7,9 @@ Run exactly one monitor instance on an always-on home server, Portainer host, or
 cloud container.
 
 The companion consumes the authenticated Operator REST and WebSocket API, then
-renders booth state, daily counters, and system health through BUSY Cloud. Its
-deployment guide, Portainer Compose file, environment reference, and update
-steps live in the companion repository.
+renders booth state, daily and active-installation counters, and system health
+through BUSY Cloud. Its deployment guide, Portainer Compose file, environment
+reference, and update steps live in the companion repository.
 
 ## Operator API contract
 
@@ -27,15 +27,37 @@ The summary endpoint returns aggregate counts for the active installation:
 {
   "callsToday": 12,
   "messagesToday": 8,
+  "callsTotal": 143,
+  "messagesTotal": 96,
   "dayStartedAt": "2026-08-08T04:00:00.000Z",
   "generatedAt": "2026-08-08T19:00:00.000Z",
   "timeZone": "America/Toronto"
 }
 ```
 
+`callsToday` counts call sessions started on or after `dayStartedAt`, while
+`messagesToday` counts messages completed on or after that boundary.
+`callsTotal` counts all call sessions in the active installation, and
+`messagesTotal` counts all completed messages in that installation. Messages
+still uploading are excluded because they do not yet have a `receivedAt`
+timestamp.
+
 `timeZone` is an optional IANA time-zone query parameter and defaults to
-`America/Toronto`. The response never includes message identifiers, audio URLs,
+`America/Toronto`; it affects the daily boundary but not the installation
+totals. The response never includes message identifiers, audio URLs,
 transcripts, or moderation content.
+
+The companion does not need an installation id in its configuration.
+`GET /v1/status` and `GET /v1/monitor/summary` default to the active
+installation, and live status updates are tagged by the API when the booth
+reports them. `GET /v1/system/current` is deliberately not scoped: it describes
+the current booth hardware and process health, which carries across an
+installation rollover.
+
+If the active installation has not received a booth status yet, the status
+endpoint returns an id-less placeholder marked `isSynthetic: true`. Its
+timestamp is deliberately non-fresh, and the companion continues treating it
+as "no reported status" rather than a new idle heartbeat.
 
 ## Deployment order
 

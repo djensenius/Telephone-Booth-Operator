@@ -10,6 +10,7 @@ import { createTar, readTar } from "../src/lib/archive.js";
 import { EXPORT_FORMAT } from "../src/lib/data-archive.js";
 import { createHash } from "node:crypto";
 import { createApp } from "../src/index.js";
+import { resetApnsSenderForTests, setApnsSenderForTests } from "../src/lib/apns.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { resetFakeAzure, seedBlobData, fakeBlobData } from "./support/fake-azure.js";
 import {
@@ -19,7 +20,9 @@ import {
   seedFile,
   seedInstruction,
   seedMessage,
+  seedMobileDevice,
   seedQuestion,
+  seedTelemetrySource,
   store,
 } from "./support/fake-db.js";
 import { operatorCookie } from "./support/http.js";
@@ -30,6 +33,7 @@ const setup = () => {
   resetSessionCryptoForTests();
   resetFakeDb();
   resetFakeAzure();
+  resetApnsSenderForTests();
 };
 
 describe("tar archive", () => {
@@ -84,6 +88,7 @@ describe("admin data export/import", () => {
     seedBlobData(instructionFile.blobKey, instructionAudio, iSha);
 
     seedCallSession({ id: "call-1", startedAt: new Date(), outcome: "recording_completed" });
+    const telemetrySource = seedTelemetrySource();
 
     const exportRes = await app.request("/v1/admin/data/export", { headers: { cookie } });
     expect(exportRes.status).toBe(200);
@@ -97,6 +102,16 @@ describe("admin data export/import", () => {
     expect(store.questions.size).toBe(0);
     expect(fakeBlobData.size).toBe(0);
     const cookie2 = operatorCookie();
+    seedMobileDevice({
+      userId: "operator-1",
+      preferences: { messageReceived: false },
+    });
+    const badges: number[] = [];
+    setApnsSenderForTests({
+      send: async (_userId, notification) => {
+        if (notification.kind === "badge") badges.push(notification.badge);
+      },
+    });
 
     const importRes = await app.request("/v1/admin/data/import", {
       method: "POST",
@@ -104,6 +119,7 @@ describe("admin data export/import", () => {
       body: archive,
     });
     expect(importRes.status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 0));
     const summary = (await importRes.json()) as {
       rows: Record<string, number>;
       blobsUploaded: number;
@@ -112,6 +128,7 @@ describe("admin data export/import", () => {
     expect(summary.rows.message).toBe(1);
     expect(summary.rows.instruction).toBe(1);
     expect(summary.rows.file).toBe(3);
+    expect(summary.rows.telemetrySource).toBe(1);
     expect(summary.blobsUploaded).toBe(3);
 
     // Data + audio are back.
@@ -119,11 +136,17 @@ describe("admin data export/import", () => {
     expect(store.messages.get(message.id)?.questionId).toBe(question.id);
     expect(store.instructions.get(instruction.id)?.audioId).toBe(instructionFile.id);
     expect(store.files.size).toBe(3);
+    expect(store.telemetrySources.get(telemetrySource.id)).toMatchObject({
+      boothId: "booth-01",
+      componentId: "router-01",
+      latestSnapshot: null,
+    });
     expect(fakeBlobData.get(questionFile.blobKey)?.toString("utf8")).toBe("question-audio-bytes");
     expect(fakeBlobData.get(messageFile.blobKey)?.toString("utf8")).toBe("message-audio-bytes");
     expect(fakeBlobData.get(instructionFile.blobKey)?.toString("utf8")).toBe(
       "instruction-audio-bytes",
     );
+    expect(badges.at(-1)).toBe(1);
   });
 
   it("rejects an authenticated non-admin export with 403", async () => {
@@ -364,7 +387,8 @@ describe("admin data export/import", () => {
     expect(store.questions.get(questionId)?.status).toBe("archived");
     expect(restoredInstallation?.summary).toMatchObject({
       calls: 1,
-      messages: 1,
+      messages: 0,
+      allRecordings: 1,
       messagesRejected: 1,
       events: 1,
       firstActivityAt: generatedAt,

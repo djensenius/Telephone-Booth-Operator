@@ -15,6 +15,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { recordAudit } from "../lib/audit.js";
 import { db } from "../lib/db.js";
+import { queueModerationBadgeRefresh } from "../lib/push-events.js";
 import { type AuthVariables } from "../lib/session.js";
 
 const idParam = z.object({ id: z.guid() });
@@ -101,6 +102,7 @@ export const devicesRouter = new Hono<{ Variables: AuthVariables }>()
         revokedAt: null,
       },
     });
+    await queueModerationBadgeRefresh();
     recordAudit(c, { targetId: row.id });
     return c.json(toSummary(row), 201);
   })

@@ -46,6 +46,15 @@ export type TranscriptionStatus = z.infer<typeof TranscriptionStatusSchema>;
 export const ModerationRecommendationSchema = z.enum(["approve", "review", "reject"]);
 export type ModerationRecommendation = z.infer<typeof ModerationRecommendationSchema>;
 
+// A local, no-speech review is separate from content moderation. It remains
+// advisory: "delete" tells a human reviewer what the device recommends, not
+// something the server will ever do by itself.
+export const MessageReviewClassificationSchema = z.enum(["likely_hangup", "unclear"]);
+export type MessageReviewClassification = z.infer<typeof MessageReviewClassificationSchema>;
+
+export const MessageReviewRecommendationSchema = z.enum(["delete", "review"]);
+export type MessageReviewRecommendation = z.infer<typeof MessageReviewRecommendationSchema>;
+
 // Provider label recorded on a transcription / moderation row. `openai`,
 // `mac_app`, `push` and `disabled` are the configurable server-side providers;
 // `on_device` is not configurable — it marks a result an operator's own device
@@ -113,6 +122,10 @@ export type RuntimeMode = z.infer<typeof RuntimeModeSchema>;
 export const BoothStatusSchema = z.object({
   state: BoothStateSchema,
   updatedAt: z.string().datetime(),
+  // True only for the API's id-less placeholder when the selected
+  // installation has no persisted booth status yet. Optional so clients can
+  // still read responses from older API builds.
+  isSynthetic: z.boolean().optional(),
   currentQuestionId: z.guid().nullable().optional(),
   currentMessageId: z.guid().nullable().optional(),
   lastError: z.string().nullable().optional(),
@@ -136,6 +149,8 @@ export type BoothStatus = z.infer<typeof BoothStatusSchema>;
 export const MonitorSummarySchema = z.object({
   callsToday: z.number().int().nonnegative(),
   messagesToday: z.number().int().nonnegative(),
+  callsTotal: z.number().int().nonnegative(),
+  messagesTotal: z.number().int().nonnegative(),
   dayStartedAt: z.string().datetime(),
   generatedAt: z.string().datetime(),
   timeZone: z.string().min(1).max(64),
@@ -146,6 +161,7 @@ export type MonitorSummary = z.infer<typeof MonitorSummarySchema>;
 // operator, never sent by the booth.
 export const StatusUpdateSchema = BoothStatusSchema.omit({
   updatedAt: true,
+  isSynthetic: true,
   firstSeenAt: true,
   repeatCount: true,
   id: true,
@@ -191,6 +207,11 @@ export const InstructionCreateSchema = z.object({
 });
 export type InstructionCreate = z.infer<typeof InstructionCreateSchema>;
 
+export const InstructionUpdateSchema = z.object({
+  description: z.string().max(280).nullable(),
+});
+export type InstructionUpdate = z.infer<typeof InstructionUpdateSchema>;
+
 export const MessageSchema = z.object({
   id: z.guid(),
   status: MessageStatusSchema,
@@ -203,11 +224,169 @@ export const MessageSchema = z.object({
   receivedAt: z.string().datetime().nullable().optional(),
   decidedAt: z.string().datetime().nullable().optional(),
   decidedById: z.string().nullable().optional(),
+  reviewClassification: MessageReviewClassificationSchema.nullable().optional(),
+  reviewRecommendation: MessageReviewRecommendationSchema.nullable().optional(),
+  reviewClassifiedAt: z.string().datetime().nullable().optional(),
+  reviewClassifiedById: z.string().nullable().optional(),
   audio: AudioRefSchema,
   latestTranscription: TranscriptionSchema.nullable().optional(),
   latestModeration: ModerationSchema.nullable().optional(),
 });
 export type Message = z.infer<typeof MessageSchema>;
+
+const GRANDFATHERED_LANGUAGE_TAGS = new Map<string, string>([
+  ["art-lojban", "jbo"],
+  ["cel-gaulish", "xtg-x-cel-gaulish"],
+  ["en-gb-oed", "en-GB-oxendict"],
+  ["i-ami", "ami"],
+  ["i-bnn", "bnn"],
+  ["i-default", "i-default"],
+  ["i-enochian", "i-enochian"],
+  ["i-hak", "hak"],
+  ["i-klingon", "tlh"],
+  ["i-lux", "lb"],
+  ["i-mingo", "i-mingo"],
+  ["i-navajo", "nv"],
+  ["i-pwn", "pwn"],
+  ["i-tao", "tao"],
+  ["i-tay", "tay"],
+  ["i-tsu", "tsu"],
+  ["no-bok", "nb"],
+  ["no-nyn", "nn"],
+  ["sgn-be-fr", "sfb"],
+  ["sgn-be-nl", "vgt"],
+  ["sgn-ch-de", "sgg"],
+  ["zh-guoyu", "cmn"],
+  ["zh-hakka", "hak"],
+  ["zh-min", "zh-min"],
+  ["zh-min-nan", "nan"],
+  ["zh-xiang", "hsn"],
+]);
+
+const alpha = /^[A-Za-z]+$/;
+const alphanumeric = /^[A-Za-z0-9]+$/;
+
+const isVariant = (subtag: string): boolean =>
+  /^[A-Za-z0-9]{5,8}$/.test(subtag) || /^[0-9][A-Za-z0-9]{3}$/.test(subtag);
+
+// RFC 5646, section 2.1.  `Intl.getCanonicalLocales` supplies registry-aware
+// canonicalization; the parser covers valid private-use and grandfathered tags
+// that ECMA-402 locale identifiers intentionally exclude.
+const canonicalizeBcp47LanguageTag = (value: string): string | null => {
+  const tag = value.trim();
+  if (tag.length === 0 || tag.length > 64 || !/^[A-Za-z0-9-]+$/.test(tag)) return null;
+
+  const grandfathered = GRANDFATHERED_LANGUAGE_TAGS.get(tag.toLowerCase());
+  if (grandfathered !== undefined) return grandfathered;
+
+  const subtags = tag.split("-");
+  if (
+    subtags.some((subtag) => subtag.length === 0 || subtag.length > 8 || !alphanumeric.test(subtag))
+  ) {
+    return null;
+  }
+
+  if (subtags[0]?.toLowerCase() === "x") {
+    return subtags.length > 1
+      ? `x-${subtags
+          .slice(1)
+          .map((subtag) => subtag.toLowerCase())
+          .join("-")}`
+      : null;
+  }
+
+  const language = subtags[0];
+  if (
+    language === undefined ||
+    !(
+      (/^[A-Za-z]{2,3}$/.test(language) && language.length <= 3) ||
+      /^[A-Za-z]{4}$/.test(language) ||
+      /^[A-Za-z]{5,8}$/.test(language)
+    )
+  ) {
+    return null;
+  }
+
+  let index = 1;
+  const canonicalSubtags = [language.toLowerCase()];
+  if (language.length <= 3) {
+    let extlangs = 0;
+    while (extlangs < 3 && alpha.test(subtags[index] ?? "") && subtags[index]?.length === 3) {
+      canonicalSubtags.push(subtags[index]!.toLowerCase());
+      index += 1;
+      extlangs += 1;
+    }
+  }
+  if (alpha.test(subtags[index] ?? "") && subtags[index]?.length === 4) {
+    const script = subtags[index]!;
+    canonicalSubtags.push(`${script[0]?.toUpperCase() ?? ""}${script.slice(1).toLowerCase()}`);
+    index += 1;
+  }
+  if (
+    (alpha.test(subtags[index] ?? "") && subtags[index]?.length === 2) ||
+    /^[0-9]{3}$/.test(subtags[index] ?? "")
+  ) {
+    const region = subtags[index]!;
+    canonicalSubtags.push(alpha.test(region) ? region.toUpperCase() : region);
+    index += 1;
+  }
+  const variants = new Set<string>();
+  while (isVariant(subtags[index] ?? "")) {
+    const variant = subtags[index]!.toLowerCase();
+    if (variants.has(variant)) return null;
+    variants.add(variant);
+    canonicalSubtags.push(variant);
+    index += 1;
+  }
+  const singletons = new Set<string>();
+  while (/^[0-9A-WY-Za-wy-z]$/.test(subtags[index] ?? "")) {
+    const singleton = subtags[index]!.toLowerCase();
+    if (singletons.has(singleton)) return null;
+    singletons.add(singleton);
+    canonicalSubtags.push(singleton);
+    index += 1;
+    const extensionStart = index;
+    while (/^[A-Za-z0-9]{2,8}$/.test(subtags[index] ?? "")) {
+      canonicalSubtags.push(subtags[index]!.toLowerCase());
+      index += 1;
+    }
+    if (index === extensionStart) return null;
+  }
+  if (subtags[index]?.toLowerCase() === "x") {
+    canonicalSubtags.push("x");
+    index += 1;
+    const privateUseStart = index;
+    while (/^[A-Za-z0-9]{1,8}$/.test(subtags[index] ?? "")) {
+      canonicalSubtags.push(subtags[index]!.toLowerCase());
+      index += 1;
+    }
+    if (index === privateUseStart) return null;
+  }
+  if (index !== subtags.length) return null;
+
+  try {
+    return Intl.getCanonicalLocales(tag)[0] ?? null;
+  } catch {
+    // A grammar-valid tag can still be outside ECMA-402's locale subset. Keep
+    // its RFC 5646 casing canonical rather than rejecting valid BCP-47 input.
+    return canonicalSubtags.join("-");
+  }
+};
+
+export const Bcp47LanguageTagSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .superRefine((value, ctx) => {
+    if (canonicalizeBcp47LanguageTag(value) === null) {
+      ctx.addIssue({ code: "custom", message: "Expected a BCP-47 language tag." });
+    }
+  })
+  .transform((value) => canonicalizeBcp47LanguageTag(value) ?? value);
+
+export const DefaultTranscriptionLanguageSchema = Bcp47LanguageTagSchema;
+export type DefaultTranscriptionLanguage = z.infer<typeof DefaultTranscriptionLanguageSchema>;
 
 // Human review actions. A logged-in operator can override the AI pipeline by
 // approving or rejecting a message, and can supply a translation for a
@@ -218,19 +397,40 @@ export const MessageDecisionSchema = z.object({
 });
 export type MessageDecision = z.infer<typeof MessageDecisionSchema>;
 
-export const TranslationSubmitSchema = z.object({
-  translatedText: z.string().trim().min(1).max(20_000),
-  translatedLanguage: z.string().trim().min(1).max(64).optional(),
-});
+export const TranslationSubmitSchema = z
+  .object({
+    transcriptionId: z.guid().optional(),
+    expectedTranscriptionId: z.guid().optional(),
+    expectedTranslationSha256: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .nullable()
+      .optional(),
+    translatedText: z.string().trim().min(1).max(20_000),
+    translatedLanguage: z.string().trim().min(1).max(64).optional(),
+    model: z.string().trim().min(1).max(128).nullable().optional(),
+  })
+  .refine(
+    ({ transcriptionId, expectedTranscriptionId }) =>
+      !transcriptionId || !expectedTranscriptionId || transcriptionId === expectedTranscriptionId,
+    { message: "transcription targets must match" },
+  );
 export type TranslationSubmit = z.infer<typeof TranslationSubmitSchema>;
 
 // Operator-supplied transcript text (e.g. from the iOS Transcriber app doing
 // on-device transcription). Text may be empty for a silent recording, mirroring
 // the worker push-back callback. `language` and `model` are optional metadata.
 export const TranscriptionSubmitSchema = z.object({
+  expectedLatestTranscriptionId: z.guid().nullable().optional(),
+  expectedLatestTranscriptionSha256: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/i)
+    .nullable()
+    .optional(),
   text: z.string().max(20_000),
   language: z.string().trim().min(1).max(64).nullable().optional(),
   model: z.string().trim().min(1).max(128).nullable().optional(),
+  processDownstream: z.boolean().optional(),
 });
 export type TranscriptionSubmit = z.infer<typeof TranscriptionSubmitSchema>;
 
@@ -240,15 +440,24 @@ export type TranscriptionSubmit = z.infer<typeof TranscriptionSubmitSchema>;
 // message. `provider` is deliberately absent — the server stamps `on_device`
 // so the UI can tell a locally computed verdict from an upstream one, and
 // `model` carries the specific model that produced it.
-export const ModerationSubmitSchema = z.object({
-  transcriptionId: z.guid().nullable().optional(),
-  flagged: z.boolean(),
-  recommendation: ModerationRecommendationSchema,
-  maxScore: z.number().min(0).max(1),
-  categories: z.record(z.string(), z.number()).optional(),
-  reasonSummary: z.string().max(2000).nullable().optional(),
-  model: z.string().trim().min(1).max(128).nullable().optional(),
-});
+export const ModerationSubmitSchema = z
+  .object({
+    transcriptionId: z.guid().nullable().optional(),
+    inputSha256: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+    flagged: z.boolean(),
+    recommendation: ModerationRecommendationSchema,
+    maxScore: z.number().min(0).max(1),
+    categories: z.record(z.string(), z.number()).optional(),
+    reasonSummary: z.string().max(2000).nullable().optional(),
+    model: z.string().trim().min(1).max(128).nullable().optional(),
+  })
+  .refine((value) => (value.inputSha256 == null) === (value.transcriptionId == null), {
+    message: "transcriptionId and inputSha256 must be supplied together",
+    path: ["inputSha256"],
+  });
 export type ModerationSubmit = z.infer<typeof ModerationSubmitSchema>;
 
 // 5 minutes — generous upper bound for booth recordings.
@@ -278,11 +487,24 @@ export const MessageCompleteSchema = z.object({
 });
 export type MessageComplete = z.infer<typeof MessageCompleteSchema>;
 
+export const AudioUploadContentTypeSchema = z.enum([
+  "audio/flac",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/aiff",
+  "audio/x-aiff",
+  "audio/mpeg",
+  "audio/mp4",
+  "audio/x-m4a",
+  "audio/ogg",
+]);
+export type AudioUploadContentType = z.infer<typeof AudioUploadContentTypeSchema>;
+
 export const UploadSasRequestSchema = z.object({
   kind: z.enum(["message", "question-audio", "instruction-audio"]),
   sha256: Sha256Schema,
   sizeBytes: z.number().int().positive(),
-  contentType: z.literal("audio/flac"),
+  contentType: AudioUploadContentTypeSchema,
 });
 export type UploadSasRequest = z.infer<typeof UploadSasRequestSchema>;
 
@@ -305,14 +527,45 @@ export const OperatorMeSchema = z.object({
 });
 export type OperatorMe = z.infer<typeof OperatorMeSchema>;
 
-export const ApiTokenScopeSchema = z.enum(["operator", "worker", "monitor"]);
+export const ApiTokenScopeSchema = z.enum(["operator", "worker", "monitor", "telemetry"]);
 export type ApiTokenScope = z.infer<typeof ApiTokenScopeSchema>;
 
-export const CreateApiTokenRequestSchema = z.object({
-  name: z.string().trim().min(1).max(64),
-  scope: ApiTokenScopeSchema.default("operator"),
-  expiresInDays: z.number().int().positive().max(3650).optional(),
-});
+export const TelemetrySourceMetadataSchema = z
+  .object({
+    boothId: z.string().trim().min(1).max(128),
+    componentId: z.string().trim().min(1).max(128),
+    displayName: z.string().trim().min(1).max(128),
+    kind: z.string().trim().min(1).max(64),
+    prometheusJob: z.string().trim().min(1).max(256),
+    prometheusInstance: z.string().trim().min(1).max(256),
+  })
+  .strict();
+export type TelemetrySourceMetadata = z.infer<typeof TelemetrySourceMetadataSchema>;
+
+export const CreateApiTokenRequestSchema = z
+  .object({
+    name: z.string().trim().min(1).max(64),
+    scope: ApiTokenScopeSchema.default("operator"),
+    expiresInDays: z.number().int().positive().max(3650).optional(),
+    telemetrySource: TelemetrySourceMetadataSchema.optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.scope === "telemetry" && !value.telemetrySource) {
+      context.addIssue({
+        code: "custom",
+        path: ["telemetrySource"],
+        message: "A telemetry token requires telemetrySource metadata.",
+      });
+    }
+    if (value.scope !== "telemetry" && value.telemetrySource) {
+      context.addIssue({
+        code: "custom",
+        path: ["telemetrySource"],
+        message: "telemetrySource metadata is only valid for telemetry tokens.",
+      });
+    }
+  });
 export type CreateApiTokenRequest = z.infer<typeof CreateApiTokenRequestSchema>;
 
 export const ApiTokenSchema = z.object({
@@ -324,6 +577,7 @@ export const ApiTokenSchema = z.object({
   expiresAt: z.string().datetime().nullable(),
   lastUsedAt: z.string().datetime().nullable(),
   revokedAt: z.string().datetime().nullable(),
+  telemetrySource: TelemetrySourceMetadataSchema.optional(),
 });
 export type ApiToken = z.infer<typeof ApiTokenSchema>;
 
@@ -474,6 +728,291 @@ export const CallSessionDetailSchema = CallSessionSchema.extend({
   events: z.array(BoothEventRecordSchema),
 });
 export type CallSessionDetail = z.infer<typeof CallSessionDetailSchema>;
+
+const nullableFiniteNumber = (minimum: number, maximum: number) =>
+  z.number().finite().min(minimum).max(maximum).nullable().optional();
+const nullableBoundedString = (maximum: number) => z.string().max(maximum).nullable().optional();
+
+export const RouterBatterySnapshotSchema = z
+  .object({
+    present: z.boolean().nullable().optional(),
+    chargePercent: nullableFiniteNumber(0, 100),
+    temperatureCelsius: nullableFiniteNumber(-100, 250),
+    voltageVolts: nullableFiniteNumber(0, 1000),
+    currentAmperes: nullableFiniteNumber(-1000, 1000),
+    health: nullableBoundedString(128),
+    technology: nullableBoundedString(128),
+    cycleCount: z.number().int().min(0).max(10_000_000).nullable().optional(),
+    // GL.iNet MCU `charge_cnt`; distinct from the kernel battery cycle count.
+    chargeCount: z.number().int().min(0).max(10_000_000).nullable().optional(),
+    abnormal: z.boolean().nullable().optional(),
+    abnormalType: z.number().int().min(-1).max(255).nullable().optional(),
+  })
+  .passthrough();
+export type RouterBatterySnapshot = z.infer<typeof RouterBatterySnapshotSchema>;
+
+export const RouterChargerSnapshotSchema = z
+  .object({
+    present: z.boolean().nullable().optional(),
+    online: z.boolean().nullable().optional(),
+    status: nullableBoundedString(128),
+    usbType: nullableBoundedString(128),
+    manufacturer: nullableBoundedString(256),
+    model: nullableBoundedString(256),
+    chargeType: nullableBoundedString(128),
+    inputVoltageLimitVolts: nullableFiniteNumber(0, 1000),
+    inputCurrentLimitAmperes: nullableFiniteNumber(0, 1000),
+    constantChargeVoltageVolts: nullableFiniteNumber(0, 1000),
+    constantChargeCurrentMaxAmperes: nullableFiniteNumber(0, 1000),
+    fastCharge: z.boolean().nullable().optional(),
+    chargingStatus: z.number().int().min(-1).max(255).nullable().optional(),
+  })
+  .passthrough();
+export type RouterChargerSnapshot = z.infer<typeof RouterChargerSnapshotSchema>;
+
+export const RouterThermalZoneSnapshotSchema = z
+  .object({
+    name: z.string().trim().min(1).max(128),
+    temperatureCelsius: z.number().finite().min(-100).max(250),
+  })
+  .passthrough();
+export type RouterThermalZoneSnapshot = z.infer<typeof RouterThermalZoneSnapshotSchema>;
+
+export const RouterComponentSnapshotSchema = z
+  .object({
+    battery: RouterBatterySnapshotSchema.optional(),
+    charger: RouterChargerSnapshotSchema.optional(),
+    thermalZones: z.array(RouterThermalZoneSnapshotSchema).max(64),
+  })
+  .passthrough();
+export type RouterComponentSnapshot = z.infer<typeof RouterComponentSnapshotSchema>;
+
+export const RouterComponentSnapshotUpdateSchema = z
+  .object({
+    capturedAt: z.string().datetime({ offset: true }),
+    snapshot: RouterComponentSnapshotSchema,
+  })
+  .strict();
+export type RouterComponentSnapshotUpdate = z.infer<typeof RouterComponentSnapshotUpdateSchema>;
+
+export const TelemetrySourceEnvelopeSchema = TelemetrySourceMetadataSchema.extend({
+  id: z.guid(),
+  latestSnapshot: RouterComponentSnapshotSchema.nullable(),
+  capturedAt: z.string().datetime().nullable(),
+  receivedAt: z.string().datetime().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type TelemetrySourceEnvelope = z.infer<typeof TelemetrySourceEnvelopeSchema>;
+
+export const ROUTER_TELEMETRY_METRICS = [
+  "glinet_battery_charge_percent",
+  "glinet_battery_temperature_celsius",
+  "glinet_battery_voltage_volts",
+  "glinet_battery_current_amperes",
+  "glinet_battery_cycle_count",
+  "glinet_battery_charge_count",
+  "glinet_battery_present",
+  "glinet_battery_abnormal",
+  "glinet_battery_abnormal_type",
+  "glinet_charger_present",
+  "glinet_charger_online",
+  "glinet_charger_fastcharge",
+  "glinet_charger_charging_status",
+  "glinet_charger_input_voltage_limit_volts",
+  "glinet_charger_input_current_limit_amperes",
+  "glinet_charger_constant_charge_voltage_volts",
+  "glinet_charger_constant_charge_current_max_amperes",
+  "glinet_thermal_temperature_celsius",
+] as const;
+
+export const RouterTelemetryMetricNameSchema = z.enum(ROUTER_TELEMETRY_METRICS);
+export type RouterTelemetryMetricName = z.infer<typeof RouterTelemetryMetricNameSchema>;
+
+export const TELEMETRY_HISTORY_MAX_POINTS_PER_SERIES = 10_000;
+export const TELEMETRY_HISTORY_MAX_SERIES = 128;
+export const TELEMETRY_HISTORY_MAX_TOTAL_SAMPLES = 100_000;
+
+export const TelemetryHistoryPointSchema = z.object({
+  timestamp: z.number().finite().nonnegative(),
+  value: z.number().finite(),
+});
+export type TelemetryHistoryPoint = z.infer<typeof TelemetryHistoryPointSchema>;
+
+export const TelemetryHistorySeriesSchema = z.object({
+  metric: RouterTelemetryMetricNameSchema,
+  labels: z.record(z.string(), z.string()),
+  points: z.array(TelemetryHistoryPointSchema).max(TELEMETRY_HISTORY_MAX_POINTS_PER_SERIES),
+});
+export type TelemetryHistorySeries = z.infer<typeof TelemetryHistorySeriesSchema>;
+
+const addTelemetryHistoryCardinalityIssue = (
+  series: readonly { readonly points: readonly unknown[] }[],
+  context: z.RefinementCtx,
+): void => {
+  const totalSamples = series.reduce((total, item) => total + item.points.length, 0);
+  if (totalSamples > TELEMETRY_HISTORY_MAX_TOTAL_SAMPLES) {
+    context.addIssue({
+      code: "custom",
+      path: ["series"],
+      message: `Telemetry history is limited to ${TELEMETRY_HISTORY_MAX_TOTAL_SAMPLES} total samples.`,
+    });
+  }
+};
+
+export const ComponentTelemetryHistorySchema = z
+  .object({
+    source: TelemetrySourceMetadataSchema,
+    from: z.string().datetime(),
+    to: z.string().datetime(),
+    stepSeconds: z.number().int().min(15),
+    series: z.array(TelemetryHistorySeriesSchema).max(TELEMETRY_HISTORY_MAX_SERIES),
+  })
+  .superRefine((value, context) => {
+    addTelemetryHistoryCardinalityIssue(value.series, context);
+  });
+export type ComponentTelemetryHistory = z.infer<typeof ComponentTelemetryHistorySchema>;
+
+export const THERMAL_METRICS = [
+  "booth_cpu_temperature_celsius",
+  "glinet_battery_temperature_celsius",
+  "glinet_thermal_temperature_celsius",
+] as const;
+
+export const ThermalMetricNameSchema = z.enum(THERMAL_METRICS);
+export type ThermalMetricName = z.infer<typeof ThermalMetricNameSchema>;
+
+export const ThermalHistorySeriesSchema = z.object({
+  metric: ThermalMetricNameSchema,
+  labels: z.record(z.string(), z.string()),
+  points: z.array(TelemetryHistoryPointSchema).max(TELEMETRY_HISTORY_MAX_POINTS_PER_SERIES),
+});
+export type ThermalHistorySeries = z.infer<typeof ThermalHistorySeriesSchema>;
+
+export const ThermalHistorySchema = z
+  .object({
+    boothId: z.string().trim().min(1).max(128),
+    source: TelemetrySourceMetadataSchema,
+    from: z.string().datetime(),
+    to: z.string().datetime(),
+    stepSeconds: z.number().int().min(15),
+    series: z.array(ThermalHistorySeriesSchema).max(TELEMETRY_HISTORY_MAX_SERIES),
+  })
+  .superRefine((value, context) => {
+    if (value.source.boothId !== value.boothId) {
+      context.addIssue({
+        code: "custom",
+        path: ["source", "boothId"],
+        message: "Thermal history source must belong to boothId.",
+      });
+    }
+    addTelemetryHistoryCardinalityIssue(value.series, context);
+  });
+export type ThermalHistory = z.infer<typeof ThermalHistorySchema>;
+
+export const CURRENT_WEATHER_CONDITIONS = [
+  "clear_sky",
+  "mainly_clear",
+  "partly_cloudy",
+  "overcast",
+  "fog",
+  "rime_fog",
+  "drizzle",
+  "freezing_drizzle",
+  "rain",
+  "freezing_rain",
+  "snowfall",
+  "snow_grains",
+  "rain_showers",
+  "snow_showers",
+  "thunderstorm",
+  "thunderstorm_with_hail",
+  "unknown",
+] as const;
+
+export const CurrentWeatherConditionSchema = z.enum(CURRENT_WEATHER_CONDITIONS);
+export type CurrentWeatherCondition = z.infer<typeof CurrentWeatherConditionSchema>;
+
+export const CurrentWeatherSchema = z.object({
+  boothId: z.string().trim().min(1).max(128),
+  source: z.literal("open_meteo"),
+  temperatureCelsius: z.number().min(-100).max(100),
+  relativeHumidityPercent: z.number().min(0).max(100),
+  cloudCoverPercent: z.number().min(0).max(100),
+  condition: CurrentWeatherConditionSchema,
+  observedAt: z.string().datetime(),
+  fetchedAt: z.string().datetime(),
+});
+export type CurrentWeather = z.infer<typeof CurrentWeatherSchema>;
+
+export const ComponentTelemetryCurrentQuerySchema = z.object({
+  boothId: z.string().trim().min(1).max(128).optional(),
+  componentId: z.string().trim().min(1).max(128).optional(),
+});
+export type ComponentTelemetryCurrentQuery = z.infer<typeof ComponentTelemetryCurrentQuerySchema>;
+
+const MAX_TELEMETRY_HISTORY_RANGE_MS = 31 * 24 * 60 * 60 * 1000;
+
+const telemetryHistoryRangeFields = {
+  from: z.string().datetime({ offset: true }),
+  to: z.string().datetime({ offset: true }),
+  stepSeconds: z.coerce.number().int().min(15).default(60),
+};
+
+const addTelemetryHistoryRangeIssues = (
+  value: { readonly from: string; readonly to: string; readonly stepSeconds: number },
+  context: z.RefinementCtx,
+): void => {
+  const fromMs = Date.parse(value.from);
+  const toMs = Date.parse(value.to);
+  if (toMs <= fromMs) {
+    context.addIssue({
+      code: "custom",
+      path: ["to"],
+      message: "to must be later than from.",
+    });
+    return;
+  }
+  const rangeMs = toMs - fromMs;
+  if (rangeMs > MAX_TELEMETRY_HISTORY_RANGE_MS) {
+    context.addIssue({
+      code: "custom",
+      path: ["to"],
+      message: "Telemetry history is limited to 31 days.",
+    });
+  }
+  const points = Math.floor(rangeMs / (value.stepSeconds * 1000)) + 1;
+  if (points > TELEMETRY_HISTORY_MAX_POINTS_PER_SERIES) {
+    context.addIssue({
+      code: "custom",
+      path: ["stepSeconds"],
+      message: "Telemetry history is limited to 10000 points per series.",
+    });
+  }
+};
+
+export const ComponentTelemetryHistoryQuerySchema = z
+  .object({
+    boothId: z.string().trim().min(1).max(128),
+    componentId: z.string().trim().min(1).max(128),
+    ...telemetryHistoryRangeFields,
+  })
+  .superRefine(addTelemetryHistoryRangeIssues);
+export type ComponentTelemetryHistoryQuery = z.infer<typeof ComponentTelemetryHistoryQuerySchema>;
+
+export const ThermalHistoryQuerySchema = z
+  .object({
+    boothId: z.string().trim().min(1).max(128),
+    componentId: z.string().trim().min(1).max(128).optional(),
+    ...telemetryHistoryRangeFields,
+  })
+  .superRefine(addTelemetryHistoryRangeIssues);
+export type ThermalHistoryQuery = z.infer<typeof ThermalHistoryQuerySchema>;
+
+export const CurrentWeatherQuerySchema = z.object({
+  boothId: z.string().trim().min(1).max(128),
+});
+export type CurrentWeatherQuery = z.infer<typeof CurrentWeatherQuerySchema>;
 
 // Live system snapshot pushed by the booth via `PUT /v1/system`. Mirrors the
 // Rust `booth-hal::SystemSnapshot` struct as it appears on the wire (camelCase
@@ -721,7 +1260,12 @@ export type InstallationScope = z.infer<typeof InstallationScopeSchema>;
 // stay cheap to compute and safe to read back from old rows.
 export const InstallationSummarySchema = z.object({
   calls: z.number().int().nonnegative(),
+  // "messages" is deliberately the operator-playable approved subset.
   messages: z.number().int().nonnegative(),
+  allRecordings: z.number().int().nonnegative().default(0),
+  byStatus: z.record(z.string(), z.number().int().nonnegative()).default({}),
+  // Kept while archived clients transition to the unambiguous `messages`
+  // (approved) and `allRecordings` fields.
   messagesApproved: z.number().int().nonnegative(),
   messagesRejected: z.number().int().nonnegative(),
   questions: z.number().int().nonnegative(),
@@ -741,6 +1285,7 @@ export const InstallationSchema = z.object({
   name: z.string(),
   notes: z.string().nullable(),
   location: z.string().nullable(),
+  defaultTranscriptionLanguage: DefaultTranscriptionLanguageSchema.nullable().optional(),
   startedAt: z.string().datetime(),
   endedAt: z.string().datetime().nullable(),
   endedById: z.string().nullable(),
@@ -757,6 +1302,7 @@ const installationMetadataFields = {
   name: z.string().trim().min(1).max(120),
   notes: z.string().trim().max(2000).nullable().optional(),
   location: z.string().trim().max(200).nullable().optional(),
+  defaultTranscriptionLanguage: DefaultTranscriptionLanguageSchema.nullable().optional(),
 };
 
 export const InstallationCreateSchema = z.object({
@@ -797,6 +1343,122 @@ export const InstallationPurgeResultSchema = z.object({
   blobFailures: z.array(z.string()),
 });
 export type InstallationPurgeResult = z.infer<typeof InstallationPurgeResultSchema>;
+
+// -----------------------------------------------------------------------------
+// Operator-authenticated on-device message processing.
+// -----------------------------------------------------------------------------
+
+export const MessageProcessingStepSchema = z.enum([
+  "transcription",
+  "translation",
+  "moderation",
+  "review",
+]);
+export type MessageProcessingStep = z.infer<typeof MessageProcessingStepSchema>;
+
+export const MessageProcessingCapabilitiesSchema = z
+  .array(MessageProcessingStepSchema)
+  .min(1)
+  .max(4)
+  .default(["transcription", "translation", "moderation", "review"]);
+export type MessageProcessingCapabilities = z.infer<typeof MessageProcessingCapabilitiesSchema>;
+
+export const MessageProcessingClaimRequestSchema = z.object({
+  capabilities: MessageProcessingCapabilitiesSchema,
+  leaseSeconds: z.number().int().min(30).max(900).default(300),
+});
+export type MessageProcessingClaimRequest = z.infer<typeof MessageProcessingClaimRequestSchema>;
+
+export const MessageProcessingClaimSchema = z.object({
+  message: MessageSchema,
+  needs: z.array(MessageProcessingStepSchema).min(1),
+  leaseToken: z.string().min(32),
+  leaseExpiresAt: z.string().datetime(),
+  defaultTranscriptionLanguage: DefaultTranscriptionLanguageSchema.nullable(),
+});
+export type MessageProcessingClaim = z.infer<typeof MessageProcessingClaimSchema>;
+
+export const MessageProcessingClaimResponseSchema = z.object({
+  claim: MessageProcessingClaimSchema.nullable(),
+});
+export type MessageProcessingClaimResponse = z.infer<typeof MessageProcessingClaimResponseSchema>;
+
+export const MessageProcessingSummarySchema = z.object({
+  queued: z.number().int().nonnegative(),
+  leased: z.number().int().nonnegative(),
+  terminal: z.number().int().nonnegative(),
+  needs: z.object({
+    transcription: z.number().int().nonnegative(),
+    translation: z.number().int().nonnegative(),
+    moderation: z.number().int().nonnegative(),
+    review: z.number().int().nonnegative(),
+  }),
+  generatedAt: z.string().datetime(),
+});
+export type MessageProcessingSummary = z.infer<typeof MessageProcessingSummarySchema>;
+
+const ProcessingTranslationSubmitSchema = z.object({
+  transcriptionId: z.guid().optional(),
+  expectedTranslationSha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .nullable()
+    .optional(),
+  translatedText: z.string().trim().min(1).max(20_000),
+  translatedLanguage: Bcp47LanguageTagSchema.optional(),
+  model: z.string().trim().min(1).max(128).nullable().optional(),
+});
+
+const ProcessingModerationSubmitSchema = z.object({
+  inputSha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
+  flagged: z.boolean(),
+  recommendation: ModerationRecommendationSchema,
+  maxScore: z.number().min(0).max(1),
+  categories: z.record(z.string(), z.number()).optional(),
+  reasonSummary: z.string().max(2000).nullable().optional(),
+  model: z.string().trim().min(1).max(128).nullable().optional(),
+});
+
+export const MessageProcessingCompleteSchema = z
+  .object({
+    leaseToken: z.string().min(32),
+    transcription: TranscriptionSubmitSchema.omit({ processDownstream: true }).optional(),
+    translation: ProcessingTranslationSubmitSchema.optional(),
+    moderation: ProcessingModerationSubmitSchema.optional(),
+    review: z
+      .object({
+        classification: MessageReviewClassificationSchema,
+        recommendation: MessageReviewRecommendationSchema,
+      })
+      .optional(),
+  })
+  .refine(
+    (value) =>
+      value.transcription !== undefined ||
+      value.translation !== undefined ||
+      value.moderation !== undefined ||
+      value.review !== undefined,
+    { message: "At least one processing result is required." },
+  );
+export type MessageProcessingComplete = z.infer<typeof MessageProcessingCompleteSchema>;
+
+export const MessageProcessingLeaseTokenSchema = z.object({
+  leaseToken: z.string().min(32),
+});
+
+export const MessageProcessingHeartbeatSchema = MessageProcessingLeaseTokenSchema.extend({
+  leaseSeconds: z.number().int().min(30).max(900).default(300),
+});
+export type MessageProcessingHeartbeat = z.infer<typeof MessageProcessingHeartbeatSchema>;
+
+export const MessageProcessingFailSchema = MessageProcessingLeaseTokenSchema.extend({
+  errorCode: z.string().trim().min(1).max(128),
+  errorMessage: z.string().trim().max(2000).optional(),
+});
+export type MessageProcessingFail = z.infer<typeof MessageProcessingFailSchema>;
 
 // Discriminated union for the `/v1/ws/status` socket. The legacy payload
 // shape (a bare `BoothStatus`) is migrated to `{ kind: "status", status }`
@@ -972,7 +1634,11 @@ export const StatsOverviewSchema = z.object({
     perDay: z.array(StatsCallsPerDaySchema),
   }),
   messages: z.object({
+    // `total` remains for older clients and has the same approved/playable
+    // meaning as `approved`; use the explicit fields in new clients.
     total: z.number().int().nonnegative(),
+    approved: z.number().int().nonnegative().optional(),
+    allRecordings: z.number().int().nonnegative().optional(),
     // Keyed by MessageStatus string. As with `outcomes`, unrecognised
     // server-side values appear under their raw key — clients should
     // render whatever key arrives rather than special-casing "unknown".

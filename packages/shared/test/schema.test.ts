@@ -3,10 +3,18 @@ import {
   BoothNetworkStatsSchema,
   BoothStatusSchema,
   CallSessionSchema,
+  CreateApiTokenRequestSchema,
+  CurrentWeatherQuerySchema,
+  CurrentWeatherSchema,
   InstructionSchema,
   InstructionStatusSchema,
+  InstructionUpdateSchema,
   QuestionSchema,
   QuestionStatusSchema,
+  RouterComponentSnapshotSchema,
+  ThermalHistoryQuerySchema,
+  ThermalHistorySchema,
+  ThermalMetricNameSchema,
 } from "../src/index.js";
 
 describe("BoothStatusSchema", () => {
@@ -25,6 +33,15 @@ describe("BoothStatusSchema", () => {
       updatedAt: "2026-01-01T00:00:00.000Z",
     });
     expect(parsed.state).toBe("callUnavailable");
+  });
+
+  it("accepts the explicit synthetic-status marker", () => {
+    const parsed = BoothStatusSchema.parse({
+      state: "idle",
+      updatedAt: "1970-01-01T00:00:00.000Z",
+      isSynthetic: true,
+    });
+    expect(parsed.isSynthetic).toBe(true);
   });
 
   describe("InstructionStatusSchema", () => {
@@ -48,6 +65,16 @@ describe("BoothStatusSchema", () => {
       expect(InstructionSchema.parse(instruction).status).toBe("active");
       const { status: _status, ...withoutStatus } = instruction;
       expect(() => InstructionSchema.parse(withoutStatus)).toThrow();
+    });
+
+    it("accepts description edits and clearing", () => {
+      expect(InstructionUpdateSchema.parse({ description: "Updated" })).toEqual({
+        description: "Updated",
+      });
+      expect(InstructionUpdateSchema.parse({ description: null })).toEqual({
+        description: null,
+      });
+      expect(() => InstructionUpdateSchema.parse({})).toThrow();
     });
   });
 
@@ -141,5 +168,208 @@ describe("CallSessionSchema", () => {
     });
 
     expect(parsed.outcome).toBe("installation_ended");
+  });
+});
+
+describe("telemetry token schema", () => {
+  const telemetrySource = {
+    boothId: "booth-01",
+    componentId: "router-01",
+    displayName: "Router",
+    kind: "router",
+    prometheusJob: "glinet-router",
+    prometheusInstance: "router-01",
+  };
+
+  it("requires source metadata only for telemetry scope", () => {
+    expect(
+      CreateApiTokenRequestSchema.parse({
+        name: "Router telemetry",
+        scope: "telemetry",
+        telemetrySource,
+      }).telemetrySource,
+    ).toEqual(telemetrySource);
+    expect(() =>
+      CreateApiTokenRequestSchema.parse({ name: "Unbound", scope: "telemetry" }),
+    ).toThrow();
+    expect(() =>
+      CreateApiTokenRequestSchema.parse({
+        name: "Operator",
+        scope: "operator",
+        telemetrySource,
+      }),
+    ).toThrow();
+  });
+});
+
+describe("RouterComponentSnapshotSchema", () => {
+  it("accepts signed battery current and preserves future fields", () => {
+    const parsed = RouterComponentSnapshotSchema.parse({
+      battery: {
+        present: true,
+        chargePercent: 72,
+        temperatureCelsius: 31.5,
+        voltageVolts: 7.8,
+        currentAmperes: -1.25,
+        health: "Good",
+        technology: "Li-ion",
+        cycleCount: 31,
+        chargeCount: 147,
+        abnormal: false,
+        abnormalType: 0,
+      },
+      charger: {
+        present: true,
+        online: true,
+        fastCharge: true,
+        chargingStatus: 1,
+      },
+      thermalZones: [{ name: "soc", temperatureCelsius: 54.25 }],
+      futureMetric: { value: 1 },
+    });
+
+    expect(parsed.battery?.currentAmperes).toBe(-1.25);
+    expect(parsed.battery?.chargeCount).toBe(147);
+    expect(parsed.battery?.abnormalType).toBe(0);
+    expect(parsed.futureMetric).toEqual({ value: 1 });
+  });
+
+  it("rejects non-finite and unreasonable values", () => {
+    expect(() =>
+      RouterComponentSnapshotSchema.parse({
+        battery: { chargePercent: 101 },
+        thermalZones: [],
+      }),
+    ).toThrow();
+    expect(() =>
+      RouterComponentSnapshotSchema.parse({
+        battery: { currentAmperes: Number.POSITIVE_INFINITY },
+        thermalZones: [],
+      }),
+    ).toThrow();
+    expect(() =>
+      RouterComponentSnapshotSchema.parse({
+        thermalZones: [{ name: "soc", temperatureCelsius: 500 }],
+      }),
+    ).toThrow();
+    expect(() =>
+      RouterComponentSnapshotSchema.parse({
+        charger: { chargingStatus: "charging" },
+        thermalZones: [],
+      }),
+    ).toThrow();
+    expect(() =>
+      RouterComponentSnapshotSchema.parse({
+        battery: { abnormalType: "normal" },
+        thermalZones: [],
+      }),
+    ).toThrow();
+  });
+});
+
+describe("thermal history schemas", () => {
+  const source = {
+    boothId: "booth-01",
+    componentId: "router",
+    displayName: "Travel router",
+    kind: "router",
+    prometheusJob: "glinet-router",
+    prometheusInstance: "router-01",
+  };
+
+  it("accepts only the fixed thermal metric contract", () => {
+    expect(ThermalMetricNameSchema.parse("booth_cpu_temperature_celsius")).toBe(
+      "booth_cpu_temperature_celsius",
+    );
+    expect(() => ThermalMetricNameSchema.parse("process_temperature_celsius")).toThrow();
+
+    const parsed = ThermalHistorySchema.parse({
+      boothId: "booth-01",
+      source,
+      from: "2026-08-17T00:00:00.000Z",
+      to: "2026-08-18T00:00:00.000Z",
+      stepSeconds: 60,
+      series: [
+        {
+          metric: "glinet_battery_temperature_celsius",
+          labels: { job: "glinet-router", instance: "router-01" },
+          points: [{ timestamp: 1_776_643_200, value: 31.5 }],
+        },
+      ],
+    });
+    expect(parsed.source).toEqual(source);
+  });
+
+  it("requires response source metadata to match the requested booth", () => {
+    expect(() =>
+      ThermalHistorySchema.parse({
+        boothId: "booth-02",
+        source,
+        from: "2026-08-17T00:00:00.000Z",
+        to: "2026-08-18T00:00:00.000Z",
+        stepSeconds: 60,
+        series: [],
+      }),
+    ).toThrow();
+  });
+
+  it("uses the component-history 31-day and 10,000-point query bounds", () => {
+    expect(
+      ThermalHistoryQuerySchema.parse({
+        boothId: "booth-01",
+        from: "2026-08-17T00:00:00Z",
+        to: "2026-08-18T00:00:00Z",
+      }).stepSeconds,
+    ).toBe(60);
+    expect(() =>
+      ThermalHistoryQuerySchema.parse({
+        boothId: "booth-01",
+        from: "2026-01-01T00:00:00Z",
+        to: "2026-02-02T00:00:00Z",
+      }),
+    ).toThrow();
+    expect(() =>
+      ThermalHistoryQuerySchema.parse({
+        boothId: "booth-01",
+        from: "2026-01-01T00:00:00Z",
+        to: "2026-01-03T00:00:00Z",
+        stepSeconds: 15,
+      }),
+    ).toThrow();
+  });
+});
+
+describe("current weather schemas", () => {
+  it("accepts bounded modeled weather and its booth query", () => {
+    expect(CurrentWeatherQuerySchema.parse({ boothId: " booth-01 " })).toEqual({
+      boothId: "booth-01",
+    });
+    expect(
+      CurrentWeatherSchema.parse({
+        boothId: "booth-01",
+        source: "open_meteo",
+        temperatureCelsius: 22.2,
+        relativeHumidityPercent: 67,
+        cloudCoverPercent: 12,
+        condition: "clear_sky",
+        observedAt: "2026-08-18T14:30:00.000Z",
+        fetchedAt: "2026-08-18T14:31:00.000Z",
+      }).condition,
+    ).toBe("clear_sky");
+  });
+
+  it("rejects unknown conditions and out-of-range percentages", () => {
+    expect(() =>
+      CurrentWeatherSchema.parse({
+        boothId: "booth-01",
+        source: "open_meteo",
+        temperatureCelsius: 22.2,
+        relativeHumidityPercent: 101,
+        cloudCoverPercent: 12,
+        condition: "sunny",
+        observedAt: "2026-08-18T14:30:00.000Z",
+        fetchedAt: "2026-08-18T14:31:00.000Z",
+      }),
+    ).toThrow();
   });
 });

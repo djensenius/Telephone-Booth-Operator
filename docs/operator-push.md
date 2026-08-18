@@ -125,14 +125,21 @@ audio through itself.
     "model": null,
     "translationStatus": "succeeded",
     "translatedText": "Hello",
-    "moderationText": "Hello"
+    "translationInputSha256": "9172e8eec99f144f72eca9a568759580edadb2cfd154857f07e657569493bc44",
+    "moderationText": "Hello",
+    "moderationInputSha256": "185f8db32271fe25f561a6fc938b2e264306ec304eda518007d1764826381969"
   }
 }
 ```
 
-`transcription` is `null` before the first transcription. `moderationText` is
+`transcription` is `null` before the first transcription. Return
+`translationInputSha256` with translation results so a delayed worker cannot
+write a translation for transcript text that changed after it fetched work.
+`moderationText` is
 the English translation when available, otherwise the original transcript —
 it is exactly the text the moderation step should score.
+New workers should return `moderationInputSha256` with their moderation result
+to reject a verdict computed against stale text.
 
 ### `POST /v1/worker/messages/{id}/transcription`
 
@@ -154,6 +161,11 @@ On success the Operator writes the transcription, then:
 > your provider doesn't emit a language tag, supply an explicit best-guess
 > BCP-47 code so the Operator routes the row through translation correctly.
 
+New workers should also send the `transcription.id` they observed as
+`expectedLatestTranscriptionId` (and the pending row id as `transcriptionId`,
+when present). The write is rejected when that snapshot is stale. Both fields
+remain optional for compatibility with existing workers.
+
 **Operator-authenticated alternative.** A logged-in operator (OIDC) that holds
 no worker token — such as the iOS Transcriber app doing on-device
 transcription — can push the same result to
@@ -168,6 +180,7 @@ row to the submitting operator (`requestedById`). It returns the resulting
 ```json
 {
   "transcriptionId": "abc…",
+  "inputSha256": "9172e8eec99f144f72eca9a568759580edadb2cfd154857f07e657569493bc44",
   "translatedText": "Hello",
   "sourceLanguage": "fr",
   "targetLanguage": "en",
@@ -184,6 +197,7 @@ content; moderation runs against it. On success the Operator broadcasts
 ```json
 {
   "transcriptionId": "abc…",
+  "inputSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   "flagged": false,
   "recommendation": "approve",
   "maxScore": 0.02,
@@ -198,6 +212,12 @@ the Operator records the suggestion against a message that is already in the
 review queue, and **never** auto-approves or auto-rejects. It then broadcasts a `kind:"message"`
 envelope so live operator UIs update instantly, and a human decides via
 `POST /v1/messages/:id/decision`.
+
+New workers should include the work response's `transcription.id` as
+`transcriptionId` and its `moderationInputSha256`; the latter prevents
+recording a verdict against text that changed after the worker fetched it.
+Legacy workers may omit both fields, but scoped callbacks must supply them
+together.
 
 **Operator-authenticated alternative.** A logged-in operator (OIDC) that holds
 no worker token — such as the iOS review app computing a verdict with Apple

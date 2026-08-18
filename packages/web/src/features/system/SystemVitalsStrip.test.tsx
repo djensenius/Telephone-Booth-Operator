@@ -1,18 +1,29 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vite-plus/test";
-import type { BoothSystemSnapshotEnvelope } from "@telephone-booth-operator/shared";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import type {
+  BoothSystemSnapshotEnvelope,
+  TelemetrySourceEnvelope,
+} from "@telephone-booth-operator/shared";
 import { apiQueryKeys } from "../../lib/api-client.js";
+import { TELEMETRY_FRESHNESS_WINDOW_MS } from "../../lib/telemetry-freshness.js";
 import { SystemVitalsStrip } from "./SystemVitalsStrip.js";
 
-function renderStrip(envelope?: BoothSystemSnapshotEnvelope) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderStrip(
+  envelope?: BoothSystemSnapshotEnvelope,
+  sources: readonly TelemetrySourceEnvelope[] = [],
+) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: Number.POSITIVE_INFINITY } },
+  });
+  const boothId = envelope?.boothId ?? "booth-01";
   if (envelope) {
     client.setQueryData(apiQueryKeys.system(envelope.boothId), envelope);
   }
+  client.setQueryData(apiQueryKeys.systemComponents(boothId), sources);
   return render(
     <QueryClientProvider client={client}>
-      <SystemVitalsStrip boothId={envelope?.boothId ?? "booth-01"} />
+      <SystemVitalsStrip boothId={boothId} />
     </QueryClientProvider>,
   );
 }
@@ -36,7 +47,31 @@ const baseSnapshot = {
   runtimeMode: "real" as const,
 };
 
+const routerReceivedAt = new Date().toISOString();
+
+const routerSource: TelemetrySourceEnvelope = {
+  id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  boothId: "booth-01",
+  componentId: "router",
+  displayName: "Travel router",
+  kind: "router",
+  prometheusJob: "glinet-router",
+  prometheusInstance: "router-01",
+  latestSnapshot: {
+    battery: { temperatureCelsius: 31.5 },
+    thermalZones: [],
+  },
+  capturedAt: routerReceivedAt,
+  receivedAt: routerReceivedAt,
+  createdAt: "2026-05-01T00:00:00.000Z",
+  updatedAt: routerReceivedAt,
+};
+
 describe("SystemVitalsStrip", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("renders an awaiting-snapshot placeholder when nothing is cached", () => {
     renderStrip();
     expect(screen.getByText("Live vitals")).toBeDefined();
@@ -49,11 +84,14 @@ describe("SystemVitalsStrip", () => {
   });
 
   it("formats values with units once a snapshot is cached", () => {
-    renderStrip({
-      boothId: "booth-01",
-      snapshot: baseSnapshot,
-      receivedAt: "2026-05-27T00:00:05.000Z",
-    });
+    renderStrip(
+      {
+        boothId: "booth-01",
+        snapshot: baseSnapshot,
+        receivedAt: "2026-05-27T00:00:05.000Z",
+      },
+      [routerSource],
+    );
     // CPU temp formatted to one decimal with the °C unit.
     expect(screen.getByText("48.0°C")).toBeDefined();
     // CPU usage rounded to whole percent.
@@ -62,6 +100,102 @@ describe("SystemVitalsStrip", () => {
     expect(screen.getByText("25.0%")).toBeDefined();
     // Uptime in `Xd Yh Zm` form.
     expect(screen.getByText("3d 4h 15m")).toBeDefined();
+    expect(screen.getByText("31.5°C")).toBeDefined();
+  });
+
+  it("keeps an explicit missing state when router battery temperature is absent", () => {
+    renderStrip({
+      boothId: "booth-01",
+      snapshot: baseSnapshot,
+      receivedAt: "2026-05-27T00:00:05.000Z",
+    });
+    const batteryTile = screen.getByText("Router battery").parentElement;
+    expect(batteryTile?.textContent).toContain("—");
+  });
+
+  it("preserves router loading and error states without hiding host vitals", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "unavailable" }), {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Number.POSITIVE_INFINITY } },
+    });
+    client.setQueryData(apiQueryKeys.system("booth-01"), {
+      boothId: "booth-01",
+      snapshot: baseSnapshot,
+      receivedAt: "2026-05-27T00:00:05.000Z",
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <SystemVitalsStrip boothId="booth-01" />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByText("…")).toBeDefined();
+    expect(await screen.findByText("offline")).toBeDefined();
+    expect(screen.getByText("48.0°C")).toBeDefined();
+  });
+
+  it("gives a background query error precedence over cached router temperature", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Number.POSITIVE_INFINITY } },
+    });
+    client.setQueryData(apiQueryKeys.system("booth-01"), {
+      boothId: "booth-01",
+      snapshot: baseSnapshot,
+      receivedAt: routerReceivedAt,
+    });
+    client.setQueryData(apiQueryKeys.systemComponents("booth-01"), [routerSource]);
+    render(
+      <QueryClientProvider client={client}>
+        <SystemVitalsStrip boothId="booth-01" />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByText("31.5°C")).toBeDefined();
+
+    const componentQuery = client.getQueryCache().find({
+      queryKey: apiQueryKeys.systemComponents("booth-01"),
+      exact: true,
+    });
+    if (!componentQuery) throw new Error("missing component query");
+    act(() => {
+      componentQuery.setState({
+        ...componentQuery.state,
+        error: new Error("unavailable"),
+        errorUpdateCount: componentQuery.state.errorUpdateCount + 1,
+        errorUpdatedAt: Date.now(),
+        fetchStatus: "idle",
+        status: "error",
+      });
+    });
+
+    await waitFor(() => expect(screen.getByText("offline")).toBeDefined());
+    expect(screen.queryByText("31.5°C")).toBeNull();
+  });
+
+  it("marks cached router temperature offline after the source freshness window", () => {
+    const staleSource: TelemetrySourceEnvelope = {
+      ...routerSource,
+      receivedAt: new Date(Date.now() - TELEMETRY_FRESHNESS_WINDOW_MS).toISOString(),
+    };
+    renderStrip(
+      {
+        boothId: "booth-01",
+        snapshot: baseSnapshot,
+        receivedAt: routerReceivedAt,
+      },
+      [staleSource],
+    );
+
+    const batteryTile = screen.getByText("Router battery").parentElement;
+    expect(batteryTile?.textContent).toContain("offline");
+    expect(batteryTile?.textContent).not.toContain("31.5°C");
   });
 
   it("renders fan PWM as a dial while prioritizing measured RPM", () => {

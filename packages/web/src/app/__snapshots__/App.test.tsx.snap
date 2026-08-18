@@ -107,6 +107,21 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
           </div>
           <div
             class="system-vitals-strip__tile system-vitals-strip__tile--ok"
+            title="Router battery temperature has not been reported"
+          >
+            <span
+              class="system-vitals-strip__tile-label"
+            >
+              Router battery
+            </span>
+            <span
+              class="system-vitals-strip__tile-value"
+            >
+              —
+            </span>
+          </div>
+          <div
+            class="system-vitals-strip__tile system-vitals-strip__tile--ok"
             title="Average CPU usage across all cores"
           >
             <span
@@ -337,6 +352,13 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
           </li>
           <li>
             <a
+              href="/thermals"
+            >
+              Thermals
+            </a>
+          </li>
+          <li>
+            <a
               href="/events"
             >
               Events
@@ -501,9 +523,22 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
     </main>
   </div>
   <footer
-    aria-label="Build information"
+    aria-label="Application information"
     class="build-footer"
   >
+    <a
+      aria-label="Download Telephone Booth Operator on the App Store"
+      href="https://apps.apple.com/us/app/telephone-booth-operator/id6775110084"
+      rel="noreferrer"
+      target="_blank"
+    >
+      App Store
+    </a>
+    <span
+      aria-hidden="true"
+    >
+      ·
+    </span>
     <span>
       Build date
     </span>

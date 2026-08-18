@@ -10,13 +10,16 @@ import {
   TranslationSubmitSchema,
 } from "@telephone-booth-operator/shared";
 import { Hono } from "hono";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { resolveAiConfig } from "../lib/ai/config.js";
 import { recordAudit } from "../lib/audit.js";
 import {
+  advanceMessageAfterModeration,
   kickPipelineForMessage,
   recordModerationResult,
   recordTranscriptionResult,
+  recordTranslationResult,
   runModeration,
   runTranscription,
 } from "../lib/ai/pipeline.js";
@@ -31,7 +34,7 @@ import {
   resolveInstallationScope,
   scopeWhere,
 } from "../lib/installation.js";
-import { countMessagesAwaitingModeration } from "../lib/moderation-badge.js";
+import { notifyMessageFlagged, observeModerationQueue } from "../lib/push-events.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 import {
   serializeMessage,
@@ -170,6 +173,9 @@ messagesRouter.delete("/:id", zValidator("param", idParamSchema), async (c) => {
     throw error;
   }
   recordAudit(c, { metadata: { previousStatus: existing.status } });
+  if (existing.status === "received" || existing.status === "pending") {
+    void observeModerationQueue("message.delete");
+  }
   return c.body(null, 204);
 });
 
@@ -369,15 +375,15 @@ messagesRouter.post(
     // In push/disabled transcription modes this is a no-op — the external app
     // decides when to transcribe and posts the result back.
     kickPipelineForMessage(id);
-    // Push fan-out: notify mobile devices that a new message has landed.
-    // The badge reflects the number of messages awaiting moderation (this
-    // one is now "pending", so it is already included in the count).
-    const badge = await countMessagesAwaitingModeration();
+    // Push fan-out: notify mobile devices that a new message has landed. Badge
+    // updates use the separate queue observer so visible alerts can never
+    // overwrite a newer count.
+    void observeModerationQueue("message.complete");
     void fanOutNotification({
+      kind: "alert",
       preferenceKey: "messageReceived",
       title: "New booth message",
       body: "A new recording is ready to moderate.",
-      badge,
       threadId: `message:${id}`,
       category: "BOOTH_MESSAGE",
       data: { messageId: id },
@@ -428,16 +434,23 @@ messagesRouter.post("/:id/transcribe", zValidator("param", idParamSchema), async
 // app doing on-device transcription) records transcript text directly, rather
 // than triggering the server-side transcription pipeline via `/transcribe`.
 // Mirrors the worker push-back semantics — finalizes a pending row or records a
-// new succeeded one — but attributes the row to the submitting operator and,
-// like all pushed transcripts, still runs translation and moderation
-// server-side before the text can be acted on.
+// new succeeded one — but attributes the row to the submitting operator.
+// Complete on-device pipelines suppress downstream provider work.
 messagesRouter.post(
   "/:id/transcription",
   zValidator("param", idParamSchema),
   zValidator("json", TranscriptionSubmitSchema),
   async (c) => {
     const { id } = c.req.valid("param");
-    const { text, language, model } = c.req.valid("json");
+    const data = c.req.valid("json");
+    const {
+      expectedLatestTranscriptionId,
+      expectedLatestTranscriptionSha256,
+      text,
+      language,
+      model,
+      processDownstream,
+    } = data;
     // An operator overriding the machine transcript is exactly the kind of
     // edit the trail exists for; the text itself stays in the Transcription row.
     recordAudit(c, {
@@ -449,12 +462,23 @@ messagesRouter.post(
     const user = c.get("user") as { id: string } | undefined;
     const result = await recordTranscriptionResult({
       messageId: id,
+      ...("expectedLatestTranscriptionId" in data
+        ? { expectedLatestTranscriptionId: expectedLatestTranscriptionId ?? null }
+        : {}),
+      ...("expectedLatestTranscriptionSha256" in data
+        ? { expectedLatestTranscriptionSha256: expectedLatestTranscriptionSha256 ?? null }
+        : {}),
       text,
       language: language ?? null,
       model: model ?? null,
+      provider: "on_device",
+      processDownstream: processDownstream ?? true,
       requestedByUserId: user?.id ?? null,
     });
     if (result.outcome === "not_found") return c.json({ error: "not_found" }, 404);
+    if (result.outcome === "stale_transcription") {
+      return c.json({ error: "stale_transcription" }, 409);
+    }
     const row = await db.transcription.findUnique({ where: { id: result.transcriptionId } });
     if (!row) return c.json({ error: "not_found" }, 404);
     return c.json(serializeTranscription(row), 202);
@@ -492,6 +516,111 @@ messagesRouter.post(
       },
     });
     const user = c.get("user") as { id: string } | undefined;
+    if (data.inputSha256 && data.transcriptionId) {
+      const targetTranscriptionId = data.transcriptionId;
+      const outcome = await db.$transaction(async (tx) => {
+        if (!(await lockMessageForReview(tx, id))) return { outcome: "not_found" } as const;
+        const transcription = await tx.transcription.findFirst({
+          where: { id: targetTranscriptionId, messageId: id, status: "succeeded" },
+        });
+        if (!transcription) return { outcome: "transcription_not_found" } as const;
+        const latestTranscription = await tx.transcription.findFirst({
+          where: { messageId: id, status: "succeeded" },
+          orderBy: { createdAt: "desc" },
+        });
+        if (latestTranscription?.id !== transcription.id) {
+          return { outcome: "stale_transcription" } as const;
+        }
+        const input =
+          transcription.translationStatus === "succeeded" &&
+          typeof transcription.translatedText === "string" &&
+          transcription.translatedText.trim().length > 0
+            ? normalizeTranslationText(transcription.translatedText)
+            : (transcription.text ?? "");
+        const actualHash = createHash("sha256").update(input.trim(), "utf8").digest("hex");
+        if (actualHash !== data.inputSha256) return { outcome: "stale_input" } as const;
+
+        const now = new Date();
+        const pending = await tx.moderation.findFirst({
+          where: {
+            messageId: id,
+            transcriptionId: transcription.id,
+            status: "pending",
+          },
+          orderBy: { createdAt: "desc" },
+        });
+        if (pending) {
+          const updated = await tx.moderation.update({
+            where: { id: pending.id },
+            data: {
+              provider: "on_device",
+              model: data.model ?? null,
+              status: "succeeded",
+              flagged: data.flagged,
+              recommendation: data.recommendation,
+              maxScore: data.maxScore,
+              categories: data.categories ?? {},
+              reasonSummary: data.reasonSummary ?? null,
+              latencyMs: now.getTime() - pending.createdAt.getTime(),
+              completedAt: now,
+              requestedById: user?.id ?? null,
+            },
+          });
+          return { outcome: "recorded", moderationId: updated.id } as const;
+        }
+        const latest = await tx.moderation.findFirst({
+          where: { messageId: id },
+          orderBy: { createdAt: "desc" },
+        });
+        if (
+          latest?.status === "succeeded" &&
+          latest.transcriptionId === transcription.id &&
+          latest.provider === "on_device" &&
+          latest.flagged === data.flagged &&
+          latest.recommendation === data.recommendation &&
+          latest.maxScore === data.maxScore &&
+          scoreMapsEqual(latest.categories, data.categories) &&
+          (latest.reasonSummary ?? null) === (data.reasonSummary ?? null) &&
+          (latest.model ?? null) === (data.model ?? null) &&
+          (latest.requestedById ?? null) === (user?.id ?? null)
+        ) {
+          return { outcome: "recorded", moderationId: latest.id } as const;
+        }
+        const created = await tx.moderation.create({
+          data: {
+            messageId: id,
+            transcriptionId: transcription.id,
+            provider: "on_device",
+            model: data.model ?? null,
+            status: "succeeded",
+            flagged: data.flagged,
+            recommendation: data.recommendation,
+            maxScore: data.maxScore,
+            categories: data.categories ?? {},
+            reasonSummary: data.reasonSummary ?? null,
+            completedAt: now,
+            requestedById: user?.id ?? null,
+          },
+        });
+        return { outcome: "recorded", moderationId: created.id } as const;
+      });
+      if (outcome.outcome === "not_found") return c.json({ error: "not_found" }, 404);
+      if (outcome.outcome === "transcription_not_found") {
+        return c.json({ error: "transcription_not_found" }, 404);
+      }
+      if (outcome.outcome === "stale_transcription") {
+        return c.json({ error: "stale_transcription" }, 409);
+      }
+      if (outcome.outcome === "stale_input") {
+        return c.json({ error: "stale_moderation_input" }, 409);
+      }
+      const row = await db.moderation.findUnique({ where: { id: outcome.moderationId } });
+      if (!row) return c.json({ error: "not_found" }, 404);
+      await advanceMessageAfterModeration(id);
+      await broadcastMessageById(id);
+      void notifyMessageFlagged(id, row.id, row.flagged === true);
+      return c.json(serializeModeration(row), 202);
+    }
     const result = await recordModerationResult({
       messageId: id,
       transcriptionId: data.transcriptionId ?? null,
@@ -508,6 +637,12 @@ messagesRouter.post(
     if (result.outcome === "not_found") return c.json({ error: "not_found" }, 404);
     if (result.outcome === "transcription_not_found") {
       return c.json({ error: "transcription_not_found" }, 404);
+    }
+    if (result.outcome === "stale_transcription") {
+      return c.json({ error: "stale_transcription" }, 409);
+    }
+    if (result.outcome === "stale_input") {
+      return c.json({ error: "stale_moderation_input" }, 409);
     }
     if (result.moderationId === null) return c.json({ error: "not_found" }, 404);
     const row = await db.moderation.findUnique({ where: { id: result.moderationId } });
@@ -546,6 +681,31 @@ const broadcastMessageById = async (messageId: string): Promise<void> => {
   const full = await db.message.findUnique({ where: { id: messageId }, include: messageWithAi });
   if (!full) return;
   wsBroadcaster.broadcast({ kind: "message", message: serializeMessage(full) });
+};
+
+const lockMessageForReview = async (
+  tx: Prisma.TransactionClient,
+  messageId: string,
+): Promise<boolean> => {
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    SELECT "id" FROM "Message" WHERE "id" = ${messageId}::uuid FOR UPDATE
+  `;
+  return rows.length > 0;
+};
+
+const scoreMapsEqual = (
+  stored: unknown,
+  submitted: Record<string, number> | undefined,
+): boolean => {
+  const previous =
+    stored !== null && typeof stored === "object" && !Array.isArray(stored)
+      ? (stored as Record<string, unknown>)
+      : {};
+  const next = submitted ?? {};
+  const keys = Object.keys(next);
+  return (
+    keys.length === Object.keys(previous).length && keys.every((key) => previous[key] === next[key])
+  );
 };
 
 // Human moderation decision: a logged-in operator approves or rejects a
@@ -596,6 +756,9 @@ messagesRouter.post(
     const message = await db.message.findUnique({ where: { id }, include: messageWithAi });
     if (!message) return c.json({ error: "not_found" }, 404);
     wsBroadcaster.broadcast({ kind: "message", message: serializeMessage(message) });
+    if (existing.status === "received" || existing.status === "pending") {
+      void observeModerationQueue("message.decision");
+    }
     return c.json(serializeMessage(message as never));
   },
 );
@@ -609,7 +772,15 @@ messagesRouter.post(
   zValidator("json", TranslationSubmitSchema),
   async (c) => {
     const { id } = c.req.valid("param");
-    const { translatedText, translatedLanguage } = c.req.valid("json");
+    const data = c.req.valid("json");
+    const {
+      transcriptionId,
+      expectedTranscriptionId,
+      expectedTranslationSha256,
+      translatedText,
+      translatedLanguage,
+      model,
+    } = data;
     const normalizedTranslation = normalizeTranslationText(translatedText);
     recordAudit(c, {
       action: "message.translation.submit",
@@ -618,31 +789,39 @@ messagesRouter.post(
       metadata: {
         translatedLanguage: translatedLanguage ?? null,
         translatedTextLength: normalizedTranslation.length,
+        transcriptionId: transcriptionId ?? null,
+        expectedTranscriptionId: expectedTranscriptionId ?? null,
+        expectedTranslationSha256: expectedTranslationSha256 ?? null,
+        model: model ?? null,
       },
     });
-    const message = await db.message.findUnique({ where: { id }, select: { id: true } });
-    if (!message) return c.json({ error: "not_found" }, 404);
-    const latest = await db.transcription.findFirst({
-      where: { messageId: id, status: "succeeded" },
-      orderBy: { createdAt: "desc" },
+    const result = await recordTranslationResult({
+      messageId: id,
+      ...(transcriptionId ? { transcriptionId } : {}),
+      ...(expectedTranscriptionId ? { expectedTranscriptionId } : {}),
+      ...("expectedTranslationSha256" in data
+        ? { expectedTranslationSha256: expectedTranslationSha256 ?? null }
+        : {}),
+      translatedText: normalizedTranslation,
+      translatedLanguage: translatedLanguage ?? null,
+      model: model ?? null,
+      ...(transcriptionId ? { provider: "on_device" as const } : {}),
     });
-    if (!latest) return c.json({ error: "no_succeeded_transcription" }, 409);
-    recordAudit(c, { metadata: { transcriptionId: latest.id } });
-    const updated = await db.transcription.update({
-      where: { id: latest.id },
-      data: {
-        translationStatus: "succeeded",
-        translatedText: normalizedTranslation,
-        translatedLanguage: translatedLanguage ?? null,
-        // Human-supplied translation: no AI provider/model. Consumers infer a
-        // manual translation from a succeeded translation with a null provider.
-        translationProvider: null,
-        translationModel: null,
-        translationError: null,
-        translationCompletedAt: new Date(),
-      },
+    if (result.outcome === "not_found") return c.json({ error: "not_found" }, 404);
+    if (result.outcome === "no_transcription") {
+      return c.json({ error: "no_succeeded_transcription" }, 409);
+    }
+    if (result.outcome === "stale_transcription") {
+      return c.json({ error: "stale_transcription" }, 409);
+    }
+    if (result.outcome === "stale_translation") {
+      return c.json({ error: "stale_translation" }, 409);
+    }
+    const transcription = await db.transcription.findUnique({
+      where: { id: result.transcriptionId },
     });
-    await broadcastMessageById(id);
-    return c.json(serializeTranscription(updated));
+    if (!transcription) return c.json({ error: "not_found" }, 404);
+    recordAudit(c, { metadata: { transcriptionId: transcription.id } });
+    return c.json(serializeTranscription(transcription));
   },
 );

@@ -1,8 +1,10 @@
 import { useState } from "react";
 import type { FormEvent, JSX } from "react";
-import type { InstructionStatus } from "@telephone-booth-operator/shared";
+import type { Instruction, InstructionStatus } from "@telephone-booth-operator/shared";
 import { GlassPanel } from "../../components/booth/index.js";
 import {
+  AUDIO_UPLOAD_ACCEPT,
+  audioUploadContentType,
   sha256Hex,
   uploadBlobToSas,
   uploads,
@@ -11,6 +13,7 @@ import {
   useDeactivateInstruction,
   useDeleteInstruction,
   useInstructionsList,
+  useUpdateInstruction,
 } from "../../lib/api-client.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
 
@@ -47,16 +50,17 @@ export function NewInstructionDialog({
     try {
       setStatus("Reserving a clean line for the instruction audio…");
       const sha256 = await sha256Hex(file);
+      const contentType = audioUploadContentType(file);
       const slot = await uploads.sas({
         kind: "instruction-audio",
         sha256,
         sizeBytes: file.size,
-        contentType: "audio/flac",
+        contentType,
       });
       if (slot.audioFileId === undefined)
         throw new Error("Upload slot did not include an audio file id.");
       setStatus("Sending the instruction audio up the wire…");
-      await uploadBlobToSas(slot.uploadUrl, file);
+      await uploadBlobToSas(slot.uploadUrl, file, contentType);
       setStatus("Filing the instruction card…");
       await createInstruction.mutateAsync({
         description: description.trim() || undefined,
@@ -91,10 +95,10 @@ export function NewInstructionDialog({
             />
           </label>
           <label>
-            Audio file (FLAC)
+            Audio file
             <input
               type="file"
-              accept="audio/flac,.flac"
+              accept={AUDIO_UPLOAD_ACCEPT}
               onChange={(event) => setFile(event.currentTarget.files?.[0] ?? null)}
               required
             />
@@ -117,6 +121,65 @@ export function NewInstructionDialog({
   );
 }
 
+export function EditInstructionDialog({
+  instruction,
+  onClose,
+}: {
+  readonly instruction: Instruction | null;
+  readonly onClose: () => void;
+}): JSX.Element | null {
+  const updateInstruction = useUpdateInstruction();
+  const [description, setDescription] = useState(instruction?.description ?? "");
+
+  if (instruction === null) return null;
+  const instructionId = instruction.id;
+
+  function submit(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    updateInstruction.mutate(
+      {
+        id: instructionId,
+        input: { description: description.trim() || null },
+      },
+      { onSuccess: onClose },
+    );
+  }
+
+  return (
+    <div className="feature-dialog-backdrop" role="presentation">
+      <section
+        className="feature-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="edit-instruction-heading"
+      >
+        <h2 id="edit-instruction-heading">Edit instruction description</h2>
+        <form className="feature-form" onSubmit={submit}>
+          <label>
+            Description
+            <input
+              value={description}
+              onChange={(event) => setDescription(event.currentTarget.value)}
+              maxLength={280}
+            />
+          </label>
+          {updateInstruction.error ? (
+            <FeatureError message="The instruction description could not be updated." />
+          ) : null}
+          <div className="debug-button-row">
+            <button type="submit" disabled={updateInstruction.isPending}>
+              Save description
+            </button>
+            <button type="button" onClick={onClose}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 export function InstructionsScreen(): JSX.Element {
   const [filter, setFilter] = useState<InstructionStatus | "all">("all");
   const instructions = useInstructionsList(filter);
@@ -124,6 +187,7 @@ export function InstructionsScreen(): JSX.Element {
   const activateInstruction = useActivateInstruction();
   const deactivateInstruction = useDeactivateInstruction();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editInstruction, setEditInstruction] = useState<Instruction | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const rows = instructions.data?.items ?? [];
 
@@ -131,7 +195,10 @@ export function InstructionsScreen(): JSX.Element {
     <GlassPanel title="Instruction library" className="feature-screen questions-screen">
       <p className="screen-kicker">Digit 8</p>
       <h1>Instructions</h1>
-      <p>Upload the operator-hosted clip the booth plays when callers need instructions.</p>
+      <p>
+        Upload instruction clips for the booth to choose from at random. Every active clip stays in
+        the calling pool.
+      </p>
       <div className="feature-toolbar" role="toolbar" aria-label="Instruction filters">
         {INSTRUCTION_FILTERS.map((option) => (
           <button
@@ -214,6 +281,9 @@ export function InstructionsScreen(): JSX.Element {
                           Activate
                         </button>
                       )}
+                      <button type="button" onClick={() => setEditInstruction(instruction)}>
+                        Edit description
+                      </button>
                       <button type="button" onClick={() => setDeleteId(instruction.id)}>
                         Delete
                       </button>
@@ -226,6 +296,11 @@ export function InstructionsScreen(): JSX.Element {
         </div>
       )}
       <NewInstructionDialog open={dialogOpen} onClose={() => setDialogOpen(false)} />
+      <EditInstructionDialog
+        key={editInstruction?.id}
+        instruction={editInstruction}
+        onClose={() => setEditInstruction(null)}
+      />
       {deleteId === null ? null : (
         <section
           className="feature-dialog"
@@ -234,7 +309,7 @@ export function InstructionsScreen(): JSX.Element {
           aria-labelledby="delete-instruction-heading"
         >
           <h2 id="delete-instruction-heading">Delete this instruction?</h2>
-          <p>The booth will stop serving this clip if it is the current active instruction.</p>
+          <p>The booth will stop choosing this clip from the active instruction pool.</p>
           <div className="debug-button-row">
             <button
               type="button"
