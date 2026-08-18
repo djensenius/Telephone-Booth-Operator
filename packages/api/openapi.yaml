@@ -1128,10 +1128,8 @@ paths:
     post:
       summary: Start a new installation.
       description: |
-        Fails with 409 if an installation is still active *and* the booth has
-        recorded into it — end it first. An active era with no activity yet
-        (one the booth opened automatically while the operator was between
-        steps) is adopted and renamed instead.
+        If an installation is still active, it is ended first in the same
+        rollover and the requested installation becomes the new active era.
 
         Set `copyQuestions` to carry the last ended era's questions forward;
         copies share the original audio file so nothing is re-uploaded.
@@ -1152,7 +1150,7 @@ paths:
               schema: { $ref: "#/components/schemas/Installation" }
         "401": { description: missing or invalid credentials }
         "403": { description: operator is not an admin }
-        "409": { description: an installation is already active and in use }
+        "409": { description: a concurrent rollover already opened another installation }
 
   /v1/installations/current:
     get:

@@ -80,7 +80,11 @@ const server = setupServer(
   http.get("http://localhost/v1/stats/summary", () => HttpResponse.json(summary)),
   http.post("http://localhost/v1/installations", async ({ request }) => {
     createBody = await request.json();
-    return HttpResponse.json(activeInstallation, { status: 201 });
+    const create = createBody as { name?: string };
+    return HttpResponse.json(
+      { ...activeInstallation, name: create.name ?? activeInstallation.name },
+      { status: 201 },
+    );
   }),
   http.patch("http://localhost/v1/installations/:id", async ({ params, request }) => {
     updateCalledId = String(params.id);
@@ -179,17 +183,37 @@ describe("InstallationsScreen", () => {
   });
 
   it("starts a new installation with copyQuestions defaulting to false", async () => {
-    renderScreen([endedInstallation]);
+    let items: unknown[] = [endedInstallation];
+    renderScreen(items);
 
     const nameInput = await screen.findByPlaceholderText("Summer 2027 residency");
     const copyCheckbox = screen.getByLabelText(/Copy the current questions/);
     expect(copyCheckbox).toHaveProperty("checked", false);
+    server.use(
+      http.get("http://localhost/v1/installations", () => HttpResponse.json({ items })),
+      http.post("http://localhost/v1/installations", async ({ request }) => {
+        createBody = await request.json();
+        const create = createBody as { name?: string };
+        const created = {
+          ...activeInstallation,
+          name: create.name ?? activeInstallation.name,
+        };
+        items = [created, ...items];
+        return HttpResponse.json(created, { status: 201 });
+      }),
+    );
 
     fireEvent.change(nameInput, { target: { value: "Autumn 2026" } });
     fireEvent.click(screen.getByRole("button", { name: "Start installation" }));
 
     await waitFor(() => expect(createBody).not.toBeNull());
     expect(createBody).toMatchObject({ name: "Autumn 2026", copyQuestions: false });
+    expect(await screen.findByText("Active")).toBeTruthy();
+    expect(
+      await screen.findByText(
+        "Started Autumn 2026. Any previously active installation was ended automatically.",
+      ),
+    ).toBeTruthy();
   });
 
   it("reports an already-active conflict when starting a new installation", async () => {
@@ -260,7 +284,7 @@ describe("InstallationsScreen", () => {
     expect(await screen.findByDisplayValue("Summer 2026 tour")).toBeTruthy();
   });
 
-  it("nudges the operator to rename when a Start hits 409 installation_already_active", async () => {
+  it("reports when a concurrent start wins the rollover race", async () => {
     server.use(
       http.post("http://localhost/v1/installations", () =>
         HttpResponse.json({ error: "installation_already_active" }, { status: 409 }),
@@ -273,9 +297,7 @@ describe("InstallationsScreen", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Start installation" }));
 
-    expect(
-      await screen.findByText(/booth has recorded into it, so it can't be renamed automatically/i),
-    ).toBeTruthy();
+    expect(await screen.findByText(/another installation rollover completed first/i)).toBeTruthy();
   });
 
   it("reseeds the end-installation form from the latest metadata each time it opens", async () => {
