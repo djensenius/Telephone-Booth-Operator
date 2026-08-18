@@ -76,6 +76,21 @@ export type FakeSystemSnapshot = {
   version: string | null;
 };
 
+export type FakeTelemetrySource = {
+  id: string;
+  boothId: string;
+  componentId: string;
+  displayName: string;
+  kind: string;
+  prometheusJob: string;
+  prometheusInstance: string;
+  latestSnapshot: unknown | null;
+  capturedAt: Date | null;
+  receivedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 type FakeSession = {
   id: string;
   userId: string;
@@ -256,6 +271,7 @@ export const store = {
   messages: new Map<string, FakeMessage>(),
   statuses: [] as FakeStatus[],
   systemSnapshots: new Map<string, FakeSystemSnapshot>(),
+  telemetrySources: new Map<string, FakeTelemetrySource>(),
   sessions: new Map<string, FakeSession>(),
   users: new Map<string, Record<string, unknown>>(),
   boothEvents: [] as FakeBoothEvent[],
@@ -633,6 +649,29 @@ export const seedMobileDevice = (overrides: Partial<FakeMobileDevice> = {}): Fak
   return device;
 };
 
+export const seedTelemetrySource = (
+  overrides: Partial<FakeTelemetrySource> = {},
+): FakeTelemetrySource => {
+  const now = new Date();
+  const source: FakeTelemetrySource = {
+    id: randomUUID(),
+    boothId: "booth-01",
+    componentId: "router-01",
+    displayName: "Router",
+    kind: "router",
+    prometheusJob: "glinet-router",
+    prometheusInstance: "router-01",
+    latestSnapshot: null,
+    capturedAt: null,
+    receivedAt: null,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  };
+  store.telemetrySources.set(source.id, source);
+  return source;
+};
+
 export const seedStatus = (overrides: Partial<FakeStatus> = {}): FakeStatus => {
   const status: FakeStatus = {
     id: store.statuses.length + 1,
@@ -697,6 +736,7 @@ export const resetFakeDb = (): void => {
   store.messages.clear();
   store.statuses.length = 0;
   store.systemSnapshots.clear();
+  store.telemetrySources.clear();
   store.sessions.clear();
   store.users.clear();
   store.boothEvents.length = 0;
@@ -1880,6 +1920,86 @@ export const fakeDb = {
       [...store.systemSnapshots.values()]
         .sort((a, b) => a.boothId.localeCompare(b.boothId))
         .map((row) => ({ ...row, receivedAt: cloneDate(row.receivedAt) })),
+  },
+  telemetrySource: {
+    findUnique: async ({
+      where,
+    }: {
+      where: {
+        id?: string;
+        boothId_componentId?: { boothId: string; componentId: string };
+      };
+    }) => {
+      const source = where.id
+        ? store.telemetrySources.get(where.id)
+        : [...store.telemetrySources.values()].find(
+            (row) =>
+              row.boothId === where.boothId_componentId?.boothId &&
+              row.componentId === where.boothId_componentId.componentId,
+          );
+      return source ? { ...source } : null;
+    },
+    findMany: async ({
+      where = {},
+    }: {
+      where?: { boothId?: string; componentId?: string; id?: { in?: string[] } };
+      orderBy?: unknown;
+    } = {}) =>
+      [...store.telemetrySources.values()]
+        .filter((source) => {
+          if (where.boothId !== undefined && source.boothId !== where.boothId) return false;
+          if (where.componentId !== undefined && source.componentId !== where.componentId) {
+            return false;
+          }
+          if (where.id?.in !== undefined && !where.id.in.includes(source.id)) return false;
+          return true;
+        })
+        .sort(
+          (a, b) =>
+            a.boothId.localeCompare(b.boothId) || a.componentId.localeCompare(b.componentId),
+        )
+        .map((source) => ({ ...source })),
+    updateMany: async ({
+      where,
+      data,
+    }: {
+      where: { id: string };
+      data: Partial<FakeTelemetrySource>;
+    }) => {
+      const source = store.telemetrySources.get(where.id);
+      if (!source) return { count: 0 };
+      store.telemetrySources.set(where.id, {
+        ...source,
+        ...data,
+        updatedAt: new Date(),
+      });
+      return { count: 1 };
+    },
+    upsert: async ({
+      where,
+      create,
+      update,
+    }: {
+      where: { id: string };
+      create: FakeTelemetrySource;
+      update: Partial<FakeTelemetrySource>;
+    }) => {
+      const existing = store.telemetrySources.get(where.id);
+      const normalizedCreate = {
+        ...create,
+        latestSnapshot:
+          create.latestSnapshot === Prisma.DbNull ? null : (create.latestSnapshot ?? null),
+      };
+      const normalizedUpdate = {
+        ...update,
+        ...(update.latestSnapshot === Prisma.DbNull ? { latestSnapshot: null } : {}),
+      };
+      const source = existing
+        ? { ...existing, ...normalizedUpdate, updatedAt: new Date() }
+        : { ...normalizedCreate, id: where.id };
+      store.telemetrySources.set(where.id, source);
+      return source;
+    },
   },
   operatorSession: {
     findUnique: async ({

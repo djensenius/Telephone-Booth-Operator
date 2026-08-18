@@ -39,6 +39,7 @@ import { questionsRouter } from "./routes/questions.js";
 import { sessionsRouter } from "./routes/sessions.js";
 import { statsRouter } from "./routes/stats.js";
 import { statusRouter } from "./routes/status.js";
+import { componentTelemetryRouter } from "./routes/system-components.js";
 import { systemRouter } from "./routes/system.js";
 import { uploadsRouter } from "./routes/uploads.js";
 import { workerRouter } from "./routes/worker.js";
@@ -96,6 +97,7 @@ export const createApp = (): Hono<{ Variables: AuthVariables & AuditVariables }>
   app.route("/v1/sessions", sessionsRouter);
   app.route("/v1/stats", statsRouter);
   app.route("/v1/system", systemRouter);
+  app.route("/v1/system/components", componentTelemetryRouter);
   app.route("/v1/uploads", uploadsRouter);
   app.route("/v1/devices", devicesRouter);
   app.route("/v1/admin/data", adminDataRouter);

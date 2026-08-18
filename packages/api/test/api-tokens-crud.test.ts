@@ -9,6 +9,7 @@ const { fakeDb, store } = vi.hoisted(() => {
   const users = new Map<string, Record<string, unknown>>();
   const sessions = new Map<string, Record<string, unknown>>();
   const tokens = new Map<string, Record<string, unknown>>();
+  const telemetrySources = new Map<string, Record<string, unknown>>();
 
   const withUser = (session: Record<string, unknown>) => ({
     ...session,
@@ -17,14 +18,24 @@ const { fakeDb, store } = vi.hoisted(() => {
 
   const selectFields = (
     row: Record<string, unknown>,
-    select: Record<string, boolean> | undefined,
+    select: Record<string, boolean | { select: Record<string, boolean> }> | undefined,
   ) => {
     if (!select) return row;
-    return Object.fromEntries(Object.keys(select).map((key) => [key, row[key]]));
+    return Object.fromEntries(
+      Object.entries(select).map(([key, selection]) => {
+        if (selection === true) return [key, row[key]];
+        if (key === "telemetrySource") {
+          const sourceId = row.telemetrySourceId;
+          const source = typeof sourceId === "string" ? telemetrySources.get(sourceId) : undefined;
+          return [key, source ? selectFields(source, selection.select) : null];
+        }
+        return [key, row[key]];
+      }),
+    );
   };
 
   return {
-    store: { users, sessions, tokens },
+    store: { users, sessions, tokens, telemetrySources },
     fakeDb: {
       // Audit rows are written by middleware on every write; these suites do
       // not assert on them, they just need the delegate to exist.
@@ -45,12 +56,46 @@ const { fakeDb, store } = vi.hoisted(() => {
       },
       apiToken: {
         create: vi.fn(async ({ data, select }) => {
+          const relation = data.telemetrySource as
+            | {
+                connectOrCreate: {
+                  where: { boothId_componentId: { boothId: string; componentId: string } };
+                  create: Record<string, unknown>;
+                };
+              }
+            | undefined;
+          let telemetrySourceId: string | null = null;
+          if (relation) {
+            const identity = relation.connectOrCreate.where.boothId_componentId;
+            let source = [...telemetrySources.values()].find(
+              (candidate) =>
+                candidate.boothId === identity.boothId &&
+                candidate.componentId === identity.componentId,
+            );
+            if (!source) {
+              source = {
+                id: randomUUID(),
+                latestSnapshot: null,
+                capturedAt: null,
+                receivedAt: null,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+                ...relation.connectOrCreate.create,
+              };
+              telemetrySources.set(source.id as string, source);
+            }
+            telemetrySourceId = source.id as string;
+          }
+          const createdBy = data.createdBy as { connect: { id: string } };
+          const { telemetrySource: _telemetrySource, createdBy: _createdBy, ...scalarData } = data;
           const row = {
             id: randomUUID(),
             createdAt: new Date(),
             lastUsedAt: null,
             revokedAt: null,
-            ...data,
+            telemetrySourceId,
+            createdByUserId: createdBy.connect.id,
+            ...scalarData,
           };
           tokens.set(row.id, row);
           return selectFields(row, select);
@@ -129,6 +174,7 @@ describe("api token CRUD", () => {
     store.users.clear();
     store.sessions.clear();
     store.tokens.clear();
+    store.telemetrySources.clear();
     resetApiTokenStateForTests();
   });
 
@@ -232,5 +278,51 @@ describe("api token CRUD", () => {
       headers: { authorization: `Bearer ${operatorToken}` },
     });
     expect(phoneWithOperator.status, await phoneWithOperator.clone().text()).toBe(200);
+  });
+
+  it("binds telemetry token rotations to one persistent source", async () => {
+    const cookie = seedSession();
+    const app = createApp();
+    const telemetrySource = {
+      boothId: "booth-01",
+      componentId: "router-01",
+      displayName: "Router",
+      kind: "router",
+      prometheusJob: "glinet-router",
+      prometheusInstance: "router-01",
+    };
+
+    const issue = async (name: string, displayName = telemetrySource.displayName) => {
+      const response = await app.request("/v1/api-tokens", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({
+          name,
+          scope: "telemetry",
+          telemetrySource: { ...telemetrySource, displayName },
+        }),
+      });
+      expect(response.status, await response.clone().text()).toBe(201);
+      return response.json();
+    };
+
+    await expect(issue("Router telemetry")).resolves.toMatchObject({
+      scope: "telemetry",
+      telemetrySource,
+    });
+    await expect(issue("Router telemetry rotation", "Ignored replacement")).resolves.toMatchObject({
+      scope: "telemetry",
+      telemetrySource,
+    });
+    expect(store.telemetrySources).toHaveLength(1);
+    expect(
+      new Set([...store.tokens.values()].map((token) => token.telemetrySourceId)),
+    ).toHaveLength(1);
+
+    const list = await app.request("/v1/api-tokens", { headers: { cookie } });
+    expect(list.status).toBe(200);
+    const summaries = (await list.json()) as Array<Record<string, unknown>>;
+    expect(summaries).toHaveLength(2);
+    expect(summaries.every((summary) => "telemetrySource" in summary)).toBe(true);
   });
 });

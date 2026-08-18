@@ -21,13 +21,14 @@ import { closeOutInstallation, invalidateActiveInstallationCache } from "./insta
 export const EXPORT_FORMAT = "telephone-booth-export";
 // 1: original shape. 2: BoothStatusSnapshot carries `firstSeenAt`/`repeatCount`.
 // 3: adds the AuditLog trail. 4: rows carry `installationId` and the archive
-// may be scoped to one installation. Each bump makes a server that predates the
-// change reject the archive as newer than supported instead of failing on
-// unknown columns mid-restore. Older archives still import — `withStatusWindow`
-// fills the missing status window, absent tables restore as empty, and legacy
-// untagged rows are adopted into a deterministic ended "Restored …"
-// installation after the archived rows are upserted.
-export const EXPORT_VERSION = 4;
+// may be scoped to one installation. 5: adds TelemetrySource rows before the
+// API tokens that can reference them. Each bump makes a server that predates
+// the change reject the archive as newer than supported instead of failing on
+// unknown columns mid-restore. Older archives still import —
+// `withStatusWindow` fills the missing status window, absent tables restore as
+// empty, and legacy untagged rows are adopted into a deterministic ended
+// "Restored …" installation after the archived rows are upserted.
+export const EXPORT_VERSION = 5;
 // Manifest models added after v1. Nothing to migrate; listed for the record.
 const INSTALLATION_MODEL = "installation" as const;
 
@@ -42,6 +43,7 @@ const IMPORT_ORDER = [
   "message",
   "boothEvent",
   "boothStatusSnapshot",
+  "telemetrySource",
   "apiToken",
   "transcription",
   "moderation",
@@ -228,6 +230,7 @@ const moderationScopeArgs = (installationId: string): Prisma.ModerationFindManyA
 // hashes or push-device registrations inside a downloadable safety copy would
 // spread secrets around for nothing.
 const EXCLUDED_FROM_SCOPED_EXPORT = new Set<ModelName>([
+  "telemetrySource",
   "apiToken",
   "mobileDevice",
   "metricFilter",
@@ -558,6 +561,23 @@ export const restoreImportArchive = async (archive: Buffer): Promise<ImportSumma
         const client = modelClientOf(tx, name);
         let count = 0;
         for (const row of dump[name]) {
+          if (name === "telemetrySource") {
+            const { latestSnapshot, ...fields } = row;
+            const source = {
+              ...fields,
+              ...(latestSnapshot === undefined
+                ? {}
+                : {
+                    latestSnapshot:
+                      latestSnapshot === null
+                        ? Prisma.DbNull
+                        : (latestSnapshot as Prisma.InputJsonValue),
+                  }),
+            };
+            await client.upsert({ where: { id: row.id }, create: source, update: source });
+            count += 1;
+            continue;
+          }
           // The audit trail is append-only: an archive may add history that is
           // missing locally, but it must never rewrite an entry that exists.
           if (name === "auditLog") {

@@ -16,7 +16,8 @@ const bearerTokenFromHeader = (authorization: string | undefined): string | null
 };
 
 // The token must carry one of the required scopes. Defaults to "operator" so
-// booth/phone and native-operator routes reject worker/monitor credentials.
+// booth/phone and native-operator routes reject worker/monitor/telemetry
+// credentials.
 export const requireApiToken =
   (
     requiredScope: ApiTokenScope | readonly ApiTokenScope[] = "operator",

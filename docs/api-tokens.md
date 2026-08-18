@@ -1,9 +1,12 @@
-# Phone-client API tokens
+# API tokens
 
 Phone clients authenticate to the Hono API with opaque Bearer tokens. Operator
 browsers still use the `__Host-booth_session` cookie; API tokens are only for
 the booth/phone client calling routes such as `/v1/uploads/*`,
 `/v1/messages/incoming`, and `PUT /v1/status`.
+
+Router component collectors use the same token mechanism with the narrower
+`telemetry` scope and `PUT /v1/system/components/current`.
 
 ## Token model
 
@@ -13,7 +16,10 @@ stores only:
 - `lookupId` — the first 8 characters, indexed for a fast database lookup.
 - `tokenHash` — an Argon2id hash of the full plaintext token.
 - `last4` — display hint for operators.
-- `scope` — capability scope: `operator` (default), `worker`, or `monitor`.
+- `scope` — capability scope: `operator` (default), `worker`, `monitor`, or
+  `telemetry`.
+- `telemetrySourceId` — required only for `telemetry`; binds the credential to
+  one persistent booth component.
 - lifecycle fields: `createdAt`, `expiresAt`, `lastUsedAt`, and `revokedAt`.
 
 The plaintext token is returned exactly once by `POST /v1/api-tokens` as
@@ -41,16 +47,24 @@ narrowest scope for the credential's job:
   It may read only `GET /v1/status`, `GET /v1/system/current`, and the
   aggregate-only `GET /v1/monitor/summary`; on `/v1/ws/status` it receives only
   `status` and `system` envelopes.
+- **`telemetry`** — a write-only credential for one router component. It may
+  call only `PUT /v1/system/components/current`. The API derives `boothId` and
+  `componentId` from the token's `TelemetrySource` relation rather than the
+  request body. It cannot read the operator API or subscribe to the WebSocket.
 
 Requests to `/v1/worker/*` with a non-`worker` token are rejected with
 `403 insufficient_scope`. Monitor tokens are likewise rejected from booth
-writes and operator message content. Tokens created before scopes existed
-default to `operator`, preserving their prior behavior.
+writes and operator message content, and telemetry tokens are rejected from
+every non-telemetry route. Tokens created before scopes existed default to
+`operator`, preserving their prior behavior.
 
 ## Lifecycle
 
 1. An authenticated operator creates a token with a name, a `scope`
-   (`operator`, `worker`, or `monitor`), and an optional `expiresInDays` value.
+   (`operator`, `worker`, `monitor`, or `telemetry`), and an optional
+   `expiresInDays` value. Telemetry tokens also require source metadata:
+   `boothId`, `componentId`, `displayName`, `kind`, `prometheusJob`, and
+   `prometheusInstance`.
 2. The API stores the Argon2id hash and returns the plaintext once.
 3. The phone client sends `Authorization: Bearer <token>` on protected phone
    routes.
@@ -73,4 +87,6 @@ Create and install the replacement token before revoking the old one:
 5. Revoke the old token.
 
 Prefer expiring tokens for temporary maintenance devices and rotate long-lived
-phone-client tokens during regular operations windows.
+phone-client tokens during regular operations windows. Issuing another
+telemetry token for the same `(boothId, componentId)` reconnects it to the
+existing source, so rotation preserves current state and history identity.

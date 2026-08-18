@@ -17,6 +17,7 @@ import { requireApiToken, type ApiTokenVariables } from "../src/lib/require-api-
 const app = new Hono<{ Variables: ApiTokenVariables }>();
 app.get("/read", requireApiToken(["operator", "monitor"]), (c) => c.json({ ok: true }));
 app.post("/write", requireApiToken(), (c) => c.json({ ok: true }));
+app.put("/telemetry", requireApiToken("telemetry"), (c) => c.json({ ok: true }));
 
 describe("API token scopes", () => {
   beforeEach(() => {
@@ -33,5 +34,20 @@ describe("API token scopes", () => {
   it("rejects worker tokens from monitor reads", async () => {
     tokenState.scope = "worker";
     expect((await app.request("/read", { headers: phoneHeaders })).status).toBe(403);
+  });
+
+  it("isolates telemetry tokens from operator and telemetry routes", async () => {
+    tokenState.scope = "telemetry";
+    expect((await app.request("/telemetry", { method: "PUT", headers: phoneHeaders })).status).toBe(
+      200,
+    );
+    expect((await app.request("/write", { method: "POST", headers: phoneHeaders })).status).toBe(
+      403,
+    );
+
+    tokenState.scope = "operator";
+    expect((await app.request("/telemetry", { method: "PUT", headers: phoneHeaders })).status).toBe(
+      403,
+    );
   });
 });

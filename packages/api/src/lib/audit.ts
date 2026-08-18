@@ -15,9 +15,10 @@
 //     instead. Losing an approval because the audit insert hiccuped would be a
 //     worse outcome than a gap in the trail, which the log surfaces loudly.
 //   • Booth telemetry heartbeats (`PUT /v1/status`, `PUT /v1/system`,
-//     `POST /v1/events`) are excluded by default: they arrive every few
-//     seconds, are already persisted with their own timestamps, and are not
-//     operator actions. Set `AUDIT_LOG_TELEMETRY=true` to include them.
+//     `PUT /v1/system/components/current`, `POST /v1/events`) are excluded by
+//     default: they arrive every few seconds, are already persisted with their
+//     own timestamps, and are not operator actions. Set
+//     `AUDIT_LOG_TELEMETRY=true` to include them.
 //
 // See docs/audit-log.md.
 
@@ -100,6 +101,7 @@ const auditTelemetry = (): boolean => flag("AUDIT_LOG_TELEMETRY", false);
 const TELEMETRY_ROUTES: ReadonlySet<string> = new Set([
   "PUT /v1/status",
   "PUT /v1/system",
+  "PUT /v1/system/components/current",
   "POST /v1/events",
 ]);
 

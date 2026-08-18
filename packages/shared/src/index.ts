@@ -527,14 +527,45 @@ export const OperatorMeSchema = z.object({
 });
 export type OperatorMe = z.infer<typeof OperatorMeSchema>;
 
-export const ApiTokenScopeSchema = z.enum(["operator", "worker", "monitor"]);
+export const ApiTokenScopeSchema = z.enum(["operator", "worker", "monitor", "telemetry"]);
 export type ApiTokenScope = z.infer<typeof ApiTokenScopeSchema>;
 
-export const CreateApiTokenRequestSchema = z.object({
-  name: z.string().trim().min(1).max(64),
-  scope: ApiTokenScopeSchema.default("operator"),
-  expiresInDays: z.number().int().positive().max(3650).optional(),
-});
+export const TelemetrySourceMetadataSchema = z
+  .object({
+    boothId: z.string().trim().min(1).max(128),
+    componentId: z.string().trim().min(1).max(128),
+    displayName: z.string().trim().min(1).max(128),
+    kind: z.string().trim().min(1).max(64),
+    prometheusJob: z.string().trim().min(1).max(256),
+    prometheusInstance: z.string().trim().min(1).max(256),
+  })
+  .strict();
+export type TelemetrySourceMetadata = z.infer<typeof TelemetrySourceMetadataSchema>;
+
+export const CreateApiTokenRequestSchema = z
+  .object({
+    name: z.string().trim().min(1).max(64),
+    scope: ApiTokenScopeSchema.default("operator"),
+    expiresInDays: z.number().int().positive().max(3650).optional(),
+    telemetrySource: TelemetrySourceMetadataSchema.optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.scope === "telemetry" && !value.telemetrySource) {
+      context.addIssue({
+        code: "custom",
+        path: ["telemetrySource"],
+        message: "A telemetry token requires telemetrySource metadata.",
+      });
+    }
+    if (value.scope !== "telemetry" && value.telemetrySource) {
+      context.addIssue({
+        code: "custom",
+        path: ["telemetrySource"],
+        message: "telemetrySource metadata is only valid for telemetry tokens.",
+      });
+    }
+  });
 export type CreateApiTokenRequest = z.infer<typeof CreateApiTokenRequestSchema>;
 
 export const ApiTokenSchema = z.object({
@@ -546,6 +577,7 @@ export const ApiTokenSchema = z.object({
   expiresAt: z.string().datetime().nullable(),
   lastUsedAt: z.string().datetime().nullable(),
   revokedAt: z.string().datetime().nullable(),
+  telemetrySource: TelemetrySourceMetadataSchema.optional(),
 });
 export type ApiToken = z.infer<typeof ApiTokenSchema>;
 
@@ -696,6 +728,189 @@ export const CallSessionDetailSchema = CallSessionSchema.extend({
   events: z.array(BoothEventRecordSchema),
 });
 export type CallSessionDetail = z.infer<typeof CallSessionDetailSchema>;
+
+const nullableFiniteNumber = (minimum: number, maximum: number) =>
+  z.number().finite().min(minimum).max(maximum).nullable().optional();
+const nullableBoundedString = (maximum: number) => z.string().max(maximum).nullable().optional();
+
+export const RouterBatterySnapshotSchema = z
+  .object({
+    present: z.boolean().nullable().optional(),
+    chargePercent: nullableFiniteNumber(0, 100),
+    temperatureCelsius: nullableFiniteNumber(-100, 250),
+    voltageVolts: nullableFiniteNumber(0, 1000),
+    currentAmperes: nullableFiniteNumber(-1000, 1000),
+    health: nullableBoundedString(128),
+    technology: nullableBoundedString(128),
+    cycleCount: z.number().int().min(0).max(10_000_000).nullable().optional(),
+    // GL.iNet MCU `charge_cnt`; distinct from the kernel battery cycle count.
+    chargeCount: z.number().int().min(0).max(10_000_000).nullable().optional(),
+    abnormal: z.boolean().nullable().optional(),
+    abnormalType: z.number().int().min(-1).max(255).nullable().optional(),
+  })
+  .passthrough();
+export type RouterBatterySnapshot = z.infer<typeof RouterBatterySnapshotSchema>;
+
+export const RouterChargerSnapshotSchema = z
+  .object({
+    present: z.boolean().nullable().optional(),
+    online: z.boolean().nullable().optional(),
+    status: nullableBoundedString(128),
+    usbType: nullableBoundedString(128),
+    manufacturer: nullableBoundedString(256),
+    model: nullableBoundedString(256),
+    chargeType: nullableBoundedString(128),
+    inputVoltageLimitVolts: nullableFiniteNumber(0, 1000),
+    inputCurrentLimitAmperes: nullableFiniteNumber(0, 1000),
+    constantChargeVoltageVolts: nullableFiniteNumber(0, 1000),
+    constantChargeCurrentMaxAmperes: nullableFiniteNumber(0, 1000),
+    fastCharge: z.boolean().nullable().optional(),
+    chargingStatus: z.number().int().min(-1).max(255).nullable().optional(),
+  })
+  .passthrough();
+export type RouterChargerSnapshot = z.infer<typeof RouterChargerSnapshotSchema>;
+
+export const RouterThermalZoneSnapshotSchema = z
+  .object({
+    name: z.string().trim().min(1).max(128),
+    temperatureCelsius: z.number().finite().min(-100).max(250),
+  })
+  .passthrough();
+export type RouterThermalZoneSnapshot = z.infer<typeof RouterThermalZoneSnapshotSchema>;
+
+export const RouterComponentSnapshotSchema = z
+  .object({
+    battery: RouterBatterySnapshotSchema.optional(),
+    charger: RouterChargerSnapshotSchema.optional(),
+    thermalZones: z.array(RouterThermalZoneSnapshotSchema).max(64),
+  })
+  .passthrough();
+export type RouterComponentSnapshot = z.infer<typeof RouterComponentSnapshotSchema>;
+
+export const RouterComponentSnapshotUpdateSchema = z
+  .object({
+    capturedAt: z.string().datetime({ offset: true }),
+    snapshot: RouterComponentSnapshotSchema,
+  })
+  .strict();
+export type RouterComponentSnapshotUpdate = z.infer<typeof RouterComponentSnapshotUpdateSchema>;
+
+export const TelemetrySourceEnvelopeSchema = TelemetrySourceMetadataSchema.extend({
+  id: z.guid(),
+  latestSnapshot: RouterComponentSnapshotSchema.nullable(),
+  capturedAt: z.string().datetime().nullable(),
+  receivedAt: z.string().datetime().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type TelemetrySourceEnvelope = z.infer<typeof TelemetrySourceEnvelopeSchema>;
+
+export const ROUTER_TELEMETRY_METRICS = [
+  "glinet_battery_charge_percent",
+  "glinet_battery_temperature_celsius",
+  "glinet_battery_voltage_volts",
+  "glinet_battery_current_amperes",
+  "glinet_battery_cycle_count",
+  "glinet_battery_charge_count",
+  "glinet_battery_present",
+  "glinet_battery_abnormal",
+  "glinet_battery_abnormal_type",
+  "glinet_charger_present",
+  "glinet_charger_online",
+  "glinet_charger_fastcharge",
+  "glinet_charger_charging_status",
+  "glinet_charger_input_voltage_limit_volts",
+  "glinet_charger_input_current_limit_amperes",
+  "glinet_charger_constant_charge_voltage_volts",
+  "glinet_charger_constant_charge_current_max_amperes",
+  "glinet_thermal_temperature_celsius",
+] as const;
+
+export const RouterTelemetryMetricNameSchema = z.enum(ROUTER_TELEMETRY_METRICS);
+export type RouterTelemetryMetricName = z.infer<typeof RouterTelemetryMetricNameSchema>;
+
+export const TELEMETRY_HISTORY_MAX_POINTS_PER_SERIES = 10_000;
+export const TELEMETRY_HISTORY_MAX_SERIES = 128;
+export const TELEMETRY_HISTORY_MAX_TOTAL_SAMPLES = 100_000;
+
+export const TelemetryHistoryPointSchema = z.object({
+  timestamp: z.number().finite().nonnegative(),
+  value: z.number().finite(),
+});
+export type TelemetryHistoryPoint = z.infer<typeof TelemetryHistoryPointSchema>;
+
+export const TelemetryHistorySeriesSchema = z.object({
+  metric: RouterTelemetryMetricNameSchema,
+  labels: z.record(z.string(), z.string()),
+  points: z.array(TelemetryHistoryPointSchema).max(TELEMETRY_HISTORY_MAX_POINTS_PER_SERIES),
+});
+export type TelemetryHistorySeries = z.infer<typeof TelemetryHistorySeriesSchema>;
+
+export const ComponentTelemetryHistorySchema = z
+  .object({
+    source: TelemetrySourceMetadataSchema,
+    from: z.string().datetime(),
+    to: z.string().datetime(),
+    stepSeconds: z.number().int().min(15),
+    series: z.array(TelemetryHistorySeriesSchema).max(TELEMETRY_HISTORY_MAX_SERIES),
+  })
+  .superRefine((value, context) => {
+    const totalSamples = value.series.reduce((total, series) => total + series.points.length, 0);
+    if (totalSamples > TELEMETRY_HISTORY_MAX_TOTAL_SAMPLES) {
+      context.addIssue({
+        code: "custom",
+        path: ["series"],
+        message: `Telemetry history is limited to ${TELEMETRY_HISTORY_MAX_TOTAL_SAMPLES} total samples.`,
+      });
+    }
+  });
+export type ComponentTelemetryHistory = z.infer<typeof ComponentTelemetryHistorySchema>;
+
+export const ComponentTelemetryCurrentQuerySchema = z.object({
+  boothId: z.string().trim().min(1).max(128).optional(),
+  componentId: z.string().trim().min(1).max(128).optional(),
+});
+export type ComponentTelemetryCurrentQuery = z.infer<typeof ComponentTelemetryCurrentQuerySchema>;
+
+const MAX_TELEMETRY_HISTORY_RANGE_MS = 31 * 24 * 60 * 60 * 1000;
+
+export const ComponentTelemetryHistoryQuerySchema = z
+  .object({
+    boothId: z.string().trim().min(1).max(128),
+    componentId: z.string().trim().min(1).max(128),
+    from: z.string().datetime({ offset: true }),
+    to: z.string().datetime({ offset: true }),
+    stepSeconds: z.coerce.number().int().min(15).default(60),
+  })
+  .superRefine((value, context) => {
+    const fromMs = Date.parse(value.from);
+    const toMs = Date.parse(value.to);
+    if (toMs <= fromMs) {
+      context.addIssue({
+        code: "custom",
+        path: ["to"],
+        message: "to must be later than from.",
+      });
+      return;
+    }
+    const rangeMs = toMs - fromMs;
+    if (rangeMs > MAX_TELEMETRY_HISTORY_RANGE_MS) {
+      context.addIssue({
+        code: "custom",
+        path: ["to"],
+        message: "Telemetry history is limited to 31 days.",
+      });
+    }
+    const points = Math.floor(rangeMs / (value.stepSeconds * 1000)) + 1;
+    if (points > TELEMETRY_HISTORY_MAX_POINTS_PER_SERIES) {
+      context.addIssue({
+        code: "custom",
+        path: ["stepSeconds"],
+        message: "Telemetry history is limited to 10000 points per series.",
+      });
+    }
+  });
+export type ComponentTelemetryHistoryQuery = z.infer<typeof ComponentTelemetryHistoryQuerySchema>;
 
 // Live system snapshot pushed by the booth via `PUT /v1/system`. Mirrors the
 // Rust `booth-hal::SystemSnapshot` struct as it appears on the wire (camelCase
