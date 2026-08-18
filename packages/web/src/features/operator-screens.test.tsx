@@ -149,6 +149,7 @@ const server = setupServer(
   http.get("http://localhost/v1/system/current", () =>
     HttpResponse.json({ error: "no snapshot" }, { status: 404 }),
   ),
+  http.get("http://localhost/v1/system/components/current", () => HttpResponse.json([])),
   http.get("http://localhost/v1/questions", ({ request }) => {
     lastQuestionsUrl = request.url;
     questionsUrls.push(request.url);

@@ -5,11 +5,10 @@ import type { JSX } from "react";
 // memory at a glance without having to navigate to the dedicated `/system`
 // route.
 //
-// Data flow: read from the same `["system", boothId]` react-query cache
-// that the full `LiveSystemPanel` and the status WebSocket already populate,
-// so on the status screen the strip updates in real time and on every other
-// authenticated page it refreshes at the polling cadence (5 s, matching the
-// booth's `PUT /v1/system` interval).
+// Data flow: host values read from the same `["system", boothId]` react-query
+// cache that the full `LiveSystemPanel` and status WebSocket populate. Router
+// battery temperature comes from the component-current query. Both refresh at
+// a five-second cadence on authenticated pages.
 
 import {
   SYSTEM_HEALTH_THRESHOLDS,
@@ -20,7 +19,7 @@ import {
   systemTemperatureSeverity,
 } from "@telephone-booth-operator/shared";
 import type { SystemHealthSeverity } from "@telephone-booth-operator/shared";
-import { useSystemCurrent } from "../../lib/api-client.js";
+import { useComponentTelemetryCurrent, useSystemCurrent } from "../../lib/api-client.js";
 import { FanVitalTile } from "./FanVitalTile.js";
 import { fmtBytes, fmtNumber, fmtPercent, fmtUptime } from "./format.js";
 
@@ -53,8 +52,13 @@ export function SystemVitalsStrip({
   boothId = DEFAULT_BOOTH_ID,
 }: SystemVitalsStripProps): JSX.Element {
   const query = useSystemCurrent(boothId);
+  const componentQuery = useComponentTelemetryCurrent({ boothId });
   const snapshot = query.data?.snapshot;
   const receivedAt = query.data?.receivedAt;
+  const componentSources = componentQuery.data ?? [];
+  const routerSource =
+    componentSources.find((source) => source.componentId === "router") ?? componentSources[0];
+  const routerBatteryTemperature = routerSource?.latestSnapshot?.battery?.temperatureCelsius;
 
   // Pull commonly-used nested fields up so the JSX below stays readable. The
   // canonical wire format groups CPU/memory/etc into sub-objects (mirroring
@@ -130,6 +134,27 @@ export function SystemVitalsStrip({
           }
           severity={tempSev}
           hint={`CPU temperature (warn ≥${SYSTEM_HEALTH_THRESHOLDS.temperatureWarnCelsius}°C, crit ≥${SYSTEM_HEALTH_THRESHOLDS.temperatureCriticalCelsius}°C)`}
+        />
+        <VitalTile
+          label="Router battery"
+          value={
+            typeof routerBatteryTemperature === "number"
+              ? `${fmtNumber(routerBatteryTemperature, 1)}°C`
+              : componentQuery.isLoading
+                ? "…"
+                : componentQuery.error
+                  ? "offline"
+                  : "—"
+          }
+          hint={
+            typeof routerBatteryTemperature === "number"
+              ? `${routerSource?.displayName ?? "Router"} battery temperature`
+              : componentQuery.isLoading
+                ? "Connecting to router telemetry"
+                : componentQuery.error
+                  ? "Router telemetry is unavailable"
+                  : "Router battery temperature has not been reported"
+          }
         />
         <VitalTile
           label="CPU"

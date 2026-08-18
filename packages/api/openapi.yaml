@@ -1942,6 +1942,57 @@ paths:
           description: snapshot or list of snapshots
         "404": { description: no snapshot persisted for the given booth }
 
+  /v1/system/thermals/history:
+    get:
+      summary: Query fixed booth and router thermal history through Grafana.
+      description: |
+        The API resolves one router telemetry source for the requested booth,
+        preferring `componentId=router` and otherwise using deterministic
+        component ordering. Callers may select an exact component with the
+        optional `componentId` parameter. The server constructs PromQL from
+        exactly the booth CPU temperature metric plus router battery and
+        thermal-zone temperature metrics pinned to the source's Prometheus
+        job and instance. Clients cannot submit arbitrary PromQL.
+        Ranges are limited to 31 days and 10,000 points per series. Grafana
+        responses retain the 4 MiB, 128-series, and 100,000-sample limits.
+      tags: [system]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      parameters:
+        - name: boothId
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+        - name: componentId
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 128 }
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+        - name: stepSeconds
+          in: query
+          schema: { type: integer, minimum: 15, default: 60 }
+      responses:
+        "200":
+          description: Normalized thermal history for the resolved source.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ThermalHistory" }
+        "400": { description: "invalid range, ordering, or point count" }
+        "401": { description: operator authentication required }
+        "404": { description: telemetry source not found }
+        "502":
+          description: >-
+            Grafana/Prometheus failed, returned malformed data, or exceeded
+            response/cardinality limits.
+        "503": { description: Grafana history proxy is missing valid HTTPS configuration }
+
   /v1/system/components/current:
     put:
       summary: Push the latest snapshot for the component bound to a telemetry token.
@@ -2959,6 +3010,40 @@ components:
           maxItems: 128
           description: At most 100,000 samples across all series.
           items: { $ref: "#/components/schemas/TelemetryHistorySeries" }
+    ThermalMetricName:
+      type: string
+      enum:
+        - booth_cpu_temperature_celsius
+        - glinet_battery_temperature_celsius
+        - glinet_thermal_temperature_celsius
+    ThermalHistorySeries:
+      type: object
+      additionalProperties: false
+      required: [metric, labels, points]
+      properties:
+        metric: { $ref: "#/components/schemas/ThermalMetricName" }
+        labels:
+          type: object
+          additionalProperties: { type: string }
+        points:
+          type: array
+          maxItems: 10000
+          items: { $ref: "#/components/schemas/TelemetryHistoryPoint" }
+    ThermalHistory:
+      type: object
+      additionalProperties: false
+      required: [boothId, source, from, to, stepSeconds, series]
+      properties:
+        boothId: { type: string, minLength: 1, maxLength: 128 }
+        source: { $ref: "#/components/schemas/TelemetrySourceMetadata" }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        stepSeconds: { type: integer, minimum: 15 }
+        series:
+          type: array
+          maxItems: 128
+          description: At most 100,000 samples across all series.
+          items: { $ref: "#/components/schemas/ThermalHistorySeries" }
     BoothSystemSnapshot:
       type: object
       description: |

@@ -66,6 +66,7 @@ function installFetch(options: { readonly authenticated?: boolean } = {}): void 
             headers: { "Content-Type": "application/json" },
           }),
         );
+      if (url.includes("/v1/system/components/current")) return Promise.resolve(jsonResponse([]));
       return Promise.resolve(jsonResponse({ ok: true }));
     }),
   );
@@ -181,6 +182,12 @@ describe("App shell", () => {
     const timeEl = document.querySelector(".build-footer time[datetime]");
     expect(timeEl).toBeTruthy();
     expect(timeEl!.getAttribute("datetime")).toBe("1970-01-01T00:00:00.000Z");
+  });
+
+  it("links the thermal dashboard from observability navigation", async () => {
+    renderShell();
+    const link = await screen.findByRole("link", { name: "Thermals" });
+    expect(link.getAttribute("href")).toBe("/thermals");
   });
 
   it("hides operator status and shortcut navigation before login", async () => {
