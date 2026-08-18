@@ -185,4 +185,34 @@ describe("Http2ApnsSender", () => {
       }),
     ).rejects.toThrow("APNs delivery failed for 1 of 1 devices");
   });
+
+  it("does not submit after the badge delivery fence is lost", async () => {
+    seedMobileDevice({ userId: "operator-1", platform: "ios" });
+    let postCalls = 0;
+    class FencedSender extends Http2ApnsSender {
+      protected override post(): Promise<{ status: number }> {
+        postCalls += 1;
+        return Promise.resolve({ status: 200 });
+      }
+    }
+    const sender = new FencedSender({
+      teamId: "TEAM123",
+      keyId: "KEY123",
+      authKey: validAuthKey,
+      bundleId: "com.example.app",
+      environment: "development",
+    });
+
+    await expect(
+      sender.send(
+        "operator-1",
+        {
+          kind: "badge",
+          badge: 2,
+        },
+        async () => null,
+      ),
+    ).rejects.toThrow("APNs delivery fence rejected a stale badge claim");
+    expect(postCalls).toBe(0);
+  });
 });

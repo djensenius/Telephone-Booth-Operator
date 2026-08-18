@@ -33,8 +33,9 @@ turn it on, and how to configure them in production.
 4. A newly recorded moderation result with `flagged: true` sends a
    `messageFlagged` alert. Re-delivery of the same moderation row is deduplicated.
 5. `moderationQueueHigh` fires once when the awaiting-moderation count crosses
-   `MODERATION_QUEUE_HIGH_THRESHOLD` (default `10`). It is re-armed only after
-   a decision or deletion brings the queue below the threshold.
+   `MODERATION_QUEUE_HIGH_THRESHOLD` (default `10`). It is re-armed whenever a
+   decision, deletion, installation close-out, data restore, or other queue
+   transition brings the count below the threshold.
 6. Alert and badge-only notifications use `apns-push-type: alert` and
    `apns-priority: 10`; badge-only payloads contain just `aps.badge`. The OS
    updates the app icon without launching the app or showing an alert. The app

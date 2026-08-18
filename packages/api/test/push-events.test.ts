@@ -197,11 +197,14 @@ describe("durable push event coordination", () => {
     await gatedCoordinator.dispatchModerationBadges();
 
     state = store.pushNotificationStates.get("moderation-queue-high");
-    expect(send).toHaveBeenCalledWith({
-      kind: "badge",
-      badge: 1,
-      data: { awaitingModeration: 1 },
-    });
+    expect(send).toHaveBeenCalledWith(
+      {
+        kind: "badge",
+        badge: 1,
+        data: { awaitingModeration: 1 },
+      },
+      expect.any(Function),
+    );
     expect(state?.badgeDeliveredVersion).toBe(1);
   });
 
@@ -255,5 +258,30 @@ describe("durable push event coordination", () => {
     await migratedCoordinator.reconcileModerationBadgeState();
 
     expect(store.pushNotificationStates.get("moderation-queue-high")?.badgeVersion).toBe(1);
+  });
+
+  it("fences a claimed badge before submission after lease ownership is lost", async () => {
+    seedMessage({ status: "pending" });
+    let submitted = false;
+    const fencedCoordinator = createPushEventCoordinator({
+      database: fakeDb as never,
+      send: async (notification, beforeSubmit) => {
+        if (notification.kind !== "badge") return;
+        const state = store.pushNotificationStates.get("moderation-queue-high");
+        if (!state) throw new Error("missing badge state");
+        state.badgeLeaseToken = "newer-replica";
+        state.badgeLeaseExpiresAt = new Date(Date.now() + 60_000);
+        const leaseExpiresAt = await beforeSubmit?.();
+        if (!leaseExpiresAt) throw new Error("stale badge claim");
+        submitted = true;
+      },
+    });
+
+    await fencedCoordinator.observeModerationQueue("lost-lease");
+
+    const state = store.pushNotificationStates.get("moderation-queue-high");
+    expect(submitted).toBe(false);
+    expect(state?.badgeDeliveredVersion).toBe(0);
+    expect(state?.badgeLeaseToken).toBe("newer-replica");
   });
 });

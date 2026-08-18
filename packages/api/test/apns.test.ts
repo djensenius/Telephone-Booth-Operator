@@ -87,4 +87,19 @@ describe("APNs fan-out diagnostics", () => {
       }),
     ).rejects.toThrow("APNs badge fan-out failed for 1 user");
   });
+
+  it("passes the badge delivery fence through fan-out", async () => {
+    seedMobileDevice({ userId: "operator-1", platform: "ios" });
+    const fence = vi.fn(async () => new Date(Date.now() + 60_000));
+    const send = vi.fn(
+      async (_userId: string, _notification: ApnsNotification, beforeSubmit?: typeof fence) => {
+        expect(beforeSubmit).toBe(fence);
+      },
+    );
+    setApnsSenderForTests({ send });
+
+    await fanOutBadgeNotification({ kind: "badge", badge: 2 }, fence);
+
+    expect(send).toHaveBeenCalledTimes(1);
+  });
 });

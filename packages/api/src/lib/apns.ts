@@ -43,12 +43,22 @@ export type ApnsBadgeNotification = {
 
 export type ApnsNotification = ApnsAlertNotification | ApnsBadgeNotification;
 
+export type ApnsDeliveryFence = () => Promise<Date | null>;
+
 export type ApnsSender = {
-  send(userId: string, notification: ApnsNotification): Promise<void>;
+  send(
+    userId: string,
+    notification: ApnsNotification,
+    beforeSubmit?: ApnsDeliveryFence,
+  ): Promise<void>;
 };
 
 class NoopApnsSender implements ApnsSender {
-  send(_userId: string, _notification: ApnsNotification): Promise<void> {
+  send(
+    _userId: string,
+    _notification: ApnsNotification,
+    _beforeSubmit?: ApnsDeliveryFence,
+  ): Promise<void> {
     // APNs is not configured. Resolve to satisfy the interface but skip
     // the network round-trip. Tests can inject a spy via
     // `setApnsSenderForTests`.
@@ -119,6 +129,7 @@ const prefersNotification = (raw: unknown, key: keyof MobileDevicePreferences): 
 
 const sendToOperatorUsers = async (
   notification: ApnsNotification,
+  beforeSubmit?: ApnsDeliveryFence,
 ): Promise<{ userIds: string[]; results: PromiseSettledResult<void>[] }> => {
   const userIds = await db.mobileDevice
     .findMany({
@@ -128,7 +139,7 @@ const sendToOperatorUsers = async (
     })
     .then((rows) => Array.from(new Set(rows.map((row) => row.userId))));
   const results = await Promise.allSettled(
-    userIds.map((userId) => apnsSender().send(userId, notification)),
+    userIds.map((userId) => apnsSender().send(userId, notification, beforeSubmit)),
   );
   return { userIds, results };
 };
@@ -178,10 +189,11 @@ export const fanOutNotification = async (notification: ApnsNotification): Promis
 /// pending badge version.
 export const fanOutBadgeNotification = async (
   notification: ApnsBadgeNotification,
+  beforeSubmit?: ApnsDeliveryFence,
 ): Promise<void> => {
   if (!isApnsDeliveryConfigured()) return;
 
-  const { results } = await sendToOperatorUsers(notification);
+  const { results } = await sendToOperatorUsers(notification, beforeSubmit);
   const failures = results.flatMap((result) =>
     result.status === "rejected"
       ? [

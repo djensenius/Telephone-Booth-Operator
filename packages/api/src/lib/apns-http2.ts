@@ -13,7 +13,7 @@ import http2 from "node:http2";
 import { importPKCS8, SignJWT } from "jose";
 
 import { db } from "./db.js";
-import { findTargetDevices, type ApnsNotification } from "./apns.js";
+import { findTargetDevices, type ApnsDeliveryFence, type ApnsNotification } from "./apns.js";
 import { log } from "./logger.js";
 
 type ApnsSigningKey = Awaited<ReturnType<typeof importPKCS8>>;
@@ -169,15 +169,23 @@ export class Http2ApnsSender {
     this.host = config.environment === "production" ? PRODUCTION_HOST : SANDBOX_HOST;
   }
 
-  async send(userId: string, notification: ApnsNotification): Promise<void> {
+  async send(
+    userId: string,
+    notification: ApnsNotification,
+    beforeSubmit?: ApnsDeliveryFence,
+  ): Promise<void> {
     const preferenceKey = notification.kind === "alert" ? notification.preferenceKey : null;
     const devices = await findTargetDevices(userId, preferenceKey);
     if (devices.length === 0) return;
     const jwt = await this.providerToken();
     const payload = JSON.stringify(buildApnsPayload(notification));
     const collapseId = notification.kind === "badge" ? MODERATION_BADGE_COLLAPSE_ID : undefined;
+    const leaseExpiresAt = beforeSubmit ? await beforeSubmit() : null;
+    if (beforeSubmit && (!leaseExpiresAt || leaseExpiresAt.getTime() <= Date.now())) {
+      throw new Error("APNs delivery fence rejected a stale badge claim");
+    }
     const results = await Promise.allSettled(
-      devices.map((device) => this.deliver(device, jwt, payload, collapseId)),
+      devices.map((device) => this.deliver(device, jwt, payload, collapseId, leaseExpiresAt)),
     );
     const failures = results.flatMap((result) =>
       result.status === "rejected"
@@ -211,7 +219,12 @@ export class Http2ApnsSender {
     jwt: string,
     payload: string,
     collapseId: string | undefined,
+    leaseExpiresAt: Date | null,
   ): Promise<void> {
+    if (leaseExpiresAt && leaseExpiresAt.getTime() <= Date.now()) {
+      throw new Error("APNs delivery fence expired before submission");
+    }
+
     let result: { status: number; reason?: string; apnsId?: string };
     try {
       result = await this.post(

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { ApnsNotification } from "./apns.js";
+import type { ApnsDeliveryFence, ApnsNotification } from "./apns.js";
 import { fanOutBadgeNotification, fanOutNotification, isApnsDeliveryConfigured } from "./apns.js";
 import { db } from "./db.js";
 import { log } from "./logger.js";
@@ -73,7 +73,7 @@ type PushEventDatabase = {
 
 type PushEventCoordinatorOptions = {
   database: PushEventDatabase;
-  send: (notification: ApnsNotification) => Promise<void>;
+  send: (notification: ApnsNotification, beforeSubmit?: ApnsDeliveryFence) => Promise<void>;
   now?: () => Date;
   createLeaseToken?: () => string;
   badgeLeaseDurationMs?: number;
@@ -146,6 +146,15 @@ export const createPushEventCoordinator = ({
     });
   };
 
+  const renewModerationBadge = async (leaseToken: string): Promise<Date | null> => {
+    const leaseExpiresAt = new Date(now().getTime() + badgeLeaseDurationMs);
+    const renewed = await database.pushNotificationState.updateMany({
+      where: { key: QUEUE_HIGH_STATE_KEY, badgeLeaseToken: leaseToken },
+      data: { badgeLeaseExpiresAt: leaseExpiresAt },
+    });
+    return renewed.count === 1 ? leaseExpiresAt : null;
+  };
+
   const dispatchModerationBadges = async (): Promise<void> => {
     if (!badgeDeliveryEnabled()) return;
 
@@ -154,11 +163,14 @@ export const createPushEventCoordinator = ({
       if (!claim) return;
 
       try {
-        await send({
-          kind: "badge",
-          badge: claim.count,
-          data: { awaitingModeration: claim.count },
-        });
+        await send(
+          {
+            kind: "badge",
+            badge: claim.count,
+            data: { awaitingModeration: claim.count },
+          },
+          () => renewModerationBadge(claim.leaseToken),
+        );
       } catch (error) {
         await releaseModerationBadge(claim.leaseToken);
         log.warn(
@@ -330,9 +342,9 @@ export const createPushEventCoordinator = ({
 const coordinator = createPushEventCoordinator({
   database: db as unknown as PushEventDatabase,
   badgeDeliveryEnabled: isApnsDeliveryConfigured,
-  send: (notification) =>
+  send: (notification, beforeSubmit) =>
     notification.kind === "badge"
-      ? fanOutBadgeNotification(notification)
+      ? fanOutBadgeNotification(notification, beforeSubmit)
       : fanOutNotification(notification),
 });
 
