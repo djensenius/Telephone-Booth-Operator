@@ -32,6 +32,7 @@ export type ApnsConfig = {
 const PRODUCTION_HOST = "https://api.push.apple.com";
 const SANDBOX_HOST = "https://api.sandbox.push.apple.com";
 const JWT_REFRESH_MS = 40 * 60 * 1000;
+const MODERATION_BADGE_COLLAPSE_ID = "moderation-badge";
 
 export type ApnsConfigStatus =
   | { status: "configured"; environment: ApnsConfig["environment"]; config: ApnsConfig }
@@ -134,7 +135,6 @@ export const buildApnsPayload = (notification: ApnsNotification): Record<string,
         }
       : { badge: notification.badge };
   if (notification.kind === "alert") {
-    if (typeof notification.badge === "number") aps.badge = notification.badge;
     if (notification.threadId) aps["thread-id"] = notification.threadId;
     if (notification.category) aps.category = notification.category;
   }
@@ -174,7 +174,10 @@ export class Http2ApnsSender {
     if (devices.length === 0) return;
     const jwt = await this.providerToken();
     const payload = JSON.stringify(buildApnsPayload(notification));
-    await Promise.allSettled(devices.map((device) => this.deliver(device, jwt, payload)));
+    const collapseId = notification.kind === "badge" ? MODERATION_BADGE_COLLAPSE_ID : undefined;
+    await Promise.allSettled(
+      devices.map((device) => this.deliver(device, jwt, payload, collapseId)),
+    );
     log.debug(
       {
         component: "apns",
@@ -191,9 +194,16 @@ export class Http2ApnsSender {
     device: { id: string; apnsToken: string; platform: string },
     jwt: string,
     payload: string,
+    collapseId: string | undefined,
   ): Promise<void> {
     try {
-      const result = await this.post(device.apnsToken, this.topic(device.platform), jwt, payload);
+      const result = await this.post(
+        device.apnsToken,
+        this.topic(device.platform),
+        jwt,
+        payload,
+        collapseId,
+      );
       if (result.status === 200) return;
       if (result.status === 410 || PERMANENT_TOKEN_FAILURES.has(result.reason ?? "")) {
         await this.revokeDevice(device.id);
@@ -257,6 +267,7 @@ export class Http2ApnsSender {
     topic: string,
     jwt: string,
     payload: string,
+    collapseId: string | undefined,
   ): Promise<{ status: number; reason?: string; apnsId?: string }> {
     return new Promise((resolve, reject) => {
       const session = this.ensureSession();
@@ -268,6 +279,7 @@ export class Http2ApnsSender {
         "apns-push-type": "alert",
         "apns-priority": "10",
         "content-type": "application/json",
+        ...(collapseId === undefined ? {} : { "apns-collapse-id": collapseId }),
       });
       let status = 0;
       let body = "";

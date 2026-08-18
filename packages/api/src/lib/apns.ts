@@ -24,10 +24,6 @@ type ApnsAlertNotification = {
   title: string;
   /// Alert body.
   body: string;
-  /// Optional app-icon badge count (`aps.badge`). Reflects the number of
-  /// messages awaiting moderation so the icon stays correct when the push
-  /// lands even if the app is backgrounded or closed.
-  badge?: number;
   /// Optional category for action-button rendering.
   category?: string;
   /// Optional thread identifier so iOS coalesces related alerts.

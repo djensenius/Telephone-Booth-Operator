@@ -74,7 +74,7 @@ describe("durable push event coordination", () => {
           (notification) =>
             notification.kind === "alert" && notification.preferenceKey === "moderationQueueHigh",
         )
-        .map((notification) => notification.badge),
+        .map((notification) => notification.data?.awaitingModeration),
     ).toEqual([2, 2]);
   });
 });

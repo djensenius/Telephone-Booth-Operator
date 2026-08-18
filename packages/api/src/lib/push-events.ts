@@ -129,7 +129,6 @@ export const createPushEventCoordinator = ({
         preferenceKey: "moderationQueueHigh",
         title: "Moderation queue is high",
         body: `${result.count} booth recordings are waiting for review.`,
-        badge: result.count,
         threadId: "moderation-queue",
         category: "BOOTH_MESSAGE",
         data: { awaitingModeration: result.count, threshold },

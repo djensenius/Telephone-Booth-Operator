@@ -4,8 +4,8 @@ The operator sends Apple Push Notification service (APNs) alerts to the
 [`Telephone-Booth-Operator-Mobile`](https://github.com/djensenius/Telephone-Booth-Operator-Mobile)
 clients (iOS, iPadOS, macOS, watchOS, visionOS, tvOS) when something notable
 happens — most importantly when a new message is received and is awaiting
-moderation. The push carries an `aps.badge` count so the app icon and the
-**Messages** tab show the number of messages awaiting moderation.
+moderation. Separate badge-only pushes carry an `aps.badge` count so the app
+icon and the **Messages** tab show the number of messages awaiting moderation.
 
 This document covers how the pipeline works, the environment variables that
 turn it on, and how to configure them in production.

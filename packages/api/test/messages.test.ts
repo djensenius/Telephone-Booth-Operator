@@ -306,8 +306,9 @@ describe("messages routes", () => {
         sent.push({
           userId,
           kind: notification.kind,
-          badge: notification.badge,
-          ...(notification.kind === "alert" ? { preferenceKey: notification.preferenceKey } : {}),
+          ...(notification.kind === "alert"
+            ? { preferenceKey: notification.preferenceKey }
+            : { badge: notification.badge }),
         });
       },
     });
@@ -342,7 +343,6 @@ describe("messages routes", () => {
           userId: "operator-1",
           kind: "alert",
           preferenceKey: "messageReceived",
-          badge: 2,
         },
         {
           userId: "operator-1",
@@ -448,7 +448,7 @@ describe("messages routes", () => {
     expect(
       sent
         .filter((entry) => entry.kind === "alert" && entry.preferenceKey === "moderationQueueHigh")
-        .map((entry) => entry.badge),
+        .map((entry) => entry.data?.awaitingModeration),
     ).toEqual([2, 2]);
   });
 

@@ -10,13 +10,12 @@ import {
 } from "../src/lib/apns-http2.js";
 
 describe("buildApnsPayload", () => {
-  it("builds a standard alert envelope with badge, thread, and category", () => {
+  it("builds a standard alert envelope with thread and category", () => {
     const payload = buildApnsPayload({
       kind: "alert",
       preferenceKey: "messageReceived",
       title: "New booth message",
       body: "A new recording is ready to moderate.",
-      badge: 3,
       threadId: "message:abc",
       category: "BOOTH_MESSAGE",
       data: { messageId: "abc" },
@@ -27,14 +26,13 @@ describe("buildApnsPayload", () => {
       aps: {
         alert: { title: "New booth message", body: "A new recording is ready to moderate." },
         sound: "default",
-        badge: 3,
         "thread-id": "message:abc",
         category: "BOOTH_MESSAGE",
       },
     });
   });
 
-  it("omits badge when not provided", () => {
+  it("keeps alert envelopes badge-free", () => {
     const payload = buildApnsPayload({
       kind: "alert",
       preferenceKey: "callStarted",
@@ -50,10 +48,9 @@ describe("buildApnsPayload", () => {
       preferenceKey: "messageReceived",
       title: "t",
       body: "b",
-      badge: 1,
       data: { aps: { badge: 999 }, extra: "x" },
     });
-    expect((payload.aps as Record<string, unknown>).badge).toBe(1);
+    expect((payload.aps as Record<string, unknown>).badge).toBeUndefined();
     expect(payload.extra).toBe("x");
   });
 
