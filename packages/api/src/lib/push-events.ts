@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ApnsNotification } from "./apns.js";
-import { fanOutNotification } from "./apns.js";
+import { fanOutBadgeNotification, fanOutNotification } from "./apns.js";
 import { db } from "./db.js";
 import { log } from "./logger.js";
 import { AWAITING_MODERATION_STATUSES } from "./moderation-badge.js";
@@ -283,7 +283,10 @@ export const createPushEventCoordinator = ({
 
 const coordinator = createPushEventCoordinator({
   database: db as unknown as PushEventDatabase,
-  send: fanOutNotification,
+  send: (notification) =>
+    notification.kind === "badge"
+      ? fanOutBadgeNotification(notification)
+      : fanOutNotification(notification),
 });
 
 export const notifyMessageFlagged = (

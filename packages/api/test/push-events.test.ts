@@ -148,4 +148,31 @@ describe("durable push event coordination", () => {
     expect(state?.badgeLeaseToken).toBeNull();
     expect(state?.badgeLeaseExpiresAt).toBeNull();
   });
+
+  it("retains a badge version after delivery failure and retries it", async () => {
+    seedMessage({ status: "pending" });
+    let badgeAttempts = 0;
+    const retryingCoordinator = createPushEventCoordinator({
+      database: fakeDb as never,
+      send: async (notification) => {
+        if (notification.kind !== "badge") return;
+        badgeAttempts += 1;
+        if (badgeAttempts === 1) throw new Error("APNs unavailable");
+      },
+    });
+
+    await retryingCoordinator.observeModerationQueue("first-attempt");
+
+    let state = store.pushNotificationStates.get("moderation-queue-high");
+    expect(state?.badgeDeliveredVersion).toBe(0);
+    expect(state?.badgeVersion).toBe(1);
+    expect(state?.badgeLeaseToken).toBeNull();
+
+    await retryingCoordinator.dispatchModerationBadges();
+
+    state = store.pushNotificationStates.get("moderation-queue-high");
+    expect(badgeAttempts).toBe(2);
+    expect(state?.badgeDeliveredVersion).toBe(1);
+    expect(state?.badgeLeaseToken).toBeNull();
+  });
 });

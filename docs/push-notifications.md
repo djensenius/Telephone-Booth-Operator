@@ -22,11 +22,11 @@ turn it on, and how to configure them in production.
 3. Every queue-changing operation records the latest badge count in durable
    delivery state. A database lease serializes badge-only pushes across API
    replicas, coalesces changes that arrive during an in-flight send, and lets a
-   restarted process recover pending work. These pushes carry no banner or
-   sound and go to every registered device even when new-message alerts are
-   disabled. Decisions, deletions, installation rollovers, and data restores
-   therefore lower or reset the icon badge while the app is backgrounded or
-   closed.
+   restarted process recover pending work. Transient APNs failures leave the
+   newest version pending for retry. These pushes carry no banner or sound and
+   go to every registered device even when new-message alerts are disabled.
+   Decisions, deletions, installation rollovers, and data restores therefore
+   lower or reset the icon badge while the app is backgrounded or closed.
 4. A newly recorded moderation result with `flagged: true` sends a
    `messageFlagged` alert. Re-delivery of the same moderation row is deduplicated.
 5. `moderationQueueHigh` fires once when the awaiting-moderation count crosses

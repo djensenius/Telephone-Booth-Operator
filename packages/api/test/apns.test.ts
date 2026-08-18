@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.js")).fakeDb }));
 
 import {
+  fanOutBadgeNotification,
   fanOutNotification,
   findTargetDevices,
   resetApnsSenderForTests,
@@ -69,5 +70,21 @@ describe("APNs fan-out diagnostics", () => {
       expect.objectContaining({ id: optedOut.id }),
       expect.objectContaining({ id: optedIn.id }),
     ]);
+  });
+
+  it("propagates badge fan-out failures for durable retry", async () => {
+    seedMobileDevice({ userId: "operator-1", platform: "ios" });
+    setApnsSenderForTests({
+      send: async () => {
+        throw new Error("APNs unavailable");
+      },
+    });
+
+    await expect(
+      fanOutBadgeNotification({
+        kind: "badge",
+        badge: 3,
+      }),
+    ).rejects.toThrow("APNs badge fan-out failed for 1 user");
   });
 });

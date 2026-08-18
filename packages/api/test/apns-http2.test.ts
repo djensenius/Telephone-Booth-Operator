@@ -1,13 +1,24 @@
-import { describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { generateKeyPairSync } from "node:crypto";
+
+vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.js")).fakeDb }));
 
 import {
   buildApnsPayload,
+  Http2ApnsSender,
   inspectApnsConfig,
   loadApnsConfigFromEnv,
   normalizePemKey,
   topicForPlatform,
 } from "../src/lib/apns-http2.js";
+import { resetFakeDb, seedMobileDevice } from "./support/fake-db.js";
+
+const { privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+const validAuthKey = privateKey.export({ format: "pem", type: "pkcs8" }).toString();
+
+beforeEach(() => {
+  resetFakeDb();
+});
 
 describe("buildApnsPayload", () => {
   it("builds a standard alert envelope with thread and category", () => {
@@ -95,15 +106,11 @@ describe("normalizePemKey", () => {
 });
 
 describe("loadApnsConfigFromEnv", () => {
-  const { privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
-  const validAuthKey = privateKey
-    .export({ format: "pem", type: "pkcs8" })
-    .toString()
-    .replace(/\n/g, "\\n");
+  const escapedAuthKey = validAuthKey.replace(/\n/g, "\\n");
   const base = {
     APNS_TEAM_ID: "TEAM123",
     APNS_KEY_ID: "KEY123",
-    APNS_AUTH_KEY: validAuthKey,
+    APNS_AUTH_KEY: escapedAuthKey,
     APNS_BUNDLE_ID: "com.example.app",
   } as NodeJS.ProcessEnv;
 
@@ -152,5 +159,30 @@ describe("loadApnsConfigFromEnv", () => {
       status: "configured",
       environment: "development",
     });
+  });
+});
+
+describe("Http2ApnsSender", () => {
+  it("waits for device attempts and propagates transient APNs failures", async () => {
+    seedMobileDevice({ userId: "operator-1", platform: "ios" });
+    class TransientFailureSender extends Http2ApnsSender {
+      protected override post(): Promise<{ status: number; reason: string }> {
+        return Promise.resolve({ status: 503, reason: "ServiceUnavailable" });
+      }
+    }
+    const sender = new TransientFailureSender({
+      teamId: "TEAM123",
+      keyId: "KEY123",
+      authKey: validAuthKey,
+      bundleId: "com.example.app",
+      environment: "development",
+    });
+
+    await expect(
+      sender.send("operator-1", {
+        kind: "badge",
+        badge: 2,
+      }),
+    ).rejects.toThrow("APNs delivery failed for 1 of 1 devices");
   });
 });

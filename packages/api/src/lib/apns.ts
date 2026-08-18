@@ -32,7 +32,7 @@ type ApnsAlertNotification = {
   data?: Record<string, unknown>;
 };
 
-type ApnsBadgeNotification = {
+export type ApnsBadgeNotification = {
   kind: "badge";
   /// Badge-only pushes go to every active device, independently of alert
   /// preferences, so the count stays accurate when banners are disabled.
@@ -56,17 +56,12 @@ class NoopApnsSender implements ApnsSender {
   }
 }
 
-const apnsEnvConfigured = (): boolean =>
-  Boolean(
-    process.env.APNS_TEAM_ID &&
-    process.env.APNS_KEY_ID &&
-    process.env.APNS_AUTH_KEY &&
-    process.env.APNS_BUNDLE_ID,
-  );
-
 const noopSender = new NoopApnsSender();
 let testSender: ApnsSender | null = null;
 let productionSender: ApnsSender | null = null;
+
+const apnsDeliveryConfigured = (): boolean =>
+  testSender !== null || loadApnsConfigFromEnv() !== null;
 
 export const setApnsSenderForTests = (sender: ApnsSender): void => {
   testSender = sender;
@@ -122,6 +117,22 @@ const prefersNotification = (raw: unknown, key: keyof MobileDevicePreferences): 
   return defaults[key];
 };
 
+const sendToOperatorUsers = async (
+  notification: ApnsNotification,
+): Promise<{ userIds: string[]; results: PromiseSettledResult<void>[] }> => {
+  const userIds = await db.mobileDevice
+    .findMany({
+      where: { revokedAt: null },
+      select: { userId: true },
+      distinct: ["userId"],
+    })
+    .then((rows) => Array.from(new Set(rows.map((row) => row.userId))));
+  const results = await Promise.allSettled(
+    userIds.map((userId) => apnsSender().send(userId, notification)),
+  );
+  return { userIds, results };
+};
+
 /// Fan-out: send `notification` to every device for every operator user
 /// that has the preference enabled. Used by the events broadcaster when
 /// it sees a notable event.
@@ -130,21 +141,10 @@ const prefersNotification = (raw: unknown, key: keyof MobileDevicePreferences): 
 /// invoked from request handlers that must not fail if APNs (or the
 /// mobile_devices table) is unavailable.
 export const fanOutNotification = async (notification: ApnsNotification): Promise<void> => {
-  if (!apnsEnvConfigured() && !testSender) {
-    return;
-  }
+  if (!apnsDeliveryConfigured()) return;
   const preferenceKey = notification.kind === "alert" ? notification.preferenceKey : undefined;
   try {
-    const userIds = await db.mobileDevice
-      .findMany({
-        where: { revokedAt: null },
-        select: { userId: true },
-        distinct: ["userId"],
-      })
-      .then((rows) => Array.from(new Set(rows.map((row) => row.userId))));
-    const results = await Promise.allSettled(
-      userIds.map((userId) => apnsSender().send(userId, notification)),
-    );
+    const { userIds, results } = await sendToOperatorUsers(notification);
     for (const [index, result] of results.entries()) {
       if (result.status === "fulfilled") continue;
       log.error(
@@ -170,6 +170,38 @@ export const fanOutNotification = async (notification: ApnsNotification): Promis
     );
     // Push delivery is best-effort. Never let a failure here surface
     // to the request handler.
+  }
+};
+
+/// Reliable fan-out for durable badge delivery. Unlike alert fan-out, database
+/// and sender failures propagate so the dispatcher can retain and retry the
+/// pending badge version.
+export const fanOutBadgeNotification = async (
+  notification: ApnsBadgeNotification,
+): Promise<void> => {
+  if (!apnsDeliveryConfigured()) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("APNs badge delivery is unavailable because APNs is not configured");
+    }
+    return;
+  }
+
+  const { results } = await sendToOperatorUsers(notification);
+  const failures = results.flatMap((result) =>
+    result.status === "rejected"
+      ? [
+          result.reason instanceof Error
+            ? result.reason
+            : new Error("APNs sender rejected badge fan-out", { cause: result.reason }),
+        ]
+      : [],
+  );
+  if (failures.length > 0) {
+    const target = failures.length === 1 ? "user" : "users";
+    throw new AggregateError(
+      failures,
+      `APNs badge fan-out failed for ${failures.length} ${target}`,
+    );
   }
 };
 

@@ -176,9 +176,24 @@ export class Http2ApnsSender {
     const jwt = await this.providerToken();
     const payload = JSON.stringify(buildApnsPayload(notification));
     const collapseId = notification.kind === "badge" ? MODERATION_BADGE_COLLAPSE_ID : undefined;
-    await Promise.allSettled(
+    const results = await Promise.allSettled(
       devices.map((device) => this.deliver(device, jwt, payload, collapseId)),
     );
+    const failures = results.flatMap((result) =>
+      result.status === "rejected"
+        ? [
+            result.reason instanceof Error
+              ? result.reason
+              : new Error("APNs device delivery failed", { cause: result.reason }),
+          ]
+        : [],
+    );
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures,
+        `APNs delivery failed for ${failures.length} of ${devices.length} devices`,
+      );
+    }
     log.debug(
       {
         component: "apns",
@@ -197,41 +212,15 @@ export class Http2ApnsSender {
     payload: string,
     collapseId: string | undefined,
   ): Promise<void> {
+    let result: { status: number; reason?: string; apnsId?: string };
     try {
-      const result = await this.post(
+      result = await this.post(
         device.apnsToken,
         this.topic(device.platform),
         jwt,
         payload,
         collapseId,
       );
-      if (result.status === 200) return;
-      if (result.status === 410 || PERMANENT_TOKEN_FAILURES.has(result.reason ?? "")) {
-        await this.revokeDevice(device.id);
-        log.warn(
-          {
-            component: "apns",
-            status: result.status,
-            reason: result.reason ?? "unknown",
-            apnsId: result.apnsId,
-            deviceId: device.id,
-            platform: device.platform,
-          },
-          "APNs rejected device token; device revoked",
-        );
-      } else {
-        log.warn(
-          {
-            component: "apns",
-            status: result.status,
-            reason: result.reason ?? "unknown",
-            apnsId: result.apnsId,
-            deviceId: device.id,
-            platform: device.platform,
-          },
-          "APNs delivery failed",
-        );
-      }
     } catch (error) {
       const errorRecord =
         error !== null && typeof error === "object" ? (error as Record<string, unknown>) : {};
@@ -248,7 +237,38 @@ export class Http2ApnsSender {
       // A transport error often means the session is dead; drop it so the
       // next send reconnects.
       this.resetSession();
+      throw error instanceof Error ? error : new Error("APNs transport failed", { cause: error });
     }
+
+    if (result.status === 200) return;
+    if (result.status === 410 || PERMANENT_TOKEN_FAILURES.has(result.reason ?? "")) {
+      await this.revokeDevice(device.id);
+      log.warn(
+        {
+          component: "apns",
+          status: result.status,
+          reason: result.reason ?? "unknown",
+          apnsId: result.apnsId,
+          deviceId: device.id,
+          platform: device.platform,
+        },
+        "APNs rejected device token; device revoked",
+      );
+      return;
+    }
+
+    log.warn(
+      {
+        component: "apns",
+        status: result.status,
+        reason: result.reason ?? "unknown",
+        apnsId: result.apnsId,
+        deviceId: device.id,
+        platform: device.platform,
+      },
+      "APNs delivery failed",
+    );
+    throw new Error(`APNs delivery failed with status ${result.status}`);
   }
 
   private topic(platform: string): string {
@@ -263,7 +283,7 @@ export class Http2ApnsSender {
     }
   }
 
-  private post(
+  protected post(
     token: string,
     topic: string,
     jwt: string,
