@@ -4,7 +4,9 @@ import {
   TELEMETRY_HISTORY_MAX_POINTS_PER_SERIES,
   TELEMETRY_HISTORY_MAX_SERIES,
   TELEMETRY_HISTORY_MAX_TOTAL_SAMPLES,
+  ThermalMetricNameSchema,
   type TelemetryHistorySeries,
+  type ThermalHistorySeries,
 } from "@telephone-booth-operator/shared";
 import { z } from "zod";
 import { log } from "./logger.js";
@@ -23,8 +25,23 @@ type QueryRangeInput = {
   stepSeconds: number;
 };
 
+type ThermalQueryRangeInput = QueryRangeInput & {
+  boothId: string;
+};
+
+type GrafanaQueryRangeInput = {
+  query: string;
+  from: string;
+  to: string;
+  stepSeconds: number;
+};
+
 export type GrafanaHistoryResult =
   | { ok: true; series: TelemetryHistorySeries[] }
+  | { ok: false; reason: "not_configured" | "upstream" };
+
+export type GrafanaThermalHistoryResult =
+  | { ok: true; series: ThermalHistorySeries[] }
   | { ok: false; reason: "not_configured" | "upstream" };
 
 export const GRAFANA_HISTORY_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
@@ -84,7 +101,25 @@ export const buildRouterTelemetrySelector = (
   )}",instance="${escapePrometheusLabelValue(prometheusInstance)}"}`;
 };
 
-const queryRangeUrl = (config: GrafanaPrometheusConfig, input: QueryRangeInput): URL => {
+export const buildThermalHistoryQuery = (
+  boothId: string,
+  prometheusJob: string,
+  prometheusInstance: string,
+): string => {
+  const boothSelector = `booth_cpu_temperature_celsius{booth_id="${escapePrometheusLabelValue(
+    boothId,
+  )}"}`;
+  const routerLabels = `job="${escapePrometheusLabelValue(
+    prometheusJob,
+  )}",instance="${escapePrometheusLabelValue(prometheusInstance)}"`;
+  return [
+    boothSelector,
+    `glinet_battery_temperature_celsius{${routerLabels}}`,
+    `glinet_thermal_temperature_celsius{${routerLabels}}`,
+  ].join(" or ");
+};
+
+const queryRangeUrl = (config: GrafanaPrometheusConfig, input: GrafanaQueryRangeInput): URL => {
   const url = new URL(config.url);
   const basePath = url.pathname.replace(/\/+$/, "");
   url.pathname = `${basePath}/api/datasources/proxy/uid/${encodeURIComponent(
@@ -92,10 +127,7 @@ const queryRangeUrl = (config: GrafanaPrometheusConfig, input: QueryRangeInput):
   )}/api/v1/query_range`;
   url.search = "";
   url.hash = "";
-  url.searchParams.set(
-    "query",
-    buildRouterTelemetrySelector(input.prometheusJob, input.prometheusInstance),
-  );
+  url.searchParams.set("query", input.query);
   url.searchParams.set("start", input.from);
   url.searchParams.set("end", input.to);
   url.searchParams.set("step", String(input.stepSeconds));
@@ -158,13 +190,20 @@ const readBoundedJson = async (response: Response): Promise<BoundedJsonResult> =
   }
 };
 
-const normalizeSeries = (
+type NormalizedHistorySeries<Metric extends string> = {
+  metric: Metric;
+  labels: Record<string, string>;
+  points: Array<{ timestamp: number; value: number }>;
+};
+
+const normalizeSeries = <Metric extends string>(
   response: z.infer<typeof prometheusResponseSchema>,
-): TelemetryHistorySeries[] | null => {
-  const series: TelemetryHistorySeries[] = [];
+  metricSchema: z.ZodType<Metric>,
+): NormalizedHistorySeries<Metric>[] | null => {
+  const series: NormalizedHistorySeries<Metric>[] = [];
   let totalSamples = 0;
   for (const result of response.data.result) {
-    const metricResult = RouterTelemetryMetricNameSchema.safeParse(result.metric.__name__);
+    const metricResult = metricSchema.safeParse(result.metric.__name__);
     if (!metricResult.success) return null;
     totalSamples += result.values.length;
     if (totalSamples > TELEMETRY_HISTORY_MAX_TOTAL_SAMPLES) return null;
@@ -189,9 +228,13 @@ const normalizeSeries = (
   return series;
 };
 
-export const queryRouterTelemetryHistory = async (
-  input: QueryRangeInput,
-): Promise<GrafanaHistoryResult> => {
+const queryGrafanaHistory = async <Metric extends string>(
+  input: GrafanaQueryRangeInput,
+  metricSchema: z.ZodType<Metric>,
+): Promise<
+  | { ok: true; series: NormalizedHistorySeries<Metric>[] }
+  | { ok: false; reason: "not_configured" | "upstream" }
+> => {
   const config = resolveGrafanaConfig();
   if (!config) return { ok: false, reason: "not_configured" };
 
@@ -245,10 +288,36 @@ export const queryRouterTelemetryHistory = async (
     return { ok: false, reason: "upstream" };
   }
 
-  const series = normalizeSeries(parsed.data);
+  const series = normalizeSeries(parsed.data, metricSchema);
   if (!series) {
     log.error({ event: "telemetry.grafana_invalid_series" });
     return { ok: false, reason: "upstream" };
   }
   return { ok: true, series };
 };
+
+export const queryRouterTelemetryHistory = (
+  input: QueryRangeInput,
+): Promise<GrafanaHistoryResult> =>
+  queryGrafanaHistory(
+    {
+      query: buildRouterTelemetrySelector(input.prometheusJob, input.prometheusInstance),
+      from: input.from,
+      to: input.to,
+      stepSeconds: input.stepSeconds,
+    },
+    RouterTelemetryMetricNameSchema,
+  );
+
+export const queryThermalHistory = (
+  input: ThermalQueryRangeInput,
+): Promise<GrafanaThermalHistoryResult> =>
+  queryGrafanaHistory(
+    {
+      query: buildThermalHistoryQuery(input.boothId, input.prometheusJob, input.prometheusInstance),
+      from: input.from,
+      to: input.to,
+      stepSeconds: input.stepSeconds,
+    },
+    ThermalMetricNameSchema,
+  );

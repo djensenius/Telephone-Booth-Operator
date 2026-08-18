@@ -10,6 +10,9 @@ import {
   QuestionSchema,
   QuestionStatusSchema,
   RouterComponentSnapshotSchema,
+  ThermalHistoryQuerySchema,
+  ThermalHistorySchema,
+  ThermalMetricNameSchema,
 } from "../src/index.js";
 
 describe("BoothStatusSchema", () => {
@@ -257,6 +260,78 @@ describe("RouterComponentSnapshotSchema", () => {
       RouterComponentSnapshotSchema.parse({
         battery: { abnormalType: "normal" },
         thermalZones: [],
+      }),
+    ).toThrow();
+  });
+});
+
+describe("thermal history schemas", () => {
+  const source = {
+    boothId: "booth-01",
+    componentId: "router",
+    displayName: "Travel router",
+    kind: "router",
+    prometheusJob: "glinet-router",
+    prometheusInstance: "router-01",
+  };
+
+  it("accepts only the fixed thermal metric contract", () => {
+    expect(ThermalMetricNameSchema.parse("booth_cpu_temperature_celsius")).toBe(
+      "booth_cpu_temperature_celsius",
+    );
+    expect(() => ThermalMetricNameSchema.parse("process_temperature_celsius")).toThrow();
+
+    const parsed = ThermalHistorySchema.parse({
+      boothId: "booth-01",
+      source,
+      from: "2026-08-17T00:00:00.000Z",
+      to: "2026-08-18T00:00:00.000Z",
+      stepSeconds: 60,
+      series: [
+        {
+          metric: "glinet_battery_temperature_celsius",
+          labels: { job: "glinet-router", instance: "router-01" },
+          points: [{ timestamp: 1_776_643_200, value: 31.5 }],
+        },
+      ],
+    });
+    expect(parsed.source).toEqual(source);
+  });
+
+  it("requires response source metadata to match the requested booth", () => {
+    expect(() =>
+      ThermalHistorySchema.parse({
+        boothId: "booth-02",
+        source,
+        from: "2026-08-17T00:00:00.000Z",
+        to: "2026-08-18T00:00:00.000Z",
+        stepSeconds: 60,
+        series: [],
+      }),
+    ).toThrow();
+  });
+
+  it("uses the component-history 31-day and 10,000-point query bounds", () => {
+    expect(
+      ThermalHistoryQuerySchema.parse({
+        boothId: "booth-01",
+        from: "2026-08-17T00:00:00Z",
+        to: "2026-08-18T00:00:00Z",
+      }).stepSeconds,
+    ).toBe(60);
+    expect(() =>
+      ThermalHistoryQuerySchema.parse({
+        boothId: "booth-01",
+        from: "2026-01-01T00:00:00Z",
+        to: "2026-02-02T00:00:00Z",
+      }),
+    ).toThrow();
+    expect(() =>
+      ThermalHistoryQuerySchema.parse({
+        boothId: "booth-01",
+        from: "2026-01-01T00:00:00Z",
+        to: "2026-01-03T00:00:00Z",
+        stepSeconds: 15,
       }),
     ).toThrow();
   });

@@ -846,6 +846,20 @@ export const TelemetryHistorySeriesSchema = z.object({
 });
 export type TelemetryHistorySeries = z.infer<typeof TelemetryHistorySeriesSchema>;
 
+const addTelemetryHistoryCardinalityIssue = (
+  series: readonly { readonly points: readonly unknown[] }[],
+  context: z.RefinementCtx,
+): void => {
+  const totalSamples = series.reduce((total, item) => total + item.points.length, 0);
+  if (totalSamples > TELEMETRY_HISTORY_MAX_TOTAL_SAMPLES) {
+    context.addIssue({
+      code: "custom",
+      path: ["series"],
+      message: `Telemetry history is limited to ${TELEMETRY_HISTORY_MAX_TOTAL_SAMPLES} total samples.`,
+    });
+  }
+};
+
 export const ComponentTelemetryHistorySchema = z
   .object({
     source: TelemetrySourceMetadataSchema,
@@ -855,16 +869,46 @@ export const ComponentTelemetryHistorySchema = z
     series: z.array(TelemetryHistorySeriesSchema).max(TELEMETRY_HISTORY_MAX_SERIES),
   })
   .superRefine((value, context) => {
-    const totalSamples = value.series.reduce((total, series) => total + series.points.length, 0);
-    if (totalSamples > TELEMETRY_HISTORY_MAX_TOTAL_SAMPLES) {
-      context.addIssue({
-        code: "custom",
-        path: ["series"],
-        message: `Telemetry history is limited to ${TELEMETRY_HISTORY_MAX_TOTAL_SAMPLES} total samples.`,
-      });
-    }
+    addTelemetryHistoryCardinalityIssue(value.series, context);
   });
 export type ComponentTelemetryHistory = z.infer<typeof ComponentTelemetryHistorySchema>;
+
+export const THERMAL_METRICS = [
+  "booth_cpu_temperature_celsius",
+  "glinet_battery_temperature_celsius",
+  "glinet_thermal_temperature_celsius",
+] as const;
+
+export const ThermalMetricNameSchema = z.enum(THERMAL_METRICS);
+export type ThermalMetricName = z.infer<typeof ThermalMetricNameSchema>;
+
+export const ThermalHistorySeriesSchema = z.object({
+  metric: ThermalMetricNameSchema,
+  labels: z.record(z.string(), z.string()),
+  points: z.array(TelemetryHistoryPointSchema).max(TELEMETRY_HISTORY_MAX_POINTS_PER_SERIES),
+});
+export type ThermalHistorySeries = z.infer<typeof ThermalHistorySeriesSchema>;
+
+export const ThermalHistorySchema = z
+  .object({
+    boothId: z.string().trim().min(1).max(128),
+    source: TelemetrySourceMetadataSchema,
+    from: z.string().datetime(),
+    to: z.string().datetime(),
+    stepSeconds: z.number().int().min(15),
+    series: z.array(ThermalHistorySeriesSchema).max(TELEMETRY_HISTORY_MAX_SERIES),
+  })
+  .superRefine((value, context) => {
+    if (value.source.boothId !== value.boothId) {
+      context.addIssue({
+        code: "custom",
+        path: ["source", "boothId"],
+        message: "Thermal history source must belong to boothId.",
+      });
+    }
+    addTelemetryHistoryCardinalityIssue(value.series, context);
+  });
+export type ThermalHistory = z.infer<typeof ThermalHistorySchema>;
 
 export const ComponentTelemetryCurrentQuerySchema = z.object({
   boothId: z.string().trim().min(1).max(128).optional(),
@@ -874,43 +918,61 @@ export type ComponentTelemetryCurrentQuery = z.infer<typeof ComponentTelemetryCu
 
 const MAX_TELEMETRY_HISTORY_RANGE_MS = 31 * 24 * 60 * 60 * 1000;
 
+const telemetryHistoryRangeFields = {
+  from: z.string().datetime({ offset: true }),
+  to: z.string().datetime({ offset: true }),
+  stepSeconds: z.coerce.number().int().min(15).default(60),
+};
+
+const addTelemetryHistoryRangeIssues = (
+  value: { readonly from: string; readonly to: string; readonly stepSeconds: number },
+  context: z.RefinementCtx,
+): void => {
+  const fromMs = Date.parse(value.from);
+  const toMs = Date.parse(value.to);
+  if (toMs <= fromMs) {
+    context.addIssue({
+      code: "custom",
+      path: ["to"],
+      message: "to must be later than from.",
+    });
+    return;
+  }
+  const rangeMs = toMs - fromMs;
+  if (rangeMs > MAX_TELEMETRY_HISTORY_RANGE_MS) {
+    context.addIssue({
+      code: "custom",
+      path: ["to"],
+      message: "Telemetry history is limited to 31 days.",
+    });
+  }
+  const points = Math.floor(rangeMs / (value.stepSeconds * 1000)) + 1;
+  if (points > TELEMETRY_HISTORY_MAX_POINTS_PER_SERIES) {
+    context.addIssue({
+      code: "custom",
+      path: ["stepSeconds"],
+      message: "Telemetry history is limited to 10000 points per series.",
+    });
+  }
+};
+
 export const ComponentTelemetryHistoryQuerySchema = z
   .object({
     boothId: z.string().trim().min(1).max(128),
     componentId: z.string().trim().min(1).max(128),
-    from: z.string().datetime({ offset: true }),
-    to: z.string().datetime({ offset: true }),
-    stepSeconds: z.coerce.number().int().min(15).default(60),
+    ...telemetryHistoryRangeFields,
   })
-  .superRefine((value, context) => {
-    const fromMs = Date.parse(value.from);
-    const toMs = Date.parse(value.to);
-    if (toMs <= fromMs) {
-      context.addIssue({
-        code: "custom",
-        path: ["to"],
-        message: "to must be later than from.",
-      });
-      return;
-    }
-    const rangeMs = toMs - fromMs;
-    if (rangeMs > MAX_TELEMETRY_HISTORY_RANGE_MS) {
-      context.addIssue({
-        code: "custom",
-        path: ["to"],
-        message: "Telemetry history is limited to 31 days.",
-      });
-    }
-    const points = Math.floor(rangeMs / (value.stepSeconds * 1000)) + 1;
-    if (points > TELEMETRY_HISTORY_MAX_POINTS_PER_SERIES) {
-      context.addIssue({
-        code: "custom",
-        path: ["stepSeconds"],
-        message: "Telemetry history is limited to 10000 points per series.",
-      });
-    }
-  });
+  .superRefine(addTelemetryHistoryRangeIssues);
 export type ComponentTelemetryHistoryQuery = z.infer<typeof ComponentTelemetryHistoryQuerySchema>;
+
+export const ThermalHistoryQuerySchema = z
+  .object({
+    boothId: z.string().trim().min(1).max(128),
+    componentId: z.string().trim().min(1).max(128).optional(),
+    ...telemetryHistoryRangeFields,
+  })
+  .superRefine(addTelemetryHistoryRangeIssues);
+export type ThermalHistoryQuery = z.infer<typeof ThermalHistoryQuerySchema>;
 
 // Live system snapshot pushed by the booth via `PUT /v1/system`. Mirrors the
 // Rust `booth-hal::SystemSnapshot` struct as it appears on the wire (camelCase

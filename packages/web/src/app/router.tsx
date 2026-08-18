@@ -30,6 +30,7 @@ import { StatsScreen } from "../features/stats/StatsScreen.js";
 import { StatusScreen } from "../features/status/StatusScreen.js";
 import { LiveSystemPanel } from "../features/system/LiveSystemPanel.js";
 import { SystemVitalsStrip } from "../features/system/SystemVitalsStrip.js";
+import { ThermalsScreen } from "../features/thermals/ThermalsScreen.js";
 import { TokensScreen } from "../features/tokens/TokensScreen.js";
 import { useNumericNavigation } from "../hooks/useNumericNavigation.js";
 import { BoothEnvelopeBridge, BoothWebSocketProvider } from "../lib/booth-websocket.js";
@@ -142,6 +143,9 @@ function AppLayout(): JSX.Element {
                   </li>
                   <li>
                     <Link to="/system">Live system</Link>
+                  </li>
+                  <li>
+                    <Link to="/thermals">Thermals</Link>
                   </li>
                   <li>
                     <Link to="/events">Events</Link>
@@ -262,6 +266,12 @@ const systemRoute = createRoute({
   component: () => protectedScreen(<LiveSystemPanel />),
 });
 
+const thermalsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/thermals",
+  component: () => protectedScreen(<ThermalsScreen />),
+});
+
 const eventsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/events",
@@ -338,6 +348,7 @@ const routeTree = rootRoute.addChildren([
   debugRoute,
   instructionsRoute,
   systemRoute,
+  thermalsRoute,
   eventsRoute,
   sessionsRoute,
   statsRoute,

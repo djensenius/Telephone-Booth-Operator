@@ -40,6 +40,8 @@ import {
   QuestionSchema,
   QuestionStatusSchema,
   StatsOverviewSchema,
+  TelemetrySourceEnvelopeSchema,
+  ThermalHistorySchema,
   TranscriptionListSchema,
   TranscriptionSchema,
   UploadSasRequestSchema,
@@ -85,6 +87,8 @@ import type {
   QuestionStatus,
   StatsOverview,
   StatsWindow,
+  TelemetrySourceEnvelope,
+  ThermalHistory,
   Transcription,
   TranscriptionList,
   UploadSasRequest,
@@ -119,6 +123,10 @@ const InstructionListSchema = z.object({
 });
 const MessageListSchema = z.object({ items: z.array(MessageSchema) });
 const InstallationListSchema = z.object({ items: z.array(InstallationSchema) });
+const SystemCurrentListSchema = z.object({
+  items: z.array(BoothSystemSnapshotEnvelopeSchema),
+});
+const TelemetrySourceListSchema = z.array(TelemetrySourceEnvelopeSchema);
 // The `/v1/stats/summary` response is an API-internal shape (not exported from
 // `shared`), so we parse the small subset the UI actually reads. Unknown keys
 // (booth snapshot, realtime) are dropped by Zod's default strip behaviour.
@@ -143,6 +151,7 @@ export type QuestionList = z.infer<typeof QuestionListSchema>;
 export type InstructionList = z.infer<typeof InstructionListSchema>;
 export type MessageList = z.infer<typeof MessageListSchema>;
 export type InstallationList = z.infer<typeof InstallationListSchema>;
+export type SystemCurrentList = z.infer<typeof SystemCurrentListSchema>;
 export type StatsSummary = z.infer<typeof StatsSummarySchema>;
 
 const rawApiBaseUrl =
@@ -567,11 +576,45 @@ export const auditLogs = {
     ),
 };
 
+export interface ComponentTelemetryCurrentParams {
+  readonly boothId?: string;
+  readonly componentId?: string;
+}
+
+export interface ThermalHistoryParams {
+  readonly boothId: string;
+  readonly componentId?: string;
+  readonly from: string;
+  readonly to: string;
+  readonly stepSeconds?: number;
+}
+
 export const system = {
   current: (boothId: string) =>
     apiFetch<BoothSystemSnapshotEnvelope>(`/v1/system/current${query({ boothId })}`, {
       schema: BoothSystemSnapshotEnvelopeSchema,
     }),
+  currentAll: () =>
+    apiFetch<SystemCurrentList>("/v1/system/current", { schema: SystemCurrentListSchema }),
+  componentsCurrent: (params: ComponentTelemetryCurrentParams = {}) =>
+    apiFetch<readonly TelemetrySourceEnvelope[]>(
+      `/v1/system/components/current${query({
+        boothId: params.boothId,
+        componentId: params.componentId,
+      })}`,
+      { schema: TelemetrySourceListSchema },
+    ),
+  thermalHistory: (params: ThermalHistoryParams) =>
+    apiFetch<ThermalHistory>(
+      `/v1/system/thermals/history${query({
+        boothId: params.boothId,
+        componentId: params.componentId,
+        from: params.from,
+        to: params.to,
+        stepSeconds: params.stepSeconds,
+      })}`,
+      { schema: ThermalHistorySchema },
+    ),
 };
 
 // A metrics time selection: either a preset window, or an explicit custom
@@ -691,6 +734,30 @@ export const installations = {
   },
 };
 
+export const THERMAL_RANGE_VALUES = ["24h", "7d", "30d"] as const;
+export type ThermalRange = (typeof THERMAL_RANGE_VALUES)[number];
+
+const THERMAL_RANGE_CONFIG: Record<
+  ThermalRange,
+  { readonly durationMs: number; readonly stepSeconds: number }
+> = {
+  "24h": { durationMs: 24 * 60 * 60 * 1000, stepSeconds: 60 },
+  "7d": { durationMs: 7 * 24 * 60 * 60 * 1000, stepSeconds: 300 },
+  "30d": { durationMs: 30 * 24 * 60 * 60 * 1000, stepSeconds: 900 },
+};
+
+export function thermalRangeBounds(
+  range: ThermalRange,
+  now: Date = new Date(),
+): { readonly from: string; readonly to: string; readonly stepSeconds: number } {
+  const config = THERMAL_RANGE_CONFIG[range];
+  return {
+    from: new Date(now.getTime() - config.durationMs).toISOString(),
+    to: now.toISOString(),
+    stepSeconds: config.stepSeconds,
+  };
+}
+
 export const apiQueryKeys = {
   me: ["auth", "me"] as const,
   status: ["status", "current"] as const,
@@ -709,7 +776,12 @@ export const apiQueryKeys = {
   sessions: (boothId?: string, scope?: InstallationScope) =>
     ["sessions", "list", boothId ?? null, scope ?? null] as const,
   session: (id: string) => ["sessions", id] as const,
-  system: (boothId: string) => ["system", boothId] as const,
+  system: (boothId: string) => ["system", "current", "booth", boothId] as const,
+  systemAll: ["system", "current", "all"] as const,
+  systemComponents: (boothId?: string, componentId?: string) =>
+    ["system", "components", boothId ?? null, componentId ?? null] as const,
+  thermalHistory: (boothId: string, componentId: string, range: ThermalRange) =>
+    ["system", "thermals", "history", boothId, componentId, range] as const,
   statsOverview: (selection: StatsRangeSelection, scope?: InstallationScope) =>
     ["stats", "overview", selection, scope ?? null] as const,
   statsSummary: (scope?: InstallationScope) => ["stats", "summary", scope ?? null] as const,
@@ -780,6 +852,41 @@ export function useSystemCurrent(boothId: string | undefined) {
     queryFn: () => system.current(boothId ?? ""),
     enabled: typeof boothId === "string" && boothId.length > 0,
     refetchInterval: 5_000,
+  });
+}
+
+export function useSystemCurrentAll() {
+  return useQuery({
+    queryKey: apiQueryKeys.systemAll,
+    queryFn: system.currentAll,
+    refetchInterval: 5_000,
+  });
+}
+
+export function useComponentTelemetryCurrent(params: ComponentTelemetryCurrentParams = {}) {
+  return useQuery({
+    queryKey: apiQueryKeys.systemComponents(params.boothId, params.componentId),
+    queryFn: () => system.componentsCurrent(params),
+    refetchInterval: 5_000,
+  });
+}
+
+export function useThermalHistory(
+  source: Pick<TelemetrySourceEnvelope, "boothId" | "componentId"> | undefined,
+  range: ThermalRange,
+) {
+  return useQuery({
+    queryKey: apiQueryKeys.thermalHistory(source?.boothId ?? "", source?.componentId ?? "", range),
+    queryFn: () => {
+      const bounds = thermalRangeBounds(range);
+      return system.thermalHistory({
+        boothId: source?.boothId ?? "",
+        ...(source ? { componentId: source.componentId } : {}),
+        ...bounds,
+      });
+    },
+    enabled: source !== undefined,
+    refetchInterval: 60_000,
   });
 }
 

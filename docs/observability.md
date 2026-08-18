@@ -20,17 +20,19 @@ external VictoriaMetrics instance; Grafana dashboards live under
 
 ## HTTP routes
 
-| Route                     | Auth             | Notes                                           |
-| ------------------------- | ---------------- | ----------------------------------------------- |
-| `POST /v1/events`         | API token        | Bulk insert (max 500), `skipDuplicates`.        |
-| `GET /v1/events`          | Operator cookie  | Cursor-paginated, filterable.                   |
-| `GET /v1/events/stream`   | Operator cookie  | SSE live tail. Same-origin only.                |
-| `GET /v1/sessions`        | Operator cookie  | Cursor-paginated.                               |
-| `GET /v1/sessions/:id`    | Operator cookie  | Session + ordered events.                       |
-| `PUT /v1/system`          | API token        | Upsert current row + WS broadcast.              |
-| `GET /v1/system/current`  | Cookie or bearer | Latest persisted snapshot.                      |
-| `GET /v1/monitor/summary` | Monitor token    | Daily and active-installation aggregate counts. |
-| `GET /v1/ws/status`       | Cookie or bearer | Discriminated `{kind,…}` envelope.              |
+| Route                               | Auth              | Notes                                           |
+| ----------------------------------- | ----------------- | ----------------------------------------------- |
+| `POST /v1/events`                   | API token         | Bulk insert (max 500), `skipDuplicates`.        |
+| `GET /v1/events`                    | Operator cookie   | Cursor-paginated, filterable.                   |
+| `GET /v1/events/stream`             | Operator cookie   | SSE live tail. Same-origin only.                |
+| `GET /v1/sessions`                  | Operator cookie   | Cursor-paginated.                               |
+| `GET /v1/sessions/:id`              | Operator cookie   | Session + ordered events.                       |
+| `PUT /v1/system`                    | API token         | Upsert current row + WS broadcast.              |
+| `GET /v1/system/current`            | Cookie or bearer  | Latest persisted host snapshot.                 |
+| `GET /v1/system/components/current` | Cookie or bearer  | Latest router component snapshots.              |
+| `GET /v1/system/thermals/history`   | Session or bearer | Fixed CPU, battery, and zone history.           |
+| `GET /v1/monitor/summary`           | Monitor token     | Daily and active-installation aggregate counts. |
+| `GET /v1/ws/status`                 | Cookie or bearer  | Discriminated `{kind,…}` envelope.              |
 
 Cursors are base64url-encoded `(receivedAt, id)` tuples and pair with the
 composite `@@index([boothId, receivedAt, id])` for stable pagination.
@@ -46,12 +48,18 @@ clock skew across reboots can't reorder the log; UIs may resort by
 
 ## Web UI
 
-The operator console exposes the observability data on three dedicated
-screens accessible from the **Observability** block in the sidebar:
+The operator console exposes observability data on dedicated screens
+accessible from the **Observability** block in the sidebar:
 
 - **Live system** (`/system`) — bar/lamp readouts for CPU, temperature,
   memory, disk, network, uptime, audio device, Tailscale link, and
   throttling flags. Updates in real time via the status WebSocket.
+- **Thermals** (`/thermals`) — fleet current cards for Pi CPU, router battery,
+  and the hottest router thermal zone, plus selected-booth history. Historical
+  queries are fixed to `booth_cpu_temperature_celsius`,
+  `glinet_battery_temperature_celsius`, and
+  `glinet_thermal_temperature_celsius`; arbitrary PromQL is never accepted.
+  The history endpoint accepts either an operator session or operator bearer.
 - **Events** (`/events`) — paginated, filterable table of booth events
   with links into the originating call session.
 - **Sessions** (`/sessions`) — paginated list of call sessions; each row
