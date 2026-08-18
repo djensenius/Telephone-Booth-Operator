@@ -1,7 +1,8 @@
-import type { JSX, ReactNode } from "react";
-import { useMemo, useState } from "react";
+import type { JSX } from "react";
+import { memo, useMemo, useState } from "react";
 import type { TelemetryHistoryPoint } from "@telephone-booth-operator/shared";
 import { GlassPanel } from "../../components/booth/index.js";
+import { useNow } from "../../hooks/useNow.js";
 import {
   THERMAL_RANGE_VALUES,
   useComponentTelemetryCurrent,
@@ -111,30 +112,79 @@ const newestPoint = (series: readonly ThermalChartSeries[]): TelemetryHistoryPoi
   return newest;
 };
 
-function SensorDetails({
-  title,
-  series,
-  children,
-}: {
+interface SensorDetailsProps {
   readonly title: string;
+  readonly chartTitle: string;
+  readonly description: string;
   readonly series: readonly ThermalChartSeries[];
-  readonly children: ReactNode;
-}): JSX.Element {
-  const latest = newestPoint(series);
+  readonly from: string;
+  readonly to: string;
+  readonly stepSeconds: number;
+}
+
+const SensorDetails = memo(function SensorDetails({
+  title,
+  chartTitle,
+  description,
+  series,
+  from,
+  to,
+  stepSeconds,
+}: SensorDetailsProps): JSX.Element {
+  const [isOpen, setIsOpen] = useState(false);
+  const latest = useMemo(() => newestPoint(series), [series]);
   return (
-    <details className="thermal-sensor-details">
+    <details
+      className="thermal-sensor-details"
+      onToggle={(event) => setIsOpen(event.currentTarget.open)}
+    >
       <summary>
         <span>{title}</span>
         <strong>{latest === null ? "No samples" : `${fmtNumber(latest.value, 1)} °C`}</strong>
       </summary>
-      {children}
+      {isOpen ? (
+        <ThermalChart
+          title={chartTitle}
+          description={description}
+          series={series}
+          from={from}
+          to={to}
+          stepSeconds={stepSeconds}
+        />
+      ) : null}
     </details>
   );
-}
+});
+
+const ZoneSensorDetails = memo(function ZoneSensorDetails({
+  zone,
+  from,
+  to,
+  stepSeconds,
+}: {
+  readonly zone: ThermalChartSeries;
+  readonly from: string;
+  readonly to: string;
+  readonly stepSeconds: number;
+}): JSX.Element {
+  const series = useMemo(() => [zone], [zone]);
+  return (
+    <SensorDetails
+      title={zone.label}
+      chartTitle={zone.label}
+      description="Individual router thermal-zone temperature."
+      series={series}
+      from={from}
+      to={to}
+      stepSeconds={stepSeconds}
+    />
+  );
+});
 
 export function ThermalsScreen(): JSX.Element {
   const systemsQuery = useSystemCurrentAll();
   const componentsQuery = useComponentTelemetryCurrent();
+  const nowMilliseconds = useNow();
   const [selectedSourceId, setSelectedSourceId] = useState<string>();
   const [range, setRange] = useState<ThermalRange>("24h");
   const sources = useMemo(() => componentsQuery.data ?? [], [componentsQuery.data]);
@@ -143,7 +193,10 @@ export function ThermalsScreen(): JSX.Element {
     () => selectPreferredTelemetrySource(sources, selectedSourceId),
     [selectedSourceId, sources],
   );
-  const summaries = useMemo(() => buildFleetThermalSummaries(sources, systems), [sources, systems]);
+  const summaries = useMemo(
+    () => buildFleetThermalSummaries(sources, systems, nowMilliseconds),
+    [nowMilliseconds, sources, systems],
+  );
   const selectedSummary = summaries.find((summary) => summary.source.id === selectedSource?.id);
   const historyQuery = useThermalHistory(selectedSource, range);
   const history = historyQuery.data ?? null;
@@ -288,36 +341,35 @@ export function ThermalsScreen(): JSX.Element {
                 series={charts.combined}
                 from={history.from}
                 to={history.to}
+                stepSeconds={history.stepSeconds}
               />
               <div className="thermal-sensor-list">
-                <SensorDetails title="Pi CPU sensor" series={charts.cpu}>
-                  <ThermalChart
-                    title="Pi CPU"
-                    description="Booth host CPU temperature."
-                    series={charts.cpu}
-                    from={history.from}
-                    to={history.to}
-                  />
-                </SensorDetails>
-                <SensorDetails title="Router battery sensor" series={charts.battery}>
-                  <ThermalChart
-                    title="Router battery"
-                    description="Battery-pack temperature reported by the selected router."
-                    series={charts.battery}
-                    from={history.from}
-                    to={history.to}
-                  />
-                </SensorDetails>
+                <SensorDetails
+                  title="Pi CPU sensor"
+                  chartTitle="Pi CPU"
+                  description="Booth host CPU temperature."
+                  series={charts.cpu}
+                  from={history.from}
+                  to={history.to}
+                  stepSeconds={history.stepSeconds}
+                />
+                <SensorDetails
+                  title="Router battery sensor"
+                  chartTitle="Router battery"
+                  description="Battery-pack temperature reported by the selected router."
+                  series={charts.battery}
+                  from={history.from}
+                  to={history.to}
+                  stepSeconds={history.stepSeconds}
+                />
                 {charts.zones.map((zone) => (
-                  <SensorDetails key={zone.id} title={zone.label} series={[zone]}>
-                    <ThermalChart
-                      title={zone.label}
-                      description="Individual router thermal-zone temperature."
-                      series={[zone]}
-                      from={history.from}
-                      to={history.to}
-                    />
-                  </SensorDetails>
+                  <ZoneSensorDetails
+                    key={zone.id}
+                    zone={zone}
+                    from={history.from}
+                    to={history.to}
+                    stepSeconds={history.stepSeconds}
+                  />
                 ))}
               </div>
             </>

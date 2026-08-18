@@ -1,13 +1,14 @@
 import axe from "axe-core";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vite-plus/test";
+import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type {
   BoothSystemSnapshotEnvelope,
   TelemetrySourceEnvelope,
   ThermalHistory,
 } from "@telephone-booth-operator/shared";
 import { apiQueryKeys } from "../../lib/api-client.js";
+import { TELEMETRY_FRESHNESS_WINDOW_MS } from "../../lib/telemetry-freshness.js";
 import { ThermalsScreen } from "./ThermalsScreen.js";
 
 const receivedAt = new Date().toISOString();
@@ -108,16 +109,28 @@ const history: ThermalHistory = {
   ],
 };
 
-function renderScreen() {
+function renderScreen({
+  sourceData = [secondSource, preferredSource],
+  systemData = systems,
+  historyData = history,
+}: {
+  readonly sourceData?: readonly TelemetrySourceEnvelope[];
+  readonly systemData?: readonly BoothSystemSnapshotEnvelope[];
+  readonly historyData?: ThermalHistory;
+} = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Number.POSITIVE_INFINITY } },
   });
-  client.setQueryData(apiQueryKeys.systemAll, { items: systems });
-  client.setQueryData(apiQueryKeys.systemComponents(), [secondSource, preferredSource]);
-  client.setQueryData(
-    apiQueryKeys.thermalHistory(preferredSource.boothId, preferredSource.componentId, "24h"),
-    history,
-  );
+  client.setQueryData(apiQueryKeys.systemAll, { items: systemData });
+  client.setQueryData(apiQueryKeys.systemComponents(), sourceData);
+  const selectedSource =
+    sourceData.find((source) => source.componentId === "router") ?? sourceData[0];
+  if (selectedSource) {
+    client.setQueryData(
+      apiQueryKeys.thermalHistory(selectedSource.boothId, selectedSource.componentId, "24h"),
+      historyData,
+    );
+  }
   return render(
     <QueryClientProvider client={client}>
       <ThermalsScreen />
@@ -172,7 +185,12 @@ function renderOfflineScreen() {
 }
 
 describe("ThermalsScreen", () => {
-  it("renders fleet current cards, selected summaries, and shaped history charts", () => {
+  afterEach(() => {
+    onlineManager.setOnline(true);
+    vi.useRealTimers();
+  });
+
+  it("renders fleet current cards, selected summaries, and shaped history charts", async () => {
     renderScreen();
 
     expect(screen.getByRole("heading", { name: "Thermals" })).toBeDefined();
@@ -185,6 +203,8 @@ describe("ThermalsScreen", () => {
     expect(screen.getByRole("heading", { name: "Combined thermal history" })).toBeDefined();
     expect(screen.getByText("Pi CPU sensor")).toBeDefined();
     expect(screen.getByText("Router battery sensor")).toBeDefined();
+    expect(screen.getAllByRole("img")).toHaveLength(1);
+    expect(screen.queryByRole("heading", { name: "wifi" })).toBeNull();
 
     const zoneSummary = screen
       .getAllByText("wifi")
@@ -195,6 +215,12 @@ describe("ThermalsScreen", () => {
     expect(details?.open).toBe(false);
     fireEvent.click(zoneSummary);
     expect(details?.open).toBe(true);
+    expect(await screen.findByRole("heading", { name: "wifi" })).toBeDefined();
+    expect(screen.getAllByRole("img")).toHaveLength(2);
+    fireEvent.click(zoneSummary);
+    expect(details?.open).toBe(false);
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "wifi" })).toBeNull());
+    expect(screen.getAllByRole("img")).toHaveLength(1);
   });
 
   it("renders a stable empty state before any router source exists", () => {
@@ -208,6 +234,35 @@ describe("ThermalsScreen", () => {
     expect(screen.getByText("Telemetry offline")).toBeDefined();
     expect(screen.getByText("Offline")).toBeDefined();
     expect(screen.getByRole("heading", { name: "Combined thermal history" })).toBeDefined();
+  });
+
+  it("transitions unchanged current data to offline as the freshness clock advances", () => {
+    vi.useFakeTimers();
+    onlineManager.setOnline(false);
+    const nowMilliseconds = Date.parse("2026-08-18T00:05:00.000Z");
+    vi.setSystemTime(nowMilliseconds);
+    const sourceData: TelemetrySourceEnvelope[] = [
+      {
+        ...preferredSource,
+        receivedAt: new Date(
+          nowMilliseconds - TELEMETRY_FRESHNESS_WINDOW_MS + 15_000,
+        ).toISOString(),
+      },
+    ];
+    const systemData: BoothSystemSnapshotEnvelope[] = [
+      {
+        ...systems[0]!,
+        receivedAt: new Date(nowMilliseconds).toISOString(),
+      },
+    ];
+    const rendered = renderScreen({ sourceData, systemData });
+
+    expect(screen.getByText("Telemetry current")).toBeDefined();
+    act(() => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(screen.getByText("Telemetry offline")).toBeDefined();
+    rendered.unmount();
   });
 
   it("has no critical accessibility violations", async () => {

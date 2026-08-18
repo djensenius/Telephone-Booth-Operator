@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { useId } from "react";
+import { memo, useId, useMemo } from "react";
 import type { TelemetryHistoryPoint } from "@telephone-booth-operator/shared";
 import type { ThermalChartSeries } from "./thermal-data.js";
 import { latestThermalPoint } from "./thermal-data.js";
@@ -13,6 +13,19 @@ const PLOT_BOTTOM = 42;
 const PLOT_WIDTH = CHART_WIDTH - PLOT_LEFT - PLOT_RIGHT;
 const PLOT_HEIGHT = CHART_HEIGHT - PLOT_TOP - PLOT_BOTTOM;
 const Y_TICK_COUNT = 5;
+const PROMETHEUS_GAP_MULTIPLIER = 1.5;
+const CHART_COLOR_COUNT = 6;
+const CHART_MARKER_COUNT = 3;
+const CHART_DASH_PATTERNS: readonly (string | undefined)[] = [
+  undefined,
+  "10 4",
+  "3 4",
+  "10 3 2 3",
+  "1 4",
+  "14 4 3 4",
+  "6 3 1 3",
+  "2 2",
+];
 
 interface ThermalChartProps {
   readonly title: string;
@@ -20,6 +33,7 @@ interface ThermalChartProps {
   readonly series: readonly ThermalChartSeries[];
   readonly from: string;
   readonly to: string;
+  readonly stepSeconds: number;
 }
 
 interface ChartDomain {
@@ -29,12 +43,27 @@ interface ChartDomain {
   readonly yMax: number;
 }
 
+interface SeriesVisualCue {
+  readonly paletteIndex: number;
+  readonly markerIndex: number;
+  readonly dashPattern: string | undefined;
+}
+
 const temperatureFormatter = new Intl.NumberFormat(undefined, {
   minimumFractionDigits: 0,
   maximumFractionDigits: 1,
 });
 
 const formatTemperature = (value: number): string => `${temperatureFormatter.format(value)} °C`;
+
+const visualCueForIndex = (index: number): SeriesVisualCue => {
+  const patternGroup = Math.floor(index / CHART_COLOR_COUNT);
+  return {
+    paletteIndex: index % CHART_COLOR_COUNT,
+    dashPattern: CHART_DASH_PATTERNS[patternGroup % CHART_DASH_PATTERNS.length],
+    markerIndex: Math.floor(patternGroup / CHART_DASH_PATTERNS.length) % CHART_MARKER_COUNT,
+  };
+};
 
 const chartDomain = (
   series: readonly ThermalChartSeries[],
@@ -79,14 +108,24 @@ const pointCoordinates = (
   y: PLOT_TOP + ((domain.yMax - point.value) / (domain.yMax - domain.yMin)) * PLOT_HEIGHT,
 });
 
-const pathForSeries = (series: ThermalChartSeries, domain: ChartDomain): string =>
-  [...series.points]
+const pathForSeries = (
+  series: ThermalChartSeries,
+  domain: ChartDomain,
+  stepSeconds: number,
+): string => {
+  let previousTimestamp: number | null = null;
+  return [...series.points]
     .sort((left, right) => left.timestamp - right.timestamp)
-    .map((point, index) => {
+    .map((point) => {
       const { x, y } = pointCoordinates(point, domain);
-      return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
+      const startsSegment =
+        previousTimestamp === null ||
+        point.timestamp - previousTimestamp > stepSeconds * PROMETHEUS_GAP_MULTIPLIER;
+      previousTimestamp = point.timestamp;
+      return `${startsSegment ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
     })
     .join(" ");
+};
 
 const timeLabel = (timestampSeconds: number): string =>
   new Date(timestampSeconds * 1000).toLocaleString(undefined, {
@@ -96,25 +135,85 @@ const timeLabel = (timestampSeconds: number): string =>
     minute: "2-digit",
   });
 
-export function ThermalChart({
+function SeriesMarker({
+  x,
+  y,
+  markerIndex,
+  paletteIndex,
+  size = 4,
+}: {
+  readonly x: number;
+  readonly y: number;
+  readonly markerIndex: number;
+  readonly paletteIndex: number;
+  readonly size?: number;
+}): JSX.Element {
+  const className = `thermal-chart__point thermal-chart__line--${paletteIndex}`;
+  if (markerIndex === 1) {
+    return (
+      <rect className={className} x={x - size} y={y - size} width={size * 2} height={size * 2} />
+    );
+  }
+  if (markerIndex === 2) {
+    return (
+      <polygon
+        className={className}
+        points={`${x},${y - size} ${x + size},${y + size} ${x - size},${y + size}`}
+      />
+    );
+  }
+  return <circle className={className} cx={x} cy={y} r={size} />;
+}
+
+export const ThermalChart = memo(function ThermalChart({
   title,
   description,
   series,
   from,
   to,
+  stepSeconds,
 }: ThermalChartProps): JSX.Element {
   const id = useId().replaceAll(":", "");
   const titleId = `thermal-chart-title-${id}`;
   const descriptionId = `thermal-chart-description-${id}`;
   const clipId = `thermal-chart-clip-${id}`;
-  const domain = chartDomain(series, from, to);
-  const yTicks =
-    domain === null
-      ? []
-      : Array.from(
-          { length: Y_TICK_COUNT },
-          (_, index) => domain.yMax - (index / (Y_TICK_COUNT - 1)) * (domain.yMax - domain.yMin),
-        );
+  const domain = useMemo(() => chartDomain(series, from, to), [from, series, to]);
+  const orderedSeries = useMemo(
+    () => [...series].sort((left, right) => left.id.localeCompare(right.id)),
+    [series],
+  );
+  const yTicks = useMemo(
+    () =>
+      domain === null
+        ? []
+        : Array.from(
+            { length: Y_TICK_COUNT },
+            (_, index) => domain.yMax - (index / (Y_TICK_COUNT - 1)) * (domain.yMax - domain.yMin),
+          ),
+    [domain],
+  );
+  const preparedSeries = useMemo(() => {
+    if (domain === null) return [];
+    return orderedSeries.map((item, index) => {
+      let minimum = Number.POSITIVE_INFINITY;
+      let maximum = Number.NEGATIVE_INFINITY;
+      for (const point of item.points) {
+        minimum = Math.min(minimum, point.value);
+        maximum = Math.max(maximum, point.value);
+      }
+      const latest = latestThermalPoint(item);
+      const visualCue = visualCueForIndex(index);
+      return {
+        item,
+        latest,
+        minimum,
+        maximum,
+        ...visualCue,
+        path: pathForSeries(item, domain, stepSeconds),
+        latestCoordinates: latest === null ? null : pointCoordinates(latest, domain),
+      };
+    });
+  }, [domain, orderedSeries, stepSeconds]);
 
   return (
     <figure className="thermal-chart">
@@ -180,40 +279,48 @@ export function ThermalChart({
                 {timeLabel(domain.xMax)}
               </text>
               <g clipPath={`url(#${clipId})`}>
-                {series.map((item, index) => {
-                  const latest = latestThermalPoint(item);
-                  const latestCoordinates =
-                    latest === null ? null : pointCoordinates(latest, domain);
-                  const paletteIndex = index % 6;
-                  return (
-                    <g key={item.id}>
-                      <path
-                        className={`thermal-chart__line thermal-chart__line--${paletteIndex}`}
-                        d={pathForSeries(item, domain)}
-                      />
-                      {latestCoordinates === null ? null : (
-                        <circle
-                          className={`thermal-chart__point thermal-chart__line--${paletteIndex}`}
-                          cx={latestCoordinates.x}
-                          cy={latestCoordinates.y}
-                          r="4"
+                {preparedSeries.map(
+                  ({ item, latestCoordinates, paletteIndex, markerIndex, dashPattern, path }) => {
+                    return (
+                      <g key={item.id} data-series-id={item.id}>
+                        <path
+                          className={`thermal-chart__line thermal-chart__line--${paletteIndex}`}
+                          d={path}
+                          strokeDasharray={dashPattern}
                         />
-                      )}
-                    </g>
-                  );
-                })}
+                        {latestCoordinates === null ? null : (
+                          <SeriesMarker
+                            x={latestCoordinates.x}
+                            y={latestCoordinates.y}
+                            markerIndex={markerIndex}
+                            paletteIndex={paletteIndex}
+                          />
+                        )}
+                      </g>
+                    );
+                  },
+                )}
               </g>
             </svg>
           </div>
           <ul className="thermal-chart__legend" aria-label={`${title} legend`}>
-            {series.map((item, index) => {
-              const latest = latestThermalPoint(item);
+            {preparedSeries.map(({ item, latest, paletteIndex, markerIndex, dashPattern }) => {
               return (
                 <li key={item.id}>
-                  <span
-                    className={`thermal-chart__legend-swatch thermal-chart__line--${index % 6}`}
+                  <svg
+                    className={`thermal-chart__legend-cue thermal-chart__line--${paletteIndex}`}
+                    viewBox="0 0 24 10"
                     aria-hidden="true"
-                  />
+                  >
+                    <line x1="1" x2="23" y1="5" y2="5" strokeDasharray={dashPattern} />
+                    <SeriesMarker
+                      x={12}
+                      y={5}
+                      markerIndex={markerIndex}
+                      paletteIndex={paletteIndex}
+                      size={3}
+                    />
+                  </svg>
                   <span>{item.label}</span>
                   <strong>{latest === null ? "—" : formatTemperature(latest.value)}</strong>
                 </li>
@@ -221,14 +328,7 @@ export function ThermalChart({
             })}
           </ul>
           <div className="visually-hidden">
-            {series.map((item) => {
-              let minimum = Number.POSITIVE_INFINITY;
-              let maximum = Number.NEGATIVE_INFINITY;
-              for (const point of item.points) {
-                minimum = Math.min(minimum, point.value);
-                maximum = Math.max(maximum, point.value);
-              }
-              const latest = latestThermalPoint(item);
+            {preparedSeries.map(({ item, latest, minimum, maximum }) => {
               return (
                 <p key={item.id}>
                   {item.label}: {item.points.length} samples
@@ -245,4 +345,4 @@ export function ThermalChart({
       )}
     </figure>
   );
-}
+});

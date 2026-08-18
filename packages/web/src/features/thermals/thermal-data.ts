@@ -5,8 +5,7 @@ import type {
   ThermalHistory,
   ThermalMetricName,
 } from "@telephone-booth-operator/shared";
-
-export const THERMAL_OFFLINE_AFTER_MS = 5 * 60 * 1000;
+import { isTelemetryFresh } from "../../lib/telemetry-freshness.js";
 
 export interface ThermalCurrentSummary {
   readonly source: TelemetrySourceEnvelope;
@@ -78,16 +77,19 @@ export function buildFleetThermalSummaries(
       null,
     );
     const lastSeenAt = validTimestamp(source.receivedAt);
+    const hostIsFresh = isTelemetryFresh(system?.receivedAt, nowMilliseconds);
+    const routerIsFresh = isTelemetryFresh(lastSeenAt, nowMilliseconds);
     return {
       source,
-      piCpuTemperatureCelsius: finiteTemperature(system?.snapshot.temperatureCelsius),
+      piCpuTemperatureCelsius: hostIsFresh
+        ? finiteTemperature(system?.snapshot.temperatureCelsius)
+        : null,
       routerBatteryTemperatureCelsius: finiteTemperature(
         source.latestSnapshot?.battery?.temperatureCelsius,
       ),
       hottestRouterZone,
       lastSeenAt,
-      offline:
-        lastSeenAt === null || nowMilliseconds - Date.parse(lastSeenAt) >= THERMAL_OFFLINE_AFTER_MS,
+      offline: !routerIsFresh,
     };
   });
 }
@@ -115,7 +117,7 @@ export function shapeThermalCharts(history: ThermalHistory | null): ThermalChart
     id: `${series.metric}:${Object.entries(series.labels)
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([name, value]) => `${name}=${value}`)
-      .join(",")}:${index}`,
+      .join(",")}`,
     label: thermalSeriesLabel(series.metric, series.labels, index),
     metric: series.metric,
     labels: series.labels,

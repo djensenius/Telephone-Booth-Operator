@@ -776,8 +776,8 @@ export const apiQueryKeys = {
   sessions: (boothId?: string, scope?: InstallationScope) =>
     ["sessions", "list", boothId ?? null, scope ?? null] as const,
   session: (id: string) => ["sessions", id] as const,
-  system: (boothId: string) => ["system", boothId] as const,
-  systemAll: ["system", "all"] as const,
+  system: (boothId: string) => ["system", "current", "booth", boothId] as const,
+  systemAll: ["system", "current", "all"] as const,
   systemComponents: (boothId?: string, componentId?: string) =>
     ["system", "components", boothId ?? null, componentId ?? null] as const,
   thermalHistory: (boothId: string, componentId: string, range: ThermalRange) =>

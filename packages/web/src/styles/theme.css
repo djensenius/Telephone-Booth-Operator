@@ -38,6 +38,13 @@
   --accent-green: #a6e3a1;
   --accent-blue: #89b4fa;
   --accent-mauve: #cba6f7;
+  --thermal-online-color: #a6e3a1;
+  --thermal-line-0: #ff5f67;
+  --thermal-line-1: #89b4fa;
+  --thermal-line-2: #f9e2af;
+  --thermal-line-3: #a6e3a1;
+  --thermal-line-4: #cba6f7;
+  --thermal-line-5: #fab387;
 
   --surface-base: #11111b;
   --surface-page: #181825;
@@ -74,6 +81,13 @@
     --accent-green: #40a02b;
     --accent-blue: #1e66f5;
     --accent-mauve: #8839ef;
+    --thermal-online-color: #1f6b1a;
+    --thermal-line-0: #a5002f;
+    --thermal-line-1: #0056b3;
+    --thermal-line-2: #7a5200;
+    --thermal-line-3: #226b18;
+    --thermal-line-4: #6b2fa0;
+    --thermal-line-5: #9a4300;
 
     --surface-base: #fff5f2;
     --surface-page: #f4ece9;
@@ -103,6 +117,13 @@
   --accent-green: #a6e3a1;
   --accent-blue: #89b4fa;
   --accent-mauve: #cba6f7;
+  --thermal-online-color: #a6e3a1;
+  --thermal-line-0: #ff5f67;
+  --thermal-line-1: #89b4fa;
+  --thermal-line-2: #f9e2af;
+  --thermal-line-3: #a6e3a1;
+  --thermal-line-4: #cba6f7;
+  --thermal-line-5: #fab387;
   --surface-base: #11111b;
   --surface-page: #181825;
   --surface-panel: #1e1e2e;
@@ -130,6 +151,13 @@
   --accent-green: #40a02b;
   --accent-blue: #1e66f5;
   --accent-mauve: #8839ef;
+  --thermal-online-color: #1f6b1a;
+  --thermal-line-0: #a5002f;
+  --thermal-line-1: #0056b3;
+  --thermal-line-2: #7a5200;
+  --thermal-line-3: #226b18;
+  --thermal-line-4: #6b2fa0;
+  --thermal-line-5: #9a4300;
   --surface-base: #fff5f2;
   --surface-page: #f4ece9;
   --surface-panel: #fffaf8;
@@ -2312,10 +2340,14 @@ textarea:focus-visible,
   background: var(--accent-red);
 }
 
-.thermal-range-picker label:has(input:focus-visible),
-.thermal-sensor-details > summary:focus-visible {
+.thermal-range-picker label:has(input:focus-visible) {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
+}
+
+.thermal-sensor-details > summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -3px;
 }
 
 .thermal-selected-current,
@@ -2355,8 +2387,8 @@ textarea:focus-visible,
 
 .thermal-online,
 .thermal-fleet-card__status--online {
-  color: var(--accent-green);
-  border-color: color-mix(in srgb, var(--accent-green) 48%, var(--border-subtle));
+  color: var(--thermal-online-color);
+  border-color: color-mix(in srgb, var(--thermal-online-color) 48%, var(--border-subtle));
 }
 
 .thermal-offline,
@@ -2553,27 +2585,27 @@ textarea:focus-visible,
 }
 
 .thermal-chart__line--0 {
-  --thermal-line: var(--accent-red-strong);
+  --thermal-line: var(--thermal-line-0);
 }
 
 .thermal-chart__line--1 {
-  --thermal-line: var(--accent-blue);
+  --thermal-line: var(--thermal-line-1);
 }
 
 .thermal-chart__line--2 {
-  --thermal-line: var(--accent-yellow);
+  --thermal-line: var(--thermal-line-2);
 }
 
 .thermal-chart__line--3 {
-  --thermal-line: var(--accent-green);
+  --thermal-line: var(--thermal-line-3);
 }
 
 .thermal-chart__line--4 {
-  --thermal-line: var(--accent-mauve);
+  --thermal-line: var(--thermal-line-4);
 }
 
 .thermal-chart__line--5 {
-  --thermal-line: var(--accent-peach);
+  --thermal-line: var(--thermal-line-5);
 }
 
 .thermal-chart__legend {
@@ -2600,11 +2632,20 @@ textarea:focus-visible,
   font-variant-numeric: tabular-nums;
 }
 
-.thermal-chart__legend-swatch {
-  width: 18px;
-  height: 3px;
-  background: var(--thermal-line);
-  border-radius: 999px;
+.thermal-chart__legend-cue {
+  width: 24px;
+  height: 10px;
+  overflow: visible;
+}
+
+.thermal-chart__legend-cue line {
+  stroke: var(--thermal-line);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.thermal-chart__legend-cue .thermal-chart__point {
+  stroke-width: 1;
 }
 
 .thermal-chart__empty {

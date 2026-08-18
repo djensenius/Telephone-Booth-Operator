@@ -5,10 +5,10 @@ import type { JSX } from "react";
 // memory at a glance without having to navigate to the dedicated `/system`
 // route.
 //
-// Data flow: host values read from the same `["system", boothId]` react-query
-// cache that the full `LiveSystemPanel` and status WebSocket populate. Router
-// battery temperature comes from the component-current query. Both refresh at
-// a five-second cadence on authenticated pages.
+// Data flow: host values read from the same booth-scoped system-current
+// react-query cache that the full `LiveSystemPanel` and status WebSocket
+// populate. Router battery temperature comes from the component-current query.
+// Both refresh at a five-second cadence on authenticated pages.
 
 import {
   SYSTEM_HEALTH_THRESHOLDS,
@@ -19,7 +19,9 @@ import {
   systemTemperatureSeverity,
 } from "@telephone-booth-operator/shared";
 import type { SystemHealthSeverity } from "@telephone-booth-operator/shared";
+import { useNow } from "../../hooks/useNow.js";
 import { useComponentTelemetryCurrent, useSystemCurrent } from "../../lib/api-client.js";
+import { isTelemetryFresh } from "../../lib/telemetry-freshness.js";
 import { FanVitalTile } from "./FanVitalTile.js";
 import { fmtBytes, fmtNumber, fmtPercent, fmtUptime } from "./format.js";
 
@@ -53,12 +55,16 @@ export function SystemVitalsStrip({
 }: SystemVitalsStripProps): JSX.Element {
   const query = useSystemCurrent(boothId);
   const componentQuery = useComponentTelemetryCurrent({ boothId });
+  const nowMilliseconds = useNow();
   const snapshot = query.data?.snapshot;
   const receivedAt = query.data?.receivedAt;
   const componentSources = componentQuery.data ?? [];
   const routerSource =
     componentSources.find((source) => source.componentId === "router") ?? componentSources[0];
   const routerBatteryTemperature = routerSource?.latestSnapshot?.battery?.temperatureCelsius;
+  const routerTelemetryIsStale =
+    routerSource !== undefined && !isTelemetryFresh(routerSource.receivedAt, nowMilliseconds);
+  const routerTelemetryIsUnavailable = componentQuery.isError || routerTelemetryIsStale;
 
   // Pull commonly-used nested fields up so the JSX below stays readable. The
   // canonical wire format groups CPU/memory/etc into sub-objects (mirroring
@@ -138,22 +144,24 @@ export function SystemVitalsStrip({
         <VitalTile
           label="Router battery"
           value={
-            typeof routerBatteryTemperature === "number"
-              ? `${fmtNumber(routerBatteryTemperature, 1)}°C`
-              : componentQuery.isLoading
-                ? "…"
-                : componentQuery.error
-                  ? "offline"
+            routerTelemetryIsUnavailable
+              ? "offline"
+              : typeof routerBatteryTemperature === "number"
+                ? `${fmtNumber(routerBatteryTemperature, 1)}°C`
+                : componentQuery.isLoading
+                  ? "…"
                   : "—"
           }
           hint={
-            typeof routerBatteryTemperature === "number"
-              ? `${routerSource?.displayName ?? "Router"} battery temperature`
-              : componentQuery.isLoading
-                ? "Connecting to router telemetry"
-                : componentQuery.error
-                  ? "Router telemetry is unavailable"
-                  : "Router battery temperature has not been reported"
+            componentQuery.isError
+              ? "Router telemetry is unavailable"
+              : routerTelemetryIsStale
+                ? "Router telemetry has not updated in five minutes"
+                : typeof routerBatteryTemperature === "number"
+                  ? `${routerSource?.displayName ?? "Router"} battery temperature`
+                  : componentQuery.isLoading
+                    ? "Connecting to router telemetry"
+                    : "Router battery temperature has not been reported"
           }
         />
         <VitalTile

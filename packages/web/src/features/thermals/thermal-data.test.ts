@@ -114,6 +114,35 @@ describe("thermal current shaping", () => {
       offline: true,
     });
   });
+
+  it("does not present stale host temperature alongside a fresh router", () => {
+    const router = source("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "booth-01", "router", {
+      latestSnapshot: {
+        battery: { temperatureCelsius: 31.5 },
+        thermalZones: [],
+      },
+      receivedAt: "2026-08-18T00:09:59.000Z",
+    });
+    const systems: BoothSystemSnapshotEnvelope[] = [
+      {
+        boothId: "booth-01",
+        snapshot: { temperatureCelsius: 49.75 },
+        receivedAt: "2026-08-18T00:00:00.000Z",
+      },
+    ];
+
+    const [summary] = buildFleetThermalSummaries(
+      [router],
+      systems,
+      Date.parse("2026-08-18T00:10:00.000Z"),
+    );
+
+    expect(summary).toMatchObject({
+      piCpuTemperatureCelsius: null,
+      routerBatteryTemperatureCelsius: 31.5,
+      offline: false,
+    });
+  });
 });
 
 describe("thermal chart shaping", () => {
