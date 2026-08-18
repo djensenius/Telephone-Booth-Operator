@@ -30,7 +30,11 @@ vi.mock("../src/lib/require-api-token.js", () => ({
 
 import { createApp } from "../src/index.js";
 import { pruneAuditLogs } from "../src/lib/audit-pruner.js";
-import { resetAuditThrottleForTests, sanitizeMetadata } from "../src/lib/audit.js";
+import {
+  isTelemetryWrite,
+  resetAuditThrottleForTests,
+  sanitizeMetadata,
+} from "../src/lib/audit.js";
 import { escapeLikePrefix } from "../src/routes/audit.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { fakeBlobs, resetFakeAzure } from "./support/fake-azure.js";
@@ -68,6 +72,12 @@ describe("audit action prefix escaping", () => {
     expect(escapeLikePrefix("auth.log_n")).toBe("auth.log\\_n");
     expect(escapeLikePrefix("a\\b")).toBe("a\\\\b");
     expect(escapeLikePrefix("message.approve")).toBe("message.approve");
+  });
+});
+
+describe("telemetry audit exclusions", () => {
+  it("classifies component snapshot ingestion as telemetry", () => {
+    expect(isTelemetryWrite("PUT", "/v1/system/components/current")).toBe(true);
   });
 });
 

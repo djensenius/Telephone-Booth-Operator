@@ -20,6 +20,7 @@ import {
   seedInstruction,
   seedMessage,
   seedQuestion,
+  seedTelemetrySource,
   store,
 } from "./support/fake-db.js";
 import { operatorCookie } from "./support/http.js";
@@ -84,6 +85,7 @@ describe("admin data export/import", () => {
     seedBlobData(instructionFile.blobKey, instructionAudio, iSha);
 
     seedCallSession({ id: "call-1", startedAt: new Date(), outcome: "recording_completed" });
+    const telemetrySource = seedTelemetrySource();
 
     const exportRes = await app.request("/v1/admin/data/export", { headers: { cookie } });
     expect(exportRes.status).toBe(200);
@@ -112,6 +114,7 @@ describe("admin data export/import", () => {
     expect(summary.rows.message).toBe(1);
     expect(summary.rows.instruction).toBe(1);
     expect(summary.rows.file).toBe(3);
+    expect(summary.rows.telemetrySource).toBe(1);
     expect(summary.blobsUploaded).toBe(3);
 
     // Data + audio are back.
@@ -119,6 +122,11 @@ describe("admin data export/import", () => {
     expect(store.messages.get(message.id)?.questionId).toBe(question.id);
     expect(store.instructions.get(instruction.id)?.audioId).toBe(instructionFile.id);
     expect(store.files.size).toBe(3);
+    expect(store.telemetrySources.get(telemetrySource.id)).toMatchObject({
+      boothId: "booth-01",
+      componentId: "router-01",
+      latestSnapshot: null,
+    });
     expect(fakeBlobData.get(questionFile.blobKey)?.toString("utf8")).toBe("question-audio-bytes");
     expect(fakeBlobData.get(messageFile.blobKey)?.toString("utf8")).toBe("message-audio-bytes");
     expect(fakeBlobData.get(instructionFile.blobKey)?.toString("utf8")).toBe(

@@ -19,6 +19,26 @@ const usageQuerySchema = z.object({
 
 const toIso = (value: Date | null): string | null => value?.toISOString() ?? null;
 
+type TelemetrySourceSummaryRow = {
+  boothId: string;
+  componentId: string;
+  displayName: string;
+  kind: string;
+  prometheusJob: string;
+  prometheusInstance: string;
+};
+
+const telemetrySourceMetadataMatches = (
+  existing: TelemetrySourceSummaryRow,
+  requested: TelemetrySourceSummaryRow,
+): boolean =>
+  existing.boothId === requested.boothId &&
+  existing.componentId === requested.componentId &&
+  existing.displayName === requested.displayName &&
+  existing.kind === requested.kind &&
+  existing.prometheusJob === requested.prometheusJob &&
+  existing.prometheusInstance === requested.prometheusInstance;
+
 const toSummary = (token: {
   id: string;
   name: string;
@@ -28,6 +48,7 @@ const toSummary = (token: {
   expiresAt: Date | null;
   lastUsedAt: Date | null;
   revokedAt: Date | null;
+  telemetrySource: TelemetrySourceSummaryRow | null;
 }) =>
   ApiTokenSchema.parse({
     id: token.id,
@@ -38,7 +59,17 @@ const toSummary = (token: {
     expiresAt: toIso(token.expiresAt),
     lastUsedAt: toIso(token.lastUsedAt),
     revokedAt: toIso(token.revokedAt),
+    ...(token.telemetrySource ? { telemetrySource: token.telemetrySource } : {}),
   });
+
+const selectedTelemetrySourceFields = {
+  boothId: true,
+  componentId: true,
+  displayName: true,
+  kind: true,
+  prometheusJob: true,
+  prometheusInstance: true,
+} as const;
 
 const selectedTokenFields = {
   id: true,
@@ -49,6 +80,7 @@ const selectedTokenFields = {
   expiresAt: true,
   lastUsedAt: true,
   revokedAt: true,
+  telemetrySource: { select: selectedTelemetrySourceFields },
 } as const;
 
 const expiresAtFromDays = (expiresInDays: number | undefined): Date | null => {
@@ -89,8 +121,33 @@ apiTokensRouter.post("/", zValidator("json", CreateApiTokenRequestSchema), async
   recordAudit(c, {
     action: "apiToken.create",
     targetType: "apiToken",
-    metadata: { name: body.name, scope: body.scope, expiresInDays: body.expiresInDays ?? null },
+    metadata: {
+      name: body.name,
+      scope: body.scope,
+      expiresInDays: body.expiresInDays ?? null,
+      boothId: body.telemetrySource?.boothId,
+      componentId: body.telemetrySource?.componentId,
+    },
   });
+  let telemetrySourceId: string | null = null;
+  if (body.telemetrySource) {
+    const source = await db.telemetrySource.upsert({
+      where: {
+        boothId_componentId: {
+          boothId: body.telemetrySource.boothId,
+          componentId: body.telemetrySource.componentId,
+        },
+      },
+      create: body.telemetrySource,
+      update: {},
+      select: { id: true, ...selectedTelemetrySourceFields },
+    });
+    if (!telemetrySourceMetadataMatches(source, body.telemetrySource)) {
+      return c.json({ error: "telemetry_source_metadata_conflict" }, 409);
+    }
+    telemetrySourceId = source.id;
+  }
+
   const generated = await generateToken();
   const token = await db.apiToken.create({
     data: {
@@ -99,8 +156,15 @@ apiTokensRouter.post("/", zValidator("json", CreateApiTokenRequestSchema), async
       lookupId: generated.lookupId,
       tokenHash: generated.hash,
       last4: generated.last4,
-      createdByUserId: user.id,
+      createdBy: { connect: { id: user.id } },
       expiresAt: expiresAtFromDays(body.expiresInDays),
+      ...(telemetrySourceId
+        ? {
+            telemetrySource: {
+              connect: { id: telemetrySourceId },
+            },
+          }
+        : {}),
     },
     select: selectedTokenFields,
   });

@@ -380,6 +380,28 @@ model OperatorSession {
   @@index([expiresAt])
 }
 
+// Persistent identity and latest snapshot for a component telemetry producer.
+// API tokens point at this row so a write cannot choose its booth/component
+// identity in each request. Prometheus remains the historical sample store.
+model TelemetrySource {
+  id                 String     @id @default(uuid()) @db.Uuid
+  boothId            String
+  componentId        String
+  displayName        String
+  kind               String
+  prometheusJob      String
+  prometheusInstance String
+  latestSnapshot     Json?
+  capturedAt         DateTime?
+  receivedAt         DateTime?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  apiTokens          ApiToken[]
+
+  @@unique([boothId, componentId])
+  @@index([boothId])
+}
+
 // Static API tokens issued to phone-side clients.
 // `tokenHash` is Argon2id; plaintext is shown to the operator exactly once.
 model ApiToken {
@@ -391,8 +413,11 @@ model ApiToken {
   // Capability scope for the token. "operator" tokens authenticate booth/phone
   // and native operator clients (the historical behaviour); "worker" tokens are
   // limited to the push-worker callback routes and receive only `work` events on
-  // the status WebSocket (never `message` envelopes with audio SAS/content).
+  // the status WebSocket (never `message` envelopes with audio SAS/content);
+  // "telemetry" tokens can update only their bound component source.
   scope           String       @default("operator")
+  telemetrySourceId String?          @db.Uuid
+  telemetrySource   TelemetrySource? @relation(fields: [telemetrySourceId], references: [id], onDelete: SetNull)
   createdByUserId String
   createdBy       OperatorUser @relation(fields: [createdByUserId], references: [id])
   createdAt       DateTime     @default(now())
@@ -404,6 +429,7 @@ model ApiToken {
   @@index([lookupId])
   @@index([revokedAt, expiresAt])
   @@index([createdByUserId, createdAt])
+  @@index([telemetrySourceId])
 }
 
 // AI transcription attempts. Each re-run inserts a new row (never overwrites

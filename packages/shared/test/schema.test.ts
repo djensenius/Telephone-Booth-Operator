@@ -3,11 +3,13 @@ import {
   BoothNetworkStatsSchema,
   BoothStatusSchema,
   CallSessionSchema,
+  CreateApiTokenRequestSchema,
   InstructionSchema,
   InstructionStatusSchema,
   InstructionUpdateSchema,
   QuestionSchema,
   QuestionStatusSchema,
+  RouterComponentSnapshotSchema,
 } from "../src/index.js";
 
 describe("BoothStatusSchema", () => {
@@ -161,5 +163,101 @@ describe("CallSessionSchema", () => {
     });
 
     expect(parsed.outcome).toBe("installation_ended");
+  });
+});
+
+describe("telemetry token schema", () => {
+  const telemetrySource = {
+    boothId: "booth-01",
+    componentId: "router-01",
+    displayName: "Router",
+    kind: "router",
+    prometheusJob: "glinet-router",
+    prometheusInstance: "router-01",
+  };
+
+  it("requires source metadata only for telemetry scope", () => {
+    expect(
+      CreateApiTokenRequestSchema.parse({
+        name: "Router telemetry",
+        scope: "telemetry",
+        telemetrySource,
+      }).telemetrySource,
+    ).toEqual(telemetrySource);
+    expect(() =>
+      CreateApiTokenRequestSchema.parse({ name: "Unbound", scope: "telemetry" }),
+    ).toThrow();
+    expect(() =>
+      CreateApiTokenRequestSchema.parse({
+        name: "Operator",
+        scope: "operator",
+        telemetrySource,
+      }),
+    ).toThrow();
+  });
+});
+
+describe("RouterComponentSnapshotSchema", () => {
+  it("accepts signed battery current and preserves future fields", () => {
+    const parsed = RouterComponentSnapshotSchema.parse({
+      battery: {
+        present: true,
+        chargePercent: 72,
+        temperatureCelsius: 31.5,
+        voltageVolts: 7.8,
+        currentAmperes: -1.25,
+        health: "Good",
+        technology: "Li-ion",
+        cycleCount: 31,
+        chargeCount: 147,
+        abnormal: false,
+        abnormalType: 0,
+      },
+      charger: {
+        present: true,
+        online: true,
+        fastCharge: true,
+        chargingStatus: 1,
+      },
+      thermalZones: [{ name: "soc", temperatureCelsius: 54.25 }],
+      futureMetric: { value: 1 },
+    });
+
+    expect(parsed.battery?.currentAmperes).toBe(-1.25);
+    expect(parsed.battery?.chargeCount).toBe(147);
+    expect(parsed.battery?.abnormalType).toBe(0);
+    expect(parsed.futureMetric).toEqual({ value: 1 });
+  });
+
+  it("rejects non-finite and unreasonable values", () => {
+    expect(() =>
+      RouterComponentSnapshotSchema.parse({
+        battery: { chargePercent: 101 },
+        thermalZones: [],
+      }),
+    ).toThrow();
+    expect(() =>
+      RouterComponentSnapshotSchema.parse({
+        battery: { currentAmperes: Number.POSITIVE_INFINITY },
+        thermalZones: [],
+      }),
+    ).toThrow();
+    expect(() =>
+      RouterComponentSnapshotSchema.parse({
+        thermalZones: [{ name: "soc", temperatureCelsius: 500 }],
+      }),
+    ).toThrow();
+    expect(() =>
+      RouterComponentSnapshotSchema.parse({
+        charger: { chargingStatus: "charging" },
+        thermalZones: [],
+      }),
+    ).toThrow();
+    expect(() =>
+      RouterComponentSnapshotSchema.parse({
+        battery: { abnormalType: "normal" },
+        thermalZones: [],
+      }),
+    ).toThrow();
   });
 });
