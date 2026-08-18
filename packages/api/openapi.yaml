@@ -1422,6 +1422,18 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ApiTokenCreated" }
+        "409":
+          description: Existing telemetry source metadata conflicts with the request.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    const: telemetry_source_metadata_conflict
 
   /v1/api-tokens/{id}:
     parameters:
@@ -1937,7 +1949,8 @@ paths:
         The API resolves component identity exclusively from the authenticated
         telemetry token's persistent source binding. The request cannot select
         a booth or component. Request bodies are limited to 65,536 bytes before
-        JSON parsing.
+        JSON parsing. A delivery older than the stored `capturedAt` is
+        acknowledged without replacing the current snapshot.
       tags: [system]
       security:
         - apiToken: []
@@ -1949,7 +1962,7 @@ paths:
       responses:
         "204": { description: snapshot accepted }
         "401": { description: missing or invalid API token }
-        "403": { description: API token does not have telemetry scope }
+        "403": { description: API token lacks telemetry scope or a source binding }
         "413": { description: "request body exceeds 65,536 bytes" }
     get:
       summary: List current router component snapshots.
@@ -1980,8 +1993,9 @@ paths:
       description: |
         The API builds the PromQL selector internally from an allowlisted metric
         set and the source's exact Prometheus job/instance labels. Clients
-        cannot submit arbitrary PromQL. Grafana responses are limited to
-        4 MiB, 128 series, 10,000 samples per series, and 100,000 samples total.
+        cannot submit arbitrary PromQL. The configured Grafana base URL must
+        use HTTPS. Grafana responses are limited to 4 MiB, 128 series, 10,000
+        samples per series, and 100,000 samples total.
       tags: [system]
       security:
         - operatorSession: []
@@ -2019,7 +2033,7 @@ paths:
           description: >-
             Grafana/Prometheus failed, returned malformed data, or exceeded
             response/cardinality limits.
-        "503": { description: Grafana history proxy is not configured }
+        "503": { description: Grafana history proxy is missing valid HTTPS configuration }
 
   /v1/devices:
     get:

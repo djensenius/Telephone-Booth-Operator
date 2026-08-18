@@ -78,17 +78,25 @@ componentTelemetryRouter.put(
     }
 
     const { capturedAt, snapshot } = c.req.valid("json");
+    const incomingCapturedAt = new Date(capturedAt);
     const receivedAt = new Date();
     const updated = await db.telemetrySource.updateMany({
-      where: { id: telemetrySourceId },
+      where: {
+        id: telemetrySourceId,
+        OR: [{ capturedAt: null }, { capturedAt: { lte: incomingCapturedAt } }],
+      },
       data: {
         latestSnapshot: snapshot as Prisma.InputJsonValue,
-        capturedAt: new Date(capturedAt),
+        capturedAt: incomingCapturedAt,
         receivedAt,
       },
     });
     if (updated.count === 0) {
-      return c.json({ error: "telemetry_source_not_bound" }, 403);
+      const source = await db.telemetrySource.findUnique({
+        where: { id: telemetrySourceId },
+        select: { id: true },
+      });
+      if (!source) return c.json({ error: "telemetry_source_not_bound" }, 403);
     }
     return c.body(null, 204);
   },

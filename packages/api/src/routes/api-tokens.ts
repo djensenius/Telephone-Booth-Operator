@@ -28,6 +28,17 @@ type TelemetrySourceSummaryRow = {
   prometheusInstance: string;
 };
 
+const telemetrySourceMetadataMatches = (
+  existing: TelemetrySourceSummaryRow,
+  requested: TelemetrySourceSummaryRow,
+): boolean =>
+  existing.boothId === requested.boothId &&
+  existing.componentId === requested.componentId &&
+  existing.displayName === requested.displayName &&
+  existing.kind === requested.kind &&
+  existing.prometheusJob === requested.prometheusJob &&
+  existing.prometheusInstance === requested.prometheusInstance;
+
 const toSummary = (token: {
   id: string;
   name: string;
@@ -118,6 +129,25 @@ apiTokensRouter.post("/", zValidator("json", CreateApiTokenRequestSchema), async
       componentId: body.telemetrySource?.componentId,
     },
   });
+  let telemetrySourceId: string | null = null;
+  if (body.telemetrySource) {
+    const source = await db.telemetrySource.upsert({
+      where: {
+        boothId_componentId: {
+          boothId: body.telemetrySource.boothId,
+          componentId: body.telemetrySource.componentId,
+        },
+      },
+      create: body.telemetrySource,
+      update: {},
+      select: { id: true, ...selectedTelemetrySourceFields },
+    });
+    if (!telemetrySourceMetadataMatches(source, body.telemetrySource)) {
+      return c.json({ error: "telemetry_source_metadata_conflict" }, 409);
+    }
+    telemetrySourceId = source.id;
+  }
+
   const generated = await generateToken();
   const token = await db.apiToken.create({
     data: {
@@ -128,18 +158,10 @@ apiTokensRouter.post("/", zValidator("json", CreateApiTokenRequestSchema), async
       last4: generated.last4,
       createdBy: { connect: { id: user.id } },
       expiresAt: expiresAtFromDays(body.expiresInDays),
-      ...(body.telemetrySource
+      ...(telemetrySourceId
         ? {
             telemetrySource: {
-              connectOrCreate: {
-                where: {
-                  boothId_componentId: {
-                    boothId: body.telemetrySource.boothId,
-                    componentId: body.telemetrySource.componentId,
-                  },
-                },
-                create: body.telemetrySource,
-              },
+              connect: { id: telemetrySourceId },
             },
           }
         : {}),

@@ -1,12 +1,13 @@
 # API tokens
 
 Phone clients authenticate to the Hono API with opaque Bearer tokens. Operator
-browsers still use the `__Host-booth_session` cookie; API tokens are only for
-the booth/phone client calling routes such as `/v1/uploads/*`,
-`/v1/messages/incoming`, and `PUT /v1/status`.
+browsers still use the `__Host-booth_session` cookie. Booth/phone clients use
+API tokens for routes such as `/v1/uploads/*`, `/v1/messages/incoming`, and
+`PUT /v1/status`.
 
-Router component collectors use the same token mechanism with the narrower
-`telemetry` scope and `PUT /v1/system/components/current`.
+Router component collectors authenticate with the same token mechanism. They
+use the narrower `telemetry` scope for
+`PUT /v1/system/components/current`.
 
 ## Token model
 
@@ -89,4 +90,6 @@ Create and install the replacement token before revoking the old one:
 Prefer expiring tokens for temporary maintenance devices and rotate long-lived
 phone-client tokens during regular operations windows. Issuing another
 telemetry token for the same `(boothId, componentId)` reconnects it to the
-existing source, so rotation preserves current state and history identity.
+existing source when all submitted metadata matches, so rotation preserves
+current state and history identity. Conflicting display, kind, or Prometheus
+metadata is rejected with `409 telemetry_source_metadata_conflict`.

@@ -1963,11 +1963,21 @@ export const fakeDb = {
       where,
       data,
     }: {
-      where: { id: string };
+      where: {
+        id: string;
+        OR?: Array<{ capturedAt: null } | { capturedAt: { lte: Date } }>;
+      };
       data: Partial<FakeTelemetrySource>;
     }) => {
       const source = store.telemetrySources.get(where.id);
       if (!source) return { count: 0 };
+      const timestampMatches =
+        where.OR?.some((condition) =>
+          condition.capturedAt === null
+            ? source.capturedAt === null
+            : source.capturedAt !== null && source.capturedAt <= condition.capturedAt.lte,
+        ) ?? true;
+      if (!timestampMatches) return { count: 0 };
       store.telemetrySources.set(where.id, {
         ...source,
         ...data,

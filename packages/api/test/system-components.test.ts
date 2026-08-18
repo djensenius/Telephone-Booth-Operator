@@ -101,6 +101,11 @@ const snapshot = {
   futureTelemetry: { supported: true },
 };
 
+const snapshotWithChargePercent = (chargePercent: number) => ({
+  ...snapshot,
+  battery: { ...snapshot.battery, chargePercent },
+});
+
 describe("component telemetry routes", () => {
   beforeEach(setup);
 
@@ -161,6 +166,62 @@ describe("component telemetry routes", () => {
     expect(persisted?.latestSnapshot).toEqual(snapshot);
     expect(persisted?.capturedAt?.toISOString()).toBe("2026-08-18T00:00:00.000Z");
     expect(persisted?.receivedAt).toBeInstanceOf(Date);
+  });
+
+  it("keeps current snapshots monotonic for stale, equal, and newer captures", async () => {
+    const source = store.telemetrySources.get(tokenState.telemetrySourceId)!;
+    const originalSnapshot = snapshotWithChargePercent(80);
+    source.latestSnapshot = originalSnapshot;
+    source.capturedAt = new Date("2026-08-18T00:01:00Z");
+    source.receivedAt = new Date("2026-08-18T00:01:01Z");
+    const originalReceivedAt = source.receivedAt.toISOString();
+    const app = createApp();
+    const putCurrent = (capturedAt: string, nextSnapshot: typeof snapshot) =>
+      app.request("/v1/system/components/current", {
+        method: "PUT",
+        headers: {
+          authorization: tokenState.authorization,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ capturedAt, snapshot: nextSnapshot }),
+      });
+
+    const stale = await putCurrent("2026-08-18T00:00:00Z", snapshotWithChargePercent(79));
+    expect(stale.status, await stale.clone().text()).toBe(204);
+    let persisted = store.telemetrySources.get(source.id)!;
+    expect(persisted.latestSnapshot).toEqual(originalSnapshot);
+    expect(persisted.capturedAt?.toISOString()).toBe("2026-08-18T00:01:00.000Z");
+    expect(persisted.receivedAt?.toISOString()).toBe(originalReceivedAt);
+
+    const equalSnapshot = snapshotWithChargePercent(81);
+    const equal = await putCurrent("2026-08-18T00:01:00Z", equalSnapshot);
+    expect(equal.status, await equal.clone().text()).toBe(204);
+    persisted = store.telemetrySources.get(source.id)!;
+    expect(persisted.latestSnapshot).toEqual(equalSnapshot);
+    expect(persisted.capturedAt?.toISOString()).toBe("2026-08-18T00:01:00.000Z");
+
+    const newerSnapshot = snapshotWithChargePercent(82);
+    const newer = await putCurrent("2026-08-18T00:02:00Z", newerSnapshot);
+    expect(newer.status, await newer.clone().text()).toBe(204);
+    persisted = store.telemetrySources.get(source.id)!;
+    expect(persisted.latestSnapshot).toEqual(newerSnapshot);
+    expect(persisted.capturedAt?.toISOString()).toBe("2026-08-18T00:02:00.000Z");
+  });
+
+  it("returns 403 only when the telemetry source binding is missing", async () => {
+    tokenState.telemetrySourceId = "00000000-0000-4000-8000-000000000404";
+    const response = await createApp().request("/v1/system/components/current", {
+      method: "PUT",
+      headers: {
+        authorization: tokenState.authorization,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ capturedAt: "2026-08-18T00:00:00Z", snapshot }),
+    });
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "telemetry_source_not_bound",
+    });
   });
 
   it("rejects oversized snapshot bodies before JSON parsing", async () => {
@@ -225,6 +286,22 @@ describe("component telemetry routes", () => {
   });
 
   it("returns 503 when Grafana history configuration is missing", async () => {
+    const response = await createApp().request(
+      "/v1/system/components/history?boothId=booth-01&componentId=router-01&from=2026-08-17T00%3A00%3A00Z&to=2026-08-18T00%3A00%3A00Z",
+      { headers: { cookie: operatorCookie() } },
+    );
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "telemetry_history_not_configured",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not send Grafana credentials to a cleartext URL", async () => {
+    process.env.GRAFANA_URL = "http://grafana.example.com";
+    process.env.GRAFANA_SERVICE_ACCOUNT_TOKEN = "test-service-token";
+    process.env.GRAFANA_PROMETHEUS_DATASOURCE_UID = "prom-main";
+
     const response = await createApp().request(
       "/v1/system/components/history?boothId=booth-01&componentId=router-01&from=2026-08-17T00%3A00%3A00Z&to=2026-08-18T00%3A00%3A00Z",
       { headers: { cookie: operatorCookie() } },
@@ -351,7 +428,10 @@ describe("component telemetry routes", () => {
     process.env.GRAFANA_URL = "https://grafana.example.com";
     process.env.GRAFANA_SERVICE_ACCOUNT_TOKEN = "test-service-token";
     process.env.GRAFANA_PROMETHEUS_DATASOURCE_UID = "prom-main";
-    fetchMock.mockResolvedValue(new Response(null, { status: 503 }));
+    const cancel = vi.fn();
+    fetchMock.mockResolvedValue(
+      new Response(new ReadableStream<Uint8Array>({ cancel }), { status: 503 }),
+    );
 
     const response = await createApp().request(
       "/v1/system/components/history?boothId=booth-01&componentId=router-01&from=2026-08-17T00%3A00%3A00Z&to=2026-08-18T00%3A00%3A00Z",
@@ -359,6 +439,7 @@ describe("component telemetry routes", () => {
     );
     expect(response.status).toBe(502);
     await expect(response.json()).resolves.toEqual({ error: "telemetry_history_upstream" });
+    expect(cancel).toHaveBeenCalledTimes(1);
   });
 
   it("returns 502 before buffering a Grafana response above the byte limit", async () => {

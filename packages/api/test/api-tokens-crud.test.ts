@@ -54,37 +54,39 @@ const { fakeDb, store } = vi.hoisted(() => {
           return include?.user ? withUser(next) : next;
         }),
       },
+      telemetrySource: {
+        upsert: vi.fn(async ({ where, create, select }) => {
+          const identity = where.boothId_componentId as {
+            boothId: string;
+            componentId: string;
+          };
+          let source = [...telemetrySources.values()].find(
+            (candidate) =>
+              candidate.boothId === identity.boothId &&
+              candidate.componentId === identity.componentId,
+          );
+          if (!source) {
+            source = {
+              id: randomUUID(),
+              latestSnapshot: null,
+              capturedAt: null,
+              receivedAt: null,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+              ...create,
+            };
+            telemetrySources.set(source.id as string, source);
+          }
+          return selectFields(source, select);
+        }),
+      },
       apiToken: {
         create: vi.fn(async ({ data, select }) => {
-          const relation = data.telemetrySource as
-            | {
-                connectOrCreate: {
-                  where: { boothId_componentId: { boothId: string; componentId: string } };
-                  create: Record<string, unknown>;
-                };
-              }
-            | undefined;
+          const relation = data.telemetrySource as { connect: { id: string } } | undefined;
           let telemetrySourceId: string | null = null;
           if (relation) {
-            const identity = relation.connectOrCreate.where.boothId_componentId;
-            let source = [...telemetrySources.values()].find(
-              (candidate) =>
-                candidate.boothId === identity.boothId &&
-                candidate.componentId === identity.componentId,
-            );
-            if (!source) {
-              source = {
-                id: randomUUID(),
-                latestSnapshot: null,
-                capturedAt: null,
-                receivedAt: null,
-                createdAt: new Date(),
-                updatedAt: new Date(),
-                ...relation.connectOrCreate.create,
-              };
-              telemetrySources.set(source.id as string, source);
-            }
-            telemetrySourceId = source.id as string;
+            if (!telemetrySources.has(relation.connect.id)) throw new Error("missing source");
+            telemetrySourceId = relation.connect.id;
           }
           const createdBy = data.createdBy as { connect: { id: string } };
           const { telemetrySource: _telemetrySource, createdBy: _createdBy, ...scalarData } = data;
@@ -292,14 +294,14 @@ describe("api token CRUD", () => {
       prometheusInstance: "router-01",
     };
 
-    const issue = async (name: string, displayName = telemetrySource.displayName) => {
+    const issue = async (name: string) => {
       const response = await app.request("/v1/api-tokens", {
         method: "POST",
         headers: { cookie, "content-type": "application/json" },
         body: JSON.stringify({
           name,
           scope: "telemetry",
-          telemetrySource: { ...telemetrySource, displayName },
+          telemetrySource,
         }),
       });
       expect(response.status, await response.clone().text()).toBe(201);
@@ -310,7 +312,7 @@ describe("api token CRUD", () => {
       scope: "telemetry",
       telemetrySource,
     });
-    await expect(issue("Router telemetry rotation", "Ignored replacement")).resolves.toMatchObject({
+    await expect(issue("Router telemetry rotation")).resolves.toMatchObject({
       scope: "telemetry",
       telemetrySource,
     });
@@ -324,5 +326,49 @@ describe("api token CRUD", () => {
     const summaries = (await list.json()) as Array<Record<string, unknown>>;
     expect(summaries).toHaveLength(2);
     expect(summaries.every((summary) => "telemetrySource" in summary)).toBe(true);
+  });
+
+  it("rejects conflicting metadata for an existing telemetry source", async () => {
+    const cookie = seedSession();
+    const app = createApp();
+    const telemetrySource = {
+      boothId: "booth-01",
+      componentId: "router-01",
+      displayName: "Router",
+      kind: "router",
+      prometheusJob: "glinet-router",
+      prometheusInstance: "router-01",
+    };
+    const issue = (source: typeof telemetrySource) =>
+      app.request("/v1/api-tokens", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({
+          name: "Router telemetry",
+          scope: "telemetry",
+          telemetrySource: source,
+        }),
+      });
+
+    const created = await issue(telemetrySource);
+    expect(created.status, await created.clone().text()).toBe(201);
+
+    const conflicts = [
+      { field: "displayName", value: "Back-room router" },
+      { field: "kind", value: "gateway" },
+      { field: "prometheusJob", value: "router-exporter" },
+      { field: "prometheusInstance", value: "router-01.example.net" },
+    ] as const;
+    for (const { field, value } of conflicts) {
+      const response = await issue({ ...telemetrySource, [field]: value });
+      expect(response.status, `${field}: ${await response.clone().text()}`).toBe(409);
+      await expect(response.json()).resolves.toEqual({
+        error: "telemetry_source_metadata_conflict",
+      });
+    }
+
+    expect(store.telemetrySources).toHaveLength(1);
+    expect(store.tokens).toHaveLength(1);
+    expect([...store.telemetrySources.values()][0]).toMatchObject(telemetrySource);
   });
 });

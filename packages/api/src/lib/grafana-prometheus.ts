@@ -64,7 +64,7 @@ const resolveGrafanaConfig = (
 
   try {
     const url = new URL(urlValue);
-    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    if (url.protocol !== "https:") return null;
     return { url, serviceAccountToken, datasourceUid };
   } catch {
     return null;
@@ -214,6 +214,7 @@ export const queryRouterTelemetryHistory = async (
   }
 
   if (!response.ok) {
+    if (response.body) await response.body.cancel().catch(() => undefined);
     log.error({
       event: "telemetry.grafana_bad_status",
       status: response.status,
