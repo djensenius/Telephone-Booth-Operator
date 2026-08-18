@@ -33,6 +33,7 @@ const PRODUCTION_HOST = "https://api.push.apple.com";
 const SANDBOX_HOST = "https://api.sandbox.push.apple.com";
 const JWT_REFRESH_MS = 40 * 60 * 1000;
 const MODERATION_BADGE_COLLAPSE_ID = "moderation-badge";
+const REQUEST_TIMEOUT_MS = 20_000;
 
 export type ApnsConfigStatus =
   | { status: "configured"; environment: ApnsConfig["environment"]; config: ApnsConfig }
@@ -284,6 +285,20 @@ export class Http2ApnsSender {
       let status = 0;
       let body = "";
       let apnsId: string | undefined;
+      let settled = false;
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error(`APNs request timed out after ${REQUEST_TIMEOUT_MS}ms`));
+        req.close(http2.constants.NGHTTP2_CANCEL);
+      }, REQUEST_TIMEOUT_MS);
+      const settle = (callback: () => void): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        callback();
+      };
+      timeout.unref();
       req.setEncoding("utf8");
       req.on("response", (headers) => {
         status = Number(headers[":status"] ?? 0);
@@ -293,7 +308,13 @@ export class Http2ApnsSender {
       req.on("data", (chunk: string | Buffer) => {
         body += typeof chunk === "string" ? chunk : chunk.toString("utf8");
       });
-      req.on("error", reject);
+      req.on("error", (error) =>
+        settle(() =>
+          reject(
+            error instanceof Error ? error : new Error("APNs request failed", { cause: error }),
+          ),
+        ),
+      );
       req.on("end", () => {
         let reason: string | undefined;
         if (body) {
@@ -303,11 +324,13 @@ export class Http2ApnsSender {
             // Non-JSON error body; leave reason undefined.
           }
         }
-        resolve({
-          status,
-          ...(reason === undefined ? {} : { reason }),
-          ...(apnsId === undefined ? {} : { apnsId }),
-        });
+        settle(() =>
+          resolve({
+            status,
+            ...(reason === undefined ? {} : { reason }),
+            ...(apnsId === undefined ? {} : { apnsId }),
+          }),
+        );
       });
       req.end(payload);
     });

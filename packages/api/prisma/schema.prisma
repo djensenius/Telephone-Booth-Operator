@@ -507,12 +507,18 @@ model Moderation {
 }
 
 // Durable singleton state for push conditions that must be coordinated across
-// API replicas. Queue-high uses one row keyed by "moderation-queue-high".
+// API replicas. Queue-high and moderation badge delivery share one row keyed by
+// "moderation-queue-high".
 model PushNotificationState {
-  key       String   @id
-  active    Boolean  @default(false)
-  threshold Int
-  updatedAt DateTime @updatedAt
+  key                   String    @id
+  active                Boolean   @default(false)
+  threshold             Int
+  badgeCount            Int       @default(0)
+  badgeVersion          Int       @default(0)
+  badgeDeliveredVersion Int       @default(0)
+  badgeLeaseToken       String?
+  badgeLeaseExpiresAt   DateTime?
+  updatedAt             DateTime  @updatedAt
 }
 
 // Mobile device registered for APNs / push notifications. One row per

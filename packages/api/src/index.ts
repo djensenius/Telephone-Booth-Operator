@@ -16,6 +16,7 @@ import { startAiSweeper } from "./lib/ai/sweeper.js";
 import { apnsHealthStatus, logApnsConfiguration } from "./lib/apns.js";
 import { auditWrites, type AuditVariables } from "./lib/audit.js";
 import { startAuditPruner } from "./lib/audit-pruner.js";
+import { startModerationBadgeDispatcher } from "./lib/push-events.js";
 import { startSnapshotPruner } from "./lib/snapshot-pruner.js";
 import {
   AuthConfigurationError,
@@ -127,10 +128,12 @@ const start = async (): Promise<void> => {
     console.log(`telephone-booth-operator API listening on :${port}`);
   });
   const statusWebSocket = attachStatusWebSocket(server);
+  const badgeDispatcher = startModerationBadgeDispatcher();
   let stopping = false;
   const shutdown = (): void => {
     if (stopping) return;
     stopping = true;
+    badgeDispatcher.stop();
     void statusWebSocket.close().finally(() => {
       const forceClose = setTimeout(() => {
         if ("closeAllConnections" in server && typeof server.closeAllConnections === "function") {

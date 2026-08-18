@@ -77,4 +77,75 @@ describe("durable push event coordination", () => {
         .map((notification) => notification.data?.awaitingModeration),
     ).toEqual([2, 2]);
   });
+
+  it("serializes in-flight badge delivery and coalesces newer counts", async () => {
+    const sentBadges: number[] = [];
+    let releaseFirstSend = (): void => undefined;
+    let markFirstSendStarted = (): void => undefined;
+    const firstSendStarted = new Promise<void>((resolve) => {
+      markFirstSendStarted = resolve;
+    });
+    const firstSendGate = new Promise<void>((resolve) => {
+      releaseFirstSend = resolve;
+    });
+    const send = vi.fn(async (notification: ApnsNotification) => {
+      if (notification.kind !== "badge") return;
+      sentBadges.push(notification.badge);
+      if (sentBadges.length === 1) {
+        markFirstSendStarted();
+        await firstSendGate;
+      }
+    });
+
+    const first = seedMessage({ status: "pending" });
+    const second = seedMessage({ status: "pending" });
+    const firstObservation = coordinator(send).observeModerationQueue("replica-1");
+    await firstSendStarted;
+
+    store.messages.get(first.id)!.status = "approved";
+    await coordinator(send).observeModerationQueue("replica-2");
+    store.messages.get(second.id)!.status = "approved";
+    await coordinator(send).observeModerationQueue("replica-3");
+
+    expect(sentBadges).toEqual([2]);
+    releaseFirstSend();
+    await firstObservation;
+
+    expect(sentBadges).toEqual([2, 0]);
+    const state = store.pushNotificationStates.get("moderation-queue-high");
+    expect(state?.badgeDeliveredVersion).toBe(state?.badgeVersion);
+    expect(state?.badgeLeaseToken).toBeNull();
+  });
+
+  it("recovers pending badge delivery after a stale lease and coordinator restart", async () => {
+    const now = new Date("2026-08-18T12:00:00.000Z");
+    store.pushNotificationStates.set("moderation-queue-high", {
+      key: "moderation-queue-high",
+      active: false,
+      threshold: 10,
+      badgeCount: 4,
+      badgeVersion: 3,
+      badgeDeliveredVersion: 2,
+      badgeLeaseToken: "crashed-replica",
+      badgeLeaseExpiresAt: new Date(now.getTime() - 1),
+      updatedAt: new Date(now.getTime() - 60_000),
+    });
+    const sent: ApnsNotification[] = [];
+    const restartedCoordinator = createPushEventCoordinator({
+      database: fakeDb as never,
+      send: async (notification) => {
+        sent.push(notification);
+      },
+      now: () => now,
+      createLeaseToken: () => "recovered-replica",
+    });
+
+    await restartedCoordinator.dispatchModerationBadges();
+
+    expect(sent).toEqual([{ kind: "badge", badge: 4, data: { awaitingModeration: 4 } }]);
+    const state = store.pushNotificationStates.get("moderation-queue-high");
+    expect(state?.badgeDeliveredVersion).toBe(3);
+    expect(state?.badgeLeaseToken).toBeNull();
+    expect(state?.badgeLeaseExpiresAt).toBeNull();
+  });
 });
