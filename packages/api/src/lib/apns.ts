@@ -15,7 +15,8 @@ import { Http2ApnsSender, inspectApnsConfig, loadApnsConfigFromEnv } from "./apn
 import { log } from "./logger.js";
 import type { MobileDevicePreferences } from "@telephone-booth-operator/shared";
 
-export type ApnsNotification = {
+type ApnsAlertNotification = {
+  kind: "alert";
   /// One of the keys in `MobileDevicePreferences` — the per-device
   /// notification toggle that gates delivery.
   preferenceKey: keyof MobileDevicePreferences;
@@ -34,6 +35,17 @@ export type ApnsNotification = {
   /// Custom payload merged with the standard `aps` envelope.
   data?: Record<string, unknown>;
 };
+
+type ApnsBadgeNotification = {
+  kind: "badge";
+  /// Badge-only pushes go to every active device, independently of alert
+  /// preferences, so the count stays accurate when banners are disabled.
+  badge: number;
+  /// Custom payload merged with the standard `aps` envelope.
+  data?: Record<string, unknown>;
+};
+
+export type ApnsNotification = ApnsAlertNotification | ApnsBadgeNotification;
 
 export type ApnsSender = {
   send(userId: string, notification: ApnsNotification): Promise<void>;
@@ -83,19 +95,20 @@ export const apnsSender = (): ApnsSender => {
   return noopSender;
 };
 
-/// Looks up active devices for `userId` whose preferences enable the
-/// given preference key, applies sensible defaults to the preference
-/// object, and returns the resulting list.
+/// Looks up active devices for `userId`. Alert pushes honor the given
+/// preference key; a null key selects every active device for badge sync.
 export const findTargetDevices = async (
   userId: string,
-  preferenceKey: keyof MobileDevicePreferences,
+  preferenceKey: keyof MobileDevicePreferences | null,
 ): Promise<Array<{ id: string; apnsToken: string; platform: string }>> => {
   const devices = await db.mobileDevice.findMany({
     where: { userId, revokedAt: null },
     select: { id: true, apnsToken: true, platform: true, preferences: true },
   });
   return devices
-    .filter((device) => prefersNotification(device.preferences, preferenceKey))
+    .filter(
+      (device) => preferenceKey === null || prefersNotification(device.preferences, preferenceKey),
+    )
     .map(({ id, apnsToken, platform }) => ({ id, apnsToken, platform }));
 };
 
@@ -124,6 +137,7 @@ export const fanOutNotification = async (notification: ApnsNotification): Promis
   if (!apnsEnvConfigured() && !testSender) {
     return;
   }
+  const preferenceKey = notification.kind === "alert" ? notification.preferenceKey : undefined;
   try {
     const userIds = await db.mobileDevice
       .findMany({
@@ -141,7 +155,8 @@ export const fanOutNotification = async (notification: ApnsNotification): Promis
         {
           component: "apns",
           errorName: result.reason instanceof Error ? result.reason.name : "unknown",
-          preferenceKey: notification.preferenceKey,
+          notificationKind: notification.kind,
+          ...(preferenceKey === undefined ? {} : { preferenceKey }),
           userId: userIds[index],
         },
         "APNs sender rejected fan-out",
@@ -149,7 +164,12 @@ export const fanOutNotification = async (notification: ApnsNotification): Promis
     }
   } catch (error) {
     log.error(
-      { component: "apns", err: error, preferenceKey: notification.preferenceKey },
+      {
+        component: "apns",
+        err: error,
+        notificationKind: notification.kind,
+        ...(preferenceKey === undefined ? {} : { preferenceKey }),
+      },
       "APNs fan-out failed",
     );
     // Push delivery is best-effort. Never let a failure here surface

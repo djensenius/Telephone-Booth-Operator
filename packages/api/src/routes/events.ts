@@ -404,6 +404,7 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
       // APNs config to break /v1/events ingestion.
       if (record.type === "call_started") {
         void fanOutNotification({
+          kind: "alert",
           preferenceKey: "callStarted",
           title: "Call started",
           body: "Someone picked up the booth.",

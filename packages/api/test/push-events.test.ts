@@ -63,7 +63,18 @@ describe("durable push event coordination", () => {
     seedMessage({ status: "pending" });
     await coordinator(send).observeModerationQueue("instance-5");
 
-    expect(send).toHaveBeenCalledTimes(2);
-    expect(sent.map((notification) => notification.badge)).toEqual([2, 2]);
+    expect(
+      sent
+        .filter((notification) => notification.kind === "badge")
+        .map((notification) => notification.badge),
+    ).toEqual([2, 2, 3, 1, 2, 3]);
+    expect(
+      sent
+        .filter(
+          (notification) =>
+            notification.kind === "alert" && notification.preferenceKey === "moderationQueueHigh",
+        )
+        .map((notification) => notification.badge),
+    ).toEqual([2, 2]);
   });
 });

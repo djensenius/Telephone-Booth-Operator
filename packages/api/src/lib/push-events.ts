@@ -71,6 +71,7 @@ export const createPushEventCoordinator = ({
       });
       if (claimed.count === 0) return;
       await send({
+        kind: "alert",
         preferenceKey: "messageFlagged",
         title: "Message flagged",
         body: "A booth recording needs operator attention.",
@@ -113,12 +114,18 @@ export const createPushEventCoordinator = ({
         });
         return { count, shouldNotify: nextActive && !activeAtThisThreshold };
       });
+      await send({
+        kind: "badge",
+        badge: result.count,
+        data: { awaitingModeration: result.count },
+      });
       if (!result.shouldNotify) return;
       log.info(
         { component: "apns", count: result.count, threshold },
         "moderation queue reached high threshold",
       );
       await send({
+        kind: "alert",
         preferenceKey: "moderationQueueHigh",
         title: "Moderation queue is high",
         body: `${result.count} booth recordings are waiting for review.`,

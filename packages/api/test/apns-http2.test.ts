@@ -12,6 +12,7 @@ import {
 describe("buildApnsPayload", () => {
   it("builds a standard alert envelope with badge, thread, and category", () => {
     const payload = buildApnsPayload({
+      kind: "alert",
       preferenceKey: "messageReceived",
       title: "New booth message",
       body: "A new recording is ready to moderate.",
@@ -35,6 +36,7 @@ describe("buildApnsPayload", () => {
 
   it("omits badge when not provided", () => {
     const payload = buildApnsPayload({
+      kind: "alert",
       preferenceKey: "callStarted",
       title: "t",
       body: "b",
@@ -44,6 +46,7 @@ describe("buildApnsPayload", () => {
 
   it("never lets custom data overwrite the reserved aps envelope", () => {
     const payload = buildApnsPayload({
+      kind: "alert",
       preferenceKey: "messageReceived",
       title: "t",
       body: "b",
@@ -52,6 +55,19 @@ describe("buildApnsPayload", () => {
     });
     expect((payload.aps as Record<string, unknown>).badge).toBe(1);
     expect(payload.extra).toBe("x");
+  });
+
+  it("builds a badge-only envelope without an alert or sound", () => {
+    const payload = buildApnsPayload({
+      kind: "badge",
+      badge: 4,
+      data: { awaitingModeration: 4 },
+    });
+
+    expect(payload).toEqual({
+      awaitingModeration: 4,
+      aps: { badge: 4 },
+    });
   });
 });
 

@@ -31,6 +31,7 @@ import {
   serializeInstallation,
 } from "../lib/installation.js";
 import { log } from "../lib/logger.js";
+import { observeModerationQueue } from "../lib/push-events.js";
 import { requireAdmin, requireOperator, type AuthVariables } from "../lib/session.js";
 import { invalidateStatsCaches } from "./stats.js";
 
@@ -196,6 +197,7 @@ installationsRouter.post(
       const endedDto = serializeInstallation(result.ended);
       wsBroadcaster.broadcast({ kind: "installation", installation: endedDto });
       log.info({ installationId: result.ended.id }, "installation ended before start");
+      void observeModerationQueue("installation.rollover");
     }
     const created = result.created;
     const dto = serializeInstallation(created);
@@ -306,6 +308,7 @@ installationsRouter.post(
     const dto = serializeInstallation(ended);
     wsBroadcaster.broadcast({ kind: "installation", installation: dto });
     log.info({ installationId: id }, "installation ended");
+    void observeModerationQueue("installation.end");
     recordAudit(c, {
       action: "installation.end",
       targetType: "installation",

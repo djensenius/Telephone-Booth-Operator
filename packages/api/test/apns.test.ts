@@ -4,6 +4,7 @@ vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.
 
 import {
   fanOutNotification,
+  findTargetDevices,
   resetApnsSenderForTests,
   setApnsSenderForTests,
 } from "../src/lib/apns.js";
@@ -26,6 +27,7 @@ describe("APNs fan-out diagnostics", () => {
     const error = vi.spyOn(log, "error").mockImplementation(() => undefined as never);
 
     await fanOutNotification({
+      kind: "alert",
       preferenceKey: "messageReceived",
       title: "title",
       body: "body",
@@ -36,6 +38,7 @@ describe("APNs fan-out diagnostics", () => {
       {
         component: "apns",
         errorName: "TypeError",
+        notificationKind: "alert",
         preferenceKey: "messageReceived",
         userId: "operator-1",
       },
@@ -43,5 +46,28 @@ describe("APNs fan-out diagnostics", () => {
     );
     expect(JSON.stringify(error.mock.calls)).not.toContain("message-1");
     expect(JSON.stringify(error.mock.calls)).not.toContain("apnsToken");
+  });
+
+  it("targets every active device for badge sync regardless of alert preferences", async () => {
+    const optedOut = seedMobileDevice({
+      userId: "operator-1",
+      preferences: { messageReceived: false },
+    });
+    const optedIn = seedMobileDevice({
+      userId: "operator-1",
+      preferences: { messageReceived: true },
+    });
+    seedMobileDevice({
+      userId: "operator-1",
+      revokedAt: new Date(),
+    });
+
+    await expect(findTargetDevices("operator-1", "messageReceived")).resolves.toEqual([
+      expect.objectContaining({ id: optedIn.id }),
+    ]);
+    await expect(findTargetDevices("operator-1", null)).resolves.toEqual([
+      expect.objectContaining({ id: optedOut.id }),
+      expect.objectContaining({ id: optedIn.id }),
+    ]);
   });
 });

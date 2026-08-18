@@ -19,15 +19,21 @@ turn it on, and how to configure them in production.
    current **awaiting-moderation** count (messages with status `received` or
    `pending`) and fans out an alert push to every registered device whose
    preferences opt in.
-3. A newly recorded moderation result with `flagged: true` sends a
+3. Every queue-changing operation also sends a badge-only push with the latest
+   count. These pushes carry no banner or sound and go to every registered
+   device even when new-message alerts are disabled. Decisions, deletions,
+   installation rollovers, and data restores therefore lower or reset the icon
+   badge while the app is backgrounded or closed.
+4. A newly recorded moderation result with `flagged: true` sends a
    `messageFlagged` alert. Re-delivery of the same moderation row is deduplicated.
-4. `moderationQueueHigh` fires once when the awaiting-moderation count crosses
+5. `moderationQueueHigh` fires once when the awaiting-moderation count crosses
    `MODERATION_QUEUE_HIGH_THRESHOLD` (default `10`). It is re-armed only after
    a decision or deletion brings the queue below the threshold.
-5. The push is an `alert` push (`apns-push-type: alert`, `apns-priority: 10`)
-   carrying `aps.badge`. The OS sets the app-icon badge from `aps.badge`; the
-   app also refreshes its in-app tab badge on foreground and on push receipt.
-6. The same count is exposed at `GET /v1/stats/summary`
+6. Alert and badge-only notifications use `apns-push-type: alert` and
+   `apns-priority: 10`; badge-only payloads contain just `aps.badge`. The OS
+   updates the app icon without launching the app or showing an alert. The app
+   also refreshes its in-app tab badge on foreground and on push receipt.
+7. The same count is exposed at `GET /v1/stats/summary`
    (`messages.awaitingModeration`) so the app can poll and stay in sync even
    when a push is missed.
 

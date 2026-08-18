@@ -126,13 +126,18 @@ export const normalizePemKey = (raw: string | undefined): string | undefined => 
 /// (matching the existing mobile contract) but `aps` always wins so custom
 /// keys can never clobber the reserved envelope.
 export const buildApnsPayload = (notification: ApnsNotification): Record<string, unknown> => {
-  const aps: Record<string, unknown> = {
-    alert: { title: notification.title, body: notification.body },
-    sound: "default",
-  };
-  if (typeof notification.badge === "number") aps.badge = notification.badge;
-  if (notification.threadId) aps["thread-id"] = notification.threadId;
-  if (notification.category) aps.category = notification.category;
+  const aps: Record<string, unknown> =
+    notification.kind === "alert"
+      ? {
+          alert: { title: notification.title, body: notification.body },
+          sound: "default",
+        }
+      : { badge: notification.badge };
+  if (notification.kind === "alert") {
+    if (typeof notification.badge === "number") aps.badge = notification.badge;
+    if (notification.threadId) aps["thread-id"] = notification.threadId;
+    if (notification.category) aps.category = notification.category;
+  }
   return { ...notification.data, aps };
 };
 
@@ -164,7 +169,8 @@ export class Http2ApnsSender {
   }
 
   async send(userId: string, notification: ApnsNotification): Promise<void> {
-    const devices = await findTargetDevices(userId, notification.preferenceKey);
+    const preferenceKey = notification.kind === "alert" ? notification.preferenceKey : null;
+    const devices = await findTargetDevices(userId, preferenceKey);
     if (devices.length === 0) return;
     const jwt = await this.providerToken();
     const payload = JSON.stringify(buildApnsPayload(notification));
@@ -173,7 +179,8 @@ export class Http2ApnsSender {
       {
         component: "apns",
         userId,
-        preferenceKey: notification.preferenceKey,
+        notificationKind: notification.kind,
+        ...(preferenceKey === null ? {} : { preferenceKey }),
         deviceCount: devices.length,
       },
       "APNs fan-out completed",

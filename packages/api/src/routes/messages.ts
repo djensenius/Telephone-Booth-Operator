@@ -382,6 +382,7 @@ messagesRouter.post(
     const badge = await countMessagesAwaitingModeration();
     void observeModerationQueue("message.complete");
     void fanOutNotification({
+      kind: "alert",
       preferenceKey: "messageReceived",
       title: "New booth message",
       body: "A new recording is ready to moderate.",
