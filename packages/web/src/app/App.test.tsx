@@ -184,6 +184,18 @@ describe("App shell", () => {
     expect(timeEl!.getAttribute("datetime")).toBe("1970-01-01T00:00:00.000Z");
   });
 
+  it("links the authenticated shell to the mobile app", async () => {
+    renderShell();
+    await screen.findByText("Status");
+    const link = screen.getByRole("link", {
+      name: "Download Telephone Booth Operator on the App Store",
+    });
+    expect(link.getAttribute("href")).toBe(
+      "https://apps.apple.com/us/app/telephone-booth-operator/id6775110084",
+    );
+    expect(link.getAttribute("target")).toBe("_blank");
+  });
+
   it("links the thermal dashboard from observability navigation", async () => {
     renderShell();
     const link = await screen.findByRole("link", { name: "Thermals" });
@@ -198,6 +210,11 @@ describe("App shell", () => {
     expect(screen.queryByText("Booth status")).toBeNull();
     expect(screen.queryByText("Shortcuts")).toBeNull();
     expect(screen.queryByLabelText("Operator navigation")).toBeNull();
+    expect(
+      screen.getByRole("link", {
+        name: "Download Telephone Booth Operator on the App Store",
+      }),
+    ).toBeTruthy();
   });
 
   it("submits shortcut 7 as logout instead of navigating to login", async () => {

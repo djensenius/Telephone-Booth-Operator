@@ -363,6 +363,7 @@ textarea:focus-visible,
   position: relative;
   z-index: 1;
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   justify-content: flex-end;
   max-width: 1180px;
@@ -372,6 +373,14 @@ textarea:focus-visible,
   color: var(--text-muted);
   letter-spacing: 0.12em;
   text-transform: uppercase;
+}
+
+.build-footer a {
+  color: var(--text-secondary);
+}
+
+.build-footer a:hover {
+  color: var(--accent-red-strong);
 }
 
 .build-footer time {
