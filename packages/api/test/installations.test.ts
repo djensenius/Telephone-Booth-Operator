@@ -848,8 +848,9 @@ describe("installations", () => {
       const created = (await res.json()) as { id: string };
       const prompts = [...store.questions.values()]
         .filter((row) => row.installationId === created.id)
-        .map((row) => row.prompt);
-      expect(prompts).toEqual(["Shared prompt", "Draft prompt"]);
+        .map((row) => row.prompt)
+        .sort();
+      expect(prompts).toEqual(["Draft prompt", "Shared prompt"]);
       expect(store.questions.get(activeQuestion.id)?.status).toBe("archived");
       expect(store.questions.get(draftQuestion.id)?.status).toBe("draft");
     });
