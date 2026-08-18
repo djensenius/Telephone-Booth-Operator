@@ -6,6 +6,7 @@ import { useNow } from "../../hooks/useNow.js";
 import {
   THERMAL_RANGE_VALUES,
   useComponentTelemetryCurrent,
+  useCurrentWeather,
   useSystemCurrentAll,
   useThermalHistory,
   type ThermalRange,
@@ -15,6 +16,8 @@ import { fmtNumber } from "../system/format.js";
 import { ThermalChart } from "./ThermalChart.js";
 import {
   buildFleetThermalSummaries,
+  formatWeatherCondition,
+  isCurrentWeatherFresh,
   latestThermalPoint,
   selectPreferredTelemetrySource,
   shapeThermalCharts,
@@ -31,8 +34,30 @@ const RANGE_LABELS: Record<ThermalRange, string> = {
 const formatCurrentTemperature = (value: number | null): string =>
   value === null ? "—" : `${fmtNumber(value, 1)} °C`;
 
+const formatPercent = (value: number): string => `${fmtNumber(value, 0)}%`;
+
 const formatLastSeen = (iso: string | null): string =>
   iso === null ? "Awaiting telemetry" : `Last update ${new Date(iso).toLocaleString()}`;
+
+function CurrentValue({
+  label,
+  value,
+  hint,
+  text = false,
+}: {
+  readonly label: string;
+  readonly value: string;
+  readonly hint?: string;
+  readonly text?: boolean;
+}): JSX.Element {
+  return (
+    <div className={`thermal-current-tile${text ? " thermal-current-tile--text" : ""}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      {hint ? <small>{hint}</small> : null}
+    </div>
+  );
+}
 
 function CurrentTemperature({
   label,
@@ -44,11 +69,11 @@ function CurrentTemperature({
   readonly hint?: string;
 }): JSX.Element {
   return (
-    <div className="thermal-current-tile">
-      <span>{label}</span>
-      <strong>{formatCurrentTemperature(value)}</strong>
-      {hint ? <small>{hint}</small> : null}
-    </div>
+    <CurrentValue
+      label={label}
+      value={formatCurrentTemperature(value)}
+      {...(hint ? { hint } : {})}
+    />
   );
 }
 
@@ -198,6 +223,9 @@ export function ThermalsScreen(): JSX.Element {
     [nowMilliseconds, sources, systems],
   );
   const selectedSummary = summaries.find((summary) => summary.source.id === selectedSource?.id);
+  const weatherQuery = useCurrentWeather(selectedSource?.boothId);
+  const weather = weatherQuery.data ?? null;
+  const weatherIsFresh = isCurrentWeatherFresh(weather?.fetchedAt, nowMilliseconds);
   const historyQuery = useThermalHistory(selectedSource, range);
   const history = historyQuery.data ?? null;
   const charts = useMemo(() => shapeThermalCharts(history), [history]);
@@ -215,8 +243,8 @@ export function ThermalsScreen(): JSX.Element {
           <span className="screen-kicker">Observability</span>
           <h1>Thermals</h1>
           <p>
-            Current temperatures across the fleet and fixed, allowlisted history for the selected
-            booth.
+            Current temperatures and outdoor weather across the fleet, with fixed allowlisted
+            thermal history for the selected booth.
           </p>
         </div>
         <div className="thermals-screen__controls">
@@ -290,6 +318,54 @@ export function ThermalsScreen(): JSX.Element {
                 : {})}
             />
           </div>
+        </section>
+      ) : null}
+
+      {selectedSource ? (
+        <section className="thermal-weather" aria-labelledby="thermal-weather-title">
+          <header>
+            <div>
+              <h2 id="thermal-weather-title">Current outdoor weather</h2>
+              <p>Modeled Open-Meteo context for {selectedSource.boothId}.</p>
+            </div>
+            {weather ? (
+              <span className={weatherIsFresh ? "thermal-online" : "thermal-offline"}>
+                {weatherIsFresh ? "Weather current" : "Weather stale"}
+              </span>
+            ) : null}
+          </header>
+          {weatherQuery.isPending ? <FeatureSkeleton label="Reading outdoor weather…" /> : null}
+          {weatherQuery.isError && !weather ? (
+            <FeatureError message="Current outdoor weather is unavailable." />
+          ) : null}
+          {weather ? (
+            <>
+              <div className="thermal-current-grid thermal-weather-grid">
+                <CurrentValue
+                  label="Outdoor temperature"
+                  value={formatCurrentTemperature(weather.temperatureCelsius)}
+                />
+                <CurrentValue
+                  label="Relative humidity"
+                  value={formatPercent(weather.relativeHumidityPercent)}
+                />
+                <CurrentValue
+                  label="Conditions"
+                  value={formatWeatherCondition(weather.condition)}
+                  text
+                />
+                <CurrentValue
+                  label="Cloud cover"
+                  value={formatPercent(weather.cloudCoverPercent)}
+                />
+              </div>
+              <small className="thermal-weather__freshness">
+                Observed {new Date(weather.observedAt).toLocaleString()} · fetched{" "}
+                {new Date(weather.fetchedAt).toLocaleString()}
+                {weatherQuery.isError ? " · latest refresh failed" : ""}
+              </small>
+            </>
+          ) : null}
         </section>
       ) : null}
 

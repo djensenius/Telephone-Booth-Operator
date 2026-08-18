@@ -1940,6 +1940,34 @@ paths:
           description: snapshot or list of snapshots
         "404": { description: no snapshot persisted for the given booth }
 
+  /v1/system/weather/current:
+    get:
+      summary: Get current modeled outdoor weather for one booth.
+      description: |
+        The server builds a fixed PromQL selector for the booth's Open-Meteo
+        temperature, humidity, cloud-cover, condition, observation-time, and
+        last-success metrics. Clients cannot submit arbitrary PromQL.
+      tags: [system]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      parameters:
+        - name: boothId
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+      responses:
+        "200":
+          description: Current modeled outdoor weather and freshness timestamps.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CurrentWeather" }
+        "400": { description: invalid booth id }
+        "401": { description: operator authentication required }
+        "404": { description: no current weather samples for the booth }
+        "502": { description: Grafana/Prometheus returned an invalid or failed response }
+        "503": { description: Grafana weather proxy is missing valid HTTPS configuration }
+
   /v1/system/thermals/history:
     get:
       summary: Query fixed booth and router thermal history through Grafana.
@@ -3042,6 +3070,52 @@ components:
           maxItems: 128
           description: At most 100,000 samples across all series.
           items: { $ref: "#/components/schemas/ThermalHistorySeries" }
+    CurrentWeather:
+      type: object
+      additionalProperties: false
+      required:
+        - boothId
+        - source
+        - temperatureCelsius
+        - relativeHumidityPercent
+        - cloudCoverPercent
+        - condition
+        - observedAt
+        - fetchedAt
+      properties:
+        boothId: { type: string, minLength: 1, maxLength: 128 }
+        source: { type: string, enum: [open_meteo] }
+        temperatureCelsius: { type: number, minimum: -100, maximum: 100 }
+        relativeHumidityPercent: { type: number, minimum: 0, maximum: 100 }
+        cloudCoverPercent: { type: number, minimum: 0, maximum: 100 }
+        condition:
+          type: string
+          enum:
+            - clear_sky
+            - mainly_clear
+            - partly_cloudy
+            - overcast
+            - fog
+            - rime_fog
+            - drizzle
+            - freezing_drizzle
+            - rain
+            - freezing_rain
+            - snowfall
+            - snow_grains
+            - rain_showers
+            - snow_showers
+            - thunderstorm
+            - thunderstorm_with_hail
+            - unknown
+        observedAt:
+          type: string
+          format: date-time
+          description: Timestamp of the Open-Meteo modeled observation.
+        fetchedAt:
+          type: string
+          format: date-time
+          description: Timestamp of the booth's latest successful weather fetch.
     BoothSystemSnapshot:
       type: object
       description: |

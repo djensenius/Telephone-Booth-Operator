@@ -30,6 +30,7 @@ external VictoriaMetrics instance; Grafana dashboards live under
 | `PUT /v1/system`                    | API token         | Upsert current row + WS broadcast.              |
 | `GET /v1/system/current`            | Cookie or bearer  | Latest persisted host snapshot.                 |
 | `GET /v1/system/components/current` | Cookie or bearer  | Latest router component snapshots.              |
+| `GET /v1/system/weather/current`    | Session or bearer | Fixed current Open-Meteo weather summary.       |
 | `GET /v1/system/thermals/history`   | Session or bearer | Fixed CPU, battery, and zone history.           |
 | `GET /v1/monitor/summary`           | Monitor token     | Daily and active-installation aggregate counts. |
 | `GET /v1/ws/status`                 | Cookie or bearer  | Discriminated `{kind,…}` envelope.              |
@@ -55,11 +56,14 @@ accessible from the **Observability** block in the sidebar:
   memory, disk, network, uptime, audio device, Tailscale link, and
   throttling flags. Updates in real time via the status WebSocket.
 - **Thermals** (`/thermals`) — fleet current cards for Pi CPU, router battery,
-  and the hottest router thermal zone, plus selected-booth history. Historical
-  queries are fixed to `booth_cpu_temperature_celsius`,
+  and the hottest router thermal zone, current modeled outdoor temperature,
+  humidity, conditions, and cloud cover, plus selected-booth thermal history.
+  Weather comes from a fixed booth-scoped Open-Meteo metric query; arbitrary
+  PromQL is never accepted. Historical queries are fixed to
+  `booth_cpu_temperature_celsius`,
   `glinet_battery_temperature_celsius`, and
-  `glinet_thermal_temperature_celsius`; arbitrary PromQL is never accepted.
-  The history endpoint accepts either an operator session or operator bearer.
+  `glinet_thermal_temperature_celsius`. Both endpoints accept either an
+  operator session or operator bearer.
 - **Events** (`/events`) — paginated, filterable table of booth events
   with links into the originating call session.
 - **Sessions** (`/sessions`) — paginated list of call sessions; each row

@@ -910,6 +910,41 @@ export const ThermalHistorySchema = z
   });
 export type ThermalHistory = z.infer<typeof ThermalHistorySchema>;
 
+export const CURRENT_WEATHER_CONDITIONS = [
+  "clear_sky",
+  "mainly_clear",
+  "partly_cloudy",
+  "overcast",
+  "fog",
+  "rime_fog",
+  "drizzle",
+  "freezing_drizzle",
+  "rain",
+  "freezing_rain",
+  "snowfall",
+  "snow_grains",
+  "rain_showers",
+  "snow_showers",
+  "thunderstorm",
+  "thunderstorm_with_hail",
+  "unknown",
+] as const;
+
+export const CurrentWeatherConditionSchema = z.enum(CURRENT_WEATHER_CONDITIONS);
+export type CurrentWeatherCondition = z.infer<typeof CurrentWeatherConditionSchema>;
+
+export const CurrentWeatherSchema = z.object({
+  boothId: z.string().trim().min(1).max(128),
+  source: z.literal("open_meteo"),
+  temperatureCelsius: z.number().min(-100).max(100),
+  relativeHumidityPercent: z.number().min(0).max(100),
+  cloudCoverPercent: z.number().min(0).max(100),
+  condition: CurrentWeatherConditionSchema,
+  observedAt: z.string().datetime(),
+  fetchedAt: z.string().datetime(),
+});
+export type CurrentWeather = z.infer<typeof CurrentWeatherSchema>;
+
 export const ComponentTelemetryCurrentQuerySchema = z.object({
   boothId: z.string().trim().min(1).max(128).optional(),
   componentId: z.string().trim().min(1).max(128).optional(),
@@ -973,6 +1008,11 @@ export const ThermalHistoryQuerySchema = z
   })
   .superRefine(addTelemetryHistoryRangeIssues);
 export type ThermalHistoryQuery = z.infer<typeof ThermalHistoryQuerySchema>;
+
+export const CurrentWeatherQuerySchema = z.object({
+  boothId: z.string().trim().min(1).max(128),
+});
+export type CurrentWeatherQuery = z.infer<typeof CurrentWeatherQuerySchema>;
 
 // Live system snapshot pushed by the booth via `PUT /v1/system`. Mirrors the
 // Rust `booth-hal::SystemSnapshot` struct as it appears on the wire (camelCase

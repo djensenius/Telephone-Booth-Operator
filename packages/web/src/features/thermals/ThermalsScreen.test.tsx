@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type {
   BoothSystemSnapshotEnvelope,
+  CurrentWeather,
   TelemetrySourceEnvelope,
   ThermalHistory,
 } from "@telephone-booth-operator/shared";
@@ -60,6 +61,17 @@ const systems: BoothSystemSnapshotEnvelope[] = [
   },
 ];
 
+const currentWeather: CurrentWeather = {
+  boothId: "booth-01",
+  source: "open_meteo",
+  temperatureCelsius: 22.2,
+  relativeHumidityPercent: 67,
+  cloudCoverPercent: 12,
+  condition: "clear_sky",
+  observedAt: receivedAt,
+  fetchedAt: receivedAt,
+};
+
 const history: ThermalHistory = {
   boothId: "booth-01",
   source: {
@@ -113,10 +125,12 @@ function renderScreen({
   sourceData = [secondSource, preferredSource],
   systemData = systems,
   historyData = history,
+  weatherData = currentWeather,
 }: {
   readonly sourceData?: readonly TelemetrySourceEnvelope[];
   readonly systemData?: readonly BoothSystemSnapshotEnvelope[];
   readonly historyData?: ThermalHistory;
+  readonly weatherData?: CurrentWeather;
 } = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Number.POSITIVE_INFINITY } },
@@ -126,6 +140,7 @@ function renderScreen({
   const selectedSource =
     sourceData.find((source) => source.componentId === "router") ?? sourceData[0];
   if (selectedSource) {
+    client.setQueryData(apiQueryKeys.currentWeather(selectedSource.boothId), weatherData);
     client.setQueryData(
       apiQueryKeys.thermalHistory(selectedSource.boothId, selectedSource.componentId, "24h"),
       historyData,
@@ -173,6 +188,10 @@ function renderOfflineScreen() {
   });
   client.setQueryData(apiQueryKeys.systemAll, { items: [] });
   client.setQueryData(apiQueryKeys.systemComponents(), [offlineSource]);
+  client.setQueryData(apiQueryKeys.currentWeather(offlineSource.boothId), {
+    ...currentWeather,
+    boothId: offlineSource.boothId,
+  });
   client.setQueryData(
     apiQueryKeys.thermalHistory(offlineSource.boothId, offlineSource.componentId, "24h"),
     offlineHistory,
@@ -200,6 +219,12 @@ describe("ThermalsScreen", () => {
     expect(screen.getAllByText("48.3 °C").length).toBeGreaterThan(0);
     expect(screen.getAllByText("31.5 °C").length).toBeGreaterThan(0);
     expect(screen.getAllByText("55.3 °C").length).toBeGreaterThan(0);
+    expect(screen.getByRole("heading", { name: "Current outdoor weather" })).toBeDefined();
+    expect(screen.getByText("22.2 °C")).toBeDefined();
+    expect(screen.getByText("67%")).toBeDefined();
+    expect(screen.getByText("Clear sky")).toBeDefined();
+    expect(screen.getByText("12%")).toBeDefined();
+    expect(screen.getByText("Weather current")).toBeDefined();
     expect(screen.getByRole("heading", { name: "Combined thermal history" })).toBeDefined();
     expect(screen.getByText("Pi CPU sensor")).toBeDefined();
     expect(screen.getByText("Router battery sensor")).toBeDefined();

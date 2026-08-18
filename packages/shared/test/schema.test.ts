@@ -4,6 +4,8 @@ import {
   BoothStatusSchema,
   CallSessionSchema,
   CreateApiTokenRequestSchema,
+  CurrentWeatherQuerySchema,
+  CurrentWeatherSchema,
   InstructionSchema,
   InstructionStatusSchema,
   InstructionUpdateSchema,
@@ -332,6 +334,41 @@ describe("thermal history schemas", () => {
         from: "2026-01-01T00:00:00Z",
         to: "2026-01-03T00:00:00Z",
         stepSeconds: 15,
+      }),
+    ).toThrow();
+  });
+});
+
+describe("current weather schemas", () => {
+  it("accepts bounded modeled weather and its booth query", () => {
+    expect(CurrentWeatherQuerySchema.parse({ boothId: " booth-01 " })).toEqual({
+      boothId: "booth-01",
+    });
+    expect(
+      CurrentWeatherSchema.parse({
+        boothId: "booth-01",
+        source: "open_meteo",
+        temperatureCelsius: 22.2,
+        relativeHumidityPercent: 67,
+        cloudCoverPercent: 12,
+        condition: "clear_sky",
+        observedAt: "2026-08-18T14:30:00.000Z",
+        fetchedAt: "2026-08-18T14:31:00.000Z",
+      }).condition,
+    ).toBe("clear_sky");
+  });
+
+  it("rejects unknown conditions and out-of-range percentages", () => {
+    expect(() =>
+      CurrentWeatherSchema.parse({
+        boothId: "booth-01",
+        source: "open_meteo",
+        temperatureCelsius: 22.2,
+        relativeHumidityPercent: 101,
+        cloudCoverPercent: 12,
+        condition: "sunny",
+        observedAt: "2026-08-18T14:30:00.000Z",
+        fetchedAt: "2026-08-18T14:31:00.000Z",
       }),
     ).toThrow();
   });

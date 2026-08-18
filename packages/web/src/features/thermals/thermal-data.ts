@@ -1,11 +1,14 @@
 import type {
   BoothSystemSnapshotEnvelope,
+  CurrentWeatherCondition,
   TelemetrySourceEnvelope,
   TelemetryHistoryPoint,
   ThermalHistory,
   ThermalMetricName,
 } from "@telephone-booth-operator/shared";
 import { isTelemetryFresh } from "../../lib/telemetry-freshness.js";
+
+export const WEATHER_FRESHNESS_WINDOW_MS = 30 * 60 * 1000;
 
 export interface ThermalCurrentSummary {
   readonly source: TelemetrySourceEnvelope;
@@ -59,6 +62,21 @@ const finiteTemperature = (value: number | null | undefined): number | null =>
 
 const validTimestamp = (timestamp: string | null | undefined): string | null =>
   timestamp && Number.isFinite(Date.parse(timestamp)) ? timestamp : null;
+
+export function formatWeatherCondition(condition: CurrentWeatherCondition): string {
+  const label = condition.replaceAll("_", " ");
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+export function isCurrentWeatherFresh(
+  fetchedAt: string | null | undefined,
+  nowMilliseconds: number = Date.now(),
+): boolean {
+  const timestamp = validTimestamp(fetchedAt);
+  return (
+    timestamp !== null && nowMilliseconds - Date.parse(timestamp) < WEATHER_FRESHNESS_WINDOW_MS
+  );
+}
 
 export function buildFleetThermalSummaries(
   sources: readonly TelemetrySourceEnvelope[],
