@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, JSX } from "react";
 import { GlassPanel } from "../../components/booth/index.js";
 import {
@@ -167,6 +167,11 @@ export function EditQuestionDialog({
 }): JSX.Element | null {
   const updateQuestion = useUpdateQuestion();
   const [prompt, setPrompt] = useState(question?.prompt ?? "");
+  const promptRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (question !== null) promptRef.current?.focus();
+  }, [question]);
 
   if (question === null) return null;
   const questionId = question.id;
@@ -180,7 +185,13 @@ export function EditQuestionDialog({
   }
 
   return (
-    <div className="feature-dialog-backdrop" role="presentation">
+    <div
+      className="feature-dialog-backdrop"
+      role="presentation"
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && !updateQuestion.isPending) onClose();
+      }}
+    >
       <section
         className="feature-dialog"
         role="dialog"
@@ -192,6 +203,7 @@ export function EditQuestionDialog({
           <label>
             Prompt
             <textarea
+              ref={promptRef}
               value={prompt}
               onChange={(event) => setPrompt(event.currentTarget.value)}
               maxLength={280}
@@ -228,8 +240,14 @@ export function QuestionsScreen({
   const deactivateQuestion = useDeactivateQuestion();
   const [dialogOpen, setDialogOpen] = useState(startNew && isAdmin);
   const [editQuestion, setEditQuestion] = useState<Question | null>(null);
+  const editReturnFocusRef = useRef<HTMLButtonElement | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const rows = questions.data?.items ?? [];
+  const closeEditDialog = useCallback(() => {
+    setEditQuestion(null);
+    editReturnFocusRef.current?.focus();
+    editReturnFocusRef.current = null;
+  }, []);
 
   return (
     <GlassPanel title="Question library" className="feature-screen questions-screen">
@@ -309,7 +327,13 @@ export function QuestionsScreen({
                   )}
                   {question.status === "archived" ? null : (
                     <>
-                      <button type="button" onClick={() => setEditQuestion(question)}>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          editReturnFocusRef.current = event.currentTarget;
+                          setEditQuestion(question);
+                        }}
+                      >
                         Edit prompt
                       </button>
                       <button type="button" onClick={() => setDeleteId(question.id)}>
@@ -330,7 +354,7 @@ export function QuestionsScreen({
         <EditQuestionDialog
           key={editQuestion?.id}
           question={editQuestion}
-          onClose={() => setEditQuestion(null)}
+          onClose={closeEditDialog}
         />
       ) : null}
       {deleteId === null || !isAdmin ? null : (

@@ -980,8 +980,17 @@ export const fakeDb = {
       }
       return { count };
     },
-    findUnique: async ({ where }: { where: { id: string } }) =>
-      store.questions.get(where.id) ?? null,
+    findUnique: async ({
+      where,
+      include,
+    }: {
+      where: { id: string };
+      include?: { audio?: boolean };
+    }) => {
+      const question = store.questions.get(where.id) ?? null;
+      if (!question) return null;
+      return include?.audio ? attachAudio(question) : question;
+    },
     create: async ({
       data,
       include,

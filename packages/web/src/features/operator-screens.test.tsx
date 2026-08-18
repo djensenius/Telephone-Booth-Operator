@@ -603,13 +603,16 @@ describe("Questions feature", () => {
 
   it("edits a question prompt", async () => {
     renderPath("/questions");
-    fireEvent.click(await screen.findByText("Edit prompt"));
+    const trigger = await screen.findByText("Edit prompt");
+    fireEvent.click(trigger);
     const input = screen.getByLabelText("Prompt");
+    expect(document.activeElement).toBe(input);
     fireEvent.change(input, { target: { value: "What can you hear right now?" } });
     fireEvent.click(screen.getByText("Save prompt"));
     await waitFor(() => expect(updatedQuestionPrompt).toBe("What can you hear right now?"), {
       timeout: 3_000,
     });
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
 
   it("reads missing duration from audio metadata", async () => {

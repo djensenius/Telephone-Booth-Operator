@@ -51,6 +51,29 @@ describe("questions routes", () => {
     expect(res.status).toBe(401);
   });
 
+  it("requires admin auth for question updates", async () => {
+    const app = createApp();
+    const id = crypto.randomUUID();
+    const body = JSON.stringify({ prompt: "Can you hear me?" });
+
+    const unauthenticated = await app.request(`/v1/questions/${id}`, {
+      method: "PATCH",
+      body,
+      headers: { "content-type": "application/json" },
+    });
+    expect(unauthenticated.status).toBe(401);
+
+    const forbidden = await app.request(`/v1/questions/${id}`, {
+      method: "PATCH",
+      body,
+      headers: {
+        "content-type": "application/json",
+        cookie: operatorCookie({ isAdmin: false }),
+      },
+    });
+    expect(forbidden.status).toBe(403);
+  });
+
   it("creates as draft, activates, randomly selects, deactivates, and archives", async () => {
     const app = createApp();
     const cookie = operatorCookie();
@@ -123,6 +146,13 @@ describe("questions routes", () => {
       headers: { cookie },
     });
     expect(deleted.status).toBe(204);
+
+    const archivedUpdate = await app.request(`/v1/questions/${question.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ prompt: "Too late to change" }),
+    });
+    expect(archivedUpdate.status).toBe(404);
 
     const afterArchive = await app.request("/v1/questions?limit=10", { headers: { cookie } });
     await expect(afterArchive.json()).resolves.toMatchObject({ items: [], nextCursor: null });
