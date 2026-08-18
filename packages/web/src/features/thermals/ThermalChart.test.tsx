@@ -61,8 +61,42 @@ describe("ThermalChart", () => {
     );
 
     const group = container.querySelector('g[data-series-id="isolated-cpu"]');
-    expect(group?.querySelectorAll(".thermal-chart__point")).toHaveLength(3);
+    const markerBatch = group?.querySelector(".thermal-chart__point");
+    expect(group?.querySelectorAll(".thermal-chart__point")).toHaveLength(1);
+    expect(markerBatch?.getAttribute("d")?.match(/\bM\b/g)).toHaveLength(3);
     expect(group?.querySelector("path")?.getAttribute("d")?.match(/\bM\b/g)).toHaveLength(3);
+  });
+
+  it("batches many singleton markers into one SVG node", () => {
+    const singletonCount = 500;
+    const series: ThermalChartSeries[] = [
+      {
+        id: "many-isolated-samples",
+        label: "Router sensor",
+        metric: "glinet_thermal_temperature_celsius",
+        labels: { zone: "soc" },
+        points: Array.from({ length: singletonCount }, (_, index) => ({
+          timestamp: index * 180,
+          value: 40 + (index % 5),
+        })),
+      },
+    ];
+    const { container } = render(
+      <ThermalChart
+        title="Router sensor"
+        description="Gapped history"
+        series={series}
+        from="1970-01-01T00:00:00.000Z"
+        to="1970-01-03T00:00:00.000Z"
+        stepSeconds={60}
+      />,
+    );
+
+    const group = container.querySelector('g[data-series-id="many-isolated-samples"]');
+    const markerBatch = group?.querySelector(".thermal-chart__point");
+    expect(group?.querySelectorAll("path")).toHaveLength(2);
+    expect(group?.querySelectorAll(".thermal-chart__point")).toHaveLength(1);
+    expect(markerBatch?.getAttribute("d")?.match(/\bM\b/g)).toHaveLength(singletonCount);
   });
 
   it("assigns stable color, dash, and marker combinations across 128 series", () => {
@@ -93,7 +127,7 @@ describe("ThermalChart", () => {
             [
               line.getAttribute("class"),
               line.getAttribute("stroke-dasharray") ?? "solid",
-              marker.tagName,
+              marker.getAttribute("data-marker-shape"),
             ].join("|"),
           ] as const;
         }),

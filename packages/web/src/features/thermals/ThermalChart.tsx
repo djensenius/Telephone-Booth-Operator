@@ -150,6 +150,9 @@ const timeLabel = (timestampSeconds: number): string =>
     minute: "2-digit",
   });
 
+const markerShape = (markerIndex: number): "circle" | "square" | "triangle" =>
+  markerIndex === 1 ? "square" : markerIndex === 2 ? "triangle" : "circle";
+
 function SeriesMarker({
   x,
   y,
@@ -164,20 +167,71 @@ function SeriesMarker({
   readonly size?: number;
 }): JSX.Element {
   const className = `thermal-chart__point thermal-chart__line--${paletteIndex}`;
+  const shape = markerShape(markerIndex);
   if (markerIndex === 1) {
     return (
-      <rect className={className} x={x - size} y={y - size} width={size * 2} height={size * 2} />
+      <rect
+        className={className}
+        data-marker-shape={shape}
+        x={x - size}
+        y={y - size}
+        width={size * 2}
+        height={size * 2}
+      />
     );
   }
   if (markerIndex === 2) {
     return (
       <polygon
         className={className}
+        data-marker-shape={shape}
         points={`${x},${y - size} ${x + size},${y + size} ${x - size},${y + size}`}
       />
     );
   }
-  return <circle className={className} cx={x} cy={y} r={size} />;
+  return <circle className={className} data-marker-shape={shape} cx={x} cy={y} r={size} />;
+}
+
+const markerPath = (
+  coordinates: readonly { readonly x: number; readonly y: number }[],
+  markerIndex: number,
+  size: number,
+): string =>
+  coordinates
+    .map(({ x, y }) => {
+      const left = (x - size).toFixed(2);
+      const right = (x + size).toFixed(2);
+      const top = (y - size).toFixed(2);
+      const bottom = (y + size).toFixed(2);
+      const centerX = x.toFixed(2);
+      const centerY = y.toFixed(2);
+      if (markerIndex === 1) {
+        return `M ${left} ${top} H ${right} V ${bottom} H ${left} Z`;
+      }
+      if (markerIndex === 2) {
+        return `M ${centerX} ${top} L ${right} ${bottom} L ${left} ${bottom} Z`;
+      }
+      return `M ${right} ${centerY} A ${size} ${size} 0 1 0 ${left} ${centerY} A ${size} ${size} 0 1 0 ${right} ${centerY} Z`;
+    })
+    .join(" ");
+
+function SeriesMarkerBatch({
+  coordinates,
+  markerIndex,
+  paletteIndex,
+}: {
+  readonly coordinates: readonly { readonly x: number; readonly y: number }[];
+  readonly markerIndex: number;
+  readonly paletteIndex: number;
+}): JSX.Element | null {
+  if (coordinates.length === 0) return null;
+  return (
+    <path
+      className={`thermal-chart__point thermal-chart__line--${paletteIndex}`}
+      data-marker-shape={markerShape(markerIndex)}
+      d={markerPath(coordinates, markerIndex, 4)}
+    />
+  );
 }
 
 export const ThermalChart = memo(function ThermalChart({
@@ -228,10 +282,7 @@ export const ThermalChart = memo(function ThermalChart({
         maximum,
         ...visualCue,
         path: geometry.path,
-        markerCoordinates: markerPoints.map((point) => ({
-          ...pointCoordinates(point, domain),
-          timestamp: point.timestamp,
-        })),
+        markerCoordinates: markerPoints.map((point) => pointCoordinates(point, domain)),
       };
     });
   }, [domain, orderedSeries, stepSeconds]);
@@ -309,15 +360,11 @@ export const ThermalChart = memo(function ThermalChart({
                           d={path}
                           strokeDasharray={dashPattern}
                         />
-                        {markerCoordinates.map((coordinates, markerPosition) => (
-                          <SeriesMarker
-                            key={`${coordinates.timestamp}:${markerPosition}`}
-                            x={coordinates.x}
-                            y={coordinates.y}
-                            markerIndex={markerIndex}
-                            paletteIndex={paletteIndex}
-                          />
-                        ))}
+                        <SeriesMarkerBatch
+                          coordinates={markerCoordinates}
+                          markerIndex={markerIndex}
+                          paletteIndex={paletteIndex}
+                        />
                       </g>
                     );
                   },
