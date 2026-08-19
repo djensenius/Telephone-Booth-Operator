@@ -197,6 +197,7 @@ type MessageRow = {
 type BoothEventRow = {
   type: string;
   occurredAt: Date;
+  sessionId: string | null;
   payload: unknown;
 };
 
@@ -262,11 +263,28 @@ const minStartedAt = (sessions: CallSessionRow[]): Date | null => {
   return min;
 };
 
-const tallyDigits = (sessions: CallSessionRow[]): Record<string, number> => {
+const tallyDigits = (
+  sessions: CallSessionRow[],
+  digitEvents: BoothEventRow[],
+): Record<string, number> => {
   const digits: Record<string, number> = {};
   for (let i = 0; i < 10; i += 1) digits[String(i)] = 0;
+
+  const sessionsWithDigitEvents = new Set<string>();
+  for (const event of digitEvents) {
+    const payload = event.payload;
+    if (typeof payload !== "object" || payload === null) continue;
+    const digit = (payload as { digit?: unknown }).digit;
+    if (typeof digit !== "number" || !Number.isInteger(digit) || digit < 0 || digit > 9) continue;
+    incRecord(digits, String(digit));
+    if (event.sessionId) sessionsWithDigitEvents.add(event.sessionId);
+  }
+
+  // New booth clients send both linked digit events and a call-end summary.
+  // Older clients sent unlinked digit events but no summary. Only fall back to
+  // the summary when no linked events exist for that session.
   for (const session of sessions) {
-    if (!session.digitsDialed) continue;
+    if (!session.digitsDialed || sessionsWithDigitEvents.has(session.id)) continue;
     for (const char of session.digitsDialed) {
       if (char in digits) digits[char] = (digits[char] ?? 0) + 1;
     }
@@ -333,6 +351,7 @@ const computeStatsOverview = async (
     inProgressCount,
     messages,
     stateTransitionEvents,
+    digitDialedEvents,
     uploadEvents,
     latestEvent,
     questions,
@@ -358,6 +377,9 @@ const computeStatsOverview = async (
     }) as unknown as Promise<MessageRow[]>,
     db.boothEvent.findMany({
       where: { ...scoped, type: "state_transition", occurredAt: bounds },
+    }) as unknown as Promise<BoothEventRow[]>,
+    db.boothEvent.findMany({
+      where: { ...scoped, type: "digit_dialed", occurredAt: bounds },
     }) as unknown as Promise<BoothEventRow[]>,
     db.boothEvent.findMany({
       where: { ...scoped, type: { in: ["upload_completed", "upload_failed"] }, occurredAt: bounds },
@@ -406,7 +428,7 @@ const computeStatsOverview = async (
   // CallSession so the count always reconciles with calls.* on either side
   // of the window boundary.
   const hangups = sessionsEndedInWindow;
-  const digitsDialed = tallyDigits(sessionsByStart);
+  const digitsDialed = tallyDigits(sessionsByStart, digitDialedEvents);
 
   // uploads
   const uploadSucceeded = uploadEvents.filter((e) => e.type === "upload_completed").length;
