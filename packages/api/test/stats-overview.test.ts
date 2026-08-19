@@ -35,12 +35,14 @@ const pushEvent = (overrides: {
   occurredAt: Date;
   payload?: unknown;
   boothId?: string;
+  sessionId?: string;
 }): void => {
   seedBoothEvent({
     boothId: overrides.boothId ?? "booth-1",
     type: overrides.type,
     occurredAt: overrides.occurredAt,
     payload: overrides.payload ?? {},
+    sessionId: overrides.sessionId ?? null,
   });
 };
 
@@ -112,7 +114,7 @@ describe("GET /v1/stats/overview", () => {
 
     // Three completed calls in the 7d window, one in-progress, one
     // outside the window.
-    seedCallSession({
+    const firstCall = seedCallSession({
       startedAt: minutesAgo(30),
       endedAt: minutesAgo(28),
       outcome: "recording_completed",
@@ -120,7 +122,7 @@ describe("GET /v1/stats/overview", () => {
       digitsDialed: "1234",
       boothId: "booth-1",
     });
-    seedCallSession({
+    const secondCall = seedCallSession({
       startedAt: daysAgo(2),
       endedAt: daysAgo(2),
       outcome: "recording_completed",
@@ -185,6 +187,23 @@ describe("GET /v1/stats/overview", () => {
       payload: { from: "idle", to: "playing_message", cause: "test" },
     });
 
+    // New booth clients send both per-digit events and the call-end summary.
+    // Stats must use the events without counting the summary a second time.
+    for (const digit of [1, 2, 3, 4]) {
+      pushEvent({
+        type: "digit_dialed",
+        occurredAt: minutesAgo(29),
+        payload: { kind: "digit_dialed", digit, pulses: digit },
+        sessionId: firstCall.id,
+      });
+    }
+    pushEvent({
+      type: "digit_dialed",
+      occurredAt: daysAgo(2),
+      payload: { kind: "digit_dialed", digit: 5, pulses: 5 },
+      sessionId: secondCall.id,
+    });
+
     // Upload events: 2 succeeded, 1 failed in window.
     pushEvent({ type: "upload_completed", occurredAt: daysAgo(1) });
     pushEvent({ type: "upload_completed", occurredAt: daysAgo(2) });
@@ -222,6 +241,12 @@ describe("GET /v1/stats/overview", () => {
     expect(body.pickupsHangups.hangups).toBe(3);
     expect(body.pickupsHangups.digitsDialed["1"]).toBe(1);
     expect(body.pickupsHangups.digitsDialed["5"]).toBe(1);
+    expect(
+      Object.values(body.pickupsHangups.digitsDialed as Record<string, number>).reduce(
+        (sum, count) => sum + count,
+        0,
+      ),
+    ).toBe(5);
 
     expect(body.uploads).toEqual({
       succeeded: 2,
@@ -240,6 +265,46 @@ describe("GET /v1/stats/overview", () => {
     expect(boothIds).toEqual(["booth-1", "booth-2"]);
 
     expect(body.lastActivityAt).not.toBeNull();
+  });
+
+  it("counts historical digit events when call summaries are missing", async () => {
+    seedCallSession({
+      startedAt: minutesAgo(30),
+      endedAt: minutesAgo(28),
+      outcome: "hung_up_during_prompt",
+      digitsDialed: null,
+    });
+    pushEvent({
+      type: "digit_dialed",
+      occurredAt: minutesAgo(29),
+      payload: { kind: "digit_dialed", digit: 7, pulses: 7 },
+    });
+
+    const app = createApp();
+    const cookie = operatorCookie();
+    const res = await app.request("/v1/stats/overview?window=24h", { headers: { cookie } });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.pickupsHangups.digitsDialed["7"]).toBe(1);
+  });
+
+  it("falls back to the call summary when digit events are unavailable", async () => {
+    seedCallSession({
+      startedAt: minutesAgo(30),
+      endedAt: minutesAgo(28),
+      outcome: "recording_completed",
+      digitsDialed: "20",
+    });
+
+    const app = createApp();
+    const cookie = operatorCookie();
+    const res = await app.request("/v1/stats/overview?window=24h", { headers: { cookie } });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.pickupsHangups.digitsDialed["2"]).toBe(1);
+    expect(body.pickupsHangups.digitsDialed["0"]).toBe(1);
   });
 
   it("tolerates unknown outcome strings and missing JSON payload fields", async () => {
