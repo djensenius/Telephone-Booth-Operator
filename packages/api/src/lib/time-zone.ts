@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 interface DateTimeParts {
   readonly year: number;
   readonly month: number;
@@ -36,6 +38,8 @@ const partsFor = (date: Date, timeZone: string): DateTimeParts => {
 const partsAsUtc = (parts: DateTimeParts): number =>
   Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
 
+export const DEFAULT_TIME_ZONE = "America/Toronto";
+
 export const isValidTimeZone = (timeZone: string): boolean => {
   try {
     new Intl.DateTimeFormat("en", { timeZone }).format(0);
@@ -44,6 +48,12 @@ export const isValidTimeZone = (timeZone: string): boolean => {
     return false;
   }
 };
+
+export const IanaTimeZoneSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .refine(isValidTimeZone, "timeZone must be a valid IANA time zone.");
 
 export const startOfDayInTimeZone = (now: Date, timeZone: string): Date => {
   const localNow = partsFor(now, timeZone);

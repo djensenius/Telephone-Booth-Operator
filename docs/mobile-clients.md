@@ -108,7 +108,19 @@ offline_access`, `code_challenge`, `code_challenge_method=S256`,
    expires. On unrecoverable refresh failure the app drops the keychain
    entry and routes the user back to the sign-in screen.
 
-## 4. Troubleshooting
+## 4. Calendar-day counters
+
+`GET /v1/stats/summary` accepts an optional `timeZone` query parameter. It must
+be an IANA identifier such as `America/Toronto`; omitting it uses
+`America/Toronto`. The response includes the effective `timeZone` and
+`dayStartedAt`, the UTC instant corresponding to midnight in that zone.
+
+Native clients should decode those response fields rather than derive a
+calendar boundary from the device clock. This keeps dashboard, Watch, TV,
+screensaver, and widget "today" counters aligned with the server across DST
+changes.
+
+## 5. Troubleshooting
 
 | Symptom                          | Likely cause                                                                      |
 | -------------------------------- | --------------------------------------------------------------------------------- |

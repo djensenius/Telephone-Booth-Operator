@@ -12,6 +12,7 @@ import {
   QuestionSchema,
   QuestionStatusSchema,
   RouterComponentSnapshotSchema,
+  StatsSummarySchema,
   ThermalHistoryQuerySchema,
   ThermalHistorySchema,
   ThermalMetricNameSchema,
@@ -85,6 +86,40 @@ describe("BoothStatusSchema", () => {
         updatedAt: "2026-01-01T00:00:00.000Z",
       }),
     ).toThrow();
+  });
+});
+
+describe("StatsSummarySchema", () => {
+  const summary = {
+    booth: {
+      state: "idle",
+      updatedAt: "2026-08-08T19:00:00.000Z",
+    },
+    messages: {
+      pending: 2,
+      awaitingModeration: 3,
+      receivedToday: 4,
+      latestId: "11111111-1111-4111-8111-111111111111",
+    },
+    calls: {
+      today: 5,
+      inProgress: 1,
+    },
+    realtime: {
+      wsClients: 2,
+    },
+    dayStartedAt: "2026-08-08T04:00:00.000Z",
+    generatedAt: "2026-08-08T19:00:00.000Z",
+    timeZone: "America/Toronto",
+  };
+
+  it("requires and preserves the effective calendar-day boundary", () => {
+    const parsed = StatsSummarySchema.parse(summary);
+    expect(parsed.dayStartedAt).toBe("2026-08-08T04:00:00.000Z");
+    expect(parsed.timeZone).toBe("America/Toronto");
+
+    const { dayStartedAt: _dayStartedAt, ...withoutBoundary } = summary;
+    expect(() => StatsSummarySchema.parse(withoutBoundary)).toThrow();
   });
 });
 

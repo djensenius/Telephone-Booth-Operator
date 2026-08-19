@@ -42,6 +42,7 @@ import {
   QuestionStatusSchema,
   QuestionUpdateSchema,
   StatsOverviewSchema,
+  StatsSummarySchema,
   TelemetrySourceEnvelopeSchema,
   ThermalHistorySchema,
   TranscriptionListSchema,
@@ -90,6 +91,7 @@ import type {
   QuestionUpdate,
   QuestionStatus,
   StatsOverview,
+  StatsSummary as SharedStatsSummary,
   StatsWindow,
   TelemetrySourceEnvelope,
   ThermalHistory,
@@ -131,22 +133,6 @@ const SystemCurrentListSchema = z.object({
   items: z.array(BoothSystemSnapshotEnvelopeSchema),
 });
 const TelemetrySourceListSchema = z.array(TelemetrySourceEnvelopeSchema);
-// The `/v1/stats/summary` response is an API-internal shape (not exported from
-// `shared`), so we parse the small subset the UI actually reads. Unknown keys
-// (booth snapshot, realtime) are dropped by Zod's default strip behaviour.
-const StatsSummarySchema = z.object({
-  messages: z.object({
-    pending: z.number().int().nonnegative(),
-    awaitingModeration: z.number().int().nonnegative(),
-    receivedToday: z.number().int().nonnegative(),
-    latestId: z.string().nullable(),
-  }),
-  calls: z.object({
-    today: z.number().int().nonnegative(),
-    inProgress: z.number().int().nonnegative(),
-  }),
-  generatedAt: z.string(),
-});
 const ApiTokenListSchema = z.array(ApiTokenSchema);
 const ApiTokenUsageListSchema = z.array(ApiTokenUsageBucketSchema);
 
@@ -156,7 +142,7 @@ export type InstructionList = z.infer<typeof InstructionListSchema>;
 export type MessageList = z.infer<typeof MessageListSchema>;
 export type InstallationList = z.infer<typeof InstallationListSchema>;
 export type SystemCurrentList = z.infer<typeof SystemCurrentListSchema>;
-export type StatsSummary = z.infer<typeof StatsSummarySchema>;
+export type StatsSummary = SharedStatsSummary;
 
 const rawApiBaseUrl =
   typeof import.meta.env.VITE_API_BASE_URL === "string" ? import.meta.env.VITE_API_BASE_URL : "";
@@ -653,8 +639,8 @@ export const stats = {
     apiFetch<StatsOverview>(`/v1/stats/overview${statsOverviewQuery(selection, scope)}`, {
       schema: StatsOverviewSchema,
     }),
-  summary: (scope?: InstallationScope) =>
-    apiFetch<StatsSummary>(`/v1/stats/summary${query({ installationId: scope })}`, {
+  summary: (scope?: InstallationScope, timeZone?: string) =>
+    apiFetch<StatsSummary>(`/v1/stats/summary${query({ installationId: scope, timeZone })}`, {
       schema: StatsSummarySchema,
     }),
 };
@@ -799,7 +785,8 @@ export const apiQueryKeys = {
     ["system", "thermals", "history", boothId, componentId, range] as const,
   statsOverview: (selection: StatsRangeSelection, scope?: InstallationScope) =>
     ["stats", "overview", selection, scope ?? null] as const,
-  statsSummary: (scope?: InstallationScope) => ["stats", "summary", scope ?? null] as const,
+  statsSummary: (scope?: InstallationScope, timeZone?: string) =>
+    ["stats", "summary", scope ?? null, timeZone ?? null] as const,
   metricFilters: ["stats", "filters"] as const,
   auditLogs: (params: AuditLogListParams) => ["audit-logs", "list", params] as const,
   auditLogTarget: (targetType: string, targetId: string, params: AuditLogTargetParams = {}) =>
@@ -927,10 +914,10 @@ export function useStatsOverview(selection: StatsRangeSelection, scope?: Install
   });
 }
 
-export function useStatsSummary(scope?: InstallationScope) {
+export function useStatsSummary(scope?: InstallationScope, timeZone?: string) {
   return useQuery({
-    queryKey: apiQueryKeys.statsSummary(scope),
-    queryFn: () => stats.summary(scope),
+    queryKey: apiQueryKeys.statsSummary(scope, timeZone),
+    queryFn: () => stats.summary(scope, timeZone),
     refetchInterval: 30_000,
   });
 }

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
-import { isValidTimeZone, startOfDayInTimeZone } from "../src/lib/time-zone.js";
+import {
+  DEFAULT_TIME_ZONE,
+  IanaTimeZoneSchema,
+  isValidTimeZone,
+  startOfDayInTimeZone,
+} from "../src/lib/time-zone.js";
 
 describe("time-zone helpers", () => {
   it("resolves Toronto midnight across daylight-saving offsets", () => {
@@ -20,5 +25,7 @@ describe("time-zone helpers", () => {
   it("rejects unknown IANA zones", () => {
     expect(isValidTimeZone("America/Toronto")).toBe(true);
     expect(isValidTimeZone("Telephone/Booth")).toBe(false);
+    expect(IanaTimeZoneSchema.parse(DEFAULT_TIME_ZONE)).toBe("America/Toronto");
+    expect(() => IanaTimeZoneSchema.parse("Telephone/Booth")).toThrow();
   });
 });

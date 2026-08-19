@@ -146,6 +146,27 @@ export const BoothStatusSchema = z.object({
 });
 export type BoothStatus = z.infer<typeof BoothStatusSchema>;
 
+export const StatsSummarySchema = z.object({
+  booth: BoothStatusSchema,
+  messages: z.object({
+    pending: z.number().int().nonnegative(),
+    awaitingModeration: z.number().int().nonnegative(),
+    receivedToday: z.number().int().nonnegative(),
+    latestId: z.guid().nullable(),
+  }),
+  calls: z.object({
+    today: z.number().int().nonnegative(),
+    inProgress: z.number().int().nonnegative(),
+  }),
+  realtime: z.object({
+    wsClients: z.number().int().nonnegative(),
+  }),
+  dayStartedAt: z.string().datetime(),
+  generatedAt: z.string().datetime(),
+  timeZone: z.string().min(1).max(64),
+});
+export type StatsSummary = z.infer<typeof StatsSummarySchema>;
+
 export const MonitorSummarySchema = z.object({
   callsToday: z.number().int().nonnegative(),
   messagesToday: z.number().int().nonnegative(),
