@@ -6,15 +6,10 @@ import { Prisma } from "../generated/prisma/client.js";
 import { db } from "../lib/db.js";
 import { resolveInstallationScope, scopeWhere } from "../lib/installation.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
-import { isValidTimeZone, startOfDayInTimeZone } from "../lib/time-zone.js";
+import { DEFAULT_TIME_ZONE, IanaTimeZoneSchema, startOfDayInTimeZone } from "../lib/time-zone.js";
 
 const querySchema = z.object({
-  timeZone: z
-    .string()
-    .min(1)
-    .max(64)
-    .refine(isValidTimeZone, "timeZone must be a valid IANA time zone.")
-    .default("America/Toronto"),
+  timeZone: IanaTimeZoneSchema.default(DEFAULT_TIME_ZONE),
 });
 
 export const monitorRouter = new Hono<{ Variables: ApiTokenVariables }>();

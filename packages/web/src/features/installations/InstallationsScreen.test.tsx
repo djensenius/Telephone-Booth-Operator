@@ -64,11 +64,13 @@ const activeInstallation = {
 };
 
 const summary = {
-  booth: {},
+  booth: { state: "idle", updatedAt: "2026-06-02T00:00:00.000Z" },
   messages: { pending: 4, awaitingModeration: 2, receivedToday: 11, latestId: null },
   calls: { today: 6, inProgress: 1 },
   realtime: { wsClients: 3 },
+  dayStartedAt: "2026-06-01T04:00:00.000Z",
   generatedAt: "2026-06-02T00:00:00.000Z",
+  timeZone: "America/Toronto",
 };
 
 let createBody: unknown = null;

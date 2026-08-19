@@ -9,10 +9,12 @@ import {
   InstallationScopeSchema,
   MetricFilterCreateSchema,
   MetricFilterUpdateSchema,
+  StatsSummarySchema,
   StatsWindowSchema,
   statsWindowDurationMs,
   type MetricFilter,
   type StatsOverview,
+  type StatsSummary,
   type StatsWindow,
 } from "@telephone-booth-operator/shared";
 import { recordAudit } from "../lib/audit.js";
@@ -27,6 +29,7 @@ import {
 } from "../lib/installation.js";
 import { defaultStatus, serializeStatus } from "../lib/serializers.js";
 import { requireOperator, type AuthVariables } from "../lib/session.js";
+import { DEFAULT_TIME_ZONE, IanaTimeZoneSchema, startOfDayInTimeZone } from "../lib/time-zone.js";
 
 const STATS_CACHE_TTL_MS = 5_000;
 const OVERVIEW_CACHE_TTL_MS = 30_000;
@@ -34,31 +37,17 @@ const TOP_QUESTION_LIMIT = 10;
 const PLAYING_MESSAGE_STATE = "playing_message";
 const MAX_MESSAGES_PER_OVERVIEW = 5_000;
 
-type StatsSummary = {
-  booth: ReturnType<typeof serializeStatus>;
-  messages: {
-    pending: number;
-    awaitingModeration: number;
-    receivedToday: number;
-    latestId: string | null;
-  };
-  calls: {
-    today: number;
-    inProgress: number;
-  };
-  realtime: {
-    wsClients: number;
-  };
-  generatedAt: string;
-};
-
-// Keyed by installation scope so a rollover doesn't serve the previous era's
-// numbers for the rest of the cache TTL.
+// Keyed by installation scope, IANA time zone, and local-day boundary so an
+// installation rollover, time-zone change, or midnight cannot reuse stale
+// calendar-day counters.
 const summaryCache = new Map<string, { value: StatsSummary; expiresAt: number }>();
 
-const computeStatsSummary = async (scope: InstallationScopeFilter): Promise<StatsSummary> => {
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
+const computeStatsSummary = async (
+  scope: InstallationScopeFilter,
+  timeZone: string,
+  generatedAt: Date,
+  dayStartedAt: Date,
+): Promise<StatsSummary> => {
   const scoped = scopeWhere(scope);
 
   const [
@@ -78,17 +67,17 @@ const computeStatsSummary = async (scope: InstallationScopeFilter): Promise<Stat
     }),
     db.message.count({ where: { ...scoped, status: "pending" } }),
     countMessagesAwaitingModeration(scoped),
-    db.message.count({ where: { ...scoped, createdAt: { gte: startOfDay } } }),
+    db.message.count({ where: { ...scoped, createdAt: { gte: dayStartedAt } } }),
     db.message.findFirst({
       where: scoped,
       orderBy: { createdAt: "desc" },
       select: { id: true },
     }),
-    db.callSession.count({ where: { ...scoped, startedAt: { gte: startOfDay } } }),
+    db.callSession.count({ where: { ...scoped, startedAt: { gte: dayStartedAt } } }),
     db.callSession.count({ where: { ...scoped, endedAt: null } }),
   ]);
 
-  return {
+  return StatsSummarySchema.parse({
     booth: latestStatus ? serializeStatus(latestStatus) : defaultStatus(),
     messages: {
       pending: pendingCount,
@@ -103,8 +92,10 @@ const computeStatsSummary = async (scope: InstallationScopeFilter): Promise<Stat
     realtime: {
       wsClients: wsBroadcaster.size,
     },
-    generatedAt: new Date().toISOString(),
-  };
+    dayStartedAt: dayStartedAt.toISOString(),
+    generatedAt: generatedAt.toISOString(),
+    timeZone,
+  });
 };
 
 // The cache key carries a caller-supplied installation id, so an operator
@@ -132,12 +123,17 @@ const cachePut = <T>(
   }
 };
 
-const getCachedSummary = async (scope: InstallationScopeFilter): Promise<StatsSummary> => {
-  const now = Date.now();
-  const key = scopeCacheKey(scope);
+const getCachedSummary = async (
+  scope: InstallationScopeFilter,
+  timeZone: string,
+): Promise<StatsSummary> => {
+  const generatedAt = new Date();
+  const now = generatedAt.getTime();
+  const dayStartedAt = startOfDayInTimeZone(generatedAt, timeZone);
+  const key = JSON.stringify([scopeCacheKey(scope), timeZone, dayStartedAt.toISOString()]);
   const entry = summaryCache.get(key);
   if (entry && entry.expiresAt > now) return entry.value;
-  const value = await computeStatsSummary(scope);
+  const value = await computeStatsSummary(scope, timeZone, generatedAt, dayStartedAt);
   cachePut(summaryCache, key, value, STATS_CACHE_TTL_MS);
   return value;
 };
@@ -621,13 +617,22 @@ const idParamSchema = z.object({ id: z.guid() });
 
 export const statsRouter = new Hono<{ Variables: AuthVariables }>();
 
-const scopeQuerySchema = z.object({ installationId: InstallationScopeSchema.optional() });
-
-statsRouter.get("/summary", requireOperator(), zValidator("query", scopeQuerySchema), async (c) => {
-  const scope = await resolveInstallationScope(c.req.valid("query").installationId);
-  const summary = await getCachedSummary(scope);
-  return c.json(summary);
+const summaryQuerySchema = z.object({
+  installationId: InstallationScopeSchema.optional(),
+  timeZone: IanaTimeZoneSchema.default(DEFAULT_TIME_ZONE),
 });
+
+statsRouter.get(
+  "/summary",
+  requireOperator(),
+  zValidator("query", summaryQuerySchema),
+  async (c) => {
+    const query = c.req.valid("query");
+    const scope = await resolveInstallationScope(query.installationId);
+    const summary = await getCachedSummary(scope, query.timeZone);
+    return c.json(summary);
+  },
+);
 
 statsRouter.get(
   "/overview",

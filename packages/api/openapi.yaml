@@ -850,8 +850,11 @@ paths:
         Cached aggregation suitable for high-frequency widget polling.
         Returns the latest booth status, message-queue counts (pending,
         received-today, latest id), call counts (today + in-progress), and
-        the active WebSocket subscriber count. Cached for 5 seconds on the
-        server so 1 request per 15s widget timeline ≈ 0 extra DB load.
+        the active WebSocket subscriber count. Calendar-day counters use the
+        requested IANA time zone and default to America/Toronto. The response
+        includes the effective zone and exact local-day boundary. Cached for
+        5 seconds on the server so 1 request per 15s widget timeline ≈ 0 extra
+        DB load.
       tags: [stats]
       security:
         - operatorSession: []
@@ -867,12 +870,21 @@ paths:
             oneOf:
               - { type: string, format: uuid }
               - { type: string, enum: [all] }
+        - name: timeZone
+          in: query
+          description: IANA time zone used to determine local midnight.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 64
+            default: America/Toronto
       responses:
         "200":
           description: aggregated booth statistics
           content:
             application/json:
               schema: { $ref: "#/components/schemas/StatsSummary" }
+        "400": { description: invalid installation scope or time zone }
         "401": { description: missing or invalid credentials }
 
   /v1/monitor/summary:
@@ -3327,7 +3339,7 @@ components:
           items: { $ref: "#/components/schemas/Transcription" }
     StatsSummary:
       type: object
-      required: [booth, messages, calls, realtime, generatedAt]
+      required: [booth, messages, calls, realtime, dayStartedAt, generatedAt, timeZone]
       properties:
         booth: { $ref: "#/components/schemas/BoothStatus" }
         messages:
@@ -3341,7 +3353,10 @@ components:
               description: >
                 Messages awaiting operator moderation (status "received" or
                 "pending"). Drives the mobile app-icon / tab badge.
-            receivedToday: { type: integer, minimum: 0 }
+            receivedToday:
+              type: integer
+              minimum: 0
+              description: Messages created on or after dayStartedAt.
             latestId:
               anyOf:
                 - { type: string, format: uuid }
@@ -3350,14 +3365,26 @@ components:
           type: object
           required: [today, inProgress]
           properties:
-            today: { type: integer, minimum: 0 }
+            today:
+              type: integer
+              minimum: 0
+              description: Calls started on or after dayStartedAt.
             inProgress: { type: integer, minimum: 0 }
         realtime:
           type: object
           required: [wsClients]
           properties:
             wsClients: { type: integer, minimum: 0 }
+        dayStartedAt:
+          type: string
+          format: date-time
+          description: UTC instant corresponding to midnight in timeZone.
         generatedAt: { type: string, format: date-time }
+        timeZone:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Effective IANA time zone used for today's counters.
     MonitorSummary:
       type: object
       required:

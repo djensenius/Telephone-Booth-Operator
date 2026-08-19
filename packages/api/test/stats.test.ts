@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.js")).fakeDb }));
 vi.mock(
@@ -43,6 +43,8 @@ const BEARER_CLAIMS = {
   groups: ["operators"],
 };
 
+const ORIGINAL_PROCESS_TIME_ZONE = process.env.TZ;
+
 const setupEnv = () => {
   process.env.NODE_ENV = "test";
   process.env.SESSION_SECRET = "test-session-secret";
@@ -73,6 +75,12 @@ const installValidBearer = () => {
 describe("/v1/stats/summary", () => {
   beforeEach(() => {
     setupEnv();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    if (ORIGINAL_PROCESS_TIME_ZONE === undefined) delete process.env.TZ;
+    else process.env.TZ = ORIGINAL_PROCESS_TIME_ZONE;
   });
 
   it("returns a 401 with no auth", async () => {
@@ -115,7 +123,9 @@ describe("/v1/stats/summary", () => {
       };
       calls: { today: number; inProgress: number };
       realtime: { wsClients: number };
+      dayStartedAt: string;
       generatedAt: string;
+      timeZone: string;
     };
     expect(body.booth.state).toBe("idle");
     expect(body.messages.pending).toBe(2);
@@ -125,7 +135,109 @@ describe("/v1/stats/summary", () => {
     expect(body.calls.today).toBe(2);
     expect(body.calls.inProgress).toBe(1);
     expect(body.realtime.wsClients).toBe(0);
+    expect(typeof body.dayStartedAt).toBe("string");
     expect(typeof body.generatedAt).toBe("string");
+    expect(body.timeZone).toBe("America/Toronto");
+  });
+
+  it.each([
+    {
+      season: "EDT",
+      now: "2026-08-08T19:00:00.000Z",
+      beforeMidnight: "2026-08-08T03:59:59.999Z",
+      midnight: "2026-08-08T04:00:00.000Z",
+    },
+    {
+      season: "EST",
+      now: "2026-01-08T19:00:00.000Z",
+      beforeMidnight: "2026-01-08T04:59:59.999Z",
+      midnight: "2026-01-08T05:00:00.000Z",
+    },
+  ])(
+    "uses Toronto midnight for today counters during $season",
+    async ({ now, beforeMidnight, midnight }) => {
+      process.env.TZ = "UTC";
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(now));
+      seedMessage({ createdAt: new Date(beforeMidnight) });
+      seedMessage({ createdAt: new Date(midnight) });
+      seedCallSession({ startedAt: new Date(beforeMidnight) });
+      seedCallSession({ startedAt: new Date(midnight) });
+
+      const response = await createApp().request("/v1/stats/summary", {
+        headers: { cookie: operatorCookie() },
+      });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        messages: { receivedToday: 1 },
+        calls: { today: 1 },
+        dayStartedAt: midnight,
+        generatedAt: now,
+        timeZone: "America/Toronto",
+      });
+    },
+  );
+
+  it("keeps summaries for different time zones in separate cache entries", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-08T19:00:00.000Z"));
+    seedMessage({ createdAt: new Date("2026-08-08T02:00:00.000Z") });
+    seedCallSession({ startedAt: new Date("2026-08-08T02:00:00.000Z") });
+    const app = createApp();
+    const headers = { cookie: operatorCookie() };
+
+    const toronto = await app.request("/v1/stats/summary?timeZone=America%2FToronto", {
+      headers,
+    });
+    const utc = await app.request("/v1/stats/summary?timeZone=UTC", {
+      headers,
+    });
+
+    await expect(toronto.json()).resolves.toMatchObject({
+      messages: { receivedToday: 0 },
+      calls: { today: 0 },
+      dayStartedAt: "2026-08-08T04:00:00.000Z",
+      timeZone: "America/Toronto",
+    });
+    await expect(utc.json()).resolves.toMatchObject({
+      messages: { receivedToday: 1 },
+      calls: { today: 1 },
+      dayStartedAt: "2026-08-08T00:00:00.000Z",
+      timeZone: "UTC",
+    });
+  });
+
+  it("rotates the cache immediately at local midnight", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-08T03:59:59.500Z"));
+    seedMessage({ createdAt: new Date("2026-08-08T03:59:59.500Z") });
+    const app = createApp();
+    const headers = { cookie: operatorCookie() };
+
+    const beforeMidnight = await app.request("/v1/stats/summary", {
+      headers,
+    });
+    await expect(beforeMidnight.json()).resolves.toMatchObject({
+      messages: { receivedToday: 1 },
+      dayStartedAt: "2026-08-07T04:00:00.000Z",
+    });
+
+    vi.setSystemTime(new Date("2026-08-08T04:00:00.000Z"));
+    const afterMidnight = await app.request("/v1/stats/summary", {
+      headers,
+    });
+    await expect(afterMidnight.json()).resolves.toMatchObject({
+      messages: { receivedToday: 0 },
+      dayStartedAt: "2026-08-08T04:00:00.000Z",
+    });
+  });
+
+  it("rejects an unknown IANA time zone", async () => {
+    const response = await createApp().request("/v1/stats/summary?timeZone=Telephone%2FBooth", {
+      headers: { cookie: operatorCookie() },
+    });
+    expect(response.status).toBe(400);
   });
 
   it("memoizes the response for the configured TTL", async () => {
