@@ -132,7 +132,7 @@ describe("StatsSummarySchema", () => {
 });
 
 describe("MonitorSummarySchema", () => {
-  it("requires interaction totals and the daily breakdown", () => {
+  it("requires interaction totals, the all-time playback total, and the daily breakdown", () => {
     const parsed = MonitorSummarySchema.parse({
       interactionsToday: 5,
       interactionsTotal: 15,
@@ -154,6 +154,10 @@ describe("MonitorSummarySchema", () => {
     });
 
     expect(parsed.breakdownToday.wrongNumberAttempts).toBe(2);
+    const { messagePlaybackStartsTotal: _messagePlaybackStartsTotal, ...withoutPlaybackTotal } =
+      parsed;
+    expect(() => MonitorSummarySchema.parse(withoutPlaybackTotal)).toThrow();
+
     expect(() =>
       MonitorSummarySchema.parse({
         callsToday: 5,
