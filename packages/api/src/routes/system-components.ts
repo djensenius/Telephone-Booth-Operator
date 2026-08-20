@@ -13,6 +13,7 @@ import type { Prisma } from "../generated/prisma/client.js";
 import { db } from "../lib/db.js";
 import { queryRouterTelemetryHistory } from "../lib/grafana-prometheus.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
+import { requireOperatorOrApiToken, type AuthVariables } from "../lib/session.js";
 
 export const COMPONENT_TELEMETRY_MAX_REQUEST_BYTES = 64 * 1024;
 
@@ -54,7 +55,9 @@ const sourceEnvelope = (source: TelemetrySourceRow) =>
     updatedAt: source.updatedAt.toISOString(),
   });
 
-const componentTelemetryRouter = new Hono<{ Variables: ApiTokenVariables }>();
+const componentTelemetryRouter = new Hono<{
+  Variables: AuthVariables & ApiTokenVariables;
+}>();
 
 componentTelemetryRouter.put(
   "/current",
@@ -104,6 +107,7 @@ componentTelemetryRouter.put(
 
 componentTelemetryRouter.get(
   "/current",
+  requireOperatorOrApiToken(["operator", "monitor"]),
   zValidator("query", ComponentTelemetryCurrentQuerySchema),
   async (c) => {
     const { boothId, componentId } = c.req.valid("query");

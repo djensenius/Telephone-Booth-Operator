@@ -29,15 +29,16 @@ vi.mock("../src/lib/require-api-token.js", () => ({
       const authorization = c.req.header("authorization");
       if (!authorization) return c.json({ error: "invalid_token" }, 401);
       const scope = authorization === "Bearer telemetry-token" ? "telemetry" : "operator";
+      const tokenScope: ApiTokenScope = authorization.endsWith("monitor-token") ? "monitor" : scope;
       c.set("apiToken", {
         id: "11111111-1111-4111-8111-111111111111",
         name: "router",
-        scope,
-        telemetrySourceId: scope === "telemetry" ? tokenState.telemetrySourceId : null,
+        scope: tokenScope,
+        telemetrySourceId: tokenScope === "telemetry" ? tokenState.telemetrySourceId : null,
       });
       c.set("apiTokenId", "11111111-1111-4111-8111-111111111111");
       const scopes = Array.isArray(requiredScope) ? requiredScope : [requiredScope];
-      if (!scopes.includes(scope)) return c.json({ error: "insufficient_scope" }, 403);
+      if (!scopes.includes(tokenScope)) return c.json({ error: "insufficient_scope" }, 403);
       await next();
     },
 }));
@@ -250,7 +251,7 @@ describe("component telemetry routes", () => {
     expect(store.telemetrySources.get(tokenState.telemetrySourceId)?.latestSnapshot).toBeNull();
   });
 
-  it("lists and filters current sources for operators only", async () => {
+  it("lists and filters current sources for operators and monitors", async () => {
     const source = store.telemetrySources.get(tokenState.telemetrySourceId)!;
     source.latestSnapshot = snapshot;
     source.capturedAt = new Date("2026-08-18T00:00:00Z");
@@ -274,6 +275,23 @@ describe("component telemetry routes", () => {
         latestSnapshot: snapshot,
         capturedAt: "2026-08-18T00:00:00.000Z",
         receivedAt: "2026-08-18T00:00:01.000Z",
+      },
+    ]);
+
+    const monitor = await app.request(
+      "/v1/system/components/current?boothId=booth-01&componentId=router-01",
+      {
+        headers: {
+          authorization: ["Bearer", "monitor-token"].join(" "),
+        },
+      },
+    );
+    expect(monitor.status).toBe(200);
+    await expect(monitor.json()).resolves.toMatchObject([
+      {
+        boothId: "booth-01",
+        componentId: "router-01",
+        latestSnapshot: snapshot,
       },
     ]);
 
