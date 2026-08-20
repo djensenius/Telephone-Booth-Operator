@@ -2651,6 +2651,15 @@ const reviveDates = <T>(row: T): T => {
   return out as T;
 };
 
+const resolveJsonPath = (value: unknown, path: readonly string[]): unknown => {
+  let current = value;
+  for (const segment of path) {
+    if (current === null || typeof current !== "object") return undefined;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+};
+
 const matchesWhere = (record: Record<string, unknown>, where: Record<string, unknown>): boolean => {
   for (const [key, raw] of Object.entries(where)) {
     if (key === "OR" && Array.isArray(raw)) {
@@ -2721,34 +2730,42 @@ const matchesWhere = (record: Record<string, unknown>, where: Record<string, unk
     }
     if (typeof raw === "object") {
       const filter = raw as Record<string, unknown>;
+      const path =
+        Array.isArray(filter.path) && filter.path.every((segment) => typeof segment === "string")
+          ? (filter.path as string[])
+          : null;
+      const candidate = path ? resolveJsonPath(value, path) : value;
+      if ("equals" in filter && candidate !== filter.equals) return false;
       if ("in" in filter) {
-        if (!Array.isArray(filter.in) || !(filter.in as unknown[]).includes(value)) return false;
+        if (!Array.isArray(filter.in) || !(filter.in as unknown[]).includes(candidate))
+          return false;
       }
       if ("not" in filter) {
         if (filter.not === null) {
-          if (value === null || value === undefined) return false;
-        } else if (value === filter.not) {
+          if (candidate === null || candidate === undefined) return false;
+        } else if (candidate === filter.not) {
           return false;
         }
       }
       if ("gte" in filter) {
-        if (value === undefined || value === null) return false;
-        if (compareValues(value, filter.gte) < 0) return false;
+        if (candidate === undefined || candidate === null) return false;
+        if (compareValues(candidate, filter.gte) < 0) return false;
       }
       if ("lte" in filter) {
-        if (value === undefined || value === null) return false;
-        if (compareValues(value, filter.lte) > 0) return false;
+        if (candidate === undefined || candidate === null) return false;
+        if (compareValues(candidate, filter.lte) > 0) return false;
       }
       if ("lt" in filter) {
-        if (value === undefined || value === null) return false;
-        if (compareValues(value, filter.lt) >= 0) return false;
+        if (candidate === undefined || candidate === null) return false;
+        if (compareValues(candidate, filter.lt) >= 0) return false;
       }
       if ("gt" in filter) {
-        if (value === undefined || value === null) return false;
-        if (compareValues(value, filter.gt) <= 0) return false;
+        if (candidate === undefined || candidate === null) return false;
+        if (compareValues(candidate, filter.gt) <= 0) return false;
       }
       if ("startsWith" in filter) {
-        if (typeof value !== "string" || !value.startsWith(String(filter.startsWith))) return false;
+        if (typeof candidate !== "string" || !candidate.startsWith(String(filter.startsWith)))
+          return false;
       }
     } else {
       if (value !== raw) return false;

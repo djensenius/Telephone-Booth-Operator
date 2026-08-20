@@ -187,6 +187,7 @@ export const MonitorSummarySchema = z.object({
   messagesToday: z.number().int().nonnegative(),
   callsTotal: z.number().int().nonnegative(),
   messagesTotal: z.number().int().nonnegative(),
+  messagePlaybackStartsTotal: z.number().int().nonnegative(),
   breakdownToday: InteractionBreakdownSchema,
   dayStartedAt: z.string().datetime(),
   generatedAt: z.string().datetime(),

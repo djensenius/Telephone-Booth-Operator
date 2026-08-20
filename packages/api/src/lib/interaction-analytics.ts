@@ -47,8 +47,8 @@ type InteractionBreakdown = {
 
 const NO_SELECTION_OUTCOME = "hung_up_before_dial";
 const MESSAGE_LEFT_OUTCOME = "recording_completed";
-const MESSAGE_PLAYBACK_STATE = "playing_message";
-const INSTRUCTION_PLAYBACK_STATE = "playing_instructions";
+export const MESSAGE_PLAYBACK_STATE = "playing_message";
+export const INSTRUCTION_PLAYBACK_STATE = "playing_instructions";
 
 const isoDay = (date: Date): string => date.toISOString().slice(0, 10);
 

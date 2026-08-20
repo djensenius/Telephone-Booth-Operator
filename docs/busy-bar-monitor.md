@@ -31,6 +31,7 @@ The summary endpoint returns aggregate counts for the active installation:
   "messagesToday": 8,
   "callsTotal": 143,
   "messagesTotal": 96,
+  "messagePlaybackStartsTotal": 41,
   "breakdownToday": {
     "noSelection": 3,
     "wrongNumberAttempts": 9,
@@ -55,6 +56,9 @@ with identical values.
 - `noSelection` and `messagesLeft` come from today's started pickups.
 - `wrongNumberAttempts`, `messagePlaybackStarts`, and
   `instructionPlaybackStarts` come from today's booth events.
+- `messagePlaybackStartsTotal` counts all `state_transition` events in the
+  active installation whose `payload.to` is `playing_message`. This is the
+  all-time `LISTEN / ALL` value and does not use the current-day boundary.
 
 `messagesToday` counts messages completed on or after the same boundary, and
 `messagesTotal` counts all completed messages in the active installation.

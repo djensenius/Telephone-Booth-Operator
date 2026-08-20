@@ -140,6 +140,7 @@ describe("MonitorSummarySchema", () => {
       messagesToday: 4,
       callsTotal: 15,
       messagesTotal: 10,
+      messagePlaybackStartsTotal: 6,
       breakdownToday: {
         noSelection: 1,
         wrongNumberAttempts: 2,
@@ -159,6 +160,7 @@ describe("MonitorSummarySchema", () => {
         messagesToday: 4,
         callsTotal: 15,
         messagesTotal: 10,
+        messagePlaybackStartsTotal: 6,
         dayStartedAt: "2026-08-08T04:00:00.000Z",
         generatedAt: "2026-08-08T19:00:00.000Z",
         timeZone: "America/Toronto",

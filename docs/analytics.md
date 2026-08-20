@@ -26,6 +26,7 @@ Different metrics cohort on different timestamps by design:
 | `StatsOverview.actions.*`                                                                           | `BoothEvent.occurredAt` in the selected range                       |
 | `StatsOverview.interactions.inProgressNow`                                                          | Live scoped count where `endedAt = null`                            |
 | `StatsSummary.interactions.*`                                                                       | Current local-day `CallSession.startedAt` counts                    |
+| `MonitorSummary.messagePlaybackStartsTotal`                                                         | All active-installation `BoothEvent` playback-start transitions     |
 | `MonitorSummary.breakdownToday.noSelection/messagesLeft`                                            | Current local-day `CallSession.startedAt` cohort                    |
 | `MonitorSummary.breakdownToday.wrongNumberAttempts/messagePlaybackStarts/instructionPlaybackStarts` | Current local-day `BoothEvent.occurredAt` cohort                    |
 | `Installation.summary.interactions*`                                                                | The installation's full frozen `CallSession` / `BoothEvent` history |
@@ -50,6 +51,10 @@ headline pickup breakouts are intentionally narrower:
 `aborted`, `installation_ended`, upload failures, and other outcomes still
 appear in the raw outcome distribution, but they are not folded into
 `noSelection`.
+
+`MonitorSummary.messagePlaybackStartsTotal` uses the same playback-start
+predicate as `messagePlaybackStarts`, but it counts the entire active
+installation instead of only the current local day.
 
 ## Action counting rules
 
