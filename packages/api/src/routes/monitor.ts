@@ -26,7 +26,8 @@ monitorRouter.get(
     const { timeZone } = c.req.valid("query");
     const generatedAt = new Date();
     const dayStartedAt = startOfDayInTimeZone(generatedAt, timeZone);
-    const scoped = scopeWhere(await resolveInstallationScope(undefined));
+    const scope = await resolveInstallationScope(undefined);
+    const scoped = scopeWhere(scope);
     const [
       todaySessions,
       todayActionEvents,
@@ -35,8 +36,26 @@ monitorRouter.get(
       messagesTotal,
       messagePlaybackStartsTotal,
     ] = await db.$transaction(
-      (tx) =>
-        Promise.all([
+      (tx) => {
+        const messagePlaybackStartsTotalPromise =
+          scope.kind === "one"
+            ? tx.$queryRaw<{ count: number }[]>`
+                  SELECT COUNT(*)::int AS "count"
+                  FROM "BoothEvent"
+                  WHERE "installationId" = ${scope.installationId}::uuid
+                    AND "type" = 'state_transition'
+                    AND "payload"->>'to' = ${MESSAGE_PLAYBACK_STATE}
+                `.then((rows) => rows[0]?.count ?? 0)
+            : scope.kind === "all"
+              ? tx.boothEvent.count({
+                  where: {
+                    type: "state_transition",
+                    payload: { path: ["to"], equals: MESSAGE_PLAYBACK_STATE },
+                  },
+                })
+              : Promise.resolve(0);
+
+        return Promise.all([
           tx.callSession.findMany({
             where: { ...scoped, startedAt: { gte: dayStartedAt } },
           }) as unknown as Promise<
@@ -58,14 +77,9 @@ monitorRouter.get(
           tx.message.count({ where: { ...scoped, receivedAt: { gte: dayStartedAt } } }),
           tx.callSession.count({ where: scoped }),
           tx.message.count({ where: { ...scoped, receivedAt: { not: null } } }),
-          tx.boothEvent.count({
-            where: {
-              ...scoped,
-              type: "state_transition",
-              payload: { path: ["to"], equals: MESSAGE_PLAYBACK_STATE },
-            },
-          }),
-        ]),
+          messagePlaybackStartsTotalPromise,
+        ]);
+      },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
     const interactionsToday = todaySessions.length;

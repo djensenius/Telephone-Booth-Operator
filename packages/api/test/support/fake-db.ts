@@ -2533,8 +2533,24 @@ export const fakeDb = {
   $queryRaw: async (
     strings: TemplateStringsArray,
     ...values: unknown[]
-  ): Promise<Array<{ endedAt: Date | null } | { id: string }>> => {
+  ): Promise<Array<{ endedAt: Date | null } | { id: string } | { count: number }>> => {
     const id = values.find((value) => typeof value === "string");
+    if (strings.join("").includes('FROM "BoothEvent"')) {
+      const [installationId, playbackState] = values;
+      const count =
+        typeof installationId === "string" && typeof playbackState === "string"
+          ? store.boothEvents.filter(
+              (event) =>
+                event.installationId === installationId &&
+                event.type === "state_transition" &&
+                event.payload !== null &&
+                typeof event.payload === "object" &&
+                !Array.isArray(event.payload) &&
+                (event.payload as Record<string, unknown>).to === playbackState,
+            ).length
+          : 0;
+      return [{ count }];
+    }
     if (strings.join("").includes('FROM "Message"')) {
       const message = typeof id === "string" ? store.messages.get(id) : undefined;
       if (strings.join("").includes('"processingLeaseTokenHash"')) {
