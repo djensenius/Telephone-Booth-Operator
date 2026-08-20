@@ -45,9 +45,10 @@ narrowest scope for the credential's job:
   WebSocket stream, not the worker input, that excludes content.) An
   operator-scoped token can never read `work` events.
 - **`monitor`** — a read-only credential for the external BUSY Bar companion.
-  It may read only `GET /v1/status`, `GET /v1/system/current`, and the
-  aggregate-only `GET /v1/monitor/summary`; on `/v1/ws/status` it receives only
-  `status` and `system` envelopes.
+  It may read only `GET /v1/status`, `GET /v1/system/current`,
+  `GET /v1/system/components/current`, and the aggregate-only
+  `GET /v1/monitor/summary`; on `/v1/ws/status` it receives only `status` and
+  `system` envelopes.
 - **`telemetry`** — a write-only credential for one router component. It may
   call only `PUT /v1/system/components/current`. The API derives `boothId` and
   `componentId` from the token's `TelemetrySource` relation rather than the

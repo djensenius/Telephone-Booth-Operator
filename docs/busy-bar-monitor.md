@@ -18,6 +18,7 @@ scope can access only:
 
 - `GET /v1/status`
 - `GET /v1/system/current`
+- `GET /v1/system/components/current`
 - `GET /v1/monitor/summary`
 - `/v1/ws/status`, limited to `status` and `system` envelopes
 

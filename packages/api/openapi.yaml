@@ -2078,6 +2078,7 @@ paths:
       security:
         - operatorSession: []
         - operatorBearer: []
+        - apiToken: []
       parameters:
         - name: boothId
           in: query
@@ -2093,7 +2094,8 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/TelemetrySourceEnvelope" }
-        "401": { description: operator authentication required }
+        "401": { description: operator authentication or valid API token required }
+        "403": { description: API token lacks operator or monitor scope }
 
   /v1/system/components/history:
     get:
