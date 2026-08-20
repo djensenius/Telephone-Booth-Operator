@@ -132,7 +132,7 @@ describe("StatsSummarySchema", () => {
 });
 
 describe("MonitorSummarySchema", () => {
-  it("requires interaction totals and the daily breakdown", () => {
+  it("requires interaction totals, the all-time playback total, and the daily breakdown", () => {
     const parsed = MonitorSummarySchema.parse({
       interactionsToday: 5,
       interactionsTotal: 15,
@@ -140,6 +140,7 @@ describe("MonitorSummarySchema", () => {
       messagesToday: 4,
       callsTotal: 15,
       messagesTotal: 10,
+      messagePlaybackStartsTotal: 6,
       breakdownToday: {
         noSelection: 1,
         wrongNumberAttempts: 2,
@@ -153,12 +154,17 @@ describe("MonitorSummarySchema", () => {
     });
 
     expect(parsed.breakdownToday.wrongNumberAttempts).toBe(2);
+    const { messagePlaybackStartsTotal: _messagePlaybackStartsTotal, ...withoutPlaybackTotal } =
+      parsed;
+    expect(() => MonitorSummarySchema.parse(withoutPlaybackTotal)).toThrow();
+
     expect(() =>
       MonitorSummarySchema.parse({
         callsToday: 5,
         messagesToday: 4,
         callsTotal: 15,
         messagesTotal: 10,
+        messagePlaybackStartsTotal: 6,
         dayStartedAt: "2026-08-08T04:00:00.000Z",
         generatedAt: "2026-08-08T19:00:00.000Z",
         timeZone: "America/Toronto",

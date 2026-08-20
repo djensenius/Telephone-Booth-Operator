@@ -3438,6 +3438,7 @@ components:
           messagesToday,
           callsTotal,
           messagesTotal,
+          messagePlaybackStartsTotal,
           breakdownToday,
           dayStartedAt,
           generatedAt,
@@ -3464,6 +3465,10 @@ components:
           deprecated: true
           description: Deprecated compatibility alias for interactionsTotal.
         messagesTotal: { type: integer, minimum: 0 }
+        messagePlaybackStartsTotal:
+          type: integer
+          minimum: 0
+          description: All state_transition events in the active installation whose payload.to was playing_message.
         breakdownToday:
           $ref: "#/components/schemas/InteractionBreakdown"
         dayStartedAt: { type: string, format: date-time }

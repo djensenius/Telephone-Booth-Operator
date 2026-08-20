@@ -72,6 +72,11 @@ describe("/v1/monitor/summary", () => {
     });
     seedBoothEvent({
       type: "state_transition",
+      occurredAt: new Date("2026-08-07T22:00:00.000Z"),
+      payload: { from: "idle", to: "playing_message", cause: "test" },
+    });
+    seedBoothEvent({
+      type: "state_transition",
       occurredAt: new Date("2026-08-08T05:02:00.000Z"),
       payload: { from: "idle", to: "playing_message", cause: "test" },
     });
@@ -92,6 +97,12 @@ describe("/v1/monitor/summary", () => {
       installationId: otherInstallation.id,
       startedAt: new Date("2026-08-08T05:00:00.000Z"),
     });
+    seedBoothEvent({
+      installationId: otherInstallation.id,
+      type: "state_transition",
+      occurredAt: new Date("2026-08-08T05:04:00.000Z"),
+      payload: { from: "idle", to: "playing_message", cause: "test" },
+    });
 
     const response = await app.request("/v1/monitor/summary?timeZone=America%2FToronto", {
       headers: phoneHeaders,
@@ -105,6 +116,7 @@ describe("/v1/monitor/summary", () => {
       messagesToday: 1,
       callsTotal: 3,
       messagesTotal: 2,
+      messagePlaybackStartsTotal: 2,
       breakdownToday: {
         noSelection: 1,
         wrongNumberAttempts: 1,
@@ -118,6 +130,58 @@ describe("/v1/monitor/summary", () => {
     });
     expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
       isolationLevel: "RepeatableRead",
+    });
+  });
+
+  it("returns zeros for an active installation with no activity", async () => {
+    const response = await app.request("/v1/monitor/summary?timeZone=America%2FToronto", {
+      headers: phoneHeaders,
+    });
+
+    expect(response.status, await response.clone().text()).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      interactionsToday: 0,
+      interactionsTotal: 0,
+      callsToday: 0,
+      messagesToday: 0,
+      callsTotal: 0,
+      messagesTotal: 0,
+      messagePlaybackStartsTotal: 0,
+      breakdownToday: {
+        noSelection: 0,
+        wrongNumberAttempts: 0,
+        messagesLeft: 0,
+        messagePlaybackStarts: 0,
+        instructionPlaybackStarts: 0,
+      },
+      dayStartedAt: "2026-08-08T04:00:00.000Z",
+      generatedAt: "2026-08-08T19:00:00.000Z",
+      timeZone: "America/Toronto",
+    });
+  });
+
+  it("excludes unrelated installations from the all-time playback total", async () => {
+    const otherInstallation = seedInstallation({
+      startedAt: new Date("2025-01-01T00:00:00.000Z"),
+      endedAt: new Date("2025-12-31T23:59:59.000Z"),
+    });
+    seedBoothEvent({
+      installationId: otherInstallation.id,
+      type: "state_transition",
+      occurredAt: new Date("2026-08-08T05:04:00.000Z"),
+      payload: { from: "idle", to: "playing_message", cause: "test" },
+    });
+
+    const response = await app.request("/v1/monitor/summary?timeZone=America%2FToronto", {
+      headers: phoneHeaders,
+    });
+
+    expect(response.status, await response.clone().text()).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      messagePlaybackStartsTotal: 0,
+      breakdownToday: {
+        messagePlaybackStarts: 0,
+      },
     });
   });
 
