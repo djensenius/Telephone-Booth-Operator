@@ -16,6 +16,7 @@ import { monitorRouter } from "../src/routes/monitor.js";
 import {
   fakeDb,
   resetFakeDb,
+  seedBoothEvent,
   seedCallSession,
   seedInstallation,
   seedMessage,
@@ -54,7 +55,31 @@ describe("/v1/monitor/summary", () => {
       receivedAt: null,
     });
     seedCallSession({ startedAt: new Date("2026-08-08T03:59:59.000Z") });
-    seedCallSession({ startedAt: new Date("2026-08-08T04:00:00.000Z") });
+    seedCallSession({
+      startedAt: new Date("2026-08-08T04:00:00.000Z"),
+      endedAt: new Date("2026-08-08T04:05:00.000Z"),
+      outcome: "recording_completed",
+    });
+    seedCallSession({
+      startedAt: new Date("2026-08-08T05:00:00.000Z"),
+      endedAt: new Date("2026-08-08T05:00:10.000Z"),
+      outcome: "hung_up_before_dial",
+    });
+    seedBoothEvent({
+      type: "digit_dialed",
+      occurredAt: new Date("2026-08-08T05:01:00.000Z"),
+      payload: { digit: 7, kind: "digit_dialed", pulses: 7 },
+    });
+    seedBoothEvent({
+      type: "state_transition",
+      occurredAt: new Date("2026-08-08T05:02:00.000Z"),
+      payload: { from: "idle", to: "playing_message", cause: "test" },
+    });
+    seedBoothEvent({
+      type: "state_transition",
+      occurredAt: new Date("2026-08-08T05:03:00.000Z"),
+      payload: { from: "idle", to: "playing_instructions", cause: "test" },
+    });
     const otherInstallation = seedInstallation({
       startedAt: new Date("2025-01-01T00:00:00.000Z"),
       endedAt: new Date("2025-12-31T23:59:59.000Z"),
@@ -74,10 +99,19 @@ describe("/v1/monitor/summary", () => {
 
     expect(response.status, await response.clone().text()).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      callsToday: 1,
+      interactionsToday: 2,
+      interactionsTotal: 3,
+      callsToday: 2,
       messagesToday: 1,
-      callsTotal: 2,
+      callsTotal: 3,
       messagesTotal: 2,
+      breakdownToday: {
+        noSelection: 1,
+        wrongNumberAttempts: 1,
+        messagesLeft: 1,
+        messagePlaybackStarts: 1,
+        instructionPlaybackStarts: 1,
+      },
       dayStartedAt: "2026-08-08T04:00:00.000Z",
       generatedAt: "2026-08-08T19:00:00.000Z",
       timeZone: "America/Toronto",

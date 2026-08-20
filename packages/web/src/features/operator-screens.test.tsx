@@ -1148,6 +1148,121 @@ describe("Events feature", () => {
 // param now means "this run" rather than "everything ever" — so the scope
 // reaching the request is the compatibility guarantee worth pinning down.
 describe("Stats feature", () => {
+  it("renders pickup and action breakouts", async () => {
+    server.use(
+      http.get("http://localhost/v1/stats/overview", () =>
+        HttpResponse.json({
+          window: "7d",
+          rangeStart: "2026-08-12T00:00:00.000Z",
+          rangeEnd: "2026-08-19T00:00:00.000Z",
+          generatedAt: "2026-08-19T00:00:00.000Z",
+          timezone: "UTC",
+          interactions: {
+            total: 12,
+            inProgressNow: 1,
+            noSelection: 2,
+            messagesLeft: 4,
+            averageDurationMs: 12_000,
+            longestDurationMs: 30_000,
+            outcomes: {
+              recording_completed: 4,
+              hung_up_before_dial: 2,
+            },
+            perDay: [
+              {
+                date: "2026-08-19",
+                total: 12,
+                noSelection: 2,
+                messagesLeft: 4,
+              },
+            ],
+          },
+          actions: {
+            digitsDialed: {
+              "0": 1,
+              "1": 5,
+              "2": 3,
+              "3": 1,
+              "4": 0,
+              "5": 0,
+              "6": 0,
+              "7": 0,
+              "8": 0,
+              "9": 0,
+            },
+            leaveMessageSelections: 5,
+            listenMessageSelections: 3,
+            instructionSelections: 1,
+            wrongNumberAttempts: 1,
+            messagePlaybackStarts: 3,
+            instructionPlaybackStarts: 1,
+          },
+          calls: {
+            total: 12,
+            completed: 4,
+            inProgress: 1,
+            averageDurationMs: 12_000,
+            longestDurationMs: 30_000,
+            outcomes: {
+              recording_completed: 4,
+              hung_up_before_dial: 2,
+            },
+            perDay: [{ date: "2026-08-19", total: 12, completed: 4 }],
+          },
+          messages: {
+            total: 3,
+            approved: 3,
+            allRecordings: 4,
+            byStatus: { approved: 3, pending: 1 },
+            averageDurationMs: 8_000,
+          },
+          playback: { totalPlaybacks: 3 },
+          pickupsHangups: {
+            pickups: 12,
+            hangups: 11,
+            digitsDialed: {
+              "0": 1,
+              "1": 5,
+              "2": 3,
+              "3": 1,
+              "4": 0,
+              "5": 0,
+              "6": 0,
+              "7": 0,
+              "8": 0,
+              "9": 0,
+            },
+          },
+          uploads: { succeeded: 4, failed: 0, failureRate: 0 },
+          topQuestions: [],
+          hourly: Array.from({ length: 24 }, (_, hour) => ({
+            hour,
+            calls: hour === 12 ? 12 : 0,
+            interactions: hour === 12 ? 12 : 0,
+            messages: hour === 12 ? 4 : 0,
+          })),
+          busiest: { hour: 12, dayOfWeek: 3 },
+          lastActivityAt: "2026-08-19T00:00:00.000Z",
+          boothBreakdown: [],
+        }),
+      ),
+    );
+
+    const { container } = renderPath("/stats");
+
+    expect(await screen.findByText("What visitors did")).toBeTruthy();
+    expect(screen.getByLabelText("Pickup overview")).toBeTruthy();
+    expect(screen.getAllByText("Pickups").length).toBeGreaterThan(0);
+    expect(screen.getByText("Pickup outcomes")).toBeTruthy();
+    expect(screen.getByText("Pickups per day (UTC)")).toBeTruthy();
+    expect(screen.getAllByText("No selection").length).toBeGreaterThan(0);
+    expect(screen.getByText("Wrong numbers")).toBeTruthy();
+    expect(screen.getAllByText("Messages left").length).toBeGreaterThan(0);
+    expect(screen.getByText("Messages listened to")).toBeTruthy();
+    expect(screen.getByText("Instructions heard")).toBeTruthy();
+    await expectNoCriticalAxe(container);
+  });
+
   it("passes an installation scope through to the overview fetch", async () => {
     renderPath(`/stats?installationId=ee111111-1111-4111-8111-111111111111`);
     await waitFor(() =>

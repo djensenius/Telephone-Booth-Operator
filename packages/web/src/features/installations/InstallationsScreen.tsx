@@ -83,7 +83,27 @@ function SummaryTile({ label, value, hint }: SummaryTileProps): JSX.Element {
 function FrozenSummary({ summary }: { readonly summary: InstallationSummary }): JSX.Element {
   return (
     <div className="stats-tiles installations-summary">
-      <SummaryTile label="Calls" value={fmtNumber(summary.calls)} />
+      <SummaryTile label="Total pickups" value={fmtNumber(summary.interactions)} />
+      <SummaryTile
+        label="No selection"
+        value={fmtNumber(summary.interactionBreakdown.noSelection)}
+      />
+      <SummaryTile
+        label="Wrong numbers"
+        value={fmtNumber(summary.interactionBreakdown.wrongNumberAttempts)}
+      />
+      <SummaryTile
+        label="Messages left"
+        value={fmtNumber(summary.interactionBreakdown.messagesLeft)}
+      />
+      <SummaryTile
+        label="Messages listened to"
+        value={fmtNumber(summary.interactionBreakdown.messagePlaybackStarts)}
+      />
+      <SummaryTile
+        label="Instructions heard"
+        value={fmtNumber(summary.interactionBreakdown.instructionPlaybackStarts)}
+      />
       <SummaryTile label="Playable messages" value={fmtNumber(summary.messages)} />
       <SummaryTile label="All recordings" value={fmtNumber(summary.allRecordings)} />
       <SummaryTile label="Approved" value={fmtNumber(summary.messagesApproved)} />
@@ -108,8 +128,8 @@ function ActiveSummary(): JSX.Element {
   const summary = summaryQuery.data;
   return (
     <div className="stats-tiles installations-summary">
-      <SummaryTile label="Calls today" value={fmtNumber(summary.calls.today)} />
-      <SummaryTile label="Calls in progress" value={fmtNumber(summary.calls.inProgress)} />
+      <SummaryTile label="Pickups today" value={fmtNumber(summary.interactions.today)} />
+      <SummaryTile label="Pickups in progress" value={fmtNumber(summary.interactions.inProgress)} />
       <SummaryTile label="Messages today" value={fmtNumber(summary.messages.receivedToday)} />
       <SummaryTile label="Pending" value={fmtNumber(summary.messages.pending)} />
       <SummaryTile

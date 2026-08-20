@@ -7,5 +7,8 @@ describe("TelephoneBanner", () => {
     render(<TelephoneBanner />);
     expect(screen.getByText("Telephone Booth")).toBeDefined();
     expect(screen.getByText("Operator console")).toBeDefined();
+    expect(
+      screen.getByText("Pickups, questions, and system status for the installation."),
+    ).toBeDefined();
   });
 });

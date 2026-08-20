@@ -13,7 +13,7 @@ export function TelephoneBanner(): JSX.Element {
         </span>
       </a>
       <p className="telephone-banner__tagline">
-        Calls, questions, and system status for the installation.
+        Pickups, questions, and system status for the installation.
       </p>
     </header>
   );

@@ -3339,7 +3339,8 @@ components:
           items: { $ref: "#/components/schemas/Transcription" }
     StatsSummary:
       type: object
-      required: [booth, messages, calls, realtime, dayStartedAt, generatedAt, timeZone]
+      required:
+        [booth, messages, interactions, calls, realtime, dayStartedAt, generatedAt, timeZone]
       properties:
         booth: { $ref: "#/components/schemas/BoothStatus" }
         messages:
@@ -3361,7 +3362,18 @@ components:
               anyOf:
                 - { type: string, format: uuid }
                 - { type: "null" }
+        interactions:
+          type: object
+          required: [today, inProgress]
+          properties:
+            today:
+              type: integer
+              minimum: 0
+              description: Interactions started on or after dayStartedAt.
+            inProgress: { type: integer, minimum: 0 }
         calls:
+          deprecated: true
+          description: Deprecated compatibility alias for interactions.
           type: object
           required: [today, inProgress]
           properties:
@@ -3385,15 +3397,75 @@ components:
           minLength: 1
           maxLength: 64
           description: Effective IANA time zone used for today's counters.
+    InteractionBreakdown:
+      type: object
+      required:
+        [
+          noSelection,
+          wrongNumberAttempts,
+          messagesLeft,
+          messagePlaybackStarts,
+          instructionPlaybackStarts,
+        ]
+      properties:
+        noSelection:
+          type: integer
+          minimum: 0
+          description: Interactions whose final outcome was hung_up_before_dial.
+        wrongNumberAttempts:
+          type: integer
+          minimum: 0
+          description: digit_dialed events for digits 3 through 9.
+        messagesLeft:
+          type: integer
+          minimum: 0
+          description: Interactions whose final outcome was recording_completed.
+        messagePlaybackStarts:
+          type: integer
+          minimum: 0
+          description: state_transition events whose payload.to was playing_message.
+        instructionPlaybackStarts:
+          type: integer
+          minimum: 0
+          description: state_transition events whose payload.to was playing_instructions.
     MonitorSummary:
       type: object
       required:
-        [callsToday, messagesToday, callsTotal, messagesTotal, dayStartedAt, generatedAt, timeZone]
+        [
+          interactionsToday,
+          interactionsTotal,
+          callsToday,
+          messagesToday,
+          callsTotal,
+          messagesTotal,
+          breakdownToday,
+          dayStartedAt,
+          generatedAt,
+          timeZone,
+        ]
       properties:
-        callsToday: { type: integer, minimum: 0 }
+        interactionsToday:
+          type: integer
+          minimum: 0
+          description: Interactions started on or after dayStartedAt in the active installation.
+        interactionsTotal:
+          type: integer
+          minimum: 0
+          description: All interactions in the active installation.
+        callsToday:
+          type: integer
+          minimum: 0
+          deprecated: true
+          description: Deprecated compatibility alias for interactionsToday.
         messagesToday: { type: integer, minimum: 0 }
-        callsTotal: { type: integer, minimum: 0 }
+        callsTotal:
+          type: integer
+          minimum: 0
+          deprecated: true
+          description: Deprecated compatibility alias for interactionsTotal.
         messagesTotal: { type: integer, minimum: 0 }
+        breakdownToday:
+          $ref: "#/components/schemas/InteractionBreakdown"
         dayStartedAt: { type: string, format: date-time }
         generatedAt: { type: string, format: date-time }
         timeZone: { type: string, minLength: 1, maxLength: 64 }
@@ -3439,6 +3511,8 @@ components:
       required:
         [
           calls,
+          interactions,
+          interactionBreakdown,
           messages,
           allRecordings,
           byStatus,
@@ -3451,7 +3525,14 @@ components:
           lastActivityAt,
         ]
       properties:
-        calls: { type: integer, minimum: 0 }
+        calls:
+          type: integer
+          minimum: 0
+          deprecated: true
+          description: Deprecated compatibility alias for interactions.
+        interactions: { type: integer, minimum: 0 }
+        interactionBreakdown:
+          $ref: "#/components/schemas/InteractionBreakdown"
         messages: { type: integer, minimum: 0 }
         allRecordings: { type: integer, minimum: 0 }
         byStatus: { type: object, additionalProperties: { type: integer, minimum: 0 } }
@@ -3576,9 +3657,11 @@ components:
           rangeEnd,
           generatedAt,
           timezone,
+          interactions,
           calls,
           messages,
           playback,
+          actions,
           pickupsHangups,
           uploads,
           topQuestions,
@@ -3596,7 +3679,56 @@ components:
         rangeEnd: { type: string, format: date-time }
         generatedAt: { type: string, format: date-time }
         timezone: { type: string, enum: [UTC] }
+        interactions:
+          type: object
+          required:
+            [
+              total,
+              inProgressNow,
+              noSelection,
+              messagesLeft,
+              averageDurationMs,
+              longestDurationMs,
+              outcomes,
+              perDay,
+            ]
+          properties:
+            total:
+              type: integer
+              minimum: 0
+              description: CallSession rows whose startedAt was in range.
+            inProgressNow:
+              type: integer
+              minimum: 0
+              description: Live scoped count of interactions whose endedAt is still null.
+            noSelection:
+              type: integer
+              minimum: 0
+              description: Start-cohort interactions whose final outcome was hung_up_before_dial.
+            messagesLeft:
+              type: integer
+              minimum: 0
+              description: Start-cohort interactions whose final outcome was recording_completed.
+            averageDurationMs: { anyOf: [{ type: number, minimum: 0 }, { type: "null" }] }
+            longestDurationMs: { anyOf: [{ type: number, minimum: 0 }, { type: "null" }] }
+            outcomes:
+              type: object
+              additionalProperties: { type: integer, minimum: 0 }
+            perDay:
+              type: array
+              items:
+                type: object
+                required: [date, total, noSelection, messagesLeft]
+                properties:
+                  date: { type: string }
+                  total: { type: integer, minimum: 0 }
+                  noSelection: { type: integer, minimum: 0 }
+                  messagesLeft: { type: integer, minimum: 0 }
         calls:
+          deprecated: true
+          description: >
+            Deprecated compatibility object. Unlike interactions, its completed
+            and outcome metrics continue to cohort by endedAt for legacy clients.
           type: object
           required:
             [total, completed, inProgress, averageDurationMs, longestDurationMs, outcomes, perDay]
@@ -3636,16 +3768,54 @@ components:
           type: object
           required: [totalPlaybacks]
           properties:
-            totalPlaybacks: { type: integer, minimum: 0 }
+            totalPlaybacks:
+              type: integer
+              minimum: 0
+              deprecated: true
+              description: Deprecated compatibility alias for actions.messagePlaybackStarts.
+        actions:
+          type: object
+          required:
+            [
+              digitsDialed,
+              leaveMessageSelections,
+              listenMessageSelections,
+              instructionSelections,
+              wrongNumberAttempts,
+              messagePlaybackStarts,
+              instructionPlaybackStarts,
+            ]
+          properties:
+            digitsDialed:
+              type: object
+              additionalProperties: { type: integer, minimum: 0 }
+              description: >
+                Zero-filled per-digit histogram from digit_dialed events that
+                occurred in range.
+            leaveMessageSelections: { type: integer, minimum: 0 }
+            listenMessageSelections: { type: integer, minimum: 0 }
+            instructionSelections: { type: integer, minimum: 0 }
+            wrongNumberAttempts: { type: integer, minimum: 0 }
+            messagePlaybackStarts: { type: integer, minimum: 0 }
+            instructionPlaybackStarts: { type: integer, minimum: 0 }
         pickupsHangups:
           type: object
           required: [pickups, hangups, digitsDialed]
           properties:
-            pickups: { type: integer, minimum: 0 }
+            pickups:
+              type: integer
+              minimum: 0
+              deprecated: true
+              description: Deprecated compatibility alias for interactions.total.
             hangups: { type: integer, minimum: 0 }
             digitsDialed:
               type: object
               additionalProperties: { type: integer, minimum: 0 }
+              deprecated: true
+              description: >
+                Deprecated compatibility histogram. Uses digit_dialed events
+                when the range has any such events, and falls back to
+                CallSession.digitsDialed summaries only when it does not.
         uploads:
           type: object
           required: [succeeded, failed, failureRate]
@@ -3668,10 +3838,15 @@ components:
           type: array
           items:
             type: object
-            required: [hour, calls, messages]
+            required: [hour, interactions, calls, messages]
             properties:
               hour: { type: integer, minimum: 0, maximum: 23 }
-              calls: { type: integer, minimum: 0 }
+              interactions: { type: integer, minimum: 0 }
+              calls:
+                type: integer
+                minimum: 0
+                deprecated: true
+                description: Deprecated compatibility alias for interactions.
               messages: { type: integer, minimum: 0 }
         busiest:
           type: object
@@ -3684,10 +3859,15 @@ components:
           type: array
           items:
             type: object
-            required: [boothId, calls, messages, lastSeenAt]
+            required: [boothId, interactions, calls, messages, lastSeenAt]
             properties:
               boothId: { type: string }
-              calls: { type: integer, minimum: 0 }
+              interactions: { type: integer, minimum: 0 }
+              calls:
+                type: integer
+                minimum: 0
+                deprecated: true
+                description: Deprecated compatibility alias for interactions.
               messages: { anyOf: [{ type: integer, minimum: 0 }, { type: "null" }] }
               lastSeenAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
     MobileDevicePlatform:

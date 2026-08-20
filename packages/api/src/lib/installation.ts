@@ -15,6 +15,10 @@ import {
 } from "@telephone-booth-operator/shared";
 import type { Prisma } from "../generated/prisma/client.js";
 import { db } from "./db.js";
+import {
+  emptyInteractionBreakdown,
+  summarizeInteractionBreakdown,
+} from "./interaction-analytics.js";
 import { log } from "./logger.js";
 
 // Name given to the installation created automatically when none exists.
@@ -66,21 +70,30 @@ type InstallationRow = {
   createdAt: Date;
 };
 
-const parseSummary = (raw: unknown): InstallationSummary | null => {
+export const parseInstallationSummary = (raw: unknown): InstallationSummary | null => {
   if (raw === null || raw === undefined) return null;
   // Summaries frozen before claimed processing used `messages` for every
   // landed recording. New summaries reserve it for the approved/playable
   // subset and add `allRecordings` plus `byStatus`. Presence of the new field
   // is the persisted format marker, so historical eras remain truthful rather
   // than silently rendering their total as a playable count.
-  const normalized =
-    typeof raw === "object" && !Array.isArray(raw) && !("allRecordings" in raw)
-      ? {
-          ...(raw as Record<string, unknown>),
-          allRecordings: (raw as Record<string, unknown>)["messages"],
-          messages: (raw as Record<string, unknown>)["messagesApproved"],
-        }
-      : raw;
+  let normalized = raw;
+  if (typeof raw === "object" && !Array.isArray(raw)) {
+    const record = raw as Record<string, unknown>;
+    normalized = {
+      ...record,
+      ...(!("allRecordings" in record)
+        ? {
+            allRecordings: record["messages"],
+            messages: record["messagesApproved"],
+          }
+        : {}),
+      ...(!("interactions" in record) ? { interactions: record["calls"] } : {}),
+      ...(!("interactionBreakdown" in record)
+        ? { interactionBreakdown: emptyInteractionBreakdown() }
+        : {}),
+    };
+  }
   const parsed = InstallationSummarySchema.safeParse(normalized);
   return parsed.success ? parsed.data : null;
 };
@@ -97,7 +110,7 @@ export const serializeInstallation = (row: InstallationRow): InstallationDto => 
   // Stored as an opaque JSON column, and an imported archive can carry anything
   // at all in it. Parse rather than cast: one malformed row should render as a
   // summary-less era, not make the whole list fail the client's own schema.
-  summary: parseSummary(row.summary),
+  summary: parseInstallationSummary(row.summary),
   createdAt: row.createdAt.toISOString(),
   isActive: row.endedAt === null,
 });
@@ -248,6 +261,8 @@ export const computeInstallationSummary = async (
 
   const [
     calls,
+    sessions,
+    actionEvents,
     messages,
     messagesApproved,
     messagesRejected,
@@ -259,6 +274,20 @@ export const computeInstallationSummary = async (
     lastEvent,
   ] = await Promise.all([
     client.callSession.count({ where }),
+    client.callSession.findMany({
+      where,
+    }) as unknown as Promise<
+      Array<{
+        startedAt: Date;
+        endedAt: Date | null;
+        outcome: string | null;
+        durationMs: number | null;
+        digitsDialed: string | null;
+      }>
+    >,
+    client.boothEvent.findMany({
+      where: { ...where, type: { in: ["digit_dialed", "state_transition"] } },
+    }) as unknown as Promise<Array<{ type: string; payload: unknown }>>,
     client.message.count({ where: landedMessages }),
     client.message.count({ where: { ...where, status: "approved" } }),
     client.message.count({ where: { ...where, status: "rejected" } }),
@@ -289,9 +318,12 @@ export const computeInstallationSummary = async (
   for (const row of statusRows) {
     byStatus[row.status] = (byStatus[row.status] ?? 0) + 1;
   }
+  const interactionBreakdown = summarizeInteractionBreakdown(sessions, actionEvents);
 
   return {
     calls,
+    interactions: calls,
+    interactionBreakdown,
     messages: messagesApproved,
     allRecordings: messages,
     byStatus,

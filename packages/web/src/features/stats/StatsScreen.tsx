@@ -199,33 +199,80 @@ interface OverviewProps {
   readonly overview: StatsOverview;
 }
 
-function CallsSection({ overview }: OverviewProps): JSX.Element {
-  const { calls } = overview;
-  const completionRate = calls.total > 0 ? calls.completed / calls.total : null;
-  const outcomes = orderRecord(calls.outcomes, OUTCOME_ORDER, OUTCOME_LABEL);
-  const maxOutcome = outcomes.reduce((max, row) => Math.max(max, row.value), 0);
-  const maxPerDay = calls.perDay.reduce((max, day) => Math.max(max, day.total), 0);
+function InteractionHeadline({ overview }: OverviewProps): JSX.Element {
+  const { interactions, actions } = overview;
   return (
-    <GlassPanel title="Calls" className="stats-panel">
+    <GlassPanel title="Pickup overview" className="stats-panel stats-panel--wide">
       <header className="stats-panel__header">
-        <h2>Calls</h2>
+        <h2>What visitors did</h2>
         <p>
-          {fmtNumber(calls.total)} pickups · {fmtNumber(calls.completed)} completed ·{" "}
-          {fmtPercent(completionRate)} completion
+          Pickups are unique handset lifts. Dial and playback actions may repeat within one pickup.
         </p>
       </header>
       <div className="stats-tiles">
-        <SummaryTile label="In progress now" value={fmtNumber(calls.inProgress)} />
+        <SummaryTile label="Pickups" value={fmtNumber(interactions.total)} hint="handset lifts" />
         <SummaryTile
-          label="Avg duration"
-          value={fmtDurationMs(calls.averageDurationMs)}
-          hint="completed calls"
+          label="No selection"
+          value={fmtNumber(interactions.noSelection)}
+          hint="hung up before dialling"
         />
-        <SummaryTile label="Longest call" value={fmtDurationMs(calls.longestDurationMs)} />
+        <SummaryTile
+          label="Wrong numbers"
+          value={fmtNumber(actions.wrongNumberAttempts)}
+          hint="digits 3–9"
+        />
+        <SummaryTile
+          label="Messages left"
+          value={fmtNumber(interactions.messagesLeft)}
+          hint="recorded and uploaded"
+        />
+        <SummaryTile
+          label="Messages listened to"
+          value={fmtNumber(actions.messagePlaybackStarts)}
+          hint="playback started"
+        />
+        <SummaryTile
+          label="Instructions heard"
+          value={fmtNumber(actions.instructionPlaybackStarts)}
+          hint="playback started"
+        />
       </div>
-      <h3>Outcomes</h3>
+    </GlassPanel>
+  );
+}
+
+function InteractionsSection({ overview }: OverviewProps): JSX.Element {
+  const { interactions } = overview;
+  const completionRate =
+    interactions.total > 0 ? interactions.messagesLeft / interactions.total : null;
+  const outcomes = orderRecord(interactions.outcomes, OUTCOME_ORDER, OUTCOME_LABEL);
+  const maxOutcome = outcomes.reduce((max, row) => Math.max(max, row.value), 0);
+  const maxPerDay = interactions.perDay.reduce((max, day) => Math.max(max, day.total), 0);
+  return (
+    <GlassPanel title="Pickups" className="stats-panel">
+      <header className="stats-panel__header">
+        <h2>Pickups</h2>
+        <p>
+          {fmtNumber(interactions.total)} pickups · {fmtNumber(interactions.messagesLeft)} messages
+          left · {fmtPercent(completionRate)} conversion
+        </p>
+      </header>
+      <div className="stats-tiles">
+        <SummaryTile label="In progress now" value={fmtNumber(interactions.inProgressNow)} />
+        <SummaryTile label="No selection" value={fmtNumber(interactions.noSelection)} />
+        <SummaryTile
+          label="Average duration"
+          value={fmtDurationMs(interactions.averageDurationMs)}
+          hint="ended pickups"
+        />
+        <SummaryTile
+          label="Longest duration"
+          value={fmtDurationMs(interactions.longestDurationMs)}
+        />
+      </div>
+      <h3>Pickup outcomes</h3>
       {outcomes.length === 0 ? (
-        <p className="stats-empty">No completed calls yet.</p>
+        <p className="stats-empty">No ended pickups yet.</p>
       ) : (
         <div className="stats-bars">
           {outcomes.map((row) => (
@@ -233,18 +280,18 @@ function CallsSection({ overview }: OverviewProps): JSX.Element {
           ))}
         </div>
       )}
-      <h3>Calls per day (UTC)</h3>
-      {calls.perDay.length === 0 ? (
+      <h3>Pickups per day (UTC)</h3>
+      {interactions.perDay.length === 0 ? (
         <p className="stats-empty">No data in this window.</p>
       ) : (
         <div className="stats-bars stats-bars--days">
-          {calls.perDay.map((day) => (
+          {interactions.perDay.map((day) => (
             <BarRow
               key={day.date}
               label={fmtDateShort(day.date)}
               value={day.total}
               max={maxPerDay}
-              trailing={`${day.total} · ${day.completed} ✔`}
+              trailing={`${day.total} · ${day.messagesLeft} left · ${day.noSelection} no selection`}
             />
           ))}
         </div>
@@ -254,7 +301,7 @@ function CallsSection({ overview }: OverviewProps): JSX.Element {
 }
 
 function MessagesSection({ overview }: OverviewProps): JSX.Element {
-  const { messages, playback } = overview;
+  const { actions, messages } = overview;
   const statuses = orderRecord(messages.byStatus, STATUS_ORDER, STATUS_LABEL);
   const maxStatus = statuses.reduce((max, row) => Math.max(max, row.value), 0);
   return (
@@ -264,8 +311,8 @@ function MessagesSection({ overview }: OverviewProps): JSX.Element {
         <p>
           {fmtNumber(messages.approved ?? messages.total)} approved/playable ·{" "}
           {fmtNumber(messages.allRecordings ?? messages.total)} recordings · avg{" "}
-          {fmtDurationMs(messages.averageDurationMs)} · {fmtNumber(playback.totalPlaybacks)} booth
-          playbacks
+          {fmtDurationMs(messages.averageDurationMs)} · {fmtNumber(actions.messagePlaybackStarts)}{" "}
+          booth playbacks
         </p>
       </header>
       <h3>By status</h3>
@@ -284,7 +331,7 @@ function MessagesSection({ overview }: OverviewProps): JSX.Element {
 
 function HourlySection({ overview }: OverviewProps): JSX.Element {
   const { hourly, busiest } = overview;
-  const maxCalls = hourly.reduce((max, b) => Math.max(max, b.calls), 0);
+  const maxInteractions = hourly.reduce((max, b) => Math.max(max, b.interactions), 0);
   return (
     <GlassPanel title="Hourly activity" className="stats-panel">
       <header className="stats-panel__header">
@@ -294,18 +341,18 @@ function HourlySection({ overview }: OverviewProps): JSX.Element {
           {busiest.dayOfWeek === null ? null : ` · ${DAY_OF_WEEK_LABEL[busiest.dayOfWeek]}`}
         </p>
       </header>
-      <div className="stats-heatmap" role="img" aria-label="Calls per UTC hour">
+      <div className="stats-heatmap" role="img" aria-label="Pickups per UTC hour">
         {hourly.map((bucket) => {
-          const intensity = maxCalls > 0 ? bucket.calls / maxCalls : 0;
+          const intensity = maxInteractions > 0 ? bucket.interactions / maxInteractions : 0;
           return (
             <div
               key={bucket.hour}
               className="stats-heatmap__cell"
-              title={`${bucket.hour}:00 UTC — ${bucket.calls} calls, ${bucket.messages} messages`}
+              title={`${bucket.hour}:00 UTC — ${bucket.interactions} pickups, ${bucket.messages} messages`}
               style={{ opacity: 0.2 + intensity * 0.8 }}
             >
               <span className="stats-heatmap__hour">{bucket.hour}</span>
-              <span className="stats-heatmap__count">{bucket.calls}</span>
+              <span className="stats-heatmap__count">{bucket.interactions}</span>
             </div>
           );
         })}
@@ -314,22 +361,40 @@ function HourlySection({ overview }: OverviewProps): JSX.Element {
   );
 }
 
-function PickupsHangupsSection({ overview }: OverviewProps): JSX.Element {
-  const { pickupsHangups, uploads, lastActivityAt } = overview;
+function ActionsSection({ overview }: OverviewProps): JSX.Element {
+  const { actions, uploads, lastActivityAt } = overview;
   const digits = Array.from({ length: 10 }, (_, i) => ({
     digit: String(i),
-    count: pickupsHangups.digitsDialed[String(i)] ?? 0,
+    count: actions.digitsDialed[String(i)] ?? 0,
   }));
   const maxDigit = digits.reduce((max, d) => Math.max(max, d.count), 0);
   return (
-    <GlassPanel title="Pickups & hangups" className="stats-panel">
+    <GlassPanel title="Dial & playback activity" className="stats-panel">
       <header className="stats-panel__header">
-        <h2>Pickups & hangups</h2>
-        <p>
-          {fmtNumber(pickupsHangups.pickups)} pickups · {fmtNumber(pickupsHangups.hangups)} hangups
-        </p>
+        <h2>Dial & playback activity</h2>
+        <p>Counts actions, so one pickup can appear more than once.</p>
       </header>
       <div className="stats-tiles">
+        <SummaryTile
+          label="Dialled 1"
+          value={fmtNumber(actions.leaveMessageSelections)}
+          hint="leave a message"
+        />
+        <SummaryTile
+          label="Dialled 2"
+          value={fmtNumber(actions.listenMessageSelections)}
+          hint="listen to a message"
+        />
+        <SummaryTile
+          label="Dialled 0"
+          value={fmtNumber(actions.instructionSelections)}
+          hint="hear instructions"
+        />
+        <SummaryTile
+          label="Wrong number"
+          value={fmtNumber(actions.wrongNumberAttempts)}
+          hint="digits 3–9"
+        />
         <SummaryTile label="Uploads succeeded" value={fmtNumber(uploads.succeeded)} />
         {uploads.failureRate === null ? (
           <SummaryTile label="Uploads failed" value={fmtNumber(uploads.failed)} />
@@ -417,7 +482,7 @@ function BoothBreakdownSection({ overview }: OverviewProps): JSX.Element | null 
         <thead>
           <tr>
             <th scope="col">Booth</th>
-            <th scope="col">Calls</th>
+            <th scope="col">Pickups</th>
             <th scope="col">Last seen</th>
           </tr>
         </thead>
@@ -425,7 +490,7 @@ function BoothBreakdownSection({ overview }: OverviewProps): JSX.Element | null 
           {boothBreakdown.map((b) => (
             <tr key={b.boothId}>
               <th scope="row">{b.boothId}</th>
-              <td>{fmtNumber(b.calls)}</td>
+              <td>{fmtNumber(b.interactions)}</td>
               <td>{fmtTimeAgo(b.lastSeenAt)}</td>
             </tr>
           ))}
@@ -662,10 +727,11 @@ export function StatsScreen(): JSX.Element {
       {query.isPending ? <FeatureSkeleton label="Adding up the numbers…" /> : null}
       {overview === null ? null : (
         <div className="stats-grid">
-          <CallsSection overview={overview} />
+          <InteractionHeadline overview={overview} />
+          <InteractionsSection overview={overview} />
           <MessagesSection overview={overview} />
           <HourlySection overview={overview} />
-          <PickupsHangupsSection overview={overview} />
+          <ActionsSection overview={overview} />
           <TopQuestionsSection overview={overview} />
           <BoothBreakdownSection overview={overview} />
         </div>

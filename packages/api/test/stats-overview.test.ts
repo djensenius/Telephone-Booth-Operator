@@ -76,6 +76,15 @@ describe("GET /v1/stats/overview", () => {
     expect(body).toMatchObject({
       window: "7d",
       timezone: "UTC",
+      interactions: {
+        total: 0,
+        inProgressNow: 0,
+        noSelection: 0,
+        messagesLeft: 0,
+        averageDurationMs: null,
+        longestDurationMs: null,
+        outcomes: {},
+      },
       calls: {
         total: 0,
         completed: 0,
@@ -92,6 +101,14 @@ describe("GET /v1/stats/overview", () => {
         averageDurationMs: null,
       },
       playback: { totalPlaybacks: 0 },
+      actions: {
+        leaveMessageSelections: 0,
+        listenMessageSelections: 0,
+        instructionSelections: 0,
+        wrongNumberAttempts: 0,
+        messagePlaybackStarts: 0,
+        instructionPlaybackStarts: 0,
+      },
       pickupsHangups: { pickups: 0, hangups: 0 },
       uploads: { succeeded: 0, failed: 0, failureRate: null },
       topQuestions: [],
@@ -100,11 +117,16 @@ describe("GET /v1/stats/overview", () => {
       boothBreakdown: [],
     });
     expect(body.hourly).toHaveLength(24);
+    expect(body.actions.digitsDialed).toMatchObject({
+      "0": 0,
+      "9": 0,
+    });
     expect(body.pickupsHangups.digitsDialed).toMatchObject({
       "0": 0,
       "9": 0,
     });
     expect(body.calls.perDay.length).toBeGreaterThan(0); // zero-filled days
+    expect(body.interactions.perDay.length).toBeGreaterThan(0);
   });
 
   it("aggregates calls, messages, playbacks, uploads, and top questions", async () => {
@@ -183,6 +205,11 @@ describe("GET /v1/stats/overview", () => {
     });
     pushEvent({
       type: "state_transition",
+      occurredAt: minutesAgo(4),
+      payload: { from: "idle", to: "playing_instructions", cause: "test" },
+    });
+    pushEvent({
+      type: "state_transition",
       occurredAt: daysAgo(20),
       payload: { from: "idle", to: "playing_message", cause: "test" },
     });
@@ -215,6 +242,17 @@ describe("GET /v1/stats/overview", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
 
+    expect(body.interactions.total).toBe(4);
+    expect(body.interactions.inProgressNow).toBe(1);
+    expect(body.interactions.noSelection).toBe(1);
+    expect(body.interactions.messagesLeft).toBe(2);
+    expect(body.interactions.outcomes).toMatchObject({
+      recording_completed: 2,
+      hung_up_before_dial: 1,
+    });
+    expect(body.interactions.averageDurationMs).toBeCloseTo((2000 + 8000 + 100) / 3, 5);
+    expect(body.interactions.longestDurationMs).toBe(8000);
+
     expect(body.calls.total).toBe(4); // 3 ended + 1 in-progress inside window
     expect(body.calls.completed).toBe(2);
     expect(body.calls.inProgress).toBe(1);
@@ -236,11 +274,21 @@ describe("GET /v1/stats/overview", () => {
     expect(body.messages.averageDurationMs).toBe((1000 + 2000) / 2);
 
     expect(body.playback.totalPlaybacks).toBe(2);
+    expect(body.actions).toMatchObject({
+      leaveMessageSelections: 1,
+      listenMessageSelections: 1,
+      instructionSelections: 0,
+      wrongNumberAttempts: 3,
+      messagePlaybackStarts: 2,
+      instructionPlaybackStarts: 1,
+    });
 
     expect(body.pickupsHangups.pickups).toBe(4);
     expect(body.pickupsHangups.hangups).toBe(3);
     expect(body.pickupsHangups.digitsDialed["1"]).toBe(1);
     expect(body.pickupsHangups.digitsDialed["5"]).toBe(1);
+    expect(body.actions.digitsDialed["1"]).toBe(1);
+    expect(body.actions.digitsDialed["5"]).toBe(1);
     expect(
       Object.values(body.pickupsHangups.digitsDialed as Record<string, number>).reduce(
         (sum, count) => sum + count,
@@ -263,6 +311,16 @@ describe("GET /v1/stats/overview", () => {
     expect(body.boothBreakdown.length).toBeGreaterThanOrEqual(2);
     const boothIds = body.boothBreakdown.map((entry: { boothId: string }) => entry.boothId).sort();
     expect(boothIds).toEqual(["booth-1", "booth-2"]);
+    expect(
+      body.boothBreakdown.every(
+        (entry: { calls: number; interactions: number }) => entry.calls === entry.interactions,
+      ),
+    ).toBe(true);
+    expect(
+      body.hourly.every(
+        (entry: { calls: number; interactions: number }) => entry.calls === entry.interactions,
+      ),
+    ).toBe(true);
 
     expect(body.lastActivityAt).not.toBeNull();
   });
@@ -303,6 +361,8 @@ describe("GET /v1/stats/overview", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
 
+    expect(body.actions.digitsDialed["2"]).toBe(0);
+    expect(body.actions.digitsDialed["0"]).toBe(0);
     expect(body.pickupsHangups.digitsDialed["2"]).toBe(1);
     expect(body.pickupsHangups.digitsDialed["0"]).toBe(1);
   });
@@ -330,8 +390,11 @@ describe("GET /v1/stats/overview", () => {
     const res = await app.request("/v1/stats/overview?window=24h", { headers: { cookie } });
     expect(res.status).toBe(200);
     const body = await res.json();
+    expect(body.interactions.outcomes).toMatchObject({ wild_new_outcome: 1 });
     expect(body.calls.outcomes).toMatchObject({ wild_new_outcome: 1 });
     expect(body.playback.totalPlaybacks).toBe(0); // neither payload had to=playing_message
+    expect(body.actions.messagePlaybackStarts).toBe(0);
+    expect(body.actions.instructionPlaybackStarts).toBe(0);
   });
 
   it("returns boothBreakdown only when more than one booth has data", async () => {
@@ -366,9 +429,47 @@ describe("GET /v1/stats/overview", () => {
     const cookie = operatorCookie();
     const res = await app.request("/v1/stats/overview?window=24h", { headers: { cookie } });
     const body = await res.json();
+    expect(body.interactions.total).toBe(1);
+    expect(body.interactions.outcomes).toEqual({});
     expect(body.pickupsHangups.pickups).toBe(1);
     expect(body.pickupsHangups.hangups).toBe(1);
     expect(body.calls.completed).toBe(1);
+    expect(body.calls.outcomes).toMatchObject({ recording_completed: 1 });
+  });
+
+  it("counts actions by occurredAt even when the interaction started before the range", async () => {
+    const outOfRange = new Date(Date.now() - 26 * 60 * 60 * 1000);
+    seedCallSession({
+      id: "boundary-session",
+      startedAt: outOfRange,
+      endedAt: new Date(Date.now() - 23 * 60 * 60 * 1000),
+      outcome: "recording_completed",
+      durationMs: 1_000,
+      boothId: "booth-1",
+      digitsDialed: "7",
+    });
+    pushEvent({
+      type: "digit_dialed",
+      occurredAt: new Date(Date.now() - 23.5 * 60 * 60 * 1000),
+      payload: { kind: "digit_dialed", digit: 7, pulses: 7 },
+      sessionId: "boundary-session",
+    });
+    pushEvent({
+      type: "state_transition",
+      occurredAt: new Date(Date.now() - 23.4 * 60 * 60 * 1000),
+      payload: { from: "idle", to: "playing_message", cause: "test" },
+      sessionId: "boundary-session",
+    });
+
+    const app = createApp();
+    const cookie = operatorCookie();
+    const res = await app.request("/v1/stats/overview?window=24h", { headers: { cookie } });
+    const body = await res.json();
+
+    expect(body.interactions.total).toBe(0);
+    expect(body.actions.wrongNumberAttempts).toBe(1);
+    expect(body.actions.messagePlaybackStarts).toBe(1);
+    expect(body.pickupsHangups.digitsDialed["7"]).toBe(1);
   });
 
   it("respects the 24h window — calls older than 24h are excluded", async () => {

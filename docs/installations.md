@@ -32,10 +32,10 @@ over. Things the booth produced during a run belong to that run.
 action. It is admin-only, runs in one transaction, and **deletes nothing**:
 
 1. Stamps `endedAt` and who ended it.
-2. Freezes the summary counters — calls, messages by status, recorded minutes,
-   question count, and the first/last booth event (null if the era recorded
-   none) — onto the row, so the history list renders without re-aggregating the
-   event table.
+2. Freezes the summary counters — pickups (`interactions`), the pickup outcome breakdown,
+   legacy `calls`, messages by status, recorded minutes, question count, and
+   the first/last booth event (null if the era recorded none) — onto the row,
+   so the history list renders without re-aggregating the event table.
 3. Closes call sessions the booth never ended (power cut, crash mid-call) with
    outcome `installation_ended`.
 4. Moves anything still in the moderation queue to a terminal state so the next
@@ -68,6 +68,11 @@ never drift apart.
 Nothing is deleted, so no backup is required to end an era — but
 `GET /v1/installations/{id}/export` gives you a scoped tar whenever you want
 one, and the Installations screen offers it per era.
+
+Historical rows frozen before the pickup-breakdown (`interactionBreakdown`)
+rollout still parse, but they need the summary backfill to populate the new
+frozen pickup fields accurately. See [analytics](analytics.md) for the cohort
+definitions and [runbook](runbook.md) for the dry-run/apply commands.
 
 ## Starting a new one
 

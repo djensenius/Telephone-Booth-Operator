@@ -37,6 +37,14 @@ const endedInstallation = {
   endedById: "user-1",
   summary: {
     calls: 120,
+    interactions: 120,
+    interactionBreakdown: {
+      noSelection: 18,
+      wrongNumberAttempts: 9,
+      messagesLeft: 61,
+      messagePlaybackStarts: 22,
+      instructionPlaybackStarts: 10,
+    },
     messages: 88,
     messagesApproved: 70,
     messagesRejected: 12,
@@ -67,6 +75,7 @@ const summary = {
   booth: { state: "idle", updatedAt: "2026-06-02T00:00:00.000Z" },
   messages: { pending: 4, awaitingModeration: 2, receivedToday: 11, latestId: null },
   calls: { today: 6, inProgress: 1 },
+  interactions: { today: 6, inProgress: 1 },
   realtime: { wsClients: 3 },
   dayStartedAt: "2026-06-01T04:00:00.000Z",
   generatedAt: "2026-06-02T00:00:00.000Z",
@@ -144,12 +153,15 @@ describe("InstallationsScreen", () => {
     // Frozen counters for the ended era.
     const endedCard = screen.getByText("Spring 2026 residency").closest("section");
     if (endedCard === null) throw new Error("Ended installation card was not rendered.");
+    expect(within(endedCard).getByText("Total pickups")).toBeTruthy();
     expect(within(endedCard).getByText("120")).toBeTruthy();
     expect(within(endedCard).getByText("1h 02m")).toBeTruthy();
     // Live counters for the active era from /v1/stats/summary.
     await waitFor(() => expect(screen.getByText("Awaiting moderation")).toBeTruthy());
     const activeCard = screen.getByText("Summer 2026 tour").closest("section");
     if (activeCard === null) throw new Error("Active installation card was not rendered.");
+    expect(within(activeCard).getByText("Pickups today")).toBeTruthy();
+    expect(within(activeCard).getByText("Pickups in progress")).toBeTruthy();
     expect(within(activeCard).getByText("6")).toBeTruthy();
 
     const results = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
