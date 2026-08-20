@@ -2055,6 +2055,10 @@ textarea:focus-visible,
   gap: 1rem;
 }
 
+.stats-panel--wide {
+  grid-column: 1 / -1;
+}
+
 .stats-panel__header h2 {
   margin: 0;
   font-size: 1.1rem;

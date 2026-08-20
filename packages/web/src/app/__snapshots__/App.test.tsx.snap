@@ -37,7 +37,7 @@ exports[`App shell > matches the themed shell snapshot 1`] = `
     <p
       class="telephone-banner__tagline"
     >
-      Calls, questions, and system status for the installation.
+      Pickups, questions, and system status for the installation.
     </p>
   </header>
   <div

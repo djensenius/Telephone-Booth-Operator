@@ -6,12 +6,15 @@ import {
   CreateApiTokenRequestSchema,
   CurrentWeatherQuerySchema,
   CurrentWeatherSchema,
+  InstallationSummarySchema,
   InstructionSchema,
   InstructionStatusSchema,
   InstructionUpdateSchema,
+  MonitorSummarySchema,
   QuestionSchema,
   QuestionStatusSchema,
   RouterComponentSnapshotSchema,
+  StatsOverviewSchema,
   StatsSummarySchema,
   ThermalHistoryQuerySchema,
   ThermalHistorySchema,
@@ -101,6 +104,10 @@ describe("StatsSummarySchema", () => {
       receivedToday: 4,
       latestId: "11111111-1111-4111-8111-111111111111",
     },
+    interactions: {
+      today: 5,
+      inProgress: 1,
+    },
     calls: {
       today: 5,
       inProgress: 1,
@@ -117,9 +124,176 @@ describe("StatsSummarySchema", () => {
     const parsed = StatsSummarySchema.parse(summary);
     expect(parsed.dayStartedAt).toBe("2026-08-08T04:00:00.000Z");
     expect(parsed.timeZone).toBe("America/Toronto");
+    expect(parsed.interactions).toEqual({ today: 5, inProgress: 1 });
 
     const { dayStartedAt: _dayStartedAt, ...withoutBoundary } = summary;
     expect(() => StatsSummarySchema.parse(withoutBoundary)).toThrow();
+  });
+});
+
+describe("MonitorSummarySchema", () => {
+  it("requires interaction totals and the daily breakdown", () => {
+    const parsed = MonitorSummarySchema.parse({
+      interactionsToday: 5,
+      interactionsTotal: 15,
+      callsToday: 5,
+      messagesToday: 4,
+      callsTotal: 15,
+      messagesTotal: 10,
+      breakdownToday: {
+        noSelection: 1,
+        wrongNumberAttempts: 2,
+        messagesLeft: 3,
+        messagePlaybackStarts: 4,
+        instructionPlaybackStarts: 5,
+      },
+      dayStartedAt: "2026-08-08T04:00:00.000Z",
+      generatedAt: "2026-08-08T19:00:00.000Z",
+      timeZone: "America/Toronto",
+    });
+
+    expect(parsed.breakdownToday.wrongNumberAttempts).toBe(2);
+    expect(() =>
+      MonitorSummarySchema.parse({
+        callsToday: 5,
+        messagesToday: 4,
+        callsTotal: 15,
+        messagesTotal: 10,
+        dayStartedAt: "2026-08-08T04:00:00.000Z",
+        generatedAt: "2026-08-08T19:00:00.000Z",
+        timeZone: "America/Toronto",
+      }),
+    ).toThrow();
+  });
+});
+
+describe("InstallationSummarySchema", () => {
+  it("defaults the interaction breakdown once an interactions alias is present", () => {
+    const parsed = InstallationSummarySchema.parse({
+      calls: 6,
+      interactions: 6,
+      messages: 2,
+      allRecordings: 3,
+      byStatus: { approved: 2, rejected: 1 },
+      messagesApproved: 2,
+      messagesRejected: 1,
+      questions: 4,
+      events: 10,
+      recordedMs: 12_000,
+      firstActivityAt: "2026-08-08T04:00:00.000Z",
+      lastActivityAt: "2026-08-08T19:00:00.000Z",
+    });
+
+    expect(parsed.interactionBreakdown).toEqual({
+      noSelection: 0,
+      wrongNumberAttempts: 0,
+      messagesLeft: 0,
+      messagePlaybackStarts: 0,
+      instructionPlaybackStarts: 0,
+    });
+  });
+});
+
+describe("StatsOverviewSchema", () => {
+  it("requires interaction and action aliases alongside legacy fields", () => {
+    const parsed = StatsOverviewSchema.parse({
+      window: "24h",
+      rangeStart: "2026-08-08T00:00:00.000Z",
+      rangeEnd: "2026-08-09T00:00:00.000Z",
+      generatedAt: "2026-08-09T00:00:00.000Z",
+      timezone: "UTC",
+      interactions: {
+        total: 2,
+        inProgressNow: 1,
+        noSelection: 1,
+        messagesLeft: 1,
+        averageDurationMs: 1234,
+        longestDurationMs: 2345,
+        outcomes: { hung_up_before_dial: 1, recording_completed: 1 },
+        perDay: [
+          {
+            date: "2026-08-08",
+            total: 2,
+            noSelection: 1,
+            messagesLeft: 1,
+          },
+        ],
+      },
+      calls: {
+        total: 2,
+        completed: 1,
+        inProgress: 1,
+        averageDurationMs: 1234,
+        longestDurationMs: 2345,
+        outcomes: { recording_completed: 1 },
+        perDay: [{ date: "2026-08-08", total: 2, completed: 1 }],
+      },
+      messages: {
+        total: 1,
+        approved: 1,
+        allRecordings: 1,
+        byStatus: { approved: 1 },
+        averageDurationMs: 1500,
+      },
+      playback: { totalPlaybacks: 1 },
+      actions: {
+        digitsDialed: {
+          "0": 0,
+          "1": 1,
+          "2": 0,
+          "3": 0,
+          "4": 0,
+          "5": 0,
+          "6": 0,
+          "7": 0,
+          "8": 0,
+          "9": 0,
+        },
+        leaveMessageSelections: 1,
+        listenMessageSelections: 0,
+        instructionSelections: 0,
+        wrongNumberAttempts: 0,
+        messagePlaybackStarts: 1,
+        instructionPlaybackStarts: 0,
+      },
+      pickupsHangups: {
+        pickups: 2,
+        hangups: 1,
+        digitsDialed: {
+          "0": 0,
+          "1": 1,
+          "2": 0,
+          "3": 0,
+          "4": 0,
+          "5": 0,
+          "6": 0,
+          "7": 0,
+          "8": 0,
+          "9": 0,
+        },
+      },
+      uploads: {
+        succeeded: 1,
+        failed: 0,
+        failureRate: 0,
+      },
+      topQuestions: [],
+      hourly: [{ hour: 8, interactions: 2, calls: 2, messages: 1 }],
+      busiest: { hour: 8, dayOfWeek: 6 },
+      lastActivityAt: "2026-08-08T19:00:00.000Z",
+      boothBreakdown: [
+        {
+          boothId: "booth-1",
+          interactions: 2,
+          calls: 2,
+          messages: null,
+          lastSeenAt: "2026-08-08T19:00:00.000Z",
+        },
+      ],
+    });
+
+    expect(parsed.hourly[0]?.interactions).toBe(2);
+    expect(parsed.boothBreakdown[0]?.interactions).toBe(2);
   });
 });
 

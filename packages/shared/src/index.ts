@@ -154,6 +154,10 @@ export const StatsSummarySchema = z.object({
     receivedToday: z.number().int().nonnegative(),
     latestId: z.guid().nullable(),
   }),
+  interactions: z.object({
+    today: z.number().int().nonnegative(),
+    inProgress: z.number().int().nonnegative(),
+  }),
   calls: z.object({
     today: z.number().int().nonnegative(),
     inProgress: z.number().int().nonnegative(),
@@ -167,11 +171,23 @@ export const StatsSummarySchema = z.object({
 });
 export type StatsSummary = z.infer<typeof StatsSummarySchema>;
 
+export const InteractionBreakdownSchema = z.object({
+  noSelection: z.number().int().nonnegative(),
+  wrongNumberAttempts: z.number().int().nonnegative(),
+  messagesLeft: z.number().int().nonnegative(),
+  messagePlaybackStarts: z.number().int().nonnegative(),
+  instructionPlaybackStarts: z.number().int().nonnegative(),
+});
+export type InteractionBreakdown = z.infer<typeof InteractionBreakdownSchema>;
+
 export const MonitorSummarySchema = z.object({
+  interactionsToday: z.number().int().nonnegative(),
+  interactionsTotal: z.number().int().nonnegative(),
   callsToday: z.number().int().nonnegative(),
   messagesToday: z.number().int().nonnegative(),
   callsTotal: z.number().int().nonnegative(),
   messagesTotal: z.number().int().nonnegative(),
+  breakdownToday: InteractionBreakdownSchema,
   dayStartedAt: z.string().datetime(),
   generatedAt: z.string().datetime(),
   timeZone: z.string().min(1).max(64),
@@ -1284,8 +1300,18 @@ export type InstallationScope = z.infer<typeof InstallationScopeSchema>;
 // Counters frozen when an installation ends. Deliberately a small, stable
 // subset of `StatsOverview` — this is persisted to a JSON column, so it must
 // stay cheap to compute and safe to read back from old rows.
+const ZERO_INTERACTION_BREAKDOWN: InteractionBreakdown = {
+  noSelection: 0,
+  wrongNumberAttempts: 0,
+  messagesLeft: 0,
+  messagePlaybackStarts: 0,
+  instructionPlaybackStarts: 0,
+};
+
 export const InstallationSummarySchema = z.object({
   calls: z.number().int().nonnegative(),
+  interactions: z.number().int().nonnegative(),
+  interactionBreakdown: InteractionBreakdownSchema.default(ZERO_INTERACTION_BREAKDOWN),
   // "messages" is deliberately the operator-playable approved subset.
   messages: z.number().int().nonnegative(),
   allRecordings: z.number().int().nonnegative().default(0),
@@ -1608,8 +1634,17 @@ export const StatsCallsPerDaySchema = z.object({
 });
 export type StatsCallsPerDay = z.infer<typeof StatsCallsPerDaySchema>;
 
+export const StatsInteractionsPerDaySchema = z.object({
+  date: z.string(), // YYYY-MM-DD (UTC)
+  total: z.number().int().nonnegative(),
+  noSelection: z.number().int().nonnegative(),
+  messagesLeft: z.number().int().nonnegative(),
+});
+export type StatsInteractionsPerDay = z.infer<typeof StatsInteractionsPerDaySchema>;
+
 export const StatsHourlyBucketSchema = z.object({
   hour: z.number().int().min(0).max(23),
+  interactions: z.number().int().nonnegative(),
   calls: z.number().int().nonnegative(),
   messages: z.number().int().nonnegative(),
 });
@@ -1626,6 +1661,7 @@ export type StatsTopQuestion = z.infer<typeof StatsTopQuestionSchema>;
 
 export const StatsBoothBreakdownSchema = z.object({
   boothId: z.string(),
+  interactions: z.number().int().nonnegative(),
   calls: z.number().int().nonnegative(),
   messages: z.number().int().nonnegative().nullable(),
   lastSeenAt: z.string().datetime().nullable(),
@@ -1645,6 +1681,16 @@ export const StatsOverviewSchema = z.object({
   rangeEnd: z.string().datetime(),
   generatedAt: z.string().datetime(),
   timezone: z.literal("UTC"),
+  interactions: z.object({
+    total: z.number().int().nonnegative(),
+    inProgressNow: z.number().int().nonnegative(),
+    noSelection: z.number().int().nonnegative(),
+    messagesLeft: z.number().int().nonnegative(),
+    averageDurationMs: z.number().nonnegative().nullable(),
+    longestDurationMs: z.number().nonnegative().nullable(),
+    outcomes: z.record(z.string(), z.number().int().nonnegative()),
+    perDay: z.array(StatsInteractionsPerDaySchema),
+  }),
   calls: z.object({
     total: z.number().int().nonnegative(),
     completed: z.number().int().nonnegative(),
@@ -1676,6 +1722,16 @@ export const StatsOverviewSchema = z.object({
     // booth telemetry does not currently carry a message id on transitions
     // so we cannot report uniqueMessagesPlayed yet.
     totalPlaybacks: z.number().int().nonnegative(),
+  }),
+  actions: z.object({
+    // 10-entry zero-filled record keyed "0".."9" from digit_dialed events.
+    digitsDialed: z.record(z.string(), z.number().int().nonnegative()),
+    leaveMessageSelections: z.number().int().nonnegative(),
+    listenMessageSelections: z.number().int().nonnegative(),
+    instructionSelections: z.number().int().nonnegative(),
+    wrongNumberAttempts: z.number().int().nonnegative(),
+    messagePlaybackStarts: z.number().int().nonnegative(),
+    instructionPlaybackStarts: z.number().int().nonnegative(),
   }),
   pickupsHangups: z.object({
     pickups: z.number().int().nonnegative(),

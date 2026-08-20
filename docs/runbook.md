@@ -43,6 +43,34 @@ checklist is in [installations](installations.md).
 If you genuinely need the data gone (a demo run, a test dataset), the
 irreversible hard purge lives in the Settings admin panel. Export first.
 
+## Backfilling frozen installation summaries
+
+This rollout adds frozen pickup totals (`interactions`) and pickup outcome
+breakdowns to ended installations. Existing `summary` JSON rows still load, but
+they need a one-off backfill so historical installation cards match the live
+aggregation rules in [analytics](analytics.md).
+
+1. Back up Postgres first.
+2. Deploy the additive API release.
+3. Run the dry-run and review the reported before/after counts.
+4. Run the apply command.
+5. Re-run the dry-run to confirm the job is now idempotent.
+
+```sh
+# Dry-run
+just backfill-installation-summaries
+
+# Apply
+just backfill-installation-summaries-apply
+
+# Optional package-level equivalents
+pnpm --filter @telephone-booth-operator/api run backfill:installation-summaries
+pnpm --filter @telephone-booth-operator/api run backfill:installation-summaries -- --apply
+```
+
+The job only scans ended installations, updates one installation per
+transaction, and reports failures explicitly before exiting non-zero.
+
 ## Restoring Postgres
 
 The operator DB is small (KB to a few MB). A nightly `pg_dump` is plenty:

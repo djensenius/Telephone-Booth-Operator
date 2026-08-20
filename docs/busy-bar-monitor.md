@@ -25,22 +25,41 @@ The summary endpoint returns aggregate counts for the active installation:
 
 ```json
 {
+  "interactionsToday": 12,
+  "interactionsTotal": 143,
   "callsToday": 12,
   "messagesToday": 8,
   "callsTotal": 143,
   "messagesTotal": 96,
+  "breakdownToday": {
+    "noSelection": 3,
+    "wrongNumberAttempts": 9,
+    "messagesLeft": 5,
+    "messagePlaybackStarts": 7,
+    "instructionPlaybackStarts": 4
+  },
   "dayStartedAt": "2026-08-08T04:00:00.000Z",
   "generatedAt": "2026-08-08T19:00:00.000Z",
   "timeZone": "America/Toronto"
 }
 ```
 
-`callsToday` counts call sessions started on or after `dayStartedAt`, while
-`messagesToday` counts messages completed on or after that boundary.
-`callsTotal` counts all call sessions in the active installation, and
-`messagesTotal` counts all completed messages in that installation. Messages
-still uploading are excluded because they do not yet have a `receivedAt`
-timestamp.
+`interactionsToday` counts pickups started on or after `dayStartedAt`, while
+`interactionsTotal` counts all pickups in the active installation. The
+deprecated `callsToday` and `callsTotal` fields remain as compatibility aliases
+with identical values.
+
+`breakdownToday` mixes the two intentional cohorts documented in
+[analytics](analytics.md):
+
+- `noSelection` and `messagesLeft` come from today's started pickups.
+- `wrongNumberAttempts`, `messagePlaybackStarts`, and
+  `instructionPlaybackStarts` come from today's booth events.
+
+`messagesToday` counts messages completed on or after the same boundary, and
+`messagesTotal` counts all completed messages in the active installation.
+Messages still uploading are excluded because they do not yet have a
+`receivedAt` timestamp.
 
 `timeZone` is an optional IANA time-zone query parameter and defaults to
 `America/Toronto`; it affects the daily boundary but not the installation

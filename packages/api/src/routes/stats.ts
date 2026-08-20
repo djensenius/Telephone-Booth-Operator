@@ -20,6 +20,12 @@ import {
 import { recordAudit } from "../lib/audit.js";
 import { wsBroadcaster } from "../lib/broadcaster.js";
 import { db } from "../lib/db.js";
+import {
+  buildInteractionPerDay,
+  summarizeInteractionActions,
+  summarizeInteractionSessions,
+  tallyLegacyDigitHistogram,
+} from "../lib/interaction-analytics.js";
 import { countMessagesAwaitingModeration } from "../lib/moderation-badge.js";
 import {
   resolveInstallationScope,
@@ -34,7 +40,6 @@ import { DEFAULT_TIME_ZONE, IanaTimeZoneSchema, startOfDayInTimeZone } from "../
 const STATS_CACHE_TTL_MS = 5_000;
 const OVERVIEW_CACHE_TTL_MS = 30_000;
 const TOP_QUESTION_LIMIT = 10;
-const PLAYING_MESSAGE_STATE = "playing_message";
 const MAX_MESSAGES_PER_OVERVIEW = 5_000;
 
 // Keyed by installation scope, IANA time zone, and local-day boundary so an
@@ -84,6 +89,10 @@ const computeStatsSummary = async (
       awaitingModeration,
       receivedToday,
       latestId: latestMessage?.id ?? null,
+    },
+    interactions: {
+      today: callsToday,
+      inProgress: callsInProgress,
     },
     calls: {
       today: callsToday,
@@ -210,12 +219,16 @@ const incRecord = (record: Record<string, number>, key: string): void => {
 const buildHourly = (callTimes: Date[], messageTimes: Date[]): StatsOverview["hourly"] => {
   const buckets = Array.from({ length: 24 }, (_, hour) => ({
     hour,
+    interactions: 0,
     calls: 0,
     messages: 0,
   }));
   for (const time of callTimes) {
     const bucket = buckets[time.getUTCHours()];
-    if (bucket) bucket.calls += 1;
+    if (bucket) {
+      bucket.interactions += 1;
+      bucket.calls += 1;
+    }
   }
   for (const time of messageTimes) {
     const bucket = buckets[time.getUTCHours()];
@@ -261,47 +274,6 @@ const minStartedAt = (sessions: CallSessionRow[]): Date | null => {
     if (!min || session.startedAt < min) min = session.startedAt;
   }
   return min;
-};
-
-const tallyDigits = (
-  sessions: CallSessionRow[],
-  digitEvents: BoothEventRow[],
-): Record<string, number> => {
-  const digits: Record<string, number> = {};
-  for (let i = 0; i < 10; i += 1) digits[String(i)] = 0;
-
-  const sessionsWithDigitEvents = new Set<string>();
-  for (const event of digitEvents) {
-    const payload = event.payload;
-    if (typeof payload !== "object" || payload === null) continue;
-    const digit = (payload as { digit?: unknown }).digit;
-    if (typeof digit !== "number" || !Number.isInteger(digit) || digit < 0 || digit > 9) continue;
-    incRecord(digits, String(digit));
-    if (event.sessionId) sessionsWithDigitEvents.add(event.sessionId);
-  }
-
-  // New booth clients send both linked digit events and a call-end summary.
-  // Older clients sent unlinked digit events but no summary. Only fall back to
-  // the summary when no linked events exist for that session.
-  for (const session of sessions) {
-    if (!session.digitsDialed || sessionsWithDigitEvents.has(session.id)) continue;
-    for (const char of session.digitsDialed) {
-      if (char in digits) digits[char] = (digits[char] ?? 0) + 1;
-    }
-  }
-  return digits;
-};
-
-const playbackCount = (events: BoothEventRow[]): number => {
-  let count = 0;
-  for (const event of events) {
-    if (event.type !== "state_transition") continue;
-    const payload = event.payload;
-    if (typeof payload !== "object" || payload === null) continue;
-    const to = (payload as { to?: unknown }).to;
-    if (to === PLAYING_MESSAGE_STATE) count += 1;
-  }
-  return count;
 };
 
 const findBusiest = (
@@ -393,6 +365,10 @@ const computeStatsOverview = async (
     >,
   ]);
 
+  const interactionSummary = summarizeInteractionSessions(sessionsByStart);
+  const interactionPerDay = buildInteractionPerDay(rangeStart, rangeEnd, sessionsByStart);
+  const actions = summarizeInteractionActions([...digitDialedEvents, ...stateTransitionEvents]);
+
   // calls.*
   const callsCompleted = sessionsByEnd.filter((s) => s.outcome === "recording_completed").length;
   const completedDurations = sessionsByEnd
@@ -422,13 +398,13 @@ const computeStatsOverview = async (
       : null;
 
   // playback
-  const totalPlaybacks = playbackCount(stateTransitionEvents);
+  const totalPlaybacks = actions.messagePlaybackStarts;
 
   // pickups (started in window) and hangups (ended in window). Derived from
   // CallSession so the count always reconciles with calls.* on either side
   // of the window boundary.
   const hangups = sessionsEndedInWindow;
-  const digitsDialed = tallyDigits(sessionsByStart, digitDialedEvents);
+  const digitsDialed = tallyLegacyDigitHistogram(sessionsByStart, digitDialedEvents);
 
   // uploads
   const uploadSucceeded = uploadEvents.filter((e) => e.type === "upload_completed").length;
@@ -513,6 +489,7 @@ const computeStatsOverview = async (
       ? Array.from(boothCalls.entries())
           .map(([boothId, info]) => ({
             boothId,
+            interactions: info.calls,
             calls: info.calls,
             messages: null, // Message has no boothId; documented limitation.
             lastSeenAt: info.lastSeenAt ? info.lastSeenAt.toISOString() : null,
@@ -526,6 +503,16 @@ const computeStatsOverview = async (
     rangeEnd: rangeEnd.toISOString(),
     generatedAt: generatedAt.toISOString(),
     timezone: "UTC",
+    interactions: {
+      total: interactionSummary.total,
+      inProgressNow: inProgressCount,
+      noSelection: interactionSummary.noSelection,
+      messagesLeft: interactionSummary.messagesLeft,
+      averageDurationMs: interactionSummary.averageDurationMs,
+      longestDurationMs: interactionSummary.longestDurationMs,
+      outcomes: interactionSummary.outcomes,
+      perDay: interactionPerDay,
+    },
     calls: {
       total: sessionsByStart.length,
       completed: callsCompleted,
@@ -545,6 +532,7 @@ const computeStatsOverview = async (
     playback: {
       totalPlaybacks,
     },
+    actions,
     pickupsHangups: {
       pickups: sessionsByStart.length,
       hangups,

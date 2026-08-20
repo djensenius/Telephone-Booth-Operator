@@ -216,10 +216,30 @@ describe("installations", () => {
         endedAt: new Date(),
         outcome: "recording_completed",
       });
+      seedCallSession({
+        id: "no-selection-session",
+        endedAt: new Date(),
+        outcome: "hung_up_before_dial",
+      });
       const pending = seedMessage({ status: "pending" });
       const approved = seedMessage({ status: "approved" });
       const question = seedQuestion({ status: "active" });
       seedBoothEvent({ type: "call_started", occurredAt: new Date("2026-02-01T00:00:00Z") });
+      seedBoothEvent({
+        type: "digit_dialed",
+        occurredAt: new Date("2026-02-01T00:00:05Z"),
+        payload: { digit: 7, kind: "digit_dialed", pulses: 7 },
+      });
+      seedBoothEvent({
+        type: "state_transition",
+        occurredAt: new Date("2026-02-01T00:00:10Z"),
+        payload: { from: "idle", to: "playing_message", cause: "test" },
+      });
+      seedBoothEvent({
+        type: "state_transition",
+        occurredAt: new Date("2026-02-01T00:00:15Z"),
+        payload: { from: "idle", to: "playing_instructions", cause: "test" },
+      });
 
       const app = createApp();
       const res = await endDefault(app);
@@ -228,16 +248,37 @@ describe("installations", () => {
       const body = (await res.json()) as {
         endedAt: string | null;
         isActive: boolean;
-        summary: { calls: number; messages: number; questions: number; events: number } | null;
+        summary: {
+          calls: number;
+          interactions: number;
+          interactionBreakdown: {
+            noSelection: number;
+            wrongNumberAttempts: number;
+            messagesLeft: number;
+            messagePlaybackStarts: number;
+            instructionPlaybackStarts: number;
+          };
+          messages: number;
+          questions: number;
+          events: number;
+        } | null;
       };
       expect(body.isActive).toBe(false);
       expect(body.endedAt).not.toBeNull();
       expect(body.summary).toMatchObject({
-        calls: 2,
+        calls: 3,
+        interactions: 3,
+        interactionBreakdown: {
+          noSelection: 1,
+          wrongNumberAttempts: 1,
+          messagesLeft: 1,
+          messagePlaybackStarts: 1,
+          instructionPlaybackStarts: 1,
+        },
         messages: 1,
         allRecordings: 2,
         questions: 1,
-        events: 1,
+        events: 4,
       });
 
       // Open sessions are closed out with a distinguishable outcome.
@@ -245,6 +286,7 @@ describe("installations", () => {
       expect(store.callSessions.get("open-session")?.outcome).toBe("installation_ended");
       // A session the booth already ended keeps its own outcome.
       expect(store.callSessions.get("closed-session")?.outcome).toBe("recording_completed");
+      expect(store.callSessions.get("no-selection-session")?.outcome).toBe("hung_up_before_dial");
 
       // The moderation queue starts empty; decided messages are untouched.
       expect(store.messages.get(pending.id)?.status).toBe("rejected");
@@ -279,16 +321,32 @@ describe("installations", () => {
           summary: {
             messages: number;
             allRecordings: number;
+            interactions: number;
             messagesApproved: number;
+            interactionBreakdown: {
+              noSelection: number;
+              wrongNumberAttempts: number;
+              messagesLeft: number;
+              messagePlaybackStarts: number;
+              instructionPlaybackStarts: number;
+            };
             byStatus: Record<string, number>;
           } | null;
         }>;
       };
       expect(body.items[0]?.summary).toEqual(
         expect.objectContaining({
+          interactions: 3,
           messages: 7,
           allRecordings: 12,
           messagesApproved: 7,
+          interactionBreakdown: {
+            noSelection: 0,
+            wrongNumberAttempts: 0,
+            messagesLeft: 0,
+            messagePlaybackStarts: 0,
+            instructionPlaybackStarts: 0,
+          },
           byStatus: {},
         }),
       );
@@ -382,7 +440,7 @@ describe("installations", () => {
 
       const previous = store.installations.get(DEFAULT_INSTALLATION_ID);
       expect(previous?.endedAt).toBeInstanceOf(Date);
-      expect(previous?.summary).toMatchObject({ calls: 1, allRecordings: 1 });
+      expect(previous?.summary).toMatchObject({ calls: 1, interactions: 1, allRecordings: 1 });
       expect(store.callSessions.get("live-call")?.outcome).toBe("installation_ended");
       expect(store.messages.get(pending.id)?.status).toBe("rejected");
       expect([...store.installations.values()].filter((row) => row.endedAt === null)).toHaveLength(
@@ -1117,15 +1175,21 @@ describe("installations", () => {
     const summaryFor = async (
       app: ReturnType<typeof createApp>,
       scope?: string,
-    ): Promise<{ receivedToday: number; callsToday: number }> => {
+    ): Promise<{ receivedToday: number; interactionsToday: number; callsToday: number }> => {
       const qs = scope === undefined ? "" : `?installationId=${scope}`;
       const res = await app.request(`/v1/stats/summary${qs}`, { headers: operatorHeaders() });
       expect(res.status, await res.clone().text()).toBe(200);
       const body = (await res.json()) as {
         messages: { receivedToday: number };
+        interactions: { today: number };
         calls: { today: number };
       };
-      return { receivedToday: body.messages.receivedToday, callsToday: body.calls.today };
+      expect(body.interactions.today).toBe(body.calls.today);
+      return {
+        receivedToday: body.messages.receivedToday,
+        interactionsToday: body.interactions.today,
+        callsToday: body.calls.today,
+      };
     };
 
     it("isolates active, historical, and all-era aggregates", async () => {
@@ -1142,14 +1206,23 @@ describe("installations", () => {
       });
 
       // Omitted scope is the active era only.
-      expect(await summaryFor(app)).toEqual({ receivedToday: 1, callsToday: 0 });
+      expect(await summaryFor(app)).toEqual({
+        receivedToday: 1,
+        interactionsToday: 0,
+        callsToday: 0,
+      });
       // The era we just closed still reads back exactly as it was.
       expect(await summaryFor(app, DEFAULT_INSTALLATION_ID)).toEqual({
         receivedToday: 1,
+        interactionsToday: 1,
         callsToday: 1,
       });
       // `all` is the documented escape hatch: the pre-installations behaviour.
-      expect(await summaryFor(app, "all")).toEqual({ receivedToday: 2, callsToday: 1 });
+      expect(await summaryFor(app, "all")).toEqual({
+        receivedToday: 2,
+        interactionsToday: 1,
+        callsToday: 1,
+      });
     });
 
     // The summary is cached; keying that cache by era is what stops a rollover
@@ -1158,13 +1231,26 @@ describe("installations", () => {
       seedMessage({ id: "aaaaaaaa-0000-4000-8000-0000000000c3", status: "approved" });
       const app = createApp();
 
-      expect(await summaryFor(app)).toEqual({ receivedToday: 1, callsToday: 0 });
+      expect(await summaryFor(app)).toEqual({
+        receivedToday: 1,
+        interactionsToday: 0,
+        callsToday: 0,
+      });
       const freshId = await startFresh(app);
 
-      expect(await summaryFor(app)).toEqual({ receivedToday: 0, callsToday: 0 });
-      expect(await summaryFor(app, freshId)).toEqual({ receivedToday: 0, callsToday: 0 });
+      expect(await summaryFor(app)).toEqual({
+        receivedToday: 0,
+        interactionsToday: 0,
+        callsToday: 0,
+      });
+      expect(await summaryFor(app, freshId)).toEqual({
+        receivedToday: 0,
+        interactionsToday: 0,
+        callsToday: 0,
+      });
       expect(await summaryFor(app, DEFAULT_INSTALLATION_ID)).toEqual({
         receivedToday: 1,
+        interactionsToday: 0,
         callsToday: 0,
       });
     });

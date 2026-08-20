@@ -121,6 +121,7 @@ describe("/v1/stats/summary", () => {
         receivedToday: number;
         latestId: string | null;
       };
+      interactions: { today: number; inProgress: number };
       calls: { today: number; inProgress: number };
       realtime: { wsClients: number };
       dayStartedAt: string;
@@ -132,6 +133,8 @@ describe("/v1/stats/summary", () => {
     expect(body.messages.awaitingModeration).toBe(3);
     expect(body.messages.receivedToday).toBe(4);
     expect(body.messages.latestId).not.toBeNull();
+    expect(body.interactions.today).toBe(2);
+    expect(body.interactions.inProgress).toBe(1);
     expect(body.calls.today).toBe(2);
     expect(body.calls.inProgress).toBe(1);
     expect(body.realtime.wsClients).toBe(0);
@@ -171,6 +174,7 @@ describe("/v1/stats/summary", () => {
       expect(response.status, await response.clone().text()).toBe(200);
       await expect(response.json()).resolves.toMatchObject({
         messages: { receivedToday: 1 },
+        interactions: { today: 1 },
         calls: { today: 1 },
         dayStartedAt: midnight,
         generatedAt: now,
@@ -196,12 +200,14 @@ describe("/v1/stats/summary", () => {
 
     await expect(toronto.json()).resolves.toMatchObject({
       messages: { receivedToday: 0 },
+      interactions: { today: 0 },
       calls: { today: 0 },
       dayStartedAt: "2026-08-08T04:00:00.000Z",
       timeZone: "America/Toronto",
     });
     await expect(utc.json()).resolves.toMatchObject({
       messages: { receivedToday: 1 },
+      interactions: { today: 1 },
       calls: { today: 1 },
       dayStartedAt: "2026-08-08T00:00:00.000Z",
       timeZone: "UTC",
@@ -220,6 +226,7 @@ describe("/v1/stats/summary", () => {
     });
     await expect(beforeMidnight.json()).resolves.toMatchObject({
       messages: { receivedToday: 1 },
+      interactions: { today: 0 },
       dayStartedAt: "2026-08-07T04:00:00.000Z",
     });
 
@@ -229,6 +236,7 @@ describe("/v1/stats/summary", () => {
     });
     await expect(afterMidnight.json()).resolves.toMatchObject({
       messages: { receivedToday: 0 },
+      interactions: { today: 0 },
       dayStartedAt: "2026-08-08T04:00:00.000Z",
     });
   });

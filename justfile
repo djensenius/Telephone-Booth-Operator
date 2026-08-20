@@ -32,6 +32,14 @@ db-migrate:
 db-seed:
     pnpm --filter @telephone-booth-operator/api run seed
 
+# Recompute frozen summaries for ended installations (dry-run).
+backfill-installation-summaries:
+    pnpm --filter @telephone-booth-operator/api run backfill:installation-summaries
+
+# Recompute frozen summaries for ended installations and write the results.
+backfill-installation-summaries-apply:
+    pnpm --filter @telephone-booth-operator/api run backfill:installation-summaries -- --apply
+
 # Check the Prisma client can talk to a real database (needs DATABASE_URL).
 db-smoke:
     pnpm --filter @telephone-booth-operator/api run db:smoke

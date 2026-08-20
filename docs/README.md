@@ -18,6 +18,7 @@ rebuilds it from the filesystem; CI fails if it drifts.
 
 - [Architecture](architecture.md) — Hono + Prisma + Postgres + Azure overview
 - [API](api/README.md) — reading and regenerating `openapi.yaml`
+- [Analytics](analytics.md) — pickup vs action definitions, cohorts, aliases, and backfill
 - [Azure storage](azure-storage.md) — container layout, SAS scoping, Azurite for dev
 - [Theme](theme.md) — operator-console visual system, components, accessibility
 - [Transcription providers](transcription-providers.md) — AI transcription + moderation pipeline

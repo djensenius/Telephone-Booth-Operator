@@ -10,6 +10,7 @@
     "start": "node dist/index.js",
     "seed": "node --env-file-if-exists=../../.env --import tsx scripts/seed.ts",
     "db:smoke": "node --env-file-if-exists=../../.env --import tsx scripts/db-smoke.ts",
+    "backfill:installation-summaries": "node --env-file-if-exists=../../.env --import tsx scripts/backfill-installation-summaries.ts",
     "lint": "vp lint src",
     "format": "vp fmt src",
     "typecheck": "tsc --noEmit",
