@@ -172,6 +172,8 @@ export const resetStatsCacheForTests = (): void => {
 
 const overviewCache = new Map<string, { value: StatsOverview; expiresAt: number }>();
 
+export const statsOverviewCacheSizeForTests = (): number => overviewCache.size;
+
 // A resolved time selection for the overview aggregation. `window` is the
 // label echoed back to the client ("custom" for explicit ranges). `rangeStart`
 // is the inclusive lower bound (null = from the beginning) and `rangeEnd` is
