@@ -33,7 +33,7 @@ import {
   resetInstallationCacheForTests,
 } from "../src/lib/installation.js";
 import { resetApnsSenderForTests, setApnsSenderForTests } from "../src/lib/apns.js";
-import { resetStatsCacheForTests, statsCacheSizesForTests } from "../src/routes/stats.js";
+import { resetStatsCacheForTests } from "../src/routes/stats.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { fakeBlobs, resetFakeAzure, seedBlobData } from "./support/fake-azure.js";
 import {
@@ -1253,20 +1253,6 @@ describe("installations", () => {
         interactionsToday: 0,
         callsToday: 0,
       });
-    });
-
-    // The cache key carries a caller-supplied uuid, so an operator paging
-    // through eras must not be able to grow the map without limit.
-    it("keeps the scoped stats cache bounded", async () => {
-      const app = createApp();
-      for (let i = 0; i < 80; i += 1) {
-        const id = `aaaaaaaa-0000-4000-8000-${i.toString().padStart(12, "0")}`;
-        const res = await app.request(`/v1/stats/summary?installationId=${id}`, {
-          headers: operatorHeaders(),
-        });
-        expect(res.status).toBe(200);
-      }
-      expect(statsCacheSizesForTests().summary).toBeLessThanOrEqual(64);
     });
 
     it("scopes the overview the same way", async () => {

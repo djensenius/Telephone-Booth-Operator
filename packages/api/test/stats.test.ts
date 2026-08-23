@@ -276,7 +276,7 @@ describe("/v1/stats/summary", () => {
     });
   });
 
-  it("invalidates cached summaries after a decision and a hard deletion", async () => {
+  it("reflects a decision and a hard deletion immediately", async () => {
     const app = createApp();
     const decided = seedMessage({ status: "pending" });
     const deleted = seedMessage({ status: "approved" });
@@ -309,7 +309,7 @@ describe("/v1/stats/summary", () => {
     });
   });
 
-  it("rotates the cache immediately at local midnight", async () => {
+  it("rotates local-day counters immediately at midnight", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-08T03:59:59.500Z"));
     seedMessage({ createdAt: new Date("2026-08-08T03:59:59.500Z") });
@@ -343,7 +343,7 @@ describe("/v1/stats/summary", () => {
     expect(response.status).toBe(400);
   });
 
-  it("memoizes the response for the configured TTL", async () => {
+  it("reads fresh summary data without process-local caching", async () => {
     const app = createApp();
     installValidBearer();
 
@@ -351,17 +351,14 @@ describe("/v1/stats/summary", () => {
     const first = await app.request("/v1/stats/summary", {
       headers: { authorization: "Bearer good-token" },
     });
-    const firstBody = (await first.json()) as { generatedAt: string };
+    await expect(first.json()).resolves.toMatchObject({ booth: { state: "idle" } });
 
-    // Mutate underlying data after the first request — cache should hide it
+    // This direct mutation stands in for a write handled by a sibling replica.
     seedStatus({ state: "recording" });
     const second = await app.request("/v1/stats/summary", {
       headers: { authorization: "Bearer good-token" },
     });
-    const secondBody = (await second.json()) as { generatedAt: string; booth: { state: string } };
-
-    expect(secondBody.generatedAt).toBe(firstBody.generatedAt);
-    expect(secondBody.booth.state).toBe("idle");
+    await expect(second.json()).resolves.toMatchObject({ booth: { state: "recording" } });
   });
 
   it("accepts a cookie-authenticated browser session", async () => {

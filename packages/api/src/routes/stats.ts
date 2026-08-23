@@ -1,6 +1,6 @@
 // Aggregated booth status + queue counters for mobile widgets / dashboards.
-// Results are memoized for STATS_CACHE_TTL_MS so that high-frequency widget
-// timelines don't fan out into N Postgres queries per refresh.
+// The live summary is deliberately uncached: process-local invalidation cannot
+// keep mutable counters coherent across horizontally scaled API replicas.
 
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
@@ -37,15 +37,9 @@ import { defaultStatus, serializeStatus } from "../lib/serializers.js";
 import { requireOperator, type AuthVariables } from "../lib/session.js";
 import { DEFAULT_TIME_ZONE, IanaTimeZoneSchema, startOfDayInTimeZone } from "../lib/time-zone.js";
 
-const STATS_CACHE_TTL_MS = 5_000;
 const OVERVIEW_CACHE_TTL_MS = 30_000;
 const TOP_QUESTION_LIMIT = 10;
 const MAX_MESSAGES_PER_OVERVIEW = 5_000;
-
-// Keyed by installation scope, IANA time zone, and local-day boundary so an
-// installation rollover, time-zone change, or midnight cannot reuse stale
-// calendar-day counters.
-const summaryCache = new Map<string, { value: StatsSummary; expiresAt: number }>();
 
 const computeStatsSummary = async (
   scope: InstallationScopeFilter,
@@ -125,10 +119,9 @@ const computeStatsSummary = async (
   });
 };
 
-// The cache key carries a caller-supplied installation id, so an operator
-// asking for era after era would otherwise grow these maps without bound. Drop
-// expired entries on write, and cap what is left: they are a latency
-// optimisation for the handful of scopes a console actually looks at.
+// The overview cache key carries a caller-supplied installation id, so an
+// operator asking for era after era would otherwise grow the map without
+// bound. Drop expired entries on write and cap what is left.
 const CACHE_MAX_ENTRIES = 64;
 
 const cachePut = <T>(
@@ -150,38 +143,23 @@ const cachePut = <T>(
   }
 };
 
-const getCachedSummary = async (
+const getSummary = async (
   scope: InstallationScopeFilter,
   timeZone: string,
 ): Promise<StatsSummary> => {
   const generatedAt = new Date();
-  const now = generatedAt.getTime();
   const dayStartedAt = startOfDayInTimeZone(generatedAt, timeZone);
-  const key = JSON.stringify([scopeCacheKey(scope), timeZone, dayStartedAt.toISOString()]);
-  const entry = summaryCache.get(key);
-  if (entry && entry.expiresAt > now) return entry.value;
-  const value = await computeStatsSummary(scope, timeZone, generatedAt, dayStartedAt);
-  cachePut(summaryCache, key, value, STATS_CACHE_TTL_MS);
-  return value;
+  return computeStatsSummary(scope, timeZone, generatedAt, dayStartedAt);
 };
 
-// Cache occupancy, so a test can prove the bound actually holds.
-export const statsCacheSizesForTests = (): { summary: number; overview: number } => ({
-  summary: summaryCache.size,
-  overview: overviewCache.size,
-});
-
-// Ending or purging an era rewrites the rows both caches aggregate. Their keys
-// carry the scope, and an `all`-scoped entry covers every era, so the only
-// correct answer is to drop everything cached rather than guess which keys the
-// change touched.
+// Ending or purging an era rewrites rows in historical overviews. An `all`
+// scope covers every era, so drop the process-local overview cache rather than
+// guessing which keys the change touched.
 export const invalidateStatsCaches = (): void => {
-  summaryCache.clear();
   overviewCache.clear();
 };
 
 export const resetStatsCacheForTests = (): void => {
-  summaryCache.clear();
   overviewCache.clear();
 };
 
@@ -657,7 +635,7 @@ statsRouter.get(
   async (c) => {
     const query = c.req.valid("query");
     const scope = await resolveInstallationScope(query.installationId);
-    const summary = await getCachedSummary(scope, query.timeZone);
+    const summary = await getSummary(scope, query.timeZone);
     return c.json(summary);
   },
 );
