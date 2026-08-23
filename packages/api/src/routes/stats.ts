@@ -60,7 +60,9 @@ const computeStatsSummary = async (
     pendingCount,
     awaitingModeration,
     receivedToday,
+    availableToday,
     latestMessage,
+    stateTransitionEvents,
     callsToday,
     callsInProgress,
   ] = await Promise.all([
@@ -73,14 +75,26 @@ const computeStatsSummary = async (
     db.message.count({ where: { ...scoped, status: "pending" } }),
     countMessagesAwaitingModeration(scoped),
     db.message.count({ where: { ...scoped, createdAt: { gte: dayStartedAt } } }),
+    db.message.count({
+      where: {
+        ...scoped,
+        createdAt: { gte: dayStartedAt },
+        status: { not: "rejected" },
+      },
+    }),
     db.message.findFirst({
       where: scoped,
       orderBy: { createdAt: "desc" },
       select: { id: true },
     }),
+    db.boothEvent.findMany({
+      where: { ...scoped, type: "state_transition", occurredAt: { gte: dayStartedAt } },
+      select: { type: true, payload: true },
+    }),
     db.callSession.count({ where: { ...scoped, startedAt: { gte: dayStartedAt } } }),
     db.callSession.count({ where: { ...scoped, endedAt: null } }),
   ]);
+  const actions = summarizeInteractionActions(stateTransitionEvents);
 
   return StatsSummarySchema.parse({
     booth: latestStatus ? serializeStatus(latestStatus) : defaultStatus(),
@@ -88,7 +102,11 @@ const computeStatsSummary = async (
       pending: pendingCount,
       awaitingModeration,
       receivedToday,
+      availableToday,
       latestId: latestMessage?.id ?? null,
+    },
+    actions: {
+      messagePlaybackStarts: actions.messagePlaybackStarts,
     },
     interactions: {
       today: callsToday,

@@ -36,6 +36,7 @@ import {
 } from "../lib/installation.js";
 import { notifyMessageFlagged, observeModerationQueue } from "../lib/push-events.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
+import { invalidateStatsCaches } from "./stats.js";
 import {
   serializeMessage,
   serializeModeration,
@@ -173,6 +174,7 @@ messagesRouter.delete("/:id", zValidator("param", idParamSchema), async (c) => {
     throw error;
   }
   recordAudit(c, { metadata: { previousStatus: existing.status } });
+  invalidateStatsCaches();
   if (existing.status === "received" || existing.status === "pending") {
     void observeModerationQueue("message.delete");
   }
@@ -753,6 +755,7 @@ messagesRouter.post(
       }
       throw error;
     }
+    invalidateStatsCaches();
     const message = await db.message.findUnique({ where: { id }, include: messageWithAi });
     if (!message) return c.json({ error: "not_found" }, 404);
     wsBroadcaster.broadcast({ kind: "message", message: serializeMessage(message) });

@@ -29,6 +29,8 @@ import {
   seedMessage,
   seedStatus,
   seedCallSession,
+  seedBoothEvent,
+  seedInstallation,
 } from "./support/fake-db.js";
 import { operatorCookie } from "./support/http.js";
 
@@ -119,8 +121,10 @@ describe("/v1/stats/summary", () => {
         pending: number;
         awaitingModeration: number;
         receivedToday: number;
+        availableToday: number;
         latestId: string | null;
       };
+      actions: { messagePlaybackStarts: number };
       interactions: { today: number; inProgress: number };
       calls: { today: number; inProgress: number };
       realtime: { wsClients: number };
@@ -132,6 +136,8 @@ describe("/v1/stats/summary", () => {
     expect(body.messages.pending).toBe(2);
     expect(body.messages.awaitingModeration).toBe(3);
     expect(body.messages.receivedToday).toBe(4);
+    expect(body.messages.availableToday).toBe(4);
+    expect(body.actions.messagePlaybackStarts).toBe(0);
     expect(body.messages.latestId).not.toBeNull();
     expect(body.interactions.today).toBe(2);
     expect(body.interactions.inProgress).toBe(1);
@@ -211,6 +217,95 @@ describe("/v1/stats/summary", () => {
       calls: { today: 1 },
       dayStartedAt: "2026-08-08T00:00:00.000Z",
       timeZone: "UTC",
+    });
+  });
+
+  it("keeps receivedToday raw while availableToday excludes rejected messages", async () => {
+    const app = createApp();
+    seedMessage({ status: "received" });
+    seedMessage({ status: "pending" });
+    seedMessage({ status: "approved" });
+    seedMessage({ status: "rejected" });
+
+    const response = await app.request("/v1/stats/summary", {
+      headers: { cookie: operatorCookie() },
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      messages: { receivedToday: 4, availableToday: 3 },
+    });
+  });
+
+  it("counts message playback transitions, not digit selections, by local day and installation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-08T19:00:00.000Z"));
+    const otherInstallation = seedInstallation({
+      id: "22222222-2222-4222-8222-222222222222",
+    });
+    seedBoothEvent({ type: "digit_dialed", payload: { digit: 2 } });
+    seedBoothEvent({ type: "state_transition", payload: { to: "playing_message" } });
+    seedBoothEvent({ type: "state_transition", payload: { to: "playing_instructions" } });
+    seedBoothEvent({
+      type: "state_transition",
+      payload: { to: "playing_message" },
+      occurredAt: new Date("2026-08-08T03:59:59.999Z"),
+    });
+    seedBoothEvent({
+      type: "state_transition",
+      payload: { to: "playing_message" },
+      installationId: otherInstallation.id,
+    });
+
+    const response = await createApp().request(
+      `/v1/stats/summary?installationId=${otherInstallation.id}&timeZone=America%2FToronto`,
+      { headers: { cookie: operatorCookie() } },
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      actions: { messagePlaybackStarts: 1 },
+      dayStartedAt: "2026-08-08T04:00:00.000Z",
+      timeZone: "America/Toronto",
+    });
+
+    const activeResponse = await createApp().request(
+      "/v1/stats/summary?timeZone=America%2FToronto",
+      { headers: { cookie: operatorCookie() } },
+    );
+    await expect(activeResponse.json()).resolves.toMatchObject({
+      actions: { messagePlaybackStarts: 1 },
+    });
+  });
+
+  it("invalidates cached summaries after a decision and a hard deletion", async () => {
+    const app = createApp();
+    const decided = seedMessage({ status: "pending" });
+    const deleted = seedMessage({ status: "approved" });
+    const headers = { cookie: operatorCookie() };
+
+    const first = await app.request("/v1/stats/summary", { headers });
+    await expect(first.json()).resolves.toMatchObject({
+      messages: { receivedToday: 2, availableToday: 2 },
+    });
+
+    const decision = await app.request(`/v1/messages/${decided.id}/decision`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ decision: "reject" }),
+    });
+    expect(decision.status).toBe(200);
+    const afterDecision = await app.request("/v1/stats/summary", { headers });
+    await expect(afterDecision.json()).resolves.toMatchObject({
+      messages: { receivedToday: 2, availableToday: 1 },
+    });
+
+    const deletion = await app.request(`/v1/messages/${deleted.id}`, {
+      method: "DELETE",
+      headers,
+    });
+    expect(deletion.status).toBe(204);
+    const afterDeletion = await app.request("/v1/stats/summary", { headers });
+    await expect(afterDeletion.json()).resolves.toMatchObject({
+      messages: { receivedToday: 1, availableToday: 0 },
     });
   });
 
