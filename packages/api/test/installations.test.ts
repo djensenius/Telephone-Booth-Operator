@@ -33,7 +33,10 @@ import {
   resetInstallationCacheForTests,
 } from "../src/lib/installation.js";
 import { resetApnsSenderForTests, setApnsSenderForTests } from "../src/lib/apns.js";
-import { resetStatsCacheForTests, statsCacheSizesForTests } from "../src/routes/stats.js";
+import {
+  resetStatsCacheForTests,
+  statsOverviewCacheSizeForTests,
+} from "../src/routes/stats.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { fakeBlobs, resetFakeAzure, seedBlobData } from "./support/fake-azure.js";
 import {
@@ -1225,9 +1228,7 @@ describe("installations", () => {
       });
     });
 
-    // The summary is cached; keying that cache by era is what stops a rollover
-    // from serving the previous era's numbers for the whole TTL.
-    it("does not serve one era's cached summary to another", async () => {
+    it("does not serve one era's summary to another", async () => {
       seedMessage({ id: "aaaaaaaa-0000-4000-8000-0000000000c3", status: "approved" });
       const app = createApp();
 
@@ -1255,20 +1256,6 @@ describe("installations", () => {
       });
     });
 
-    // The cache key carries a caller-supplied uuid, so an operator paging
-    // through eras must not be able to grow the map without limit.
-    it("keeps the scoped stats cache bounded", async () => {
-      const app = createApp();
-      for (let i = 0; i < 80; i += 1) {
-        const id = `aaaaaaaa-0000-4000-8000-${i.toString().padStart(12, "0")}`;
-        const res = await app.request(`/v1/stats/summary?installationId=${id}`, {
-          headers: operatorHeaders(),
-        });
-        expect(res.status).toBe(200);
-      }
-      expect(statsCacheSizesForTests().summary).toBeLessThanOrEqual(64);
-    });
-
     it("scopes the overview the same way", async () => {
       seedMessage({ id: "aaaaaaaa-0000-4000-8000-0000000000c4", status: "approved" });
       const app = createApp();
@@ -1285,6 +1272,18 @@ describe("installations", () => {
       expect(all.status).toBe(200);
       const allBody = (await all.json()) as { messages: { total: number } };
       expect(allBody.messages.total).toBe(1);
+    });
+
+    it("keeps the scoped overview cache bounded", async () => {
+      const app = createApp();
+      for (let i = 0; i < 80; i += 1) {
+        const id = `aaaaaaaa-0000-4000-8000-${i.toString().padStart(12, "0")}`;
+        const res = await app.request(`/v1/stats/overview?installationId=${id}`, {
+          headers: operatorHeaders(),
+        });
+        expect(res.status).toBe(200);
+      }
+      expect(statsOverviewCacheSizeForTests()).toBeLessThanOrEqual(64);
     });
   });
 

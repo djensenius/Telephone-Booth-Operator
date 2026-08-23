@@ -3342,12 +3342,12 @@ components:
     StatsSummary:
       type: object
       required:
-        [booth, messages, interactions, calls, realtime, dayStartedAt, generatedAt, timeZone]
+        [booth, messages, actions, interactions, calls, realtime, dayStartedAt, generatedAt, timeZone]
       properties:
         booth: { $ref: "#/components/schemas/BoothStatus" }
         messages:
           type: object
-          required: [pending, awaitingModeration, receivedToday, latestId]
+          required: [pending, awaitingModeration, receivedToday, availableToday, latestId]
           properties:
             pending: { type: integer, minimum: 0 }
             awaitingModeration:
@@ -3359,11 +3359,23 @@ components:
             receivedToday:
               type: integer
               minimum: 0
-              description: Messages created on or after dayStartedAt.
+              description: Messages created on or after dayStartedAt, regardless of status.
+            availableToday:
+              type: integer
+              minimum: 0
+              description: Messages created on or after dayStartedAt whose status is not rejected.
             latestId:
               anyOf:
                 - { type: string, format: uuid }
                 - { type: "null" }
+        actions:
+          type: object
+          required: [messagePlaybackStarts]
+          properties:
+            messagePlaybackStarts:
+              type: integer
+              minimum: 0
+              description: Successful booth message playback starts since dayStartedAt, counted from state_transition events whose payload.to was playing_message.
         interactions:
           type: object
           required: [today, inProgress]

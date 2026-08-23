@@ -73,7 +73,14 @@ const activeInstallation = {
 
 const summary = {
   booth: { state: "idle", updatedAt: "2026-06-02T00:00:00.000Z" },
-  messages: { pending: 4, awaitingModeration: 2, receivedToday: 11, latestId: null },
+  messages: {
+    pending: 4,
+    awaitingModeration: 2,
+    receivedToday: 11,
+    availableToday: 9,
+    latestId: null,
+  },
+  actions: { messagePlaybackStarts: 2 },
   calls: { today: 6, inProgress: 1 },
   interactions: { today: 6, inProgress: 1 },
   realtime: { wsClients: 3 },

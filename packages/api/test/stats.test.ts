@@ -29,6 +29,8 @@ import {
   seedMessage,
   seedStatus,
   seedCallSession,
+  seedBoothEvent,
+  seedInstallation,
 } from "./support/fake-db.js";
 import { operatorCookie } from "./support/http.js";
 
@@ -119,8 +121,10 @@ describe("/v1/stats/summary", () => {
         pending: number;
         awaitingModeration: number;
         receivedToday: number;
+        availableToday: number;
         latestId: string | null;
       };
+      actions: { messagePlaybackStarts: number };
       interactions: { today: number; inProgress: number };
       calls: { today: number; inProgress: number };
       realtime: { wsClients: number };
@@ -132,6 +136,8 @@ describe("/v1/stats/summary", () => {
     expect(body.messages.pending).toBe(2);
     expect(body.messages.awaitingModeration).toBe(3);
     expect(body.messages.receivedToday).toBe(4);
+    expect(body.messages.availableToday).toBe(4);
+    expect(body.actions.messagePlaybackStarts).toBe(0);
     expect(body.messages.latestId).not.toBeNull();
     expect(body.interactions.today).toBe(2);
     expect(body.interactions.inProgress).toBe(1);
@@ -214,7 +220,96 @@ describe("/v1/stats/summary", () => {
     });
   });
 
-  it("rotates the cache immediately at local midnight", async () => {
+  it("keeps receivedToday raw while availableToday excludes rejected messages", async () => {
+    const app = createApp();
+    seedMessage({ status: "received" });
+    seedMessage({ status: "pending" });
+    seedMessage({ status: "approved" });
+    seedMessage({ status: "rejected" });
+
+    const response = await app.request("/v1/stats/summary", {
+      headers: { cookie: operatorCookie() },
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      messages: { receivedToday: 4, availableToday: 3 },
+    });
+  });
+
+  it("counts message playback transitions, not digit selections, by local day and installation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-08T19:00:00.000Z"));
+    const otherInstallation = seedInstallation({
+      id: "22222222-2222-4222-8222-222222222222",
+    });
+    seedBoothEvent({ type: "digit_dialed", payload: { digit: 2 } });
+    seedBoothEvent({ type: "state_transition", payload: { to: "playing_message" } });
+    seedBoothEvent({ type: "state_transition", payload: { to: "playing_instructions" } });
+    seedBoothEvent({
+      type: "state_transition",
+      payload: { to: "playing_message" },
+      occurredAt: new Date("2026-08-08T03:59:59.999Z"),
+    });
+    seedBoothEvent({
+      type: "state_transition",
+      payload: { to: "playing_message" },
+      installationId: otherInstallation.id,
+    });
+
+    const response = await createApp().request(
+      `/v1/stats/summary?installationId=${otherInstallation.id}&timeZone=America%2FToronto`,
+      { headers: { cookie: operatorCookie() } },
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      actions: { messagePlaybackStarts: 1 },
+      dayStartedAt: "2026-08-08T04:00:00.000Z",
+      timeZone: "America/Toronto",
+    });
+
+    const activeResponse = await createApp().request(
+      "/v1/stats/summary?timeZone=America%2FToronto",
+      { headers: { cookie: operatorCookie() } },
+    );
+    await expect(activeResponse.json()).resolves.toMatchObject({
+      actions: { messagePlaybackStarts: 1 },
+    });
+  });
+
+  it("reflects a decision and a hard deletion immediately", async () => {
+    const app = createApp();
+    const decided = seedMessage({ status: "pending" });
+    const deleted = seedMessage({ status: "approved" });
+    const headers = { cookie: operatorCookie() };
+
+    const first = await app.request("/v1/stats/summary", { headers });
+    await expect(first.json()).resolves.toMatchObject({
+      messages: { receivedToday: 2, availableToday: 2 },
+    });
+
+    const decision = await app.request(`/v1/messages/${decided.id}/decision`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ decision: "reject" }),
+    });
+    expect(decision.status).toBe(200);
+    const afterDecision = await app.request("/v1/stats/summary", { headers });
+    await expect(afterDecision.json()).resolves.toMatchObject({
+      messages: { receivedToday: 2, availableToday: 1 },
+    });
+
+    const deletion = await app.request(`/v1/messages/${deleted.id}`, {
+      method: "DELETE",
+      headers,
+    });
+    expect(deletion.status).toBe(204);
+    const afterDeletion = await app.request("/v1/stats/summary", { headers });
+    await expect(afterDeletion.json()).resolves.toMatchObject({
+      messages: { receivedToday: 1, availableToday: 0 },
+    });
+  });
+
+  it("rotates local-day counters immediately at midnight", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-08T03:59:59.500Z"));
     seedMessage({ createdAt: new Date("2026-08-08T03:59:59.500Z") });
@@ -248,7 +343,7 @@ describe("/v1/stats/summary", () => {
     expect(response.status).toBe(400);
   });
 
-  it("memoizes the response for the configured TTL", async () => {
+  it("reads fresh summary data without process-local caching", async () => {
     const app = createApp();
     installValidBearer();
 
@@ -256,17 +351,14 @@ describe("/v1/stats/summary", () => {
     const first = await app.request("/v1/stats/summary", {
       headers: { authorization: "Bearer good-token" },
     });
-    const firstBody = (await first.json()) as { generatedAt: string };
+    await expect(first.json()).resolves.toMatchObject({ booth: { state: "idle" } });
 
-    // Mutate underlying data after the first request — cache should hide it
+    // This direct mutation stands in for a write handled by a sibling replica.
     seedStatus({ state: "recording" });
     const second = await app.request("/v1/stats/summary", {
       headers: { authorization: "Bearer good-token" },
     });
-    const secondBody = (await second.json()) as { generatedAt: string; booth: { state: string } };
-
-    expect(secondBody.generatedAt).toBe(firstBody.generatedAt);
-    expect(secondBody.booth.state).toBe("idle");
+    await expect(second.json()).resolves.toMatchObject({ booth: { state: "recording" } });
   });
 
   it("accepts a cookie-authenticated browser session", async () => {

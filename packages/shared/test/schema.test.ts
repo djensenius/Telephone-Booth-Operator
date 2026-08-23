@@ -102,7 +102,11 @@ describe("StatsSummarySchema", () => {
       pending: 2,
       awaitingModeration: 3,
       receivedToday: 4,
+      availableToday: 3,
       latestId: "11111111-1111-4111-8111-111111111111",
+    },
+    actions: {
+      messagePlaybackStarts: 2,
     },
     interactions: {
       today: 5,

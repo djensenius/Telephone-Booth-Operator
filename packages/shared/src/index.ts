@@ -152,7 +152,11 @@ export const StatsSummarySchema = z.object({
     pending: z.number().int().nonnegative(),
     awaitingModeration: z.number().int().nonnegative(),
     receivedToday: z.number().int().nonnegative(),
+    availableToday: z.number().int().nonnegative(),
     latestId: z.guid().nullable(),
+  }),
+  actions: z.object({
+    messagePlaybackStarts: z.number().int().nonnegative(),
   }),
   interactions: z.object({
     today: z.number().int().nonnegative(),
