@@ -211,7 +211,7 @@ describe("admin data export/import", () => {
     expect(restored?.repeatCount).toBe(1);
   });
 
-  it("resets missing ticket-bag fields when restoring a version-5 archive", async () => {
+  it("resets ticket-bag fields when restoring a version-5 archive", async () => {
     const app = createApp();
     const cookie = operatorCookie();
     const question = seedQuestion({
@@ -261,6 +261,14 @@ describe("admin data export/import", () => {
                 endedById: installation.endedById,
                 summary: installation.summary,
                 createdAt: installation.createdAt,
+                questionSelectionCycle: 9,
+                lastSelectedQuestionId: question.id,
+                recentQuestionDraws: [
+                  {
+                    drawId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                    questionId: question.id,
+                  },
+                ],
               },
             ],
             question: [
@@ -272,6 +280,9 @@ describe("admin data export/import", () => {
                 createdAt: question.createdAt,
                 retiredAt: question.retiredAt,
                 installationId: question.installationId,
+                weight: 9,
+                lastSelectedCycle: 9,
+                selectionsInCycle: 9,
               },
             ],
           }),
@@ -334,10 +345,49 @@ describe("admin data export/import", () => {
 
   it.each([
     ["a non-object question row", { question: [null] }],
-    ["an out-of-range question weight", { question: [{ id: crypto.randomUUID(), weight: 0 }] }],
+    [
+      "missing question fields",
+      {
+        question: [{ id: crypto.randomUUID(), weight: 1, lastSelectedCycle: null }],
+      },
+    ],
+    [
+      "missing installation fields",
+      {
+        installation: [
+          {
+            id: crypto.randomUUID(),
+            questionSelectionCycle: 0,
+            lastSelectedQuestionId: null,
+          },
+        ],
+      },
+    ],
+    [
+      "an out-of-range question weight",
+      {
+        question: [
+          {
+            id: crypto.randomUUID(),
+            weight: 0,
+            lastSelectedCycle: null,
+            selectionsInCycle: 0,
+          },
+        ],
+      },
+    ],
     [
       "an overflowing selection counter",
-      { question: [{ id: crypto.randomUUID(), selectionsInCycle: 2_147_483_648 }] },
+      {
+        question: [
+          {
+            id: crypto.randomUUID(),
+            weight: 1,
+            lastSelectedCycle: null,
+            selectionsInCycle: 2_147_483_648,
+          },
+        ],
+      },
     ],
     [
       "a malformed recent draw",
@@ -345,6 +395,8 @@ describe("admin data export/import", () => {
         installation: [
           {
             id: crypto.randomUUID(),
+            questionSelectionCycle: 0,
+            lastSelectedQuestionId: null,
             recentQuestionDraws: [{ drawId: "not-a-uuid", questionId: crypto.randomUUID() }],
           },
         ],

@@ -36,6 +36,7 @@ export const EXPORT_FORMAT = "telephone-booth-export";
 // deterministic ended "Restored …" installation after the archived rows are
 // upserted.
 export const EXPORT_VERSION = 6;
+const QUESTION_TICKET_STATE_VERSION = 6;
 // Manifest models added after v1. Nothing to migrate; listed for the record.
 const INSTALLATION_MODEL = "installation" as const;
 
@@ -400,7 +401,7 @@ const parseArchive = (
       if (typeof row !== "object" || row === null || Array.isArray(row)) {
         throw new ImportFormatError(`data.json entry "${name}" row ${index} must be an object`);
       }
-      return normalizeArchiveRow(name, row);
+      return normalizeArchiveRow(name, row, manifest.version);
     });
   }
 
@@ -429,36 +430,46 @@ const ticketStateError = (model: string, row: Row, error: z.ZodError): ImportFor
       .join("; ")}`,
   );
 
-const withQuestionTicketState = (row: Row): Row => {
+const withQuestionTicketState = (row: Row, archiveVersion: number): Row => {
+  const ticketState =
+    archiveVersion < QUESTION_TICKET_STATE_VERSION
+      ? { weight: 1, lastSelectedCycle: null, selectionsInCycle: 0 }
+      : {
+          weight: row.weight,
+          lastSelectedCycle: row.lastSelectedCycle,
+          selectionsInCycle: row.selectionsInCycle,
+        };
   const parsed = z
     .object({
       weight: QuestionWeightSchema,
       lastSelectedCycle: nonnegativeIntegerSchema.nullable(),
       selectionsInCycle: nonnegativeIntegerSchema,
     })
-    .safeParse({
-      weight: row.weight === undefined ? 1 : row.weight,
-      lastSelectedCycle: row.lastSelectedCycle === undefined ? null : row.lastSelectedCycle,
-      selectionsInCycle: row.selectionsInCycle === undefined ? 0 : row.selectionsInCycle,
-    });
+    .safeParse(ticketState);
   if (!parsed.success) throw ticketStateError("question", row, parsed.error);
   return { ...row, ...parsed.data };
 };
 
-const withInstallationTicketState = (row: Row): Row => {
+const withInstallationTicketState = (row: Row, archiveVersion: number): Row => {
+  const ticketState =
+    archiveVersion < QUESTION_TICKET_STATE_VERSION
+      ? {
+          questionSelectionCycle: 0,
+          lastSelectedQuestionId: null,
+          recentQuestionDraws: [],
+        }
+      : {
+          questionSelectionCycle: row.questionSelectionCycle,
+          lastSelectedQuestionId: row.lastSelectedQuestionId,
+          recentQuestionDraws: row.recentQuestionDraws,
+        };
   const parsed = z
     .object({
       questionSelectionCycle: nonnegativeIntegerSchema,
       lastSelectedQuestionId: nullableUuidSchema,
       recentQuestionDraws: questionDrawHistorySchema,
     })
-    .safeParse({
-      questionSelectionCycle:
-        row.questionSelectionCycle === undefined ? 0 : row.questionSelectionCycle,
-      lastSelectedQuestionId:
-        row.lastSelectedQuestionId === undefined ? null : row.lastSelectedQuestionId,
-      recentQuestionDraws: row.recentQuestionDraws === undefined ? [] : row.recentQuestionDraws,
-    });
+    .safeParse(ticketState);
   if (!parsed.success) throw ticketStateError("installation", row, parsed.error);
 
   const recentQuestionDraws = parsed.data.recentQuestionDraws.map((entry) => ({
@@ -480,10 +491,10 @@ const withInstallationTicketState = (row: Row): Row => {
   };
 };
 
-const normalizeArchiveRow = (name: ModelName, row: Row): Row => {
+const normalizeArchiveRow = (name: ModelName, row: Row, archiveVersion: number): Row => {
   if (name === "boothStatusSnapshot") return withStatusWindow(row);
-  if (name === "question") return withQuestionTicketState(row);
-  if (name === INSTALLATION_MODEL) return withInstallationTicketState(row);
+  if (name === "question") return withQuestionTicketState(row, archiveVersion);
+  if (name === INSTALLATION_MODEL) return withInstallationTicketState(row, archiveVersion);
   return row;
 };
 
