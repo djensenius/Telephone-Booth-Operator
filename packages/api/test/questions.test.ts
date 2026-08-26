@@ -323,6 +323,55 @@ describe("questions routes", () => {
     ]);
   });
 
+  it("retains only the newest 100 logical draws for retry replay", async () => {
+    const question = seedQuestion({ status: "active" });
+    const app = createApp();
+    const drawIds = Array.from(
+      { length: 101 },
+      (_, index) => `00000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`,
+    );
+
+    for (const drawId of drawIds) {
+      const response = await app.request("/v1/questions/random", {
+        headers: { ...phoneHeaders, "x-question-draw-id": drawId },
+      });
+      expect(response.status, await response.clone().text()).toBe(200);
+    }
+
+    const expectedRetainedDraws = drawIds.slice(1).map((drawId) => ({
+      drawId,
+      questionId: question.id,
+    }));
+    const installation = store.installations.get(DEFAULT_INSTALLATION_ID);
+    expect(installation).toBeDefined();
+    if (!installation) throw new Error("default installation was not seeded");
+    expect(installation.recentQuestionDraws).toEqual(expectedRetainedDraws);
+    const cycleBeforeReplay = installation.questionSelectionCycle;
+
+    const retainedReplay = await app.request("/v1/questions/random", {
+      headers: { ...phoneHeaders, "x-question-draw-id": drawIds[1] },
+    });
+    expect(retainedReplay.status, await retainedReplay.clone().text()).toBe(200);
+    await expect(retainedReplay.json()).resolves.toMatchObject({ id: question.id });
+    expect(store.installations.get(DEFAULT_INSTALLATION_ID)).toMatchObject({
+      questionSelectionCycle: cycleBeforeReplay,
+      recentQuestionDraws: expectedRetainedDraws,
+    });
+
+    const evictedReplay = await app.request("/v1/questions/random", {
+      headers: { ...phoneHeaders, "x-question-draw-id": drawIds[0] },
+    });
+    expect(evictedReplay.status, await evictedReplay.clone().text()).toBe(200);
+    await expect(evictedReplay.json()).resolves.toMatchObject({ id: question.id });
+    expect(store.installations.get(DEFAULT_INSTALLATION_ID)).toMatchObject({
+      questionSelectionCycle: cycleBeforeReplay + 1,
+      recentQuestionDraws: [
+        ...expectedRetainedDraws.slice(1),
+        { drawId: drawIds[0], questionId: question.id },
+      ],
+    });
+  });
+
   it("does not replay a draw-history question from another installation", async () => {
     const current = seedQuestion({ status: "active" });
     const previousInstallation = seedInstallation({
