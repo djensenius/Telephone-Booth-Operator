@@ -1,5 +1,5 @@
 export { BoothFrame } from "./BoothFrame.js";
-export { BoothStatusProvider, useBoothStatus } from "./BoothStatusContext.js";
+export { BoothStatusProvider, toBoothDisplayStatus, useBoothStatus } from "./BoothStatusContext.js";
 export type {
   BoothConnectionStatus,
   BoothDisplayStatus,

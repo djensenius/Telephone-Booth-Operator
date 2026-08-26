@@ -1,23 +1,31 @@
 import type { JSX, ReactNode } from "react";
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import { BoothStatusSchema, WsEnvelopeSchema } from "@telephone-booth-operator/shared";
 import type { BoothStatus, WsEnvelope } from "@telephone-booth-operator/shared";
-import { useBoothStatus } from "../components/booth/BoothStatusContext.js";
+import { toBoothDisplayStatus, useBoothStatus } from "../components/booth/BoothStatusContext.js";
 import {
   apiQueryKeys,
   apiWebSocketUrlFor,
   invalidateInstallationScopedQueries,
+  useStatusCurrent,
 } from "./api-client.js";
 import { isNewerThan, mergeLiveStatus } from "./status-history.js";
 
 // One shared `/v1/ws/status` connection for the whole authenticated app. The
 // socket must live above the router so envelopes (installation rollovers,
 // message pushes, system snapshots) reach the query cache no matter which
-// screen the operator is on. StatusScreen still owns the presentation of
-// booth status/history, but it consumes this shared subscription rather than
-// opening its own socket.
+// screen the operator is on. The app-wide bridge keeps the shell badge current,
+// while StatusScreen owns the detailed status/history presentation.
 
 type BoothWebSocketState = "polling" | "connecting" | "live";
 type EnvelopeListener = (envelope: WsEnvelope) => void;
@@ -198,28 +206,59 @@ export function useBoothWebSocket(): BoothWebSocketApi {
 // only for their own presentation state.
 // Frames can arrive out of order, so an older one joins the history but never
 // becomes the current status.
-function applyStatusToCache(queryClient: QueryClient, status: BoothStatus): void {
+function applyStatusToCache(queryClient: QueryClient, status: BoothStatus): boolean {
   const cached = queryClient.getQueryData<BoothStatus>(apiQueryKeys.status) ?? null;
-  if (isNewerThan(status, cached)) queryClient.setQueryData(apiQueryKeys.status, status);
+  const isCurrent = isNewerThan(status, cached);
+  if (isCurrent) queryClient.setQueryData(apiQueryKeys.status, status);
   queryClient.setQueryData(
     apiQueryKeys.statusHistory,
     (current: { readonly items: readonly BoothStatus[] } | undefined) => ({
       items: mergeLiveStatus(current?.items ?? [], status),
     }),
   );
+  return isCurrent;
 }
 
 export function BoothEnvelopeBridge(): null {
   const ws = useBoothWebSocket();
   const queryClient = useQueryClient();
+  const statusQuery = useStatusCurrent({ paused: ws.state === "live" });
+  const { setLastStatusAt, setRuntimeMode, setStatus } = useBoothStatus();
+  const latestStatusRef = useRef<BoothStatus | null>(null);
+
+  const syncStatus = useCallback(
+    (status: BoothStatus): void => {
+      if (!isNewerThan(status, latestStatusRef.current)) return;
+      latestStatusRef.current = status;
+      setStatus(toBoothDisplayStatus(status.state));
+      setRuntimeMode(status.runtimeMode ?? null);
+      setLastStatusAt(new Date(status.updatedAt));
+    },
+    [setLastStatusAt, setRuntimeMode, setStatus],
+  );
+
+  // Fetch once even when the socket opens immediately. A status socket only
+  // carries new reports, so this snapshot is what makes a reload preserve a
+  // legitimate stale/offline warning until the booth's next heartbeat.
+  useEffect(() => {
+    if (statusQuery.data !== null && statusQuery.data !== undefined) {
+      syncStatus(statusQuery.data);
+    }
+  }, [statusQuery.data, syncStatus]);
+
+  const acceptLiveStatus = useCallback(
+    (status: BoothStatus): void => {
+      if (applyStatusToCache(queryClient, status)) syncStatus(status);
+    },
+    [queryClient, syncStatus],
+  );
+
   // An older API build still sends the bare status frame. The bridge has to
   // honour it too, or a console parked anywhere but the status screen stops
   // updating against that build.
   useEffect(() => {
-    return ws.subscribeLegacyStatus((status) => {
-      applyStatusToCache(queryClient, status);
-    });
-  }, [ws, queryClient]);
+    return ws.subscribeLegacyStatus(acceptLiveStatus);
+  }, [ws, acceptLiveStatus]);
   useEffect(() => {
     return ws.subscribe((envelope) => {
       if (envelope.kind === "installation") {
@@ -227,7 +266,7 @@ export function BoothEnvelopeBridge(): null {
         return;
       }
       if (envelope.kind === "status") {
-        applyStatusToCache(queryClient, envelope.status);
+        acceptLiveStatus(envelope.status);
         return;
       }
       if (envelope.kind === "system") {
@@ -246,6 +285,6 @@ export function BoothEnvelopeBridge(): null {
         void queryClient.invalidateQueries({ queryKey: apiQueryKeys.transcriptions(message.id) });
       }
     });
-  }, [ws, queryClient]);
+  }, [ws, queryClient, acceptLiveStatus]);
   return null;
 }

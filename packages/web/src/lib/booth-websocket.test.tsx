@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { BoothStatusProvider } from "../components/booth/BoothStatusContext.js";
+import { BoothStatusBadge } from "../components/booth/BoothStatusBadge.js";
 import { apiQueryKeys } from "./api-client.js";
 import {
   BoothEnvelopeBridge,
@@ -41,12 +42,20 @@ function Probe(): JSX.Element {
   return <span data-testid="ws-state">{ws.state}</span>;
 }
 
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 function renderProvider(client: QueryClient = new QueryClient()): QueryClient {
   render(
     <QueryClientProvider client={client}>
       <BoothStatusProvider>
         <BoothWebSocketProvider enabled>
           <BoothEnvelopeBridge />
+          <BoothStatusBadge />
           <Probe />
         </BoothWebSocketProvider>
       </BoothStatusProvider>
@@ -60,6 +69,10 @@ describe("BoothWebSocketProvider", () => {
     FakeSocket.instances = [];
     vi.stubGlobal("WebSocket", FakeSocket);
     vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<Response>(() => undefined)),
+    );
   });
 
   afterEach(() => {
@@ -101,15 +114,83 @@ describe("BoothWebSocketProvider", () => {
     const socket = FakeSocket.instances[0]!;
     act(() => socket.emit("open"));
 
-    const status = { state: "idle", updatedAt: "2026-05-01T00:00:00.000Z" };
+    const status = {
+      state: "recording",
+      runtimeMode: "mock",
+      updatedAt: "2026-05-01T00:00:00.000Z",
+    };
     act(() => socket.emit("message", { data: JSON.stringify(status) }));
 
     await waitFor(() =>
-      expect(client.getQueryData(apiQueryKeys.status)).toMatchObject({ state: "idle" }),
+      expect(client.getQueryData(apiQueryKeys.status)).toMatchObject({ state: "recording" }),
     );
     expect(client.getQueryData(apiQueryKeys.statusHistory)).toMatchObject({
-      items: [{ state: "idle" }],
+      items: [{ state: "recording" }],
     });
+    expect(screen.getByText("Recording")).toBeDefined();
+    expect(screen.getByText("MOCK")).toBeDefined();
+  });
+
+  it("keeps the app-wide badge current without mounting the status screen", async () => {
+    vi.setSystemTime(new Date("2026-05-01T00:10:00.000Z"));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          jsonResponse({
+            state: "idle",
+            updatedAt: "2026-05-01T00:00:00.000Z",
+            currentQuestionId: null,
+            currentMessageId: null,
+            lastError: null,
+          }),
+        ),
+      ),
+    );
+
+    renderProvider();
+    expect(await screen.findByText("Booth offline")).toBeDefined();
+
+    await waitFor(() => expect(FakeSocket.instances).toHaveLength(1));
+    const socket = FakeSocket.instances[0]!;
+    act(() => socket.emit("open"));
+    act(() =>
+      socket.emit("message", {
+        data: JSON.stringify({
+          kind: "status",
+          status: {
+            state: "recording",
+            runtimeMode: "simulator",
+            updatedAt: "2026-05-01T00:10:00.000Z",
+            currentQuestionId: null,
+            currentMessageId: null,
+            lastError: null,
+          },
+        }),
+      }),
+    );
+
+    await waitFor(() => expect(screen.getByText("Recording")).toBeDefined());
+    expect(screen.queryByText("Booth offline")).toBeNull();
+    expect(screen.getByText("SIM")).toBeDefined();
+
+    act(() =>
+      socket.emit("message", {
+        data: JSON.stringify({
+          kind: "status",
+          status: {
+            state: "idle",
+            updatedAt: "2026-05-01T00:05:00.000Z",
+            currentQuestionId: null,
+            currentMessageId: null,
+            lastError: null,
+          },
+        }),
+      }),
+    );
+
+    expect(screen.getByText("Recording")).toBeDefined();
+    expect(screen.getByText("SIM")).toBeDefined();
   });
 
   // A malformed URL makes the constructor throw rather than fire `error`, and

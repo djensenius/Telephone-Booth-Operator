@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { BoothState, BoothStatus } from "@telephone-booth-operator/shared";
-import { GlassPanel, useBoothStatus } from "../../components/booth/index.js";
+import { GlassPanel, toBoothDisplayStatus, useBoothStatus } from "../../components/booth/index.js";
 import { useStatusCurrent, useStatusHistory } from "../../lib/api-client.js";
 import { useBoothWebSocket } from "../../lib/booth-websocket.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
@@ -28,19 +28,6 @@ function displayState(state: BoothState): string {
 
 function hookLabel(state: BoothState): "On hook" | "Off hook" {
   return state === "idle" || state === "error" ? "On hook" : "Off hook";
-}
-
-function boothDisplay(state: BoothState): "idle" | "playing" | "recording" | "error" {
-  if (state === "error") return "error";
-  if (state === "recording" || state === "uploading") return "recording";
-  if (
-    state === "playingMessage" ||
-    state === "playingQuestion" ||
-    state === "playingInstructions" ||
-    state === "callUnavailable"
-  )
-    return "playing";
-  return "idle";
 }
 
 export function StatusScreen(): JSX.Element {
@@ -96,7 +83,7 @@ export function StatusScreen(): JSX.Element {
   }, [ws, setLastStatusAt]);
 
   useEffect(() => {
-    if (liveStatus) setStatus(boothDisplay(liveStatus.state));
+    if (liveStatus) setStatus(toBoothDisplayStatus(liveStatus.state));
   }, [liveStatus, setStatus]);
 
   useEffect(() => {
