@@ -211,6 +211,104 @@ describe("admin data export/import", () => {
     expect(restored?.repeatCount).toBe(1);
   });
 
+  it("resets ticket-bag fields when restoring a version-5 archive", async () => {
+    const app = createApp();
+    const cookie = operatorCookie();
+    const question = seedQuestion({
+      weight: 7,
+      lastSelectedCycle: 4,
+      selectionsInCycle: 3,
+    });
+    const installation = store.installations.get(DEFAULT_INSTALLATION_ID);
+    expect(installation).toBeDefined();
+    if (!installation) return;
+    installation.questionSelectionCycle = 4;
+    installation.lastSelectedQuestionId = question.id;
+    installation.recentQuestionDraws = [
+      { drawId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", questionId: question.id },
+    ];
+
+    const generatedAt = "2026-08-01T12:00:00.000Z";
+    const archive = createTar([
+      {
+        name: "manifest.json",
+        data: Buffer.from(
+          JSON.stringify({
+            format: EXPORT_FORMAT,
+            version: 5,
+            generatedAt,
+            container: "audio",
+            counts: {},
+            blobCount: 0,
+            missingBlobs: [],
+          }),
+          "utf8",
+        ),
+      },
+      {
+        name: "data.json",
+        data: Buffer.from(
+          JSON.stringify({
+            installation: [
+              {
+                id: installation.id,
+                name: installation.name,
+                notes: installation.notes,
+                location: installation.location,
+                defaultTranscriptionLanguage: installation.defaultTranscriptionLanguage,
+                startedAt: installation.startedAt,
+                endedAt: installation.endedAt,
+                endedById: installation.endedById,
+                summary: installation.summary,
+                createdAt: installation.createdAt,
+                questionSelectionCycle: 9,
+                lastSelectedQuestionId: question.id,
+                recentQuestionDraws: [
+                  {
+                    drawId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                    questionId: question.id,
+                  },
+                ],
+              },
+            ],
+            question: [
+              {
+                id: question.id,
+                prompt: question.prompt,
+                status: question.status,
+                audioId: question.audioId,
+                createdAt: question.createdAt,
+                retiredAt: question.retiredAt,
+                installationId: question.installationId,
+                weight: 9,
+                lastSelectedCycle: 9,
+                selectionsInCycle: 9,
+              },
+            ],
+          }),
+          "utf8",
+        ),
+      },
+    ]);
+
+    const response = await app.request("/v1/admin/data/import", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/x-tar" },
+      body: archive,
+    });
+    expect(response.status, await response.clone().text()).toBe(200);
+    expect(store.installations.get(installation.id)).toMatchObject({
+      questionSelectionCycle: 0,
+      lastSelectedQuestionId: null,
+      recentQuestionDraws: [],
+    });
+    expect(store.questions.get(question.id)).toMatchObject({
+      weight: 1,
+      lastSelectedCycle: null,
+      selectionsInCycle: 0,
+    });
+  });
+
   // The manifest arrives inside an uploaded tar, so a malformed optional field
   // has to be an invalid_archive rather than a TypeError surfacing as a 500.
   it("rejects a manifest whose partialInstallationIds is not a string array", async () => {
@@ -243,6 +341,95 @@ describe("admin data export/import", () => {
     });
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toBe("invalid_archive");
+  });
+
+  it.each([
+    ["a non-object question row", { question: [null] }],
+    [
+      "missing question fields",
+      {
+        question: [{ id: crypto.randomUUID(), weight: 1, lastSelectedCycle: null }],
+      },
+    ],
+    [
+      "missing installation fields",
+      {
+        installation: [
+          {
+            id: crypto.randomUUID(),
+            questionSelectionCycle: 0,
+            lastSelectedQuestionId: null,
+          },
+        ],
+      },
+    ],
+    [
+      "an out-of-range question weight",
+      {
+        question: [
+          {
+            id: crypto.randomUUID(),
+            weight: 0,
+            lastSelectedCycle: null,
+            selectionsInCycle: 0,
+          },
+        ],
+      },
+    ],
+    [
+      "an overflowing selection counter",
+      {
+        question: [
+          {
+            id: crypto.randomUUID(),
+            weight: 1,
+            lastSelectedCycle: null,
+            selectionsInCycle: 2_147_483_648,
+          },
+        ],
+      },
+    ],
+    [
+      "a malformed recent draw",
+      {
+        installation: [
+          {
+            id: crypto.randomUUID(),
+            questionSelectionCycle: 0,
+            lastSelectedQuestionId: null,
+            recentQuestionDraws: [{ drawId: "not-a-uuid", questionId: crypto.randomUUID() }],
+          },
+        ],
+      },
+    ],
+  ])("rejects v6 ticket state with %s", async (_label, data) => {
+    const archive = createTar([
+      {
+        name: "manifest.json",
+        data: Buffer.from(
+          JSON.stringify({
+            format: EXPORT_FORMAT,
+            version: 6,
+            generatedAt: "2026-08-26T12:34:56.000Z",
+            container: "audio",
+            counts: {},
+            blobCount: 0,
+            missingBlobs: [],
+          }),
+          "utf8",
+        ),
+      },
+      { name: "data.json", data: Buffer.from(JSON.stringify(data), "utf8") },
+    ]);
+
+    const response = await createApp().request("/v1/admin/data/import", {
+      method: "POST",
+      headers: { cookie: operatorCookie(), "content-type": "application/x-tar" },
+      body: archive,
+    });
+
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: string }).error).toBe("invalid_archive");
   });
 
   it("adopts legacy archive rows into one idempotent restored installation", async () => {

@@ -40,6 +40,7 @@ export const serializeQuestion = (question: WithAudio<Question>): QuestionPayloa
   id: question.id,
   prompt: question.prompt,
   status: question.status,
+  weight: question.weight,
   createdAt: iso(question.createdAt),
   audio: audioRef(question.audio),
 });

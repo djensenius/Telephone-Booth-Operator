@@ -11,6 +11,12 @@
 //     blobKey/sha256 are stored, so scope/lifetime rules are untouched.
 
 import { createHash } from "node:crypto";
+import {
+  QUESTION_DRAW_HISTORY_LIMIT,
+  QUESTION_TICKET_COUNTER_MAX,
+  QuestionWeightSchema,
+} from "@telephone-booth-operator/shared";
+import { z } from "zod";
 import { Prisma } from "../generated/prisma/client.js";
 import { downloadBlob, headBlob, uploadBlob } from "./azure-blob.js";
 import { createTar, readTar } from "./archive.js";
@@ -22,13 +28,15 @@ export const EXPORT_FORMAT = "telephone-booth-export";
 // 1: original shape. 2: BoothStatusSnapshot carries `firstSeenAt`/`repeatCount`.
 // 3: adds the AuditLog trail. 4: rows carry `installationId` and the archive
 // may be scoped to one installation. 5: adds TelemetrySource rows before the
-// API tokens that can reference them. Each bump makes a server that predates
-// the change reject the archive as newer than supported instead of failing on
-// unknown columns mid-restore. Older archives still import —
-// `withStatusWindow` fills the missing status window, absent tables restore as
-// empty, and legacy untagged rows are adopted into a deterministic ended
-// "Restored …" installation after the archived rows are upserted.
-export const EXPORT_VERSION = 5;
+// API tokens that can reference them. 6: adds weighted question ticket-bag
+// state. Each bump makes a server that predates the change reject the archive
+// as newer than supported instead of failing on unknown columns mid-restore.
+// Older archives still import — normalization fills newly-added fields, absent
+// tables restore as empty, and legacy untagged rows are adopted into a
+// deterministic ended "Restored …" installation after the archived rows are
+// upserted.
+export const EXPORT_VERSION = 6;
+const QUESTION_TICKET_STATE_VERSION = 6;
 // Manifest models added after v1. Nothing to migrate; listed for the record.
 const INSTALLATION_MODEL = "installation" as const;
 
@@ -389,7 +397,12 @@ const parseArchive = (
     if (!Array.isArray(rows)) {
       throw new ImportFormatError(`data.json entry "${name}" must be an array`);
     }
-    normalized[name] = name === "boothStatusSnapshot" ? rows.map(withStatusWindow) : rows;
+    normalized[name] = rows.map((row, index) => {
+      if (typeof row !== "object" || row === null || Array.isArray(row)) {
+        throw new ImportFormatError(`data.json entry "${name}" row ${index} must be an object`);
+      }
+      return normalizeArchiveRow(name, row, manifest.version);
+    });
   }
 
   return { manifest, dump: normalized, blobs };
@@ -403,6 +416,87 @@ const withStatusWindow = (row: Row): Row =>
   row.firstSeenAt === undefined || row.firstSeenAt === null
     ? { ...row, firstSeenAt: row.updatedAt, repeatCount: row.repeatCount ?? 1 }
     : row;
+
+const nonnegativeIntegerSchema = z.number().int().min(0).max(QUESTION_TICKET_COUNTER_MAX);
+const nullableUuidSchema = z.guid().nullable();
+const questionDrawHistorySchema = z
+  .array(z.object({ drawId: z.guid(), questionId: z.guid() }))
+  .max(QUESTION_DRAW_HISTORY_LIMIT);
+
+const ticketStateError = (model: string, row: Row, error: z.ZodError): ImportFormatError =>
+  new ImportFormatError(
+    `invalid ${model} ticket state for ${String(row.id)}: ${error.issues
+      .map((issue) => `${issue.path.join(".") || "value"} ${issue.message}`)
+      .join("; ")}`,
+  );
+
+const withQuestionTicketState = (row: Row, archiveVersion: number): Row => {
+  const ticketState =
+    archiveVersion < QUESTION_TICKET_STATE_VERSION
+      ? { weight: 1, lastSelectedCycle: null, selectionsInCycle: 0 }
+      : {
+          weight: row.weight,
+          lastSelectedCycle: row.lastSelectedCycle,
+          selectionsInCycle: row.selectionsInCycle,
+        };
+  const parsed = z
+    .object({
+      weight: QuestionWeightSchema,
+      lastSelectedCycle: nonnegativeIntegerSchema.nullable(),
+      selectionsInCycle: nonnegativeIntegerSchema,
+    })
+    .safeParse(ticketState);
+  if (!parsed.success) throw ticketStateError("question", row, parsed.error);
+  return { ...row, ...parsed.data };
+};
+
+const withInstallationTicketState = (row: Row, archiveVersion: number): Row => {
+  const ticketState =
+    archiveVersion < QUESTION_TICKET_STATE_VERSION
+      ? {
+          questionSelectionCycle: 0,
+          lastSelectedQuestionId: null,
+          recentQuestionDraws: [],
+        }
+      : {
+          questionSelectionCycle: row.questionSelectionCycle,
+          lastSelectedQuestionId: row.lastSelectedQuestionId,
+          recentQuestionDraws: row.recentQuestionDraws,
+        };
+  const parsed = z
+    .object({
+      questionSelectionCycle: nonnegativeIntegerSchema,
+      lastSelectedQuestionId: nullableUuidSchema,
+      recentQuestionDraws: questionDrawHistorySchema,
+    })
+    .safeParse(ticketState);
+  if (!parsed.success) throw ticketStateError("installation", row, parsed.error);
+
+  const recentQuestionDraws = parsed.data.recentQuestionDraws.map((entry) => ({
+    drawId: entry.drawId.toLowerCase(),
+    questionId: entry.questionId.toLowerCase(),
+  }));
+  if (
+    new Set(recentQuestionDraws.map((entry) => entry.drawId)).size !== recentQuestionDraws.length
+  ) {
+    throw new ImportFormatError(
+      `invalid installation ticket state for ${String(row.id)}: duplicate draw IDs`,
+    );
+  }
+  return {
+    ...row,
+    questionSelectionCycle: parsed.data.questionSelectionCycle,
+    lastSelectedQuestionId: parsed.data.lastSelectedQuestionId?.toLowerCase() ?? null,
+    recentQuestionDraws,
+  };
+};
+
+const normalizeArchiveRow = (name: ModelName, row: Row, archiveVersion: number): Row => {
+  if (name === "boothStatusSnapshot") return withStatusWindow(row);
+  if (name === "question") return withQuestionTicketState(row, archiveVersion);
+  if (name === INSTALLATION_MODEL) return withInstallationTicketState(row, archiveVersion);
+  return row;
+};
 
 const dateFromManifest = (manifest: ExportManifest): Date => {
   const generated = new Date(manifest.generatedAt);

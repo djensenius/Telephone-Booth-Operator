@@ -70,7 +70,7 @@ curl -X PUT "$PUBLIC_API_URL/v1/status" \
   -H 'Content-Type: application/json' \
   -d '{"state":"recording"}'
 
-# Phone: get a random question
+# Phone: draw the next question from the weighted ticket bag
 curl "$PUBLIC_API_URL/v1/questions/random" \
   -H "Authorization: Bearer $PHONE_API_TOKEN"
 

@@ -31,6 +31,7 @@ jobs:
     env:
       DATABASE_URL: postgres://booth:booth@localhost:5432/telephone_booth
       SESSION_SECRET: "0000000000000000000000000000000000000000000000000000000000000000"
+      RUN_DATABASE_TESTS: "1"
       AUTHENTIK_ISSUER: "http://localhost:8888/"
       AUTHENTIK_CLIENT_ID: "ci"
       AUTHENTIK_CLIENT_SECRET: "ci"

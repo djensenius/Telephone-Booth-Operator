@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, JSX } from "react";
+import { createPortal } from "react-dom";
 import { GlassPanel } from "../../components/booth/index.js";
 import {
   AUDIO_UPLOAD_ACCEPT,
@@ -17,7 +18,12 @@ import {
 import { durationLabel } from "../../lib/time-format.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
 import { useCurrentUser } from "../auth/useCurrentUser.js";
-import type { Question, QuestionStatus } from "@telephone-booth-operator/shared";
+import {
+  QUESTION_WEIGHT_MAX,
+  QUESTION_WEIGHT_MIN,
+  type Question,
+  type QuestionStatus,
+} from "@telephone-booth-operator/shared";
 
 const QUESTION_FILTERS: readonly (QuestionStatus | "all")[] = [
   "all",
@@ -73,11 +79,17 @@ export function NewQuestionDialog({
 }): JSX.Element | null {
   const createQuestion = useCreateQuestion();
   const [prompt, setPrompt] = useState("");
+  const [weight, setWeight] = useState("1");
   const [file, setFile] = useState<File | null>(null);
   const [status, setStatus] = useState("");
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   if (!open) return null;
+  const parsedWeight = Number(weight);
+  const weightIsValid =
+    Number.isInteger(parsedWeight) &&
+    parsedWeight >= QUESTION_WEIGHT_MIN &&
+    parsedWeight <= QUESTION_WEIGHT_MAX;
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -98,8 +110,13 @@ export function NewQuestionDialog({
       setStatus("Sending the question audio up the wire…");
       await uploadBlobToSas(slot.uploadUrl, file, contentType);
       setStatus("Filing the prompt card…");
-      await createQuestion.mutateAsync({ prompt, audioFileId: slot.audioFileId });
+      await createQuestion.mutateAsync({
+        prompt,
+        audioFileId: slot.audioFileId,
+        weight: parsedWeight,
+      });
       setPrompt("");
+      setWeight("1");
       setFile(null);
       setStatus("");
       onClose();
@@ -109,7 +126,7 @@ export function NewQuestionDialog({
     }
   }
 
-  return (
+  return createPortal(
     <div className="feature-dialog-backdrop" role="presentation">
       <section
         className="feature-dialog"
@@ -129,6 +146,21 @@ export function NewQuestionDialog({
             />
           </label>
           <label>
+            Selection weight
+            <input
+              type="number"
+              value={weight}
+              onChange={(event) => setWeight(event.currentTarget.value)}
+              min={QUESTION_WEIGHT_MIN}
+              max={QUESTION_WEIGHT_MAX}
+              step={1}
+              required
+            />
+          </label>
+          <p className="feature-help">
+            Weight 1 is standard. Higher weights play this recording more often within each cycle.
+          </p>
+          <label>
             Audio file
             <input
               type="file"
@@ -144,7 +176,12 @@ export function NewQuestionDialog({
           <div className="debug-button-row">
             <button
               type="submit"
-              disabled={createQuestion.isPending || prompt.trim().length === 0 || file === null}
+              disabled={
+                createQuestion.isPending ||
+                prompt.trim().length === 0 ||
+                file === null ||
+                !weightIsValid
+              }
             >
               Place a call
             </button>
@@ -154,7 +191,8 @@ export function NewQuestionDialog({
           </div>
         </form>
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -167,6 +205,7 @@ export function EditQuestionDialog({
 }): JSX.Element | null {
   const updateQuestion = useUpdateQuestion();
   const [prompt, setPrompt] = useState(question?.prompt ?? "");
+  const [weight, setWeight] = useState(String(question?.weight ?? 1));
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
@@ -175,16 +214,21 @@ export function EditQuestionDialog({
 
   if (question === null) return null;
   const questionId = question.id;
+  const parsedWeight = Number(weight);
+  const weightIsValid =
+    Number.isInteger(parsedWeight) &&
+    parsedWeight >= QUESTION_WEIGHT_MIN &&
+    parsedWeight <= QUESTION_WEIGHT_MAX;
 
   function submit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     updateQuestion.mutate(
-      { id: questionId, input: { prompt: prompt.trim() } },
+      { id: questionId, input: { prompt: prompt.trim(), weight: parsedWeight } },
       { onSuccess: onClose },
     );
   }
 
-  return (
+  return createPortal(
     <div
       className="feature-dialog-backdrop"
       role="presentation"
@@ -198,7 +242,7 @@ export function EditQuestionDialog({
         aria-modal="true"
         aria-labelledby="edit-question-heading"
       >
-        <h2 id="edit-question-heading">Edit question prompt</h2>
+        <h2 id="edit-question-heading">Edit question</h2>
         <form className="feature-form" onSubmit={submit}>
           <label>
             Prompt
@@ -211,12 +255,30 @@ export function EditQuestionDialog({
               required
             />
           </label>
+          <label>
+            Selection weight
+            <input
+              type="number"
+              value={weight}
+              onChange={(event) => setWeight(event.currentTarget.value)}
+              min={QUESTION_WEIGHT_MIN}
+              max={QUESTION_WEIGHT_MAX}
+              step={1}
+              required
+            />
+          </label>
+          <p className="feature-help">
+            Weight 1 is standard. Higher weights add more plays to each randomized cycle.
+          </p>
           {updateQuestion.error ? (
-            <FeatureError message="The question prompt could not be updated." />
+            <FeatureError message="The question could not be updated." />
           ) : null}
           <div className="debug-button-row">
-            <button type="submit" disabled={updateQuestion.isPending || prompt.trim().length === 0}>
-              Save prompt
+            <button
+              type="submit"
+              disabled={updateQuestion.isPending || prompt.trim().length === 0 || !weightIsValid}
+            >
+              Save question
             </button>
             <button type="button" onClick={onClose}>
               Cancel
@@ -224,7 +286,8 @@ export function EditQuestionDialog({
           </div>
         </form>
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -254,6 +317,11 @@ export function QuestionsScreen({
       <p className="screen-kicker">Digit 3</p>
       <h1>Questions</h1>
       <p>Keep the booth supplied with prompt cards and their matching audio.</p>
+      <p className="feature-help" role="note">
+        Active recordings play from a randomized weighted ticket bag. Weight 1 adds one play per
+        cycle; higher weights add that many plays. The booth avoids an immediate repeat whenever
+        another recording still has a ticket, then refills the bag after every ticket is used.
+      </p>
       <div className="question-library-controls">
         <div className="feature-toolbar" role="toolbar" aria-label="Question filters">
           {QUESTION_FILTERS.map((option) => (
@@ -299,6 +367,7 @@ export function QuestionsScreen({
                   {question.status}
                 </span>
                 <span className="question-card__date">Added {date(question.createdAt)}</span>
+                <span className="question-card__date">Weight {question.weight}</span>
               </div>
               <h2>{question.prompt}</h2>
               <QuestionAudio url={question.audio.url} durationMs={question.audio.durationMs} />
@@ -334,7 +403,7 @@ export function QuestionsScreen({
                           setEditQuestion(question);
                         }}
                       >
-                        Edit prompt
+                        Edit question
                       </button>
                       <button type="button" onClick={() => setDeleteId(question.id)}>
                         Delete
@@ -357,32 +426,35 @@ export function QuestionsScreen({
           onClose={closeEditDialog}
         />
       ) : null}
-      {deleteId === null || !isAdmin ? null : (
-        <div className="feature-dialog-backdrop" role="presentation">
-          <section
-            className="feature-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="delete-question-heading"
-          >
-            <h2 id="delete-question-heading">Retire this question?</h2>
-            <p>The booth will stop offering this prompt, but existing messages stay on file.</p>
-            <div className="debug-button-row">
-              <button
-                type="button"
-                onClick={() =>
-                  void deleteQuestion.mutateAsync(deleteId).then(() => setDeleteId(null))
-                }
+      {deleteId === null || !isAdmin
+        ? null
+        : createPortal(
+            <div className="feature-dialog-backdrop" role="presentation">
+              <section
+                className="feature-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="delete-question-heading"
               >
-                Confirm delete
-              </button>
-              <button type="button" onClick={() => setDeleteId(null)}>
-                Cancel
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
+                <h2 id="delete-question-heading">Retire this question?</h2>
+                <p>The booth will stop offering this prompt, but existing messages stay on file.</p>
+                <div className="debug-button-row">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void deleteQuestion.mutateAsync(deleteId).then(() => setDeleteId(null))
+                    }
+                  >
+                    Confirm delete
+                  </button>
+                  <button type="button" onClick={() => setDeleteId(null)}>
+                    Cancel
+                  </button>
+                </div>
+              </section>
+            </div>,
+            document.body,
+          )}
     </GlassPanel>
   );
 }

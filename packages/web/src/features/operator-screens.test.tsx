@@ -41,6 +41,7 @@ const question = {
   id: questionId,
   prompt: "What did the city sound like today?",
   status: "active",
+  weight: 1,
   createdAt: "2026-01-01T00:00:00.000Z",
   audio: { url: "https://media.example/question.flac", sha256: sha, durationMs: 12000 },
 };
@@ -100,11 +101,13 @@ const token = {
 };
 
 let createdQuestion = false;
+let createdQuestionWeight: number | undefined;
 let lastQuestionsUrl = "";
 let questionsUrls: string[] = [];
 let activatedQuestionId = "";
 let deactivatedQuestionId = "";
 let updatedQuestionPrompt = "";
+let updatedQuestionWeight: number | undefined;
 let deletedMessages: string[] = [];
 let revokedToken = false;
 let lastCreatedTokenScope: string | undefined;
@@ -175,14 +178,22 @@ const server = setupServer(
     blobUploadContentType = request.headers.get("content-type");
     return new HttpResponse(null, { status: 201 });
   }),
-  http.post("http://localhost/v1/questions", () => {
+  http.post("http://localhost/v1/questions", async ({ request }) => {
+    const body = (await request.json()) as { weight?: number };
     createdQuestion = true;
+    createdQuestionWeight = body.weight;
     return HttpResponse.json(questionTwo, { status: 201 });
   }),
   http.patch("http://localhost/v1/questions/:id", async ({ params, request }) => {
-    const body = (await request.json()) as { prompt: string };
+    const body = (await request.json()) as { prompt: string; weight: number };
     updatedQuestionPrompt = body.prompt;
-    return HttpResponse.json({ ...question, id: String(params.id), prompt: body.prompt });
+    updatedQuestionWeight = body.weight;
+    return HttpResponse.json({
+      ...question,
+      id: String(params.id),
+      prompt: body.prompt,
+      weight: body.weight,
+    });
   }),
   http.delete("http://localhost/v1/questions/:id", () => new HttpResponse(null, { status: 204 })),
   http.post("http://localhost/v1/questions/:id/activate", ({ params }) => {
@@ -365,11 +376,13 @@ beforeAll(() => server.listen({ onUnhandledRequest: "bypass" }));
 afterAll(() => server.close());
 beforeEach(() => {
   createdQuestion = false;
+  createdQuestionWeight = undefined;
   lastQuestionsUrl = "";
   questionsUrls = [];
   activatedQuestionId = "";
   deactivatedQuestionId = "";
   updatedQuestionPrompt = "";
+  updatedQuestionWeight = undefined;
   deletedMessages = [];
   revokedToken = false;
   lastCreatedTokenScope = undefined;
@@ -554,12 +567,15 @@ describe("Questions feature", () => {
   it("renders the question library", async () => {
     renderPath("/questions");
     expect(await screen.findByText("What did the city sound like today?")).toBeTruthy();
+    expect(screen.getByText(/randomized weighted ticket bag/u)).toBeTruthy();
   });
 
   it("opens the new question dialog", async () => {
     renderPath("/questions");
     fireEvent.click(await screen.findByText("New question"));
-    expect(screen.getByRole("dialog", { name: "New question" })).toBeTruthy();
+    const dialog = screen.getByRole("dialog", { name: "New question" });
+    expect(dialog).toBeTruthy();
+    expect(dialog.parentElement?.parentElement).toBe(document.body);
   });
 
   it("uploads audio and creates a question", async () => {
@@ -575,6 +591,7 @@ describe("Questions feature", () => {
     expect(form).not.toBeNull();
     fireEvent.submit(form as HTMLFormElement);
     await waitFor(() => expect(createdQuestion).toBe(true), { timeout: 3_000 });
+    expect(createdQuestionWeight).toBe(1);
     expect(uploadReservationBody).toMatchObject({ contentType: "audio/wav" });
     expect(blobUploadContentType).toBe("audio/wav");
   });
@@ -601,17 +618,19 @@ describe("Questions feature", () => {
     expect(screen.getByText("Retire this question?")).toBeTruthy();
   });
 
-  it("edits a question prompt", async () => {
+  it("edits a question prompt and selection weight", async () => {
     renderPath("/questions");
-    const trigger = await screen.findByText("Edit prompt");
+    const trigger = await screen.findByText("Edit question");
     fireEvent.click(trigger);
     const input = screen.getByLabelText("Prompt");
     expect(document.activeElement).toBe(input);
     fireEvent.change(input, { target: { value: "What can you hear right now?" } });
-    fireEvent.click(screen.getByText("Save prompt"));
+    fireEvent.change(screen.getByLabelText("Selection weight"), { target: { value: "2" } });
+    fireEvent.click(screen.getByText("Save question"));
     await waitFor(() => expect(updatedQuestionPrompt).toBe("What can you hear right now?"), {
       timeout: 3_000,
     });
+    expect(updatedQuestionWeight).toBe(2);
     await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
 
