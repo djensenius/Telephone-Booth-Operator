@@ -30,10 +30,12 @@ function hookLabel(state: BoothState): "On hook" | "Off hook" {
 }
 
 export function StatusScreen(): JSX.Element {
-  const ws = useBoothWebSocket();
-  const wsState = ws.state;
-  const statusQuery = useStatusCurrent({ paused: wsState === "live" });
-  const historyQuery = useStatusHistory({ paused: wsState === "live" });
+  const wsState = useBoothWebSocket().state;
+  // The app-wide bridge owns current-status polling; this observer reads that
+  // cache without starting a second interval. History still reconciles here
+  // because WebSocket broadcasts do not cross API replica boundaries.
+  const statusQuery = useStatusCurrent({ paused: true });
+  const historyQuery = useStatusHistory();
 
   const history = useMemo(
     () =>

@@ -194,6 +194,35 @@ describe("BoothWebSocketProvider", () => {
     expect(screen.getByText("SIM")).toBeDefined();
   });
 
+  it("keeps REST reconciliation active while the status socket is live", async () => {
+    let requestCount = 0;
+    const pendingResponse = new Promise<Response>(() => undefined);
+    const fetchMock = vi.fn(() => {
+      requestCount += 1;
+      return requestCount === 1
+        ? Promise.resolve(
+            jsonResponse({
+              state: "idle",
+              updatedAt: new Date().toISOString(),
+              isSynthetic: true,
+            }),
+          )
+        : pendingResponse;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderProvider();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    await waitFor(() => expect(FakeSocket.instances).toHaveLength(1));
+    act(() => FakeSocket.instances[0]!.emit("open"));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  });
+
   it("does not let a delayed status request overwrite a newer live frame", async () => {
     let resolveFetch: ((response: Response) => void) | undefined;
     const fetchMock = vi.fn(

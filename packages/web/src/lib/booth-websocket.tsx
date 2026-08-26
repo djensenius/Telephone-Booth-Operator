@@ -229,7 +229,10 @@ function applyStatusToCache(queryClient: QueryClient, status: BoothStatus): bool
 export function BoothEnvelopeBridge(): null {
   const ws = useBoothWebSocket();
   const queryClient = useQueryClient();
-  const statusQuery = useStatusCurrent({ paused: ws.state === "live" });
+  // The broadcaster is process-local, so a live socket on one API replica can
+  // miss status reports handled by another. Keep bounded REST reconciliation
+  // active; accepted live frames cancel older in-flight responses below.
+  const statusQuery = useStatusCurrent();
   const { setLastStatusAt, setRuntimeMode, setStatus } = useBoothStatus();
   const latestStatusRef = useRef<BoothStatus | null>(null);
 
