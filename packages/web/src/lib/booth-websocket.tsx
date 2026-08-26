@@ -202,8 +202,8 @@ export function useBoothWebSocket(): BoothWebSocketApi {
 // Always-mounted bridge: every envelope that belongs in the query cache is
 // applied here rather than on the screen that happens to render it. A console
 // parked on Messages must still see a pushed recording, and one on any route
-// must re-scope when a rollover happens on another console. Screens subscribe
-// only for their own presentation state.
+// must re-scope when a rollover happens on another console. Detailed screens
+// consume the same cache, so status ordering has one app-wide owner.
 // Frames can arrive out of order, so an older one joins the history but never
 // becomes the current status.
 function applyStatusToCache(queryClient: QueryClient, status: BoothStatus): boolean {
@@ -216,6 +216,7 @@ function applyStatusToCache(queryClient: QueryClient, status: BoothStatus): bool
     void queryClient.cancelQueries({ queryKey: apiQueryKeys.status, exact: true });
     queryClient.setQueryData(apiQueryKeys.status, status);
   }
+  void queryClient.cancelQueries({ queryKey: apiQueryKeys.statusHistory, exact: true });
   queryClient.setQueryData(
     apiQueryKeys.statusHistory,
     (current: { readonly items: readonly BoothStatus[] } | undefined) => ({
@@ -259,6 +260,16 @@ export function BoothEnvelopeBridge(): null {
     [queryClient, syncStatus],
   );
 
+  const resetStatus = useCallback((): void => {
+    latestStatusRef.current = null;
+    void queryClient.cancelQueries({ queryKey: ["status"] });
+    queryClient.setQueryData<BoothStatus | null>(apiQueryKeys.status, null);
+    queryClient.setQueryData(apiQueryKeys.statusHistory, { items: [] });
+    setStatus("idle");
+    setRuntimeMode(null);
+    setLastStatusAt(null);
+  }, [queryClient, setLastStatusAt, setRuntimeMode, setStatus]);
+
   // An older API build still sends the bare status frame. The bridge has to
   // honour it too, or a console parked anywhere but the status screen stops
   // updating against that build.
@@ -268,6 +279,7 @@ export function BoothEnvelopeBridge(): null {
   useEffect(() => {
     return ws.subscribe((envelope) => {
       if (envelope.kind === "installation") {
+        resetStatus();
         invalidateInstallationScopedQueries(queryClient);
         return;
       }
@@ -291,6 +303,6 @@ export function BoothEnvelopeBridge(): null {
         void queryClient.invalidateQueries({ queryKey: apiQueryKeys.transcriptions(message.id) });
       }
     });
-  }, [ws, queryClient, acceptLiveStatus]);
+  }, [ws, queryClient, acceptLiveStatus, resetStatus]);
   return null;
 }

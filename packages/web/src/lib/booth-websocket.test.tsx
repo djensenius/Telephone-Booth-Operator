@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import { BoothStatusProvider } from "../components/booth/BoothStatusContext.js";
 import { BoothStatusBadge } from "../components/booth/BoothStatusBadge.js";
 import { apiQueryKeys } from "./api-client.js";
+import type { StatusHistory } from "./api-client.js";
 import {
   BoothEnvelopeBridge,
   BoothWebSocketProvider,
@@ -245,6 +246,121 @@ describe("BoothWebSocketProvider", () => {
       updatedAt: "2026-05-01T00:10:00.000Z",
     });
     expect(screen.getByText("Recording")).toBeDefined();
+  });
+
+  it("does not let a delayed history request erase a live frame", async () => {
+    let resolveHistory: ((history: StatusHistory) => void) | undefined;
+    const client = new QueryClient();
+    const historyRequest = client
+      .fetchQuery({
+        queryKey: apiQueryKeys.statusHistory,
+        queryFn: () =>
+          new Promise<StatusHistory>((resolve) => {
+            resolveHistory = resolve;
+          }),
+      })
+      .catch(() => undefined);
+
+    renderProvider(client);
+    await waitFor(() => expect(FakeSocket.instances).toHaveLength(1));
+    const socket = FakeSocket.instances[0]!;
+    act(() => socket.emit("open"));
+    act(() =>
+      socket.emit("message", {
+        data: JSON.stringify({
+          kind: "status",
+          status: {
+            state: "recording",
+            updatedAt: "2026-05-01T00:10:00.000Z",
+            currentQuestionId: null,
+            currentMessageId: null,
+            lastError: null,
+          },
+        }),
+      }),
+    );
+
+    expect(client.getQueryData(apiQueryKeys.statusHistory)).toMatchObject({
+      items: [{ state: "recording", updatedAt: "2026-05-01T00:10:00.000Z" }],
+    });
+    const resolveStatusHistory = resolveHistory;
+    if (resolveStatusHistory === undefined)
+      throw new Error("Status history request did not start.");
+    resolveStatusHistory({ items: [] });
+    await historyRequest;
+
+    expect(client.getQueryData(apiQueryKeys.statusHistory)).toMatchObject({
+      items: [{ state: "recording", updatedAt: "2026-05-01T00:10:00.000Z" }],
+    });
+  });
+
+  it("resets status ordering when the active installation changes", async () => {
+    const client = renderProvider();
+    await waitFor(() => expect(FakeSocket.instances).toHaveLength(1));
+    const socket = FakeSocket.instances[0]!;
+    act(() => socket.emit("open"));
+    act(() =>
+      socket.emit("message", {
+        data: JSON.stringify({
+          kind: "status",
+          status: {
+            state: "recording",
+            runtimeMode: "simulator",
+            updatedAt: "2026-05-01T00:10:00.000Z",
+            currentQuestionId: null,
+            currentMessageId: null,
+            lastError: null,
+          },
+        }),
+      }),
+    );
+    await waitFor(() => expect(screen.getByText("Recording")).toBeDefined());
+
+    act(() =>
+      socket.emit("message", {
+        data: JSON.stringify({
+          kind: "installation",
+          installation: {
+            id: "ee333333-3333-4333-8333-333333333333",
+            name: "Fresh era",
+            notes: null,
+            location: null,
+            startedAt: "2026-05-01T00:11:00.000Z",
+            endedAt: null,
+            endedById: null,
+            summary: null,
+            createdAt: "2026-05-01T00:11:00.000Z",
+            isActive: true,
+          },
+        }),
+      }),
+    );
+
+    expect(client.getQueryData(apiQueryKeys.status)).toBeNull();
+    expect(client.getQueryData(apiQueryKeys.statusHistory)).toEqual({ items: [] });
+    expect(screen.getByText("Idle")).toBeDefined();
+    expect(screen.queryByText("SIM")).toBeNull();
+
+    act(() =>
+      socket.emit("message", {
+        data: JSON.stringify({
+          kind: "status",
+          status: {
+            state: "playingQuestion",
+            updatedAt: "2026-05-01T00:05:00.000Z",
+            currentQuestionId: null,
+            currentMessageId: null,
+            lastError: null,
+          },
+        }),
+      }),
+    );
+
+    await waitFor(() => expect(screen.getByText("Playing")).toBeDefined());
+    expect(client.getQueryData(apiQueryKeys.status)).toMatchObject({
+      state: "playingQuestion",
+      updatedAt: "2026-05-01T00:05:00.000Z",
+    });
   });
 
   // A malformed URL makes the constructor throw rather than fire `error`, and
