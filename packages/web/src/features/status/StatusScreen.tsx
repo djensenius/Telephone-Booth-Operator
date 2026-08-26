@@ -42,7 +42,7 @@ export function StatusScreen(): JSX.Element {
       collapseStatusHistory(historyQuery.data?.items ?? []).slice(0, STATUS_HISTORY_DISPLAY_LIMIT),
     [historyQuery.data],
   );
-  const current = statusQuery.data ?? history[0] ?? null;
+  const current = statusQuery.data === null ? null : (statusQuery.data ?? history[0] ?? null);
 
   return (
     <GlassPanel title="Live status panel" className="feature-screen status-screen">

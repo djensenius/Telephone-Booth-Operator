@@ -1252,7 +1252,7 @@ export function useInstallationsList() {
 
 // After a rollover (start/end) every era-scoped read is stale: the active
 // installation moved, frozen summaries changed, and live stats now belong to a
-// different era. Invalidate broadly so the whole console re-scopes.
+// different era. Refresh broadly so the whole console re-scopes.
 export function invalidateInstallationScopedQueries(
   queryClient: ReturnType<typeof useQueryClient>,
 ): void {
@@ -1265,7 +1265,9 @@ export function invalidateInstallationScopedQueries(
   void queryClient.invalidateQueries({ queryKey: ["sessions"] });
   void queryClient.invalidateQueries({ queryKey: ["events"] });
   void queryClient.invalidateQueries({ queryKey: ["questions"] });
-  void queryClient.invalidateQueries({ queryKey: ["status"] });
+  // Do not retain the previous installation's current/history rows while the
+  // active queries refetch their new scope.
+  void queryClient.resetQueries({ queryKey: ["status"] });
 }
 
 export function useCreateInstallation() {

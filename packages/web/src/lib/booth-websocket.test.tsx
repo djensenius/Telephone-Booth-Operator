@@ -223,6 +223,60 @@ describe("BoothWebSocketProvider", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
 
+  it("clears the badge when REST reports no current status", async () => {
+    let requestCount = 0;
+    let resolveNoStatus: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(() => {
+      requestCount += 1;
+      if (requestCount === 1) {
+        return Promise.resolve(
+          jsonResponse({
+            state: "recording",
+            runtimeMode: "simulator",
+            updatedAt: new Date().toISOString(),
+            currentQuestionId: null,
+            currentMessageId: null,
+            lastError: null,
+          }),
+        );
+      }
+      return new Promise<Response>((resolve) => {
+        resolveNoStatus = resolve;
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = renderProvider();
+    await waitFor(() => expect(screen.getByText("Recording")).toBeDefined());
+    expect(screen.getByText("SIM")).toBeDefined();
+    await waitFor(() => expect(FakeSocket.instances).toHaveLength(1));
+    act(() => FakeSocket.instances[0]!.emit("open"));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    const resolveCurrentStatus = resolveNoStatus;
+    if (resolveCurrentStatus === undefined) throw new Error("Status reconciliation did not start.");
+    await act(async () => {
+      resolveCurrentStatus(
+        jsonResponse({
+          state: "idle",
+          updatedAt: "1970-01-01T00:00:00.000Z",
+          isSynthetic: true,
+        }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(screen.getByText("Idle")).toBeDefined());
+    expect(screen.queryByText("SIM")).toBeNull();
+    expect(client.getQueryData(apiQueryKeys.status)).toBeNull();
+    expect(client.getQueryData(apiQueryKeys.statusHistory)).toEqual({ items: [] });
+  });
+
   it("does not let a delayed status request overwrite a newer live frame", async () => {
     let resolveFetch: ((response: Response) => void) | undefined;
     const fetchMock = vi.fn(
@@ -365,8 +419,8 @@ describe("BoothWebSocketProvider", () => {
       }),
     );
 
-    expect(client.getQueryData(apiQueryKeys.status)).toBeNull();
-    expect(client.getQueryData(apiQueryKeys.statusHistory)).toEqual({ items: [] });
+    expect(client.getQueryData(apiQueryKeys.status)).toBeUndefined();
+    expect(client.getQueryData(apiQueryKeys.statusHistory)).toBeUndefined();
     expect(screen.getByText("Idle")).toBeDefined();
     expect(screen.queryByText("SIM")).toBeNull();
 

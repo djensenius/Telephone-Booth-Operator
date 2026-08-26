@@ -247,14 +247,26 @@ export function BoothEnvelopeBridge(): null {
     [setLastStatusAt, setRuntimeMode, setStatus],
   );
 
-  // Fetch once even when the socket opens immediately. A status socket only
-  // carries new reports, so this snapshot is what makes a reload preserve a
-  // legitimate stale/offline warning until the booth's next heartbeat.
+  const clearStatus = useCallback((): void => {
+    latestStatusRef.current = null;
+    setStatus("idle");
+    setRuntimeMode(null);
+    setLastStatusAt(null);
+  }, [setLastStatusAt, setRuntimeMode, setStatus]);
+
+  // Hydrate even when the socket opens immediately. A status socket only
+  // carries new reports, so the REST snapshot preserves a legitimate
+  // stale/offline warning and later polls reconcile cross-replica gaps.
   useEffect(() => {
-    if (statusQuery.data !== null && statusQuery.data !== undefined) {
-      syncStatus(statusQuery.data);
+    if (statusQuery.data === undefined) return;
+    if (statusQuery.data === null) {
+      clearStatus();
+      void queryClient.cancelQueries({ queryKey: apiQueryKeys.statusHistory, exact: true });
+      queryClient.setQueryData(apiQueryKeys.statusHistory, { items: [] });
+      return;
     }
-  }, [statusQuery.data, syncStatus]);
+    syncStatus(statusQuery.data);
+  }, [statusQuery.data, clearStatus, queryClient, syncStatus]);
 
   const acceptLiveStatus = useCallback(
     (status: BoothStatus): void => {
@@ -262,16 +274,6 @@ export function BoothEnvelopeBridge(): null {
     },
     [queryClient, syncStatus],
   );
-
-  const resetStatus = useCallback((): void => {
-    latestStatusRef.current = null;
-    void queryClient.cancelQueries({ queryKey: ["status"] });
-    queryClient.setQueryData<BoothStatus | null>(apiQueryKeys.status, null);
-    queryClient.setQueryData(apiQueryKeys.statusHistory, { items: [] });
-    setStatus("idle");
-    setRuntimeMode(null);
-    setLastStatusAt(null);
-  }, [queryClient, setLastStatusAt, setRuntimeMode, setStatus]);
 
   // An older API build still sends the bare status frame. The bridge has to
   // honour it too, or a console parked anywhere but the status screen stops
@@ -282,7 +284,7 @@ export function BoothEnvelopeBridge(): null {
   useEffect(() => {
     return ws.subscribe((envelope) => {
       if (envelope.kind === "installation") {
-        resetStatus();
+        clearStatus();
         invalidateInstallationScopedQueries(queryClient);
         return;
       }
@@ -306,6 +308,6 @@ export function BoothEnvelopeBridge(): null {
         void queryClient.invalidateQueries({ queryKey: apiQueryKeys.transcriptions(message.id) });
       }
     });
-  }, [ws, queryClient, acceptLiveStatus, resetStatus]);
+  }, [ws, queryClient, acceptLiveStatus, clearStatus]);
   return null;
 }

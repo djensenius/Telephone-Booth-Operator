@@ -4,9 +4,9 @@ import { invalidateInstallationScopedQueries } from "./api-client.js";
 
 // The `installation` WS envelope (StatusScreen) and the local start/end
 // mutations both funnel through this helper. Every scoped read must be
-// invalidated so the console re-scopes without a reload.
+// refreshed so the console re-scopes without a reload.
 describe("invalidateInstallationScopedQueries", () => {
-  it("invalidates every installation-scoped query family", () => {
+  it("invalidates scoped families and clears the previous installation status", () => {
     const client = new QueryClient();
     const seed = (key: readonly unknown[]): void => {
       client.setQueryData(key, { items: [] });
@@ -32,7 +32,7 @@ describe("invalidateInstallationScopedQueries", () => {
     expect(stale(["sessions", "list", null, null])).toBe(true);
     expect(stale(["events", "list", { limit: 100 }])).toBe(true);
     expect(stale(["questions", "list", "all", null])).toBe(true);
-    expect(stale(["status", "current"])).toBe(true);
-    expect(stale(["status", "history"])).toBe(true);
+    expect(client.getQueryData(["status", "current"])).toBeUndefined();
+    expect(client.getQueryData(["status", "history"])).toBeUndefined();
   });
 });
