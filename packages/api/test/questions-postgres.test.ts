@@ -95,7 +95,7 @@ describeWithDatabase("question draws with PostgreSQL", () => {
     const ids = await Promise.all(
       responses.map(async (response) => ((await response.json()) as { id: string }).id),
     );
-    expect(new Set(ids)).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
     const questions = await db.question.findMany({
       where: { installationId },
       select: { selectionsInCycle: true },

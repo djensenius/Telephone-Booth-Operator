@@ -219,7 +219,12 @@ paths:
               schema: { $ref: "#/components/schemas/Question" }
         "400": { description: invalid question draw id }
         "404": { description: no questions available }
-        "503": { description: question bag busy during installation rollover; retryable }
+        "503":
+          description: question bag busy during installation rollover; retryable
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying the draw.
+              schema: { type: integer, minimum: 0 }
 
   /v1/questions/{id}:
     parameters:

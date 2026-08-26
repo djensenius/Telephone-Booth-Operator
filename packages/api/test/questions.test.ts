@@ -264,7 +264,7 @@ describe("questions routes", () => {
     const ids = await Promise.all(
       responses.map(async (response) => ((await response.json()) as { id: string }).id),
     );
-    expect(new Set(ids)).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
   });
 
   it("replays one ticket when the same logical draw is retried concurrently", async () => {
@@ -284,7 +284,7 @@ describe("questions routes", () => {
     const ids = await Promise.all(
       responses.map(async (response) => ((await response.json()) as { id: string }).id),
     );
-    expect(new Set(ids)).toHaveLength(1);
+    expect(new Set(ids).size).toBe(1);
     const consumed = [...store.questions.values()].reduce(
       (total, question) => total + question.selectionsInCycle,
       0,
