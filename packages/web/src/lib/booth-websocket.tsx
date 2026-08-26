@@ -1,23 +1,31 @@
 import type { JSX, ReactNode } from "react";
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import { BoothStatusSchema, WsEnvelopeSchema } from "@telephone-booth-operator/shared";
 import type { BoothStatus, WsEnvelope } from "@telephone-booth-operator/shared";
-import { useBoothStatus } from "../components/booth/BoothStatusContext.js";
+import { toBoothDisplayStatus, useBoothStatus } from "../components/booth/BoothStatusContext.js";
 import {
   apiQueryKeys,
   apiWebSocketUrlFor,
   invalidateInstallationScopedQueries,
+  useStatusCurrent,
 } from "./api-client.js";
 import { isNewerThan, mergeLiveStatus } from "./status-history.js";
 
 // One shared `/v1/ws/status` connection for the whole authenticated app. The
 // socket must live above the router so envelopes (installation rollovers,
 // message pushes, system snapshots) reach the query cache no matter which
-// screen the operator is on. StatusScreen still owns the presentation of
-// booth status/history, but it consumes this shared subscription rather than
-// opening its own socket.
+// screen the operator is on. The app-wide bridge keeps the shell badge current,
+// while StatusScreen owns the detailed status/history presentation.
 
 type BoothWebSocketState = "polling" | "connecting" | "live";
 type EnvelopeListener = (envelope: WsEnvelope) => void;
@@ -194,40 +202,99 @@ export function useBoothWebSocket(): BoothWebSocketApi {
 // Always-mounted bridge: every envelope that belongs in the query cache is
 // applied here rather than on the screen that happens to render it. A console
 // parked on Messages must still see a pushed recording, and one on any route
-// must re-scope when a rollover happens on another console. Screens subscribe
-// only for their own presentation state.
+// must re-scope when a rollover happens on another console. Detailed screens
+// consume the same cache, so status ordering has one app-wide owner.
 // Frames can arrive out of order, so an older one joins the history but never
 // becomes the current status.
-function applyStatusToCache(queryClient: QueryClient, status: BoothStatus): void {
+function applyStatusToCache(queryClient: QueryClient, status: BoothStatus): boolean {
   const cached = queryClient.getQueryData<BoothStatus>(apiQueryKeys.status) ?? null;
-  if (isNewerThan(status, cached)) queryClient.setQueryData(apiQueryKeys.status, status);
+  const isCurrent = isNewerThan(status, cached);
+  if (isCurrent) {
+    // A GET started before this frame may resolve afterwards. Cancel its query
+    // before writing so React Query cannot replace the live status with that
+    // older response, even when the underlying fetch ignores cancellation.
+    void queryClient.cancelQueries({ queryKey: apiQueryKeys.status, exact: true });
+    queryClient.setQueryData(apiQueryKeys.status, status);
+  }
+  void queryClient.cancelQueries({ queryKey: apiQueryKeys.statusHistory, exact: true });
   queryClient.setQueryData(
     apiQueryKeys.statusHistory,
     (current: { readonly items: readonly BoothStatus[] } | undefined) => ({
       items: mergeLiveStatus(current?.items ?? [], status),
     }),
   );
+  return isCurrent;
 }
 
 export function BoothEnvelopeBridge(): null {
   const ws = useBoothWebSocket();
   const queryClient = useQueryClient();
+  // The broadcaster is process-local, so a live socket on one API replica can
+  // miss status reports handled by another. Keep bounded REST reconciliation
+  // active; accepted live frames cancel older in-flight responses below.
+  const statusQuery = useStatusCurrent();
+  const { setLastStatusAt, setRuntimeMode, setStatus } = useBoothStatus();
+  const latestStatusRef = useRef<BoothStatus | null>(null);
+
+  const syncStatus = useCallback(
+    (status: BoothStatus): void => {
+      if (!isNewerThan(status, latestStatusRef.current)) return;
+      latestStatusRef.current = status;
+      setStatus(toBoothDisplayStatus(status.state));
+      setRuntimeMode(status.runtimeMode ?? null);
+      setLastStatusAt(new Date(status.updatedAt));
+    },
+    [setLastStatusAt, setRuntimeMode, setStatus],
+  );
+
+  const clearStatus = useCallback((): void => {
+    latestStatusRef.current = null;
+    setStatus("idle");
+    setRuntimeMode(null);
+    setLastStatusAt(null);
+  }, [setLastStatusAt, setRuntimeMode, setStatus]);
+
+  // Hydrate even when the socket opens immediately. A status socket only
+  // carries new reports, so the REST snapshot preserves a legitimate
+  // stale/offline warning and later polls reconcile cross-replica gaps.
+  useEffect(() => {
+    if (statusQuery.data === undefined) {
+      // Initial loading has no accepted status. Once a status exists, however,
+      // resetQueries uses undefined to mark a local installation rollover.
+      if (latestStatusRef.current !== null) clearStatus();
+      return;
+    }
+    if (statusQuery.data === null) {
+      clearStatus();
+      void queryClient.cancelQueries({ queryKey: apiQueryKeys.statusHistory, exact: true });
+      queryClient.setQueryData(apiQueryKeys.statusHistory, { items: [] });
+      return;
+    }
+    syncStatus(statusQuery.data);
+  }, [statusQuery.data, clearStatus, queryClient, syncStatus]);
+
+  const acceptLiveStatus = useCallback(
+    (status: BoothStatus): void => {
+      if (applyStatusToCache(queryClient, status)) syncStatus(status);
+    },
+    [queryClient, syncStatus],
+  );
+
   // An older API build still sends the bare status frame. The bridge has to
   // honour it too, or a console parked anywhere but the status screen stops
   // updating against that build.
   useEffect(() => {
-    return ws.subscribeLegacyStatus((status) => {
-      applyStatusToCache(queryClient, status);
-    });
-  }, [ws, queryClient]);
+    return ws.subscribeLegacyStatus(acceptLiveStatus);
+  }, [ws, acceptLiveStatus]);
   useEffect(() => {
     return ws.subscribe((envelope) => {
       if (envelope.kind === "installation") {
+        clearStatus();
         invalidateInstallationScopedQueries(queryClient);
         return;
       }
       if (envelope.kind === "status") {
-        applyStatusToCache(queryClient, envelope.status);
+        acceptLiveStatus(envelope.status);
         return;
       }
       if (envelope.kind === "system") {
@@ -246,6 +313,6 @@ export function BoothEnvelopeBridge(): null {
         void queryClient.invalidateQueries({ queryKey: apiQueryKeys.transcriptions(message.id) });
       }
     });
-  }, [ws, queryClient]);
+  }, [ws, queryClient, acceptLiveStatus, clearStatus]);
   return null;
 }

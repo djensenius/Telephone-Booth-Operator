@@ -109,7 +109,7 @@ function AppLayout(): JSX.Element {
   useNumericNavigation(isAuthenticated, isAdmin);
   return (
     <BoothWebSocketProvider enabled={isAuthenticated}>
-      <BoothEnvelopeBridge />
+      {isAuthenticated ? <BoothEnvelopeBridge /> : null}
       <BoothFrame>
         <a className="skip-link" href="#main-content">
           Skip to content

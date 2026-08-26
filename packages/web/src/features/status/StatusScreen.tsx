@@ -1,7 +1,7 @@
 import type { JSX } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { BoothState, BoothStatus } from "@telephone-booth-operator/shared";
-import { GlassPanel, useBoothStatus } from "../../components/booth/index.js";
+import { useMemo } from "react";
+import type { BoothState } from "@telephone-booth-operator/shared";
+import { GlassPanel } from "../../components/booth/index.js";
 import { useStatusCurrent, useStatusHistory } from "../../lib/api-client.js";
 import { useBoothWebSocket } from "../../lib/booth-websocket.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
@@ -9,7 +9,6 @@ import {
   STATUS_HISTORY_DISPLAY_LIMIT,
   collapseStatusHistory,
   firstSeenAtOf,
-  isNewerThan,
   repeatCountOf,
 } from "../../lib/status-history.js";
 
@@ -30,85 +29,20 @@ function hookLabel(state: BoothState): "On hook" | "Off hook" {
   return state === "idle" || state === "error" ? "On hook" : "Off hook";
 }
 
-function boothDisplay(state: BoothState): "idle" | "playing" | "recording" | "error" {
-  if (state === "error") return "error";
-  if (state === "recording" || state === "uploading") return "recording";
-  if (
-    state === "playingMessage" ||
-    state === "playingQuestion" ||
-    state === "playingInstructions" ||
-    state === "callUnavailable"
-  )
-    return "playing";
-  return "idle";
-}
-
 export function StatusScreen(): JSX.Element {
-  const { setLastStatusAt, setRuntimeMode, setStatus } = useBoothStatus();
-  const ws = useBoothWebSocket();
-  const [liveStatus, setLiveStatus] = useState<BoothStatus | null>(null);
-  const wsState = ws.state;
-  const statusQuery = useStatusCurrent({ paused: wsState === "live" });
-  const historyQuery = useStatusHistory({ paused: wsState === "live" });
-
-  const latestStatusRef = useRef<BoothStatus | null>(null);
-  useEffect(() => {
-    const polled = statusQuery.data ?? null;
-    // A poll can be in flight while the socket connects and resolve after a
-    // newer frame has already landed. Rewinding the reference to that older
-    // snapshot would let the next out-of-order frame through, so the poll is
-    // held to the same ordering rule as the socket.
-    if (polled !== null && !isNewerThan(polled, latestStatusRef.current)) return;
-    setLiveStatus(polled);
-    latestStatusRef.current = polled;
-    if (polled?.updatedAt) {
-      setLastStatusAt(new Date(polled.updatedAt));
-    }
-  }, [statusQuery.data, setLastStatusAt]);
-
-  // Subscribe to the shared /v1/ws/status stream for this screen's own
-  // presentation state. Every cache write lives in `BoothEnvelopeBridge`, which
-  // is mounted app-wide, so a console on another route sees pushed messages and
-  // rollovers too.
-  useEffect(() => {
-    const offEnvelope = ws.subscribe((envelope) => {
-      if (envelope.kind !== "status") return;
-      // Frames can arrive out of order, so an older one is recorded in the
-      // history but never becomes the displayed current status. Tracked in a
-      // ref rather than read back from the cache, which the bridge is writing
-      // to from the same envelope.
-      const status = envelope.status;
-      if (!isNewerThan(status, latestStatusRef.current)) return;
-      latestStatusRef.current = status;
-      setLiveStatus(status);
-      setLastStatusAt(new Date(status.updatedAt));
-    });
-    const offLegacy = ws.subscribeLegacyStatus((status) => {
-      if (!isNewerThan(status, latestStatusRef.current)) return;
-      latestStatusRef.current = status;
-      setLiveStatus(status);
-      setLastStatusAt(new Date(status.updatedAt));
-    });
-    return () => {
-      offEnvelope();
-      offLegacy();
-    };
-  }, [ws, setLastStatusAt]);
-
-  useEffect(() => {
-    if (liveStatus) setStatus(boothDisplay(liveStatus.state));
-  }, [liveStatus, setStatus]);
-
-  useEffect(() => {
-    setRuntimeMode(liveStatus?.runtimeMode ?? null);
-  }, [liveStatus, setRuntimeMode]);
+  const wsState = useBoothWebSocket().state;
+  // The app-wide bridge owns current-status polling; this observer reads that
+  // cache without starting a second interval. History still reconciles here
+  // because WebSocket broadcasts do not cross API replica boundaries.
+  const statusQuery = useStatusCurrent({ paused: true });
+  const historyQuery = useStatusHistory();
 
   const history = useMemo(
     () =>
       collapseStatusHistory(historyQuery.data?.items ?? []).slice(0, STATUS_HISTORY_DISPLAY_LIMIT),
     [historyQuery.data],
   );
-  const current = liveStatus ?? history[0] ?? null;
+  const current = statusQuery.data === null ? null : (statusQuery.data ?? history[0] ?? null);
 
   return (
     <GlassPanel title="Live status panel" className="feature-screen status-screen">

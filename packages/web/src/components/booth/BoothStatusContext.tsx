@@ -1,9 +1,24 @@
 import { createContext, useContext, useMemo, useState } from "react";
 import type { JSX, PropsWithChildren } from "react";
+import type { BoothState } from "@telephone-booth-operator/shared";
 
 export type BoothDisplayStatus = "idle" | "playing" | "recording" | "error";
 export type BoothConnectionStatus = "connected" | "disconnected";
 export type BoothRuntimeMode = "real" | "mock" | "simulator";
+
+export function toBoothDisplayStatus(state: BoothState): BoothDisplayStatus {
+  if (state === "error") return "error";
+  if (state === "recording" || state === "uploading") return "recording";
+  if (
+    state === "playingMessage" ||
+    state === "playingQuestion" ||
+    state === "playingInstructions" ||
+    state === "callUnavailable"
+  ) {
+    return "playing";
+  }
+  return "idle";
+}
 
 export interface BoothStatusContextValue {
   readonly status: BoothDisplayStatus;
