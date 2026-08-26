@@ -3,6 +3,7 @@ import { zValidator } from "@hono/zod-validator";
 import {
   InstallationScopeSchema,
   QUESTION_DRAW_HISTORY_LIMIT,
+  QUESTION_TICKET_COUNTER_MAX,
   QUESTION_WEIGHT_MAX,
   QUESTION_WEIGHT_MIN,
   QuestionCreateSchema,
@@ -366,12 +367,11 @@ questionsRouter.get("/random", requireApiToken(), async (c) => {
       const recentQuestionDraws = questionDrawHistorySchema.parse(installation.recentQuestionDraws);
       const previousDraw = recentQuestionDraws.find((entry) => entry.drawId === drawId);
       if (previousDraw !== undefined) {
-        const replay = await tx.question.findUnique({
-          where: { id: previousDraw.questionId },
+        const replay = await tx.question.findFirst({
+          where: { id: previousDraw.questionId, installationId },
           include: { audio: true },
         });
-        if (!replay) throw new Error("selected question disappeared before draw replay");
-        return replay;
+        if (replay) return replay;
       }
 
       const activeQuestions = await tx.question.findMany({
@@ -396,10 +396,24 @@ questionsRouter.get("/random", requireApiToken(), async (c) => {
       }
 
       let cycle = installation.questionSelectionCycle;
-      let selected = drawQuestion(activeQuestions, cycle, installation.lastSelectedQuestionId);
+      let ticketQuestions = activeQuestions;
+      let selected = drawQuestion(ticketQuestions, cycle, installation.lastSelectedQuestionId);
       if (selected === null) {
-        cycle += 1;
-        selected = drawQuestion(activeQuestions, cycle, installation.lastSelectedQuestionId);
+        if (cycle === QUESTION_TICKET_COUNTER_MAX) {
+          cycle = 0;
+          await tx.question.updateMany({
+            where: { installationId },
+            data: { lastSelectedCycle: null, selectionsInCycle: 0 },
+          });
+          ticketQuestions = activeQuestions.map((question) => ({
+            ...question,
+            lastSelectedCycle: null,
+            selectionsInCycle: 0,
+          }));
+        } else {
+          cycle += 1;
+        }
+        selected = drawQuestion(ticketQuestions, cycle, installation.lastSelectedQuestionId);
       }
       if (selected === null) {
         throw new Error("active questions have no valid selection tickets");

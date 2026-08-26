@@ -2515,11 +2515,17 @@ components:
           default: 1
           description: Number of tickets contributed to each selection cycle.
     QuestionUpdate:
-      type: object
-      minProperties: 1
-      properties:
-        prompt: { type: string, minLength: 1, maxLength: 280 }
-        weight: { type: integer, minimum: 1, maximum: 100 }
+      anyOf:
+        - type: object
+          required: [prompt]
+          properties:
+            prompt: { type: string, minLength: 1, maxLength: 280 }
+            weight: { type: integer, minimum: 1, maximum: 100 }
+        - type: object
+          required: [weight]
+          properties:
+            prompt: { type: string, minLength: 1, maxLength: 280 }
+            weight: { type: integer, minimum: 1, maximum: 100 }
     QuestionList:
       type: object
       required: [items, nextCursor]

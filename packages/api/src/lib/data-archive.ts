@@ -13,6 +13,7 @@
 import { createHash } from "node:crypto";
 import {
   QUESTION_DRAW_HISTORY_LIMIT,
+  QUESTION_TICKET_COUNTER_MAX,
   QuestionWeightSchema,
 } from "@telephone-booth-operator/shared";
 import { z } from "zod";
@@ -395,7 +396,12 @@ const parseArchive = (
     if (!Array.isArray(rows)) {
       throw new ImportFormatError(`data.json entry "${name}" must be an array`);
     }
-    normalized[name] = rows.map((row) => normalizeArchiveRow(name, row));
+    normalized[name] = rows.map((row, index) => {
+      if (typeof row !== "object" || row === null || Array.isArray(row)) {
+        throw new ImportFormatError(`data.json entry "${name}" row ${index} must be an object`);
+      }
+      return normalizeArchiveRow(name, row);
+    });
   }
 
   return { manifest, dump: normalized, blobs };
@@ -410,8 +416,7 @@ const withStatusWindow = (row: Row): Row =>
     ? { ...row, firstSeenAt: row.updatedAt, repeatCount: row.repeatCount ?? 1 }
     : row;
 
-const POSTGRES_INTEGER_MAX = 2_147_483_647;
-const nonnegativeIntegerSchema = z.number().int().min(0).max(POSTGRES_INTEGER_MAX);
+const nonnegativeIntegerSchema = z.number().int().min(0).max(QUESTION_TICKET_COUNTER_MAX);
 const nullableUuidSchema = z.guid().nullable();
 const questionDrawHistorySchema = z
   .array(z.object({ drawId: z.guid(), questionId: z.guid() }))

@@ -333,6 +333,7 @@ describe("admin data export/import", () => {
   });
 
   it.each([
+    ["a non-object question row", { question: [null] }],
     ["an out-of-range question weight", { question: [{ id: crypto.randomUUID(), weight: 0 }] }],
     [
       "an overflowing selection counter",

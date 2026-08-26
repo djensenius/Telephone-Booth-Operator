@@ -30,6 +30,7 @@ import {
   DEFAULT_INSTALLATION_ID,
   resetFakeDb,
   seedFile,
+  seedInstallation,
   seedQuestion,
   store,
   timeOutNextQuestionDraw,
@@ -320,6 +321,65 @@ describe("questions routes", () => {
     expect(store.installations.get(DEFAULT_INSTALLATION_ID)?.recentQuestionDraws).toEqual([
       { drawId: uppercaseDrawId.toLowerCase(), questionId: firstId },
     ]);
+  });
+
+  it("does not replay a draw-history question from another installation", async () => {
+    const current = seedQuestion({ status: "active" });
+    const previousInstallation = seedInstallation({
+      endedAt: new Date("2025-12-31T23:59:59.000Z"),
+    });
+    const foreign = seedQuestion({
+      status: "active",
+      installationId: previousInstallation.id,
+    });
+    const drawId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const installation = store.installations.get(DEFAULT_INSTALLATION_ID);
+    expect(installation).toBeDefined();
+    if (!installation) return;
+    installation.recentQuestionDraws = [{ drawId, questionId: foreign.id }];
+
+    const response = await createApp().request("/v1/questions/random", {
+      headers: { ...phoneHeaders, "x-question-draw-id": drawId },
+    });
+
+    expect(response.status, await response.clone().text()).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ id: current.id });
+    expect(store.questions.get(current.id)?.selectionsInCycle).toBe(1);
+    expect(store.questions.get(foreign.id)?.selectionsInCycle).toBe(0);
+  });
+
+  it("wraps an exhausted maximum cycle without overflowing PostgreSQL integers", async () => {
+    const previous = seedQuestion({
+      status: "active",
+      lastSelectedCycle: 2_147_483_647,
+      selectionsInCycle: 1,
+    });
+    const next = seedQuestion({
+      status: "active",
+      lastSelectedCycle: 2_147_483_647,
+      selectionsInCycle: 1,
+    });
+    const installation = store.installations.get(DEFAULT_INSTALLATION_ID);
+    expect(installation).toBeDefined();
+    if (!installation) return;
+    installation.questionSelectionCycle = 2_147_483_647;
+    installation.lastSelectedQuestionId = previous.id;
+
+    const response = await createApp().request("/v1/questions/random", {
+      headers: phoneHeaders,
+    });
+
+    expect(response.status, await response.clone().text()).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ id: next.id });
+    expect(store.installations.get(DEFAULT_INSTALLATION_ID)?.questionSelectionCycle).toBe(0);
+    expect(store.questions.get(previous.id)).toMatchObject({
+      lastSelectedCycle: null,
+      selectionsInCycle: 0,
+    });
+    expect(store.questions.get(next.id)).toMatchObject({
+      lastSelectedCycle: 0,
+      selectionsInCycle: 1,
+    });
   });
 
   it("rejects malformed draw ids without consuming a ticket", async () => {
