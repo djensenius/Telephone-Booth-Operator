@@ -209,7 +209,13 @@ export function useBoothWebSocket(): BoothWebSocketApi {
 function applyStatusToCache(queryClient: QueryClient, status: BoothStatus): boolean {
   const cached = queryClient.getQueryData<BoothStatus>(apiQueryKeys.status) ?? null;
   const isCurrent = isNewerThan(status, cached);
-  if (isCurrent) queryClient.setQueryData(apiQueryKeys.status, status);
+  if (isCurrent) {
+    // A GET started before this frame may resolve afterwards. Cancel its query
+    // before writing so React Query cannot replace the live status with that
+    // older response, even when the underlying fetch ignores cancellation.
+    void queryClient.cancelQueries({ queryKey: apiQueryKeys.status, exact: true });
+    queryClient.setQueryData(apiQueryKeys.status, status);
+  }
   queryClient.setQueryData(
     apiQueryKeys.statusHistory,
     (current: { readonly items: readonly BoothStatus[] } | undefined) => ({

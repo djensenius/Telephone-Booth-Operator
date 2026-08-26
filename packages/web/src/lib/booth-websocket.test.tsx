@@ -193,6 +193,60 @@ describe("BoothWebSocketProvider", () => {
     expect(screen.getByText("SIM")).toBeDefined();
   });
 
+  it("does not let a delayed status request overwrite a newer live frame", async () => {
+    let resolveFetch: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = renderProvider();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    await waitFor(() => expect(FakeSocket.instances).toHaveLength(1));
+    const socket = FakeSocket.instances[0]!;
+    act(() => socket.emit("open"));
+    act(() =>
+      socket.emit("message", {
+        data: JSON.stringify({
+          kind: "status",
+          status: {
+            state: "recording",
+            updatedAt: "2026-05-01T00:10:00.000Z",
+            currentQuestionId: null,
+            currentMessageId: null,
+            lastError: null,
+          },
+        }),
+      }),
+    );
+
+    expect(client.getQueryData(apiQueryKeys.status)).toMatchObject({ state: "recording" });
+    const resolveStatusFetch = resolveFetch;
+    if (resolveStatusFetch === undefined) throw new Error("Status request did not start.");
+    await act(async () => {
+      resolveStatusFetch(
+        jsonResponse({
+          state: "idle",
+          updatedAt: "2026-05-01T00:05:00.000Z",
+          currentQuestionId: null,
+          currentMessageId: null,
+          lastError: null,
+        }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(client.getQueryData(apiQueryKeys.status)).toMatchObject({
+      state: "recording",
+      updatedAt: "2026-05-01T00:10:00.000Z",
+    });
+    expect(screen.getByText("Recording")).toBeDefined();
+  });
+
   // A malformed URL makes the constructor throw rather than fire `error`, and
   // an unhandled throw in the effect would leave the provider with no socket
   // and no retry armed.
