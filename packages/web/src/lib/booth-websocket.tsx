@@ -258,7 +258,12 @@ export function BoothEnvelopeBridge(): null {
   // carries new reports, so the REST snapshot preserves a legitimate
   // stale/offline warning and later polls reconcile cross-replica gaps.
   useEffect(() => {
-    if (statusQuery.data === undefined) return;
+    if (statusQuery.data === undefined) {
+      // Initial loading has no accepted status. Once a status exists, however,
+      // resetQueries uses undefined to mark a local installation rollover.
+      if (latestStatusRef.current !== null) clearStatus();
+      return;
+    }
     if (statusQuery.data === null) {
       clearStatus();
       void queryClient.cancelQueries({ queryKey: apiQueryKeys.statusHistory, exact: true });

@@ -4,7 +4,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { BoothStatusProvider } from "../components/booth/BoothStatusContext.js";
 import { BoothStatusBadge } from "../components/booth/BoothStatusBadge.js";
-import { apiQueryKeys } from "./api-client.js";
+import { apiQueryKeys, invalidateInstallationScopedQueries } from "./api-client.js";
 import type { StatusHistory } from "./api-client.js";
 import {
   BoothEnvelopeBridge,
@@ -423,6 +423,56 @@ describe("BoothWebSocketProvider", () => {
     expect(client.getQueryData(apiQueryKeys.statusHistory)).toBeUndefined();
     expect(screen.getByText("Idle")).toBeDefined();
     expect(screen.queryByText("SIM")).toBeNull();
+
+    act(() =>
+      socket.emit("message", {
+        data: JSON.stringify({
+          kind: "status",
+          status: {
+            state: "playingQuestion",
+            updatedAt: "2026-05-01T00:05:00.000Z",
+            currentQuestionId: null,
+            currentMessageId: null,
+            lastError: null,
+          },
+        }),
+      }),
+    );
+
+    await waitFor(() => expect(screen.getByText("Playing")).toBeDefined());
+    expect(client.getQueryData(apiQueryKeys.status)).toMatchObject({
+      state: "playingQuestion",
+      updatedAt: "2026-05-01T00:05:00.000Z",
+    });
+  });
+
+  it("resets status ordering after a local installation mutation", async () => {
+    const client = renderProvider();
+    await waitFor(() => expect(FakeSocket.instances).toHaveLength(1));
+    const socket = FakeSocket.instances[0]!;
+    act(() => socket.emit("open"));
+    act(() =>
+      socket.emit("message", {
+        data: JSON.stringify({
+          kind: "status",
+          status: {
+            state: "recording",
+            runtimeMode: "simulator",
+            updatedAt: "2026-05-01T00:10:00.000Z",
+            currentQuestionId: null,
+            currentMessageId: null,
+            lastError: null,
+          },
+        }),
+      }),
+    );
+    await waitFor(() => expect(screen.getByText("Recording")).toBeDefined());
+
+    act(() => invalidateInstallationScopedQueries(client));
+
+    await waitFor(() => expect(screen.getByText("Idle")).toBeDefined());
+    expect(screen.queryByText("SIM")).toBeNull();
+    expect(client.getQueryData(apiQueryKeys.status)).toBeUndefined();
 
     act(() =>
       socket.emit("message", {
