@@ -523,7 +523,19 @@ describe("installations", () => {
 
     it("copies questions forward when asked, sharing the same audio file", async () => {
       const file = seedFile({ blobKey: "questions/ab/abc.flac", sha256: "sha-original" });
-      seedQuestion({ status: "active", prompt: "Where do you feel most alone?", audioId: file.id });
+      const source = seedQuestion({
+        status: "active",
+        prompt: "Where do you feel most alone?",
+        audioId: file.id,
+        weight: 3,
+        lastSelectedCycle: 4,
+        selectionsInCycle: 2,
+      });
+      const current = store.installations.get(DEFAULT_INSTALLATION_ID);
+      if (current) {
+        current.questionSelectionCycle = 4;
+        current.lastSelectedQuestionId = source.id;
+      }
 
       const app = createApp();
       expect((await endDefault(app)).status).toBe(200);
@@ -538,6 +550,15 @@ describe("installations", () => {
 
       const carried = [...store.questions.values()].filter((q) => q.installationId === created.id);
       expect(carried).toHaveLength(1);
+      expect(carried[0]).toMatchObject({
+        weight: 3,
+        lastSelectedCycle: null,
+        selectionsInCycle: 0,
+      });
+      expect(store.installations.get(created.id)).toMatchObject({
+        questionSelectionCycle: 0,
+        lastSelectedQuestionId: null,
+      });
 
       // The copy points at the *same* File row, so nothing is re-uploaded and
       // no unique constraint (blobKey, sha256) can be violated.

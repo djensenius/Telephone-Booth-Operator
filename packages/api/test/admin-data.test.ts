@@ -211,6 +211,93 @@ describe("admin data export/import", () => {
     expect(restored?.repeatCount).toBe(1);
   });
 
+  it("resets missing ticket-bag fields when restoring a version-5 archive", async () => {
+    const app = createApp();
+    const cookie = operatorCookie();
+    const question = seedQuestion({
+      weight: 7,
+      lastSelectedCycle: 4,
+      selectionsInCycle: 3,
+    });
+    const installation = store.installations.get(DEFAULT_INSTALLATION_ID);
+    expect(installation).toBeDefined();
+    if (!installation) return;
+    installation.questionSelectionCycle = 4;
+    installation.lastSelectedQuestionId = question.id;
+    installation.recentQuestionDraws = [
+      { drawId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", questionId: question.id },
+    ];
+
+    const generatedAt = "2026-08-01T12:00:00.000Z";
+    const archive = createTar([
+      {
+        name: "manifest.json",
+        data: Buffer.from(
+          JSON.stringify({
+            format: EXPORT_FORMAT,
+            version: 5,
+            generatedAt,
+            container: "audio",
+            counts: {},
+            blobCount: 0,
+            missingBlobs: [],
+          }),
+          "utf8",
+        ),
+      },
+      {
+        name: "data.json",
+        data: Buffer.from(
+          JSON.stringify({
+            installation: [
+              {
+                id: installation.id,
+                name: installation.name,
+                notes: installation.notes,
+                location: installation.location,
+                defaultTranscriptionLanguage: installation.defaultTranscriptionLanguage,
+                startedAt: installation.startedAt,
+                endedAt: installation.endedAt,
+                endedById: installation.endedById,
+                summary: installation.summary,
+                createdAt: installation.createdAt,
+              },
+            ],
+            question: [
+              {
+                id: question.id,
+                prompt: question.prompt,
+                status: question.status,
+                audioId: question.audioId,
+                createdAt: question.createdAt,
+                retiredAt: question.retiredAt,
+                installationId: question.installationId,
+              },
+            ],
+          }),
+          "utf8",
+        ),
+      },
+    ]);
+
+    const response = await app.request("/v1/admin/data/import", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/x-tar" },
+      body: archive,
+    });
+    expect(response.status, await response.clone().text()).toBe(200);
+    expect(store.installations.get(installation.id)).toMatchObject({
+      questionSelectionCycle: 0,
+      lastSelectedQuestionId: null,
+      recentQuestionDraws: [],
+    });
+    expect(store.questions.get(question.id)).toMatchObject({
+      weight: 1,
+      lastSelectedCycle: null,
+      selectionsInCycle: 0,
+    });
+  });
+
   // The manifest arrives inside an uploaded tar, so a malformed optional field
   // has to be an invalid_archive rather than a TypeError surfacing as a 500.
   it("rejects a manifest whose partialInstallationIds is not a string array", async () => {

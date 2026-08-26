@@ -216,11 +216,20 @@ export const QuestionStatusSchema = z.enum(["draft", "active", "archived"]);
 export type QuestionStatus = z.infer<typeof QuestionStatusSchema>;
 export const InstructionStatusSchema = z.enum(["active", "inactive"]);
 export type InstructionStatus = z.infer<typeof InstructionStatusSchema>;
+export const QUESTION_WEIGHT_MIN = 1;
+export const QUESTION_WEIGHT_MAX = 100;
+export const QuestionWeightSchema = z
+  .number()
+  .int()
+  .min(QUESTION_WEIGHT_MIN)
+  .max(QUESTION_WEIGHT_MAX);
+export type QuestionWeight = z.infer<typeof QuestionWeightSchema>;
 
 export const QuestionSchema = z.object({
   id: z.guid(),
   prompt: z.string().min(1).max(280),
   status: QuestionStatusSchema,
+  weight: QuestionWeightSchema.default(1),
   createdAt: z.string().datetime(),
   audio: AudioRefSchema,
 });
@@ -230,12 +239,18 @@ export const QuestionCreateSchema = z.object({
   prompt: z.string().min(1).max(280),
   audioFileId: z.guid(),
   status: QuestionStatusSchema.optional(),
+  weight: QuestionWeightSchema.optional(),
 });
 export type QuestionCreate = z.infer<typeof QuestionCreateSchema>;
 
-export const QuestionUpdateSchema = z.object({
-  prompt: z.string().min(1).max(280),
-});
+export const QuestionUpdateSchema = z
+  .object({
+    prompt: z.string().min(1).max(280).optional(),
+    weight: QuestionWeightSchema.optional(),
+  })
+  .refine((value) => value.prompt !== undefined || value.weight !== undefined, {
+    message: "at least one question field is required",
+  });
 export type QuestionUpdate = z.infer<typeof QuestionUpdateSchema>;
 
 export const InstructionSchema = z.object({

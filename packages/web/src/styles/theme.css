@@ -1721,13 +1721,17 @@ textarea:focus-visible,
   display: grid;
   place-items: center;
   padding: 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: rgb(0 0 0 / 58%);
 }
 
 .feature-dialog {
   z-index: 41;
   width: min(680px, 100%);
-  margin-block-start: 12px;
+  max-height: calc(100dvh - 32px);
+  margin-block: auto;
+  overflow-y: auto;
 }
 
 .status-indicator {

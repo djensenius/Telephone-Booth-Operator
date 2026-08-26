@@ -22,13 +22,14 @@ export const EXPORT_FORMAT = "telephone-booth-export";
 // 1: original shape. 2: BoothStatusSnapshot carries `firstSeenAt`/`repeatCount`.
 // 3: adds the AuditLog trail. 4: rows carry `installationId` and the archive
 // may be scoped to one installation. 5: adds TelemetrySource rows before the
-// API tokens that can reference them. Each bump makes a server that predates
-// the change reject the archive as newer than supported instead of failing on
-// unknown columns mid-restore. Older archives still import —
-// `withStatusWindow` fills the missing status window, absent tables restore as
-// empty, and legacy untagged rows are adopted into a deterministic ended
-// "Restored …" installation after the archived rows are upserted.
-export const EXPORT_VERSION = 5;
+// API tokens that can reference them. 6: adds weighted question ticket-bag
+// state. Each bump makes a server that predates the change reject the archive
+// as newer than supported instead of failing on unknown columns mid-restore.
+// Older archives still import — normalization fills newly-added fields, absent
+// tables restore as empty, and legacy untagged rows are adopted into a
+// deterministic ended "Restored …" installation after the archived rows are
+// upserted.
+export const EXPORT_VERSION = 6;
 // Manifest models added after v1. Nothing to migrate; listed for the record.
 const INSTALLATION_MODEL = "installation" as const;
 
@@ -389,7 +390,7 @@ const parseArchive = (
     if (!Array.isArray(rows)) {
       throw new ImportFormatError(`data.json entry "${name}" must be an array`);
     }
-    normalized[name] = name === "boothStatusSnapshot" ? rows.map(withStatusWindow) : rows;
+    normalized[name] = rows.map((row) => normalizeArchiveRow(name, row));
   }
 
   return { manifest, dump: normalized, blobs };
@@ -403,6 +404,27 @@ const withStatusWindow = (row: Row): Row =>
   row.firstSeenAt === undefined || row.firstSeenAt === null
     ? { ...row, firstSeenAt: row.updatedAt, repeatCount: row.repeatCount ?? 1 }
     : row;
+
+const withQuestionTicketState = (row: Row): Row => ({
+  ...row,
+  weight: row.weight ?? 1,
+  lastSelectedCycle: row.lastSelectedCycle ?? null,
+  selectionsInCycle: row.selectionsInCycle ?? 0,
+});
+
+const withInstallationTicketState = (row: Row): Row => ({
+  ...row,
+  questionSelectionCycle: row.questionSelectionCycle ?? 0,
+  lastSelectedQuestionId: row.lastSelectedQuestionId ?? null,
+  recentQuestionDraws: row.recentQuestionDraws ?? [],
+});
+
+const normalizeArchiveRow = (name: ModelName, row: Row): Row => {
+  if (name === "boothStatusSnapshot") return withStatusWindow(row);
+  if (name === "question") return withQuestionTicketState(row);
+  if (name === INSTALLATION_MODEL) return withInstallationTicketState(row);
+  return row;
+};
 
 const dateFromManifest = (manifest: ExportManifest): Date => {
   const generated = new Date(manifest.generatedAt);

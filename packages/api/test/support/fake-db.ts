@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { Prisma } from "../../src/generated/prisma/client.js";
 
@@ -16,6 +17,9 @@ export type FakeQuestion = {
   id: string;
   prompt: string;
   status: string;
+  weight: number;
+  lastSelectedCycle: number | null;
+  selectionsInCycle: number;
   audioId: string;
   createdAt: Date;
   retiredAt: Date | null;
@@ -246,6 +250,9 @@ export type FakeInstallation = {
   endedById: string | null;
   summary: unknown;
   createdAt: Date;
+  questionSelectionCycle: number;
+  lastSelectedQuestionId: string | null;
+  recentQuestionDraws: Array<{ drawId: string; questionId: string }>;
 };
 
 // Stable id so tests can assert on scoping without reading it back first.
@@ -288,6 +295,40 @@ export const store = {
   metricFilters: new Map<string, FakeMetricFilter>(),
   installations: new Map<string, FakeInstallation>(),
   auditLogs: [] as FakeAuditLog[],
+};
+
+type FakeTransactionLocks = {
+  lockedIds: Set<string>;
+  releases: Array<() => void>;
+};
+
+const transactionLocks = new AsyncLocalStorage<FakeTransactionLocks>();
+const exclusiveLockTails = new Map<string, Promise<void>>();
+let timeOutNextReadCommittedTransaction = false;
+
+export const timeOutNextQuestionDraw = (): void => {
+  timeOutNextReadCommittedTransaction = true;
+};
+
+const acquireExclusiveLock = async (id: string): Promise<void> => {
+  const transaction = transactionLocks.getStore();
+  if (!transaction || transaction.lockedIds.has(id)) return;
+
+  const previous = exclusiveLockTails.get(id) ?? Promise.resolve();
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.then(() => held);
+  exclusiveLockTails.set(id, tail);
+  await previous;
+  transaction.lockedIds.add(id);
+  transaction.releases.push(() => {
+    release();
+    void tail.then(() => {
+      if (exclusiveLockTails.get(id) === tail) exclusiveLockTails.delete(id);
+    });
+  });
 };
 
 const cloneDate = (date: Date): Date => new Date(date.getTime());
@@ -570,6 +611,9 @@ export const seedQuestion = (overrides: Partial<FakeQuestion> = {}): FakeQuestio
     id: overrides.id ?? randomUUID(),
     prompt: overrides.prompt ?? `prompt-${randomUUID().slice(0, 6)}`,
     status: overrides.status ?? "active",
+    weight: overrides.weight ?? 1,
+    lastSelectedCycle: overrides.lastSelectedCycle ?? null,
+    selectionsInCycle: overrides.selectionsInCycle ?? 0,
     audioId: overrides.audioId ?? seedFile().id,
     createdAt: overrides.createdAt ?? new Date(),
     retiredAt: overrides.retiredAt ?? null,
@@ -633,6 +677,9 @@ export const seedInstallation = (overrides: Partial<FakeInstallation> = {}): Fak
     endedById: overrides.endedById ?? null,
     summary: overrides.summary ?? null,
     createdAt: overrides.createdAt ?? new Date(),
+    questionSelectionCycle: overrides.questionSelectionCycle ?? 0,
+    lastSelectedQuestionId: overrides.lastSelectedQuestionId ?? null,
+    recentQuestionDraws: overrides.recentQuestionDraws ?? [],
   };
   store.installations.set(installation.id, installation);
   return installation;
@@ -735,6 +782,8 @@ export const seedBoothEvent = (overrides: Partial<FakeBoothEvent> = {}): FakeBoo
 };
 
 export const resetFakeDb = (): void => {
+  exclusiveLockTails.clear();
+  timeOutNextReadCommittedTransaction = false;
   store.files.clear();
   store.questions.clear();
   store.instructions.clear();
@@ -763,6 +812,9 @@ export const resetFakeDb = (): void => {
     endedById: null,
     summary: null,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    questionSelectionCycle: 0,
+    lastSelectedQuestionId: null,
+    recentQuestionDraws: [],
   });
   store.auditLogs.length = 0;
 };
@@ -999,6 +1051,7 @@ export const fakeDb = {
         prompt: string;
         audioId: string;
         status?: string;
+        weight?: number;
         createdAt?: Date;
         installationId?: string;
       };
@@ -1008,6 +1061,9 @@ export const fakeDb = {
         id: randomUUID(),
         prompt: data.prompt,
         status: data.status ?? "draft",
+        weight: data.weight ?? 1,
+        lastSelectedCycle: null,
+        selectionsInCycle: 0,
         audioId: data.audioId,
         createdAt: data.createdAt ?? new Date(),
         retiredAt: null,
@@ -1079,7 +1135,14 @@ export const fakeDb = {
       create: Record<string, unknown>;
       update: Record<string, unknown>;
     }) => {
-      const question = { ...(create as unknown as FakeQuestion), id: where.id };
+      const input = create as Partial<FakeQuestion>;
+      const question: FakeQuestion = {
+        ...(input as FakeQuestion),
+        id: where.id,
+        weight: input.weight ?? 1,
+        lastSelectedCycle: input.lastSelectedCycle ?? null,
+        selectionsInCycle: input.selectionsInCycle ?? 0,
+      };
       store.questions.set(where.id, question);
       return question;
     },
@@ -2328,6 +2391,9 @@ export const fakeDb = {
         endedById: data.endedById ?? null,
         summary: data.summary ?? null,
         createdAt: data.createdAt ?? now,
+        questionSelectionCycle: data.questionSelectionCycle ?? 0,
+        lastSelectedQuestionId: data.lastSelectedQuestionId ?? null,
+        recentQuestionDraws: data.recentQuestionDraws ?? [],
       };
       store.installations.set(row.id, row);
       return row;
@@ -2372,7 +2438,16 @@ export const fakeDb = {
       const existing = store.installations.get(where.id);
       const row = existing
         ? ({ ...existing, ...reviveDates(update), id: where.id } as FakeInstallation)
-        : ({ ...reviveDates(create), id: where.id } as unknown as FakeInstallation);
+        : ({
+            ...reviveDates(create),
+            id: where.id,
+            questionSelectionCycle: (create.questionSelectionCycle as number | undefined) ?? 0,
+            lastSelectedQuestionId:
+              (create.lastSelectedQuestionId as string | null | undefined) ?? null,
+            recentQuestionDraws:
+              (create.recentQuestionDraws as FakeInstallation["recentQuestionDraws"] | undefined) ??
+              [],
+          } as unknown as FakeInstallation);
       store.installations.set(where.id, row);
       return row;
     },
@@ -2518,24 +2593,40 @@ export const fakeDb = {
     fn: (tx: typeof fakeDb) => Promise<T>,
     _options?: { isolationLevel?: string; maxWait?: number; timeout?: number },
   ): Promise<T> => {
-    const snapshot = snapshotFakeStore();
-    try {
-      return await fn(fakeDb);
-    } catch (error) {
-      restoreFakeStore(snapshot);
-      throw error;
+    if (_options?.isolationLevel === "ReadCommitted" && timeOutNextReadCommittedTransaction) {
+      timeOutNextReadCommittedTransaction = false;
+      throw new Prisma.PrismaClientKnownRequestError("transaction timed out", {
+        code: "P2028",
+        clientVersion: "test",
+      });
     }
+    const locks: FakeTransactionLocks = { lockedIds: new Set(), releases: [] };
+    return transactionLocks.run(locks, async () => {
+      const snapshot = snapshotFakeStore();
+      try {
+        return await fn(fakeDb);
+      } catch (error) {
+        restoreFakeStore(snapshot);
+        throw error;
+      } finally {
+        for (const release of locks.releases.reverse()) release();
+      }
+    });
   },
   // The era row is locked with raw SQL — `FOR SHARE` for a writer, `FOR UPDATE`
-  // for the close-out — because Prisma has no first-class row lock. There is no
-  // concurrency to serialise in a test, so the fake only has to answer the
-  // question the lock asks: is this era still open?
+  // for the close-out — because Prisma has no first-class row lock. Exclusive
+  // locks queue by row above; changing production code to FOR SHARE therefore
+  // makes concurrency tests expose duplicate draws rather than passing anyway.
   $queryRaw: async (
     strings: TemplateStringsArray,
     ...values: unknown[]
   ): Promise<Array<{ endedAt: Date | null } | { id: string } | { count: number }>> => {
+    const statement = strings.join("");
     const id = values.find((value) => typeof value === "string");
-    if (strings.join("").includes('FROM "BoothEvent"')) {
+    if (statement.includes("FOR UPDATE") && typeof id === "string") {
+      await acquireExclusiveLock(id);
+    }
+    if (statement.includes('FROM "BoothEvent"')) {
       const [installationId, playbackState] = values;
       const count =
         typeof installationId === "string" && typeof playbackState === "string"
@@ -2551,9 +2642,9 @@ export const fakeDb = {
           : 0;
       return [{ count }];
     }
-    if (strings.join("").includes('FROM "Message"')) {
+    if (statement.includes('FROM "Message"')) {
       const message = typeof id === "string" ? store.messages.get(id) : undefined;
-      if (strings.join("").includes('"processingLeaseTokenHash"')) {
+      if (statement.includes('"processingLeaseTokenHash"')) {
         const [messageId, tokenHash, expiresAt, userId] = values;
         const leaseMatches =
           typeof messageId === "string" &&

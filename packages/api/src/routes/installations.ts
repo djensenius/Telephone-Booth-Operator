@@ -165,6 +165,7 @@ installationsRouter.post(
                 // the rollover) comes back live in the new era.
                 status: question.status === "draft" ? "draft" : "active",
                 audioId: question.audioId,
+                weight: question.weight,
                 installationId: installation.id,
               },
             });

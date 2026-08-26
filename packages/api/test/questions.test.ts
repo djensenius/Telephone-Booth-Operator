@@ -26,7 +26,14 @@ vi.mock("../src/lib/require-api-token.js", () => ({
 import { createApp } from "../src/index.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { resetFakeAzure } from "./support/fake-azure.js";
-import { resetFakeDb, seedFile } from "./support/fake-db.js";
+import {
+  DEFAULT_INSTALLATION_ID,
+  resetFakeDb,
+  seedFile,
+  seedQuestion,
+  store,
+  timeOutNextQuestionDraw,
+} from "./support/fake-db.js";
 import { operatorCookie, phoneHeaders } from "./support/http.js";
 
 const setup = () => {
@@ -86,18 +93,19 @@ describe("questions routes", () => {
     });
     expect(create.status, await create.clone().text()).toBe(201);
     const question = await create.json();
-    expect(question).toMatchObject({ prompt: "What did you hear?", status: "draft" });
+    expect(question).toMatchObject({ prompt: "What did you hear?", status: "draft", weight: 1 });
     expect(question.audio).toMatchObject({ sha256: "1".repeat(64), durationMs: 2500 });
 
     const update = await app.request(`/v1/questions/${question.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({ prompt: "What can you hear?" }),
+      body: JSON.stringify({ prompt: "What can you hear?", weight: 3 }),
     });
     expect(update.status, await update.clone().text()).toBe(200);
     await expect(update.json()).resolves.toMatchObject({
       id: question.id,
       prompt: "What can you hear?",
+      weight: 3,
     });
 
     // Drafts are listed for management but not served to the phone.
@@ -166,6 +174,175 @@ describe("questions routes", () => {
 
     const none = await app.request("/v1/questions/random", { headers: phoneHeaders });
     expect(none.status).toBe(404);
+  });
+
+  it("serves every weight-1 recording once before starting a new cycle", async () => {
+    const active = [
+      seedQuestion({ status: "active" }),
+      seedQuestion({ status: "active" }),
+      seedQuestion({ status: "active" }),
+    ];
+    seedQuestion({ status: "draft" });
+    seedQuestion({ status: "archived" });
+    const app = createApp();
+
+    const served: string[] = [];
+    for (let draw = 0; draw < active.length; draw += 1) {
+      const response = await app.request("/v1/questions/random", { headers: phoneHeaders });
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      served.push(((await response.json()) as { id: string }).id);
+    }
+
+    expect(new Set(served)).toEqual(new Set(active.map((question) => question.id)));
+    expect(store.installations.get(DEFAULT_INSTALLATION_ID)?.questionSelectionCycle).toBe(0);
+
+    const nextCycle = await app.request("/v1/questions/random", { headers: phoneHeaders });
+    expect(nextCycle.status, await nextCycle.clone().text()).toBe(200);
+    const nextId = ((await nextCycle.json()) as { id: string }).id;
+    expect(nextId).not.toBe(served.at(-1));
+    expect(store.installations.get(DEFAULT_INSTALLATION_ID)?.questionSelectionCycle).toBe(1);
+  });
+
+  it("consumes each recording's weight as tickets and avoids consecutive repeats", async () => {
+    const standard = seedQuestion({ status: "active", weight: 1 });
+    const featured = seedQuestion({ status: "active", weight: 2 });
+    const app = createApp();
+
+    const served: string[] = [];
+    for (let draw = 0; draw < 3; draw += 1) {
+      const response = await app.request("/v1/questions/random", { headers: phoneHeaders });
+      expect(response.status, await response.clone().text()).toBe(200);
+      served.push(((await response.json()) as { id: string }).id);
+    }
+
+    expect(served.filter((id) => id === standard.id)).toHaveLength(1);
+    expect(served.filter((id) => id === featured.id)).toHaveLength(2);
+    expect(served[0]).not.toBe(served[1]);
+
+    const nextCycle = await app.request("/v1/questions/random", { headers: phoneHeaders });
+    expect(nextCycle.status, await nextCycle.clone().text()).toBe(200);
+    expect(((await nextCycle.json()) as { id: string }).id).not.toBe(served.at(-1));
+  });
+
+  it("adds a newly activated recording to the current ticket bag", async () => {
+    const first = seedQuestion({ status: "active" });
+    const second = seedQuestion({ status: "active" });
+    const added = seedQuestion({ status: "draft" });
+    const app = createApp();
+
+    const initial = await app.request("/v1/questions/random", { headers: phoneHeaders });
+    expect(initial.status, await initial.clone().text()).toBe(200);
+    const initialId = ((await initial.json()) as { id: string }).id;
+
+    const activate = await app.request(`/v1/questions/${added.id}/activate`, {
+      method: "POST",
+      headers: { cookie: operatorCookie() },
+    });
+    expect(activate.status, await activate.clone().text()).toBe(200);
+
+    const remainder: string[] = [];
+    for (let draw = 0; draw < 2; draw += 1) {
+      const response = await app.request("/v1/questions/random", { headers: phoneHeaders });
+      expect(response.status, await response.clone().text()).toBe(200);
+      remainder.push(((await response.json()) as { id: string }).id);
+    }
+    expect(new Set([initialId, ...remainder])).toEqual(new Set([first.id, second.id, added.id]));
+  });
+
+  it("serializes concurrent draws so they consume different tickets", async () => {
+    seedQuestion({ status: "active" });
+    seedQuestion({ status: "active" });
+    const app = createApp();
+
+    const responses = await Promise.all([
+      app.request("/v1/questions/random", { headers: phoneHeaders }),
+      app.request("/v1/questions/random", { headers: phoneHeaders }),
+    ]);
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    const ids = await Promise.all(
+      responses.map(async (response) => ((await response.json()) as { id: string }).id),
+    );
+    expect(new Set(ids)).toHaveLength(2);
+  });
+
+  it("replays one ticket when the same logical draw is retried concurrently", async () => {
+    seedQuestion({ status: "active" });
+    seedQuestion({ status: "active" });
+    const app = createApp();
+    const headers = {
+      ...phoneHeaders,
+      "x-question-draw-id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    };
+
+    const responses = await Promise.all([
+      app.request("/v1/questions/random", { headers }),
+      app.request("/v1/questions/random", { headers }),
+    ]);
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    const ids = await Promise.all(
+      responses.map(async (response) => ((await response.json()) as { id: string }).id),
+    );
+    expect(new Set(ids)).toHaveLength(1);
+    const consumed = [...store.questions.values()].reduce(
+      (total, question) => total + question.selectionsInCycle,
+      0,
+    );
+    expect(consumed).toBe(1);
+  });
+
+  it("replays a draw after an intervening headerless request and normalizes UUID case", async () => {
+    seedQuestion({ status: "active" });
+    seedQuestion({ status: "active" });
+    seedQuestion({ status: "active" });
+    const app = createApp();
+    const uppercaseDrawId = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
+
+    const first = await app.request("/v1/questions/random", {
+      headers: { ...phoneHeaders, "x-question-draw-id": uppercaseDrawId },
+    });
+    const intervening = await app.request("/v1/questions/random", { headers: phoneHeaders });
+    const replay = await app.request("/v1/questions/random", {
+      headers: { ...phoneHeaders, "x-question-draw-id": uppercaseDrawId.toLowerCase() },
+    });
+
+    expect([first.status, intervening.status, replay.status]).toEqual([200, 200, 200]);
+    const firstId = ((await first.json()) as { id: string }).id;
+    const interveningId = ((await intervening.json()) as { id: string }).id;
+    const replayId = ((await replay.json()) as { id: string }).id;
+    expect(interveningId).not.toBe(firstId);
+    expect(replayId).toBe(firstId);
+    const consumed = [...store.questions.values()].reduce(
+      (total, question) => total + question.selectionsInCycle,
+      0,
+    );
+    expect(consumed).toBe(2);
+    expect(store.installations.get(DEFAULT_INSTALLATION_ID)?.recentQuestionDraws).toEqual([
+      { drawId: uppercaseDrawId.toLowerCase(), questionId: firstId },
+    ]);
+  });
+
+  it("rejects malformed draw ids without consuming a ticket", async () => {
+    const question = seedQuestion({ status: "active" });
+    const response = await createApp().request("/v1/questions/random", {
+      headers: { ...phoneHeaders, "x-question-draw-id": "not-a-uuid" },
+    });
+
+    expect(response.status).toBe(400);
+    expect(store.questions.get(question.id)?.selectionsInCycle).toBe(0);
+  });
+
+  it("returns a retryable response when rollover lock contention times out", async () => {
+    seedQuestion({ status: "active" });
+    timeOutNextQuestionDraw();
+
+    const response = await createApp().request("/v1/questions/random", {
+      headers: phoneHeaders,
+    });
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("1");
+    await expect(response.json()).resolves.toEqual({ error: "question_draw_busy" });
   });
 
   it("returns 404 when activating a missing question", async () => {

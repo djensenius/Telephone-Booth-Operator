@@ -110,6 +110,14 @@ model Installation {
   // @telephone-booth-operator/shared. Null while the installation is active.
   summary   Json?
   createdAt DateTime      @default(now())
+  // Durable state for the active question ticket bag. The last question id is
+  // deliberately scalar-only: questions are archived rather than deleted, and
+  // a stale id is harmless when it no longer belongs to the active pool.
+  questionSelectionCycle Int     @default(0)
+  lastSelectedQuestionId String? @db.Uuid
+  // Bounded `{ drawId, questionId }` history used to replay logical draws
+  // across retries, including when another draw completes in between.
+  recentQuestionDraws     Json    @default("[]")
 
   messages     Message[]
   callSessions CallSession[]
@@ -140,6 +148,11 @@ model Question {
   audio          File           @relation(fields: [audioId], references: [id])
   createdAt      DateTime       @default(now())
   retiredAt      DateTime?
+  // Weight 1 contributes one ticket per cycle. Higher weights contribute that
+  // many tickets while the two cycle fields track durable consumption.
+  weight             Int            @default(1)
+  lastSelectedCycle  Int?
+  selectionsInCycle Int            @default(0)
   messages       Message[]
   // Nullable in the column so the migration never rewrites a large table, but
   // always populated at write time via `requireActiveInstallation()`.
@@ -153,6 +166,7 @@ model Question {
   @@unique([installationId, audioId])
   @@index([status, createdAt])
   @@index([installationId, status, createdAt])
+  @@index([installationId, status, lastSelectedCycle])
   @@index([audioId])
 }
 

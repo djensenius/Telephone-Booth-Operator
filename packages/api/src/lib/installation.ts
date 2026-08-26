@@ -400,8 +400,11 @@ export const ERA_LOCK_ATTEMPTS = 3;
 // concurrent writers arriving just after a rollover would take every
 // connection and then wait on each other. Creating a missing era is left to
 // the caller, outside its transaction, for the same reason.
-export const lockOpenInstallation = async (
+type InstallationLock = (tx: Prisma.TransactionClient, installationId: string) => Promise<boolean>;
+
+const lockOpenInstallationWith = async (
   tx: Prisma.TransactionClient,
+  lock: InstallationLock,
   preferred?: string,
 ): Promise<string | null> => {
   const openEra = async (): Promise<string | null> => {
@@ -415,13 +418,24 @@ export const lockOpenInstallation = async (
 
   let candidate = preferred ?? (await openEra());
   for (let attempt = 0; attempt < ERA_LOCK_ATTEMPTS && candidate !== null; attempt += 1) {
-    if (await lockInstallationForWrite(tx, candidate)) return candidate;
+    if (await lock(tx, candidate)) return candidate;
     const next = await openEra();
     if (next === candidate) return null;
     candidate = next;
   }
   return null;
 };
+
+export const lockOpenInstallation = (
+  tx: Prisma.TransactionClient,
+  preferred?: string,
+): Promise<string | null> => lockOpenInstallationWith(tx, lockInstallationForWrite, preferred);
+
+// Question selection mutates a shared ticket bag. An exclusive era lock makes
+// the draw and its persisted consumption one serial operation across replicas.
+export const lockOpenInstallationExclusively = (
+  tx: Prisma.TransactionClient,
+): Promise<string | null> => lockOpenInstallationWith(tx, lockInstallationExclusively);
 
 export class NoOpenEraError extends Error {
   constructor() {

@@ -192,23 +192,40 @@ paths:
 
   /v1/questions/random:
     get:
-      summary: A random active question for the phone client to play.
+      summary: The next weighted active question for the phone client to play.
+      description: |
+        Draws from a durable per-installation ticket bag. Weight 1 contributes
+        one play per randomized cycle, weight 2 contributes two, and so on.
+        Consecutive repeats are avoided while another recording still has a
+        ticket. Bag state survives API restarts and is serialized across
+        replicas.
       tags: [questions]
       security:
         - apiToken: []
+      parameters:
+        - name: X-Question-Draw-Id
+          in: header
+          required: false
+          description: |
+            Stable UUID for one logical draw. Phone clients reuse it across
+            retries so a lost response does not consume another ticket. The
+            most recent 100 logical draws per installation are retained.
+          schema: { type: string, format: uuid }
       responses:
         "200":
           description: ok
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Question" }
+        "400": { description: invalid question draw id }
         "404": { description: no questions available }
+        "503": { description: question bag busy during installation rollover; retryable }
 
   /v1/questions/{id}:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     patch:
-      summary: Update a question prompt.
+      summary: Update a question prompt or selection weight.
       tags: [questions]
       security:
         - operatorSession: []
@@ -2470,11 +2487,12 @@ components:
         durationMs: { anyOf: [{ type: integer, minimum: 1 }, { type: "null" }] }
     Question:
       type: object
-      required: [id, prompt, status, createdAt, audio]
+      required: [id, prompt, status, weight, createdAt, audio]
       properties:
         id: { type: string, format: uuid }
         prompt: { type: string, minLength: 1, maxLength: 280 }
         status: { $ref: "#/components/schemas/QuestionStatus" }
+        weight: { type: integer, minimum: 1, maximum: 100 }
         createdAt: { type: string, format: date-time }
         audio: { $ref: "#/components/schemas/AudioRef" }
     QuestionStatus:
@@ -2490,11 +2508,18 @@ components:
           allOf:
             - $ref: "#/components/schemas/QuestionStatus"
           description: Defaults to draft when omitted.
+        weight:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 1
+          description: Number of tickets contributed to each selection cycle.
     QuestionUpdate:
       type: object
-      required: [prompt]
+      minProperties: 1
       properties:
         prompt: { type: string, minLength: 1, maxLength: 280 }
+        weight: { type: integer, minimum: 1, maximum: 100 }
     QuestionList:
       type: object
       required: [items, nextCursor]
