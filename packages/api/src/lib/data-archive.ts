@@ -11,6 +11,11 @@
 //     blobKey/sha256 are stored, so scope/lifetime rules are untouched.
 
 import { createHash } from "node:crypto";
+import {
+  QUESTION_DRAW_HISTORY_LIMIT,
+  QuestionWeightSchema,
+} from "@telephone-booth-operator/shared";
+import { z } from "zod";
 import { Prisma } from "../generated/prisma/client.js";
 import { downloadBlob, headBlob, uploadBlob } from "./azure-blob.js";
 import { createTar, readTar } from "./archive.js";
@@ -405,19 +410,70 @@ const withStatusWindow = (row: Row): Row =>
     ? { ...row, firstSeenAt: row.updatedAt, repeatCount: row.repeatCount ?? 1 }
     : row;
 
-const withQuestionTicketState = (row: Row): Row => ({
-  ...row,
-  weight: row.weight ?? 1,
-  lastSelectedCycle: row.lastSelectedCycle ?? null,
-  selectionsInCycle: row.selectionsInCycle ?? 0,
-});
+const POSTGRES_INTEGER_MAX = 2_147_483_647;
+const nonnegativeIntegerSchema = z.number().int().min(0).max(POSTGRES_INTEGER_MAX);
+const nullableUuidSchema = z.guid().nullable();
+const questionDrawHistorySchema = z
+  .array(z.object({ drawId: z.guid(), questionId: z.guid() }))
+  .max(QUESTION_DRAW_HISTORY_LIMIT);
 
-const withInstallationTicketState = (row: Row): Row => ({
-  ...row,
-  questionSelectionCycle: row.questionSelectionCycle ?? 0,
-  lastSelectedQuestionId: row.lastSelectedQuestionId ?? null,
-  recentQuestionDraws: row.recentQuestionDraws ?? [],
-});
+const ticketStateError = (model: string, row: Row, error: z.ZodError): ImportFormatError =>
+  new ImportFormatError(
+    `invalid ${model} ticket state for ${String(row.id)}: ${error.issues
+      .map((issue) => `${issue.path.join(".") || "value"} ${issue.message}`)
+      .join("; ")}`,
+  );
+
+const withQuestionTicketState = (row: Row): Row => {
+  const parsed = z
+    .object({
+      weight: QuestionWeightSchema,
+      lastSelectedCycle: nonnegativeIntegerSchema.nullable(),
+      selectionsInCycle: nonnegativeIntegerSchema,
+    })
+    .safeParse({
+      weight: row.weight === undefined ? 1 : row.weight,
+      lastSelectedCycle: row.lastSelectedCycle === undefined ? null : row.lastSelectedCycle,
+      selectionsInCycle: row.selectionsInCycle === undefined ? 0 : row.selectionsInCycle,
+    });
+  if (!parsed.success) throw ticketStateError("question", row, parsed.error);
+  return { ...row, ...parsed.data };
+};
+
+const withInstallationTicketState = (row: Row): Row => {
+  const parsed = z
+    .object({
+      questionSelectionCycle: nonnegativeIntegerSchema,
+      lastSelectedQuestionId: nullableUuidSchema,
+      recentQuestionDraws: questionDrawHistorySchema,
+    })
+    .safeParse({
+      questionSelectionCycle:
+        row.questionSelectionCycle === undefined ? 0 : row.questionSelectionCycle,
+      lastSelectedQuestionId:
+        row.lastSelectedQuestionId === undefined ? null : row.lastSelectedQuestionId,
+      recentQuestionDraws: row.recentQuestionDraws === undefined ? [] : row.recentQuestionDraws,
+    });
+  if (!parsed.success) throw ticketStateError("installation", row, parsed.error);
+
+  const recentQuestionDraws = parsed.data.recentQuestionDraws.map((entry) => ({
+    drawId: entry.drawId.toLowerCase(),
+    questionId: entry.questionId.toLowerCase(),
+  }));
+  if (
+    new Set(recentQuestionDraws.map((entry) => entry.drawId)).size !== recentQuestionDraws.length
+  ) {
+    throw new ImportFormatError(
+      `invalid installation ticket state for ${String(row.id)}: duplicate draw IDs`,
+    );
+  }
+  return {
+    ...row,
+    questionSelectionCycle: parsed.data.questionSelectionCycle,
+    lastSelectedQuestionId: parsed.data.lastSelectedQuestionId?.toLowerCase() ?? null,
+    recentQuestionDraws,
+  };
+};
 
 const normalizeArchiveRow = (name: ModelName, row: Row): Row => {
   if (name === "boothStatusSnapshot") return withStatusWindow(row);

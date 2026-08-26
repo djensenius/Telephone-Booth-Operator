@@ -218,6 +218,7 @@ export const InstructionStatusSchema = z.enum(["active", "inactive"]);
 export type InstructionStatus = z.infer<typeof InstructionStatusSchema>;
 export const QUESTION_WEIGHT_MIN = 1;
 export const QUESTION_WEIGHT_MAX = 100;
+export const QUESTION_DRAW_HISTORY_LIMIT = 100;
 export const QuestionWeightSchema = z
   .number()
   .int()

@@ -2,6 +2,7 @@ import { randomInt } from "node:crypto";
 import { zValidator } from "@hono/zod-validator";
 import {
   InstallationScopeSchema,
+  QUESTION_DRAW_HISTORY_LIMIT,
   QUESTION_WEIGHT_MAX,
   QUESTION_WEIGHT_MIN,
   QuestionCreateSchema,
@@ -45,7 +46,6 @@ const listQuerySchema = z.object({
 const idParamSchema = z.object({ id: z.guid() });
 const questionDrawIdSchema = z.guid();
 const QUESTION_DRAW_ID_HEADER = "x-question-draw-id";
-const QUESTION_DRAW_HISTORY_LIMIT = 100;
 const questionDrawHistorySchema = z.array(
   z.object({
     drawId: z.guid(),

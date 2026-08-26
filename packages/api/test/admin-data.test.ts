@@ -332,6 +332,53 @@ describe("admin data export/import", () => {
     expect(((await res.json()) as { error: string }).error).toBe("invalid_archive");
   });
 
+  it.each([
+    ["an out-of-range question weight", { question: [{ id: crypto.randomUUID(), weight: 0 }] }],
+    [
+      "an overflowing selection counter",
+      { question: [{ id: crypto.randomUUID(), selectionsInCycle: 2_147_483_648 }] },
+    ],
+    [
+      "a malformed recent draw",
+      {
+        installation: [
+          {
+            id: crypto.randomUUID(),
+            recentQuestionDraws: [{ drawId: "not-a-uuid", questionId: crypto.randomUUID() }],
+          },
+        ],
+      },
+    ],
+  ])("rejects v6 ticket state with %s", async (_label, data) => {
+    const archive = createTar([
+      {
+        name: "manifest.json",
+        data: Buffer.from(
+          JSON.stringify({
+            format: EXPORT_FORMAT,
+            version: 6,
+            generatedAt: "2026-08-26T12:34:56.000Z",
+            container: "audio",
+            counts: {},
+            blobCount: 0,
+            missingBlobs: [],
+          }),
+          "utf8",
+        ),
+      },
+      { name: "data.json", data: Buffer.from(JSON.stringify(data), "utf8") },
+    ]);
+
+    const response = await createApp().request("/v1/admin/data/import", {
+      method: "POST",
+      headers: { cookie: operatorCookie(), "content-type": "application/x-tar" },
+      body: archive,
+    });
+
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: string }).error).toBe("invalid_archive");
+  });
+
   it("adopts legacy archive rows into one idempotent restored installation", async () => {
     const app = createApp();
     const cookie = operatorCookie();
