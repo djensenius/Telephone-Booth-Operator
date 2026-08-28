@@ -4,11 +4,13 @@ vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.
 
 import {
   fanOutBadgeNotification,
+  fanOutQueueCycleNotification,
   fanOutNotification,
   findTargetDevices,
   resetApnsSenderForTests,
   setApnsSenderForTests,
 } from "../src/lib/apns.js";
+import type { ApnsNotification } from "../src/lib/apns.js";
 import { log } from "../src/lib/logger.js";
 import { resetFakeDb, seedMobileDevice } from "./support/fake-db.js";
 
@@ -86,6 +88,33 @@ describe("APNs fan-out diagnostics", () => {
         badge: 3,
       }),
     ).rejects.toThrow("APNs badge fan-out failed for 1 user");
+  });
+
+  it("does not retry a queue-cycle alert after a partial fan-out failure", async () => {
+    seedMobileDevice({ userId: "operator-1", platform: "ios" });
+    setApnsSenderForTests({
+      send: async () => {
+        throw new Error("APNs unavailable");
+      },
+    });
+    const error = vi.spyOn(log, "error").mockImplementation(() => undefined as never);
+
+    await fanOutQueueCycleNotification({
+      kind: "alert",
+      preferenceKey: "messageReceived",
+      title: "Messages waiting",
+      body: "Open the moderation queue to review new booth recordings.",
+    });
+
+    expect(error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "apns",
+        notificationKind: "alert",
+        preferenceKey: "messageReceived",
+        userId: "operator-1",
+      }),
+      "APNs sender rejected queue-cycle alert",
+    );
   });
 
   it("passes the badge delivery fence through fan-out", async () => {

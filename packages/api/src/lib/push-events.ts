@@ -3,6 +3,7 @@ import type { ApnsDeliveryFence, ApnsNotification } from "./apns.js";
 import {
   APNS_DELIVERY_FENCE_MINIMUM_MS,
   fanOutBadgeNotification,
+  fanOutQueueCycleNotification,
   fanOutNotification,
   isApnsDeliveryConfigured,
 } from "./apns.js";
@@ -12,6 +13,7 @@ import { AWAITING_MODERATION_STATUSES } from "./moderation-badge.js";
 
 const DEFAULT_QUEUE_HIGH_THRESHOLD = 10;
 const QUEUE_HIGH_STATE_KEY = "moderation-queue-high";
+const MESSAGE_ALERT_STATE_KEY = "message-alert";
 const BADGE_LEASE_DURATION_MS = 120_000;
 const BADGE_DISPATCH_INTERVAL_MS = 5_000;
 const BADGE_DISPATCH_BATCH_SIZE = 16;
@@ -79,6 +81,10 @@ type PushEventDatabase = {
 type PushEventCoordinatorOptions = {
   database: PushEventDatabase;
   send: (notification: ApnsNotification, beforeSubmit?: ApnsDeliveryFence) => Promise<void>;
+  sendMessageAlert?: (
+    notification: ApnsNotification,
+    beforeSubmit?: ApnsDeliveryFence,
+  ) => Promise<void>;
   now?: () => Date;
   createLeaseToken?: () => string;
   badgeLeaseDurationMs?: number;
@@ -91,6 +97,10 @@ type BadgeClaim = {
   leaseToken: string;
 };
 
+type MessageAlertClaim = {
+  version: number;
+};
+
 export const moderationQueueHighThreshold = (env: NodeJS.ProcessEnv = process.env): number => {
   const parsed = Number.parseInt(env.MODERATION_QUEUE_HIGH_THRESHOLD ?? "", 10);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : DEFAULT_QUEUE_HIGH_THRESHOLD;
@@ -99,17 +109,136 @@ export const moderationQueueHighThreshold = (env: NodeJS.ProcessEnv = process.en
 export const createPushEventCoordinator = ({
   database,
   send,
+  sendMessageAlert = send,
   now = () => new Date(),
   createLeaseToken = randomUUID,
   badgeLeaseDurationMs = BADGE_LEASE_DURATION_MS,
   badgeDeliveryEnabled = () => true,
 }: PushEventCoordinatorOptions): {
   dispatchModerationBadges(): Promise<void>;
+  dispatchMessageAlerts(): Promise<void>;
   notifyMessageFlagged(messageId: string, moderationId: string, flagged: boolean): Promise<void>;
+  notifyMessageReceived(messageId: string): Promise<void>;
   observeModerationQueue(operation: string): Promise<void>;
   queueModerationBadgeRefresh(): Promise<void>;
   reconcileModerationBadgeState(): Promise<void>;
 } => {
+  const advanceMessageAlertState = async (
+    tx: PushEventTransaction,
+    count: number,
+    force: boolean,
+  ): Promise<number> => {
+    const state = await tx.pushNotificationState.upsert({
+      where: { key: MESSAGE_ALERT_STATE_KEY },
+      create: {
+        key: MESSAGE_ALERT_STATE_KEY,
+        active: false,
+        threshold: 0,
+        badgeCount: 0,
+        badgeVersion: 0,
+        badgeDeliveredVersion: 0,
+      },
+      update: {},
+    });
+    if (!force && state.badgeCount === count) return state.badgeVersion;
+    const cycleAlertConsumed = state.threshold === 1;
+    const updated = await tx.pushNotificationState.update({
+      where: { key: MESSAGE_ALERT_STATE_KEY },
+      data: {
+        active: count > 0 && !cycleAlertConsumed && (state.active || state.badgeCount === 0),
+        threshold: count === 0 ? 0 : state.threshold,
+        badgeCount: count,
+        badgeVersion: { increment: 1 },
+      },
+    });
+    return updated.badgeVersion;
+  };
+
+  const claimMessageAlert = async (): Promise<MessageAlertClaim | null> => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const state = await database.pushNotificationState.findUnique({
+        where: { key: MESSAGE_ALERT_STATE_KEY },
+      });
+      if (!state || !state.active || state.badgeVersion <= state.badgeDeliveredVersion) return null;
+
+      const claimed = await database.pushNotificationState.updateMany({
+        where: {
+          key: MESSAGE_ALERT_STATE_KEY,
+          active: true,
+          badgeVersion: state.badgeVersion,
+        },
+        data: {
+          active: false,
+          threshold: 1,
+          badgeDeliveredVersion: state.badgeVersion,
+          badgeLeaseToken: null,
+          badgeLeaseExpiresAt: null,
+        },
+      });
+      if (claimed.count === 1) {
+        return {
+          version: state.badgeVersion,
+        };
+      }
+    }
+    return null;
+  };
+
+  const validateMessageAlert = async (claim: MessageAlertClaim): Promise<Date | null> => {
+    return database.$transaction(async (tx) => {
+      await tx.$queryRaw`
+        SELECT 1 AS locked
+        FROM (SELECT pg_advisory_xact_lock(hashtext(${QUEUE_HIGH_STATE_KEY}))) AS acquired
+      `;
+      const count = await tx.message.count({
+        where: { status: { in: [...AWAITING_MODERATION_STATUSES] } },
+      });
+      if (count === 0) {
+        await advanceMessageAlertState(tx, count, false);
+        return null;
+      }
+      const state = await tx.pushNotificationState.findUnique({
+        where: { key: MESSAGE_ALERT_STATE_KEY },
+      });
+      if (!state || state.threshold !== 1 || state.badgeDeliveredVersion !== claim.version) {
+        return null;
+      }
+      return new Date(now().getTime() + badgeLeaseDurationMs);
+    });
+  };
+
+  const dispatchMessageAlerts = async (): Promise<void> => {
+    if (!badgeDeliveryEnabled()) return;
+
+    for (let delivered = 0; delivered < BADGE_DISPATCH_BATCH_SIZE; delivered += 1) {
+      const claim = await claimMessageAlert();
+      if (!claim) return;
+
+      try {
+        await sendMessageAlert(
+          {
+            kind: "alert",
+            preferenceKey: "messageReceived",
+            title: "Messages waiting",
+            body: "Open the moderation queue to review new booth recordings.",
+            threadId: "moderation-queue",
+            collapseId: "message-moderation-queue",
+            category: "BOOTH_MESSAGE",
+            data: {
+              notificationKind: "messageQueue",
+            },
+          },
+          () => validateMessageAlert(claim),
+        );
+      } catch (error) {
+        log.warn(
+          { component: "apns", err: error, version: claim.version },
+          "queue-cycle message notification delivery failed",
+        );
+      }
+    }
+  };
+
   const claimModerationBadge = async (): Promise<BadgeClaim | null> => {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const state = await database.pushNotificationState.findUnique({
@@ -227,11 +356,13 @@ export const createPushEventCoordinator = ({
     const threshold = moderationQueueHighThreshold();
     await database.$transaction(async (tx) => {
       await tx.$queryRaw`
-        SELECT pg_advisory_xact_lock(hashtext(${QUEUE_HIGH_STATE_KEY}))
+        SELECT 1 AS locked
+        FROM (SELECT pg_advisory_xact_lock(hashtext(${QUEUE_HIGH_STATE_KEY}))) AS acquired
       `;
       const count = await tx.message.count({
         where: { status: { in: [...AWAITING_MODERATION_STATUSES] } },
       });
+      await advanceMessageAlertState(tx, count, false);
       await tx.pushNotificationState.upsert({
         where: { key: QUEUE_HIGH_STATE_KEY },
         create: {
@@ -258,11 +389,13 @@ export const createPushEventCoordinator = ({
     const threshold = moderationQueueHighThreshold();
     const result = await database.$transaction(async (tx) => {
       await tx.$queryRaw`
-        SELECT pg_advisory_xact_lock(hashtext(${QUEUE_HIGH_STATE_KEY}))
+        SELECT 1 AS locked
+        FROM (SELECT pg_advisory_xact_lock(hashtext(${QUEUE_HIGH_STATE_KEY}))) AS acquired
       `;
       const count = await tx.message.count({
         where: { status: { in: [...AWAITING_MODERATION_STATUSES] } },
       });
+      await advanceMessageAlertState(tx, count, false);
       const nextActive = count >= threshold;
       const state = await tx.pushNotificationState.upsert({
         where: { key: QUEUE_HIGH_STATE_KEY },
@@ -306,6 +439,7 @@ export const createPushEventCoordinator = ({
 
   return {
     dispatchModerationBadges,
+    dispatchMessageAlerts,
     queueModerationBadgeRefresh,
     reconcileModerationBadgeState,
 
@@ -339,6 +473,60 @@ export const createPushEventCoordinator = ({
       }
     },
 
+    async notifyMessageReceived(messageId) {
+      const threshold = moderationQueueHighThreshold();
+      try {
+        const result = await database.$transaction(async (tx) => {
+          await tx.$queryRaw`
+            SELECT 1 AS locked
+            FROM (SELECT pg_advisory_xact_lock(hashtext(${QUEUE_HIGH_STATE_KEY}))) AS acquired
+          `;
+          const count = await tx.message.count({
+            where: { status: { in: [...AWAITING_MODERATION_STATUSES] } },
+          });
+          const state = await tx.pushNotificationState.upsert({
+            where: { key: QUEUE_HIGH_STATE_KEY },
+            create: {
+              key: QUEUE_HIGH_STATE_KEY,
+              active: false,
+              threshold,
+              badgeCount: 0,
+              badgeVersion: 0,
+              badgeDeliveredVersion: 0,
+            },
+            update: {},
+          });
+          const activeAtThisThreshold = state.threshold === threshold && state.active;
+          const nextActive = count >= threshold;
+          await tx.pushNotificationState.update({
+            where: { key: QUEUE_HIGH_STATE_KEY },
+            data: {
+              active: nextActive,
+              threshold,
+              badgeCount: count,
+              badgeVersion: { increment: 1 },
+            },
+          });
+          await advanceMessageAlertState(tx, count, true);
+          return {
+            count,
+            shouldNotifyQueueHigh: nextActive && !activeAtThisThreshold,
+          };
+        });
+
+        await dispatchMessageAlerts();
+        await dispatchModerationBadges();
+        if (result.shouldNotifyQueueHigh) {
+          await sendQueueHighNotification(result.count, threshold);
+        }
+      } catch (error) {
+        log.warn(
+          { component: "apns", err: error, messageId, threshold },
+          "failed to coordinate aggregated message notification",
+        );
+      }
+    },
+
     async observeModerationQueue(operation) {
       const threshold = moderationQueueHighThreshold();
       try {
@@ -348,11 +536,13 @@ export const createPushEventCoordinator = ({
           // advisory lock prevents stale concurrent observations from
           // overwriting a newer crossing state.
           await tx.$queryRaw`
-            SELECT pg_advisory_xact_lock(hashtext(${QUEUE_HIGH_STATE_KEY}))
+            SELECT 1 AS locked
+            FROM (SELECT pg_advisory_xact_lock(hashtext(${QUEUE_HIGH_STATE_KEY}))) AS acquired
           `;
           const count = await tx.message.count({
             where: { status: { in: [...AWAITING_MODERATION_STATUSES] } },
           });
+          await advanceMessageAlertState(tx, count, false);
           const state = await tx.pushNotificationState.upsert({
             where: { key: QUEUE_HIGH_STATE_KEY },
             create: {
@@ -394,10 +584,16 @@ export const createPushEventCoordinator = ({
 const coordinator = createPushEventCoordinator({
   database: db as unknown as PushEventDatabase,
   badgeDeliveryEnabled: isApnsDeliveryConfigured,
+  sendMessageAlert: (notification, beforeSubmit) => {
+    if (notification.kind !== "alert") {
+      throw new Error("Durable message delivery requires an alert notification");
+    }
+    return fanOutQueueCycleNotification(notification, beforeSubmit);
+  },
   send: (notification, beforeSubmit) =>
     notification.kind === "badge"
       ? fanOutBadgeNotification(notification, beforeSubmit)
-      : fanOutNotification(notification),
+      : fanOutNotification(notification, beforeSubmit),
 });
 
 export const notifyMessageFlagged = (
@@ -406,10 +602,15 @@ export const notifyMessageFlagged = (
   flagged: boolean,
 ): Promise<void> => coordinator.notifyMessageFlagged(messageId, moderationId, flagged);
 
+export const notifyMessageReceived = (messageId: string): Promise<void> =>
+  coordinator.notifyMessageReceived(messageId);
+
 export const observeModerationQueue = (operation: string): Promise<void> =>
   coordinator.observeModerationQueue(operation);
 
 export const dispatchModerationBadges = (): Promise<void> => coordinator.dispatchModerationBadges();
+
+export const dispatchMessageAlerts = (): Promise<void> => coordinator.dispatchMessageAlerts();
 
 export const reconcileModerationBadgeState = (): Promise<void> =>
   coordinator.reconcileModerationBadgeState();
@@ -426,6 +627,7 @@ export const startModerationBadgeDispatcher = (): { stop: () => void } => {
     running = true;
     try {
       await reconcileModerationBadgeState();
+      await dispatchMessageAlerts();
     } catch (error) {
       log.warn({ component: "apns", err: error }, "moderation badge dispatcher failed");
     } finally {

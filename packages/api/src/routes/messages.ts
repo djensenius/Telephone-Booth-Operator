@@ -23,7 +23,6 @@ import {
   runModeration,
   runTranscription,
 } from "../lib/ai/pipeline.js";
-import { fanOutNotification } from "../lib/apns.js";
 import { generateSasUrl, headBlob } from "../lib/azure-blob.js";
 import { wsBroadcaster } from "../lib/broadcaster.js";
 import { db } from "../lib/db.js";
@@ -34,7 +33,11 @@ import {
   resolveInstallationScope,
   scopeWhere,
 } from "../lib/installation.js";
-import { notifyMessageFlagged, observeModerationQueue } from "../lib/push-events.js";
+import {
+  notifyMessageFlagged,
+  notifyMessageReceived,
+  observeModerationQueue,
+} from "../lib/push-events.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 import {
   serializeMessage,
@@ -375,19 +378,9 @@ messagesRouter.post(
     // In push/disabled transcription modes this is a no-op — the external app
     // decides when to transcribe and posts the result back.
     kickPipelineForMessage(id);
-    // Push fan-out: notify mobile devices that a new message has landed. Badge
-    // updates use the separate queue observer so visible alerts can never
-    // overwrite a newer count.
-    void observeModerationQueue("message.complete");
-    void fanOutNotification({
-      kind: "alert",
-      preferenceKey: "messageReceived",
-      title: "New booth message",
-      body: "A new recording is ready to moderate.",
-      threadId: `message:${id}`,
-      category: "BOOTH_MESSAGE",
-      data: { messageId: id },
-    });
+    // The coordinated push updates the durable badge state and only submits
+    // the aggregate alert while its count remains current.
+    void notifyMessageReceived(id);
     return c.json({ id, status: "pending", receivedAt: receivedAt.toISOString() });
   },
 );

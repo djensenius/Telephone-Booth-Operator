@@ -143,6 +143,8 @@ export const buildApnsPayload = (notification: ApnsNotification): Record<string,
   if (notification.kind === "alert") {
     if (notification.threadId) aps["thread-id"] = notification.threadId;
     if (notification.category) aps.category = notification.category;
+    if (notification.mutableContent) aps["mutable-content"] = 1;
+    if (notification.badge !== undefined) aps.badge = notification.badge;
   }
   return { ...notification.data, aps };
 };
@@ -184,7 +186,8 @@ export class Http2ApnsSender {
     if (devices.length === 0) return;
     const jwt = await this.providerToken();
     const payload = JSON.stringify(buildApnsPayload(notification));
-    const collapseId = notification.kind === "badge" ? MODERATION_BADGE_COLLAPSE_ID : undefined;
+    const collapseId =
+      notification.kind === "badge" ? MODERATION_BADGE_COLLAPSE_ID : notification.collapseId;
     const leaseExpiresAt = beforeSubmit ? await beforeSubmit() : null;
     if (
       beforeSubmit &&
@@ -193,7 +196,9 @@ export class Http2ApnsSender {
       throw new Error("APNs delivery fence rejected a stale badge claim");
     }
     const results = await Promise.allSettled(
-      devices.map((device) => this.deliver(device, jwt, payload, collapseId, leaseExpiresAt)),
+      devices.map((device) =>
+        this.deliver(device, jwt, payload, collapseId, leaseExpiresAt, beforeSubmit),
+      ),
     );
     const failures = results.flatMap((result) =>
       result.status === "rejected"
@@ -228,8 +233,14 @@ export class Http2ApnsSender {
     payload: string,
     collapseId: string | undefined,
     leaseExpiresAt: Date | null,
+    beforeSubmit: ApnsDeliveryFence | undefined,
   ): Promise<void> {
-    if (leaseExpiresAt && leaseExpiresAt.getTime() - Date.now() < APNS_DELIVERY_FENCE_MINIMUM_MS) {
+    const refreshedLeaseExpiresAt = beforeSubmit ? await beforeSubmit() : leaseExpiresAt;
+    if (
+      beforeSubmit &&
+      (!refreshedLeaseExpiresAt ||
+        refreshedLeaseExpiresAt.getTime() - Date.now() < APNS_DELIVERY_FENCE_MINIMUM_MS)
+    ) {
       throw new Error("APNs delivery fence expired before submission");
     }
 

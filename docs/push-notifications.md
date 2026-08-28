@@ -17,8 +17,13 @@ turn it on, and how to configure them in production.
    (`apnsToken` + `platform`). Tokens are stored in the `mobile_devices` table.
 2. When a message hits `POST /v1/messages/{id}/complete`, the API computes the
    current **awaiting-moderation** count (messages with status `received` or
-   `pending`) and fans out an alert push to every registered device whose
-   preferences opt in.
+   `pending`) and makes at most one best-effort alert attempt for each
+   empty-to-non-empty queue cycle. The alert intentionally omits a numeric
+   count and badge; durable badge-only pushes remain the authoritative count.
+   The cycle is consumed before fan-out so a partial APNs failure cannot cause
+   successful targets to receive duplicate lock-screen alerts on retry.
+   Further arrivals update the badge without adding more alerts. The app
+   removes the delivered queue alert when the operator opens matching content.
 3. Every queue-changing operation records the latest badge count in durable
    delivery state. A database lease serializes badge-only pushes across API
    replicas, coalesces changes that arrive during an in-flight send, and lets a
