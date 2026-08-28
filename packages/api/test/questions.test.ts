@@ -153,24 +153,38 @@ describe("questions routes", () => {
     expect(missing.status).toBe(404);
   });
 
-  it("does not skip the first unseen question at a page boundary", async () => {
-    const newer = seedQuestion({ createdAt: new Date("2026-08-28T16:00:00.000Z") });
-    const older = seedQuestion({ createdAt: new Date("2026-08-27T16:00:00.000Z") });
+  it("keeps question pagination stable when the cursor row is deleted", async () => {
+    const createdAt = new Date("2026-08-28T16:00:00.000Z");
+    const newer = seedQuestion({
+      id: "22222222-2222-4222-8222-222222222222",
+      createdAt,
+    });
+    const older = seedQuestion({
+      id: "11111111-1111-4111-8111-111111111111",
+      createdAt,
+    });
     const app = createApp();
     const cookie = operatorCookie();
 
     const first = await app.request("/v1/questions?limit=1", { headers: { cookie } });
     const firstPage = (await first.json()) as { items: Array<{ id: string }>; nextCursor: string };
     expect(firstPage.items.map((item) => item.id)).toEqual([newer.id]);
-    expect(firstPage.nextCursor).toBe(newer.id);
+    expect(firstPage.nextCursor).not.toBe(newer.id);
 
-    const second = await app.request(`/v1/questions?limit=1&cursor=${firstPage.nextCursor}`, {
-      headers: { cookie },
-    });
+    store.questions.delete(newer.id);
+    const second = await app.request(
+      `/v1/questions?limit=1&cursor=${encodeURIComponent(firstPage.nextCursor)}`,
+      { headers: { cookie } },
+    );
     await expect(second.json()).resolves.toMatchObject({
       items: [{ id: older.id }],
       nextCursor: null,
     });
+
+    const invalid = await app.request("/v1/questions?cursor=not-a-cursor", {
+      headers: { cookie },
+    });
+    expect(invalid.status).toBe(400);
   });
 
   it("creates as draft, activates, randomly selects, deactivates, and archives", async () => {

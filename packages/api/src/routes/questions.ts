@@ -30,7 +30,7 @@ import { serializeMessage, serializeQuestion } from "../lib/serializers.js";
 import { requireAdmin, type AuthVariables } from "../lib/session.js";
 
 const listQuerySchema = z.object({
-  cursor: z.guid().optional(),
+  cursor: z.string().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   // `any` includes archived questions; the bare default hides them.
   status: z.union([QuestionStatusSchema, z.literal("any")]).optional(),
@@ -50,7 +50,8 @@ const questionMessagesQuerySchema = z.object({
   cursor: z.string().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
 });
-const questionMessageKeysetFromCursor = (raw: string): Prisma.MessageWhereInput[] | null => {
+type CreatedAtKeyset = Array<{ createdAt: { lt: Date } } | { createdAt: Date; id: { lt: string } }>;
+const createdAtKeysetFromCursor = (raw: string): CreatedAtKeyset | null => {
   const decoded = decodeCursor(raw);
   if (!decoded || encodeCursor(decoded) !== raw || !z.guid().safeParse(decoded.id).success) {
     return null;
@@ -79,23 +80,26 @@ export const questionsRouter = new Hono<{ Variables: AuthVariables & ApiTokenVar
 
 questionsRouter.get("/", zValidator("query", listQuerySchema), async (c) => {
   const { cursor, limit, status, installationId, ids } = c.req.valid("query");
+  const keyset = !ids && cursor !== undefined ? createdAtKeysetFromCursor(cursor) : null;
+  if (!ids && cursor !== undefined && keyset === null) {
+    return c.json({ error: "invalid_cursor" }, 400);
+  }
   // Default management view hides archived questions but shows drafts; an
   // explicit status filter overrides this, and `any` drops the filter so a
   // caller resolving prompts for historical messages can still find them.
   // An explicit id list is the whole filter: it already names the rows, and
   // narrowing it by era or status would defeat the point of asking.
-  const where = ids
+  const where: Prisma.QuestionWhereInput = ids
     ? { id: { in: ids } }
     : {
         ...scopeWhere(await resolveInstallationScope(installationId)),
         ...(status === "any" ? {} : status ? { status } : { status: { not: "archived" as const } }),
+        ...(keyset === null ? {} : { AND: [{ OR: keyset }] }),
       };
   // An id list is already bounded by the schema at 200, and a caller resolving
   // named rows cannot page: it asked for these questions, not for a window over
   // them. Paginating here would silently drop the tail of a long list.
-  const page = ids
-    ? { take: ids.length }
-    : { take: limit + 1, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) };
+  const page = ids ? { take: ids.length } : { take: limit + 1 };
   const questions = await db.question.findMany({
     where,
     include: { audio: true },
@@ -105,7 +109,11 @@ questionsRouter.get("/", zValidator("query", listQuerySchema), async (c) => {
   if (ids) return c.json({ items: questions.map(serializeQuestion), nextCursor: null });
   const pageItems = questions.slice(0, limit);
   const items = pageItems.map(serializeQuestion);
-  const next = questions.length > limit ? pageItems.at(-1)?.id : null;
+  const last = pageItems.at(-1);
+  const next =
+    questions.length > limit && last
+      ? encodeCursor({ timestamp: last.createdAt.toISOString(), id: last.id })
+      : null;
   return c.json({ items, nextCursor: next ?? null });
 });
 
@@ -116,7 +124,7 @@ questionsRouter.get(
   async (c) => {
     const { id } = c.req.valid("param");
     const { cursor, limit } = c.req.valid("query");
-    const keyset = cursor === undefined ? null : questionMessageKeysetFromCursor(cursor);
+    const keyset = cursor === undefined ? null : createdAtKeysetFromCursor(cursor);
     if (cursor !== undefined && keyset === null) {
       return c.json({ error: "invalid_cursor" }, 400);
     }

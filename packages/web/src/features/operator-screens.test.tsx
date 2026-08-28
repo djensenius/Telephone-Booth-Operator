@@ -807,6 +807,7 @@ describe("Question answers feature", () => {
 
   it("releases a failed audio URL when a renewed link arrives", async () => {
     const refreshedAudioUrl = "https://media.example/renewed-message.flac";
+    const secondRefreshedAudioUrl = "https://media.example/renewed-message-2.flac";
     server.use(
       http.get("http://localhost/v1/questions/:id/messages", () =>
         HttpResponse.json({
@@ -816,8 +817,15 @@ describe("Question answers feature", () => {
               status: lastDecision?.decision === "approve" ? "approved" : "received",
               audio: {
                 ...message.audio,
-                url: lastDecision === null ? message.audio.url : refreshedAudioUrl,
+                url: retranscribedMessages.includes(messageId)
+                  ? secondRefreshedAudioUrl
+                  : lastDecision === null
+                    ? message.audio.url
+                    : refreshedAudioUrl,
               },
+              ...(retranscribedMessages.includes(messageId)
+                ? { latestTranscription: pendingPushTranscription }
+                : {}),
             },
           ],
           nextCursor: null,
@@ -835,6 +843,11 @@ describe("Question answers feature", () => {
 
     expect(await screen.findByText("approved")).toBeTruthy();
     expect(audio?.getAttribute("src")).toBe(refreshedAudioUrl);
+    fireEvent.error(audio as HTMLAudioElement);
+    expect(audio?.getAttribute("src")).toBe(refreshedAudioUrl);
+    fireEvent.click(screen.getByRole("button", { name: "Re-run transcription" }));
+    expect(await screen.findByText("Waiting on transcription device")).toBeTruthy();
+    expect(audio?.getAttribute("src")).toBe(secondRefreshedAudioUrl);
   });
 
   it("refreshes an answer immediately after retranscription", async () => {

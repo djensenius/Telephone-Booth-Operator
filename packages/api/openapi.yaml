@@ -128,7 +128,8 @@ paths:
       parameters:
         - name: cursor
           in: query
-          schema: { type: string, format: uuid }
+          description: Opaque continuation token returned by the previous page.
+          schema: { type: string, minLength: 1 }
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
@@ -169,6 +170,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/QuestionList" }
+        "400": { description: invalid cursor }
     post:
       summary: Create a new question from an already-uploaded audio file.
       tags: [questions]
@@ -2568,7 +2570,7 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/Question" }
-        nextCursor: { anyOf: [{ type: string, format: uuid }, { type: "null" }] }
+        nextCursor: { type: [string, "null"] }
     Instruction:
       type: object
       required: [id, description, status, createdAt, audio]
@@ -2681,9 +2683,7 @@ components:
           type: array
           items: { $ref: "#/components/schemas/Message" }
         nextCursor:
-          oneOf:
-            - { type: string }
-            - { type: "null" }
+          type: [string, "null"]
     MessageProcessingClaimRequest:
       type: object
       properties:

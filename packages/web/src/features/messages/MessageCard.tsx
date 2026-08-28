@@ -107,7 +107,10 @@ export function MessageCard({
             setActiveAudioUrl(null);
             setFailedAudioUrl(null);
           }}
-          onError={() => setFailedAudioUrl(audioUrl)}
+          onError={() => {
+            setFailedAudioUrl(audioUrl);
+            setActiveAudioUrl(null);
+          }}
         >
           Message audio
         </audio>
