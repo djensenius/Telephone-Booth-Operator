@@ -284,4 +284,39 @@ describe("Http2ApnsSender", () => {
     ).rejects.toThrow("APNs delivery fence rejected a stale badge claim");
     expect(postCalls).toBe(0);
   });
+
+  it("rechecks the delivery fence for each device before submission", async () => {
+    seedMobileDevice({ userId: "operator-1", platform: "ios" });
+    let postCalls = 0;
+    let fenceCalls = 0;
+    class PerDeviceFencedSender extends Http2ApnsSender {
+      protected override post(): Promise<{ status: number }> {
+        postCalls += 1;
+        return Promise.resolve({ status: 200 });
+      }
+    }
+    const sender = new PerDeviceFencedSender({
+      teamId: "TEAM123",
+      keyId: "KEY123",
+      authKey: validAuthKey,
+      bundleId: "com.example.app",
+      environment: "development",
+    });
+
+    await expect(
+      sender.send(
+        "operator-1",
+        {
+          kind: "badge",
+          badge: 2,
+        },
+        async () => {
+          fenceCalls += 1;
+          return fenceCalls === 1 ? new Date(Date.now() + 60_000) : null;
+        },
+      ),
+    ).rejects.toThrow("APNs delivery failed for 1 of 1 devices");
+    expect(fenceCalls).toBe(2);
+    expect(postCalls).toBe(0);
+  });
 });

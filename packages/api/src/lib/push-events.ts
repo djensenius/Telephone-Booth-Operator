@@ -193,15 +193,14 @@ export const createPushEventCoordinator = ({
       const count = await tx.message.count({
         where: { status: { in: [...AWAITING_MODERATION_STATUSES] } },
       });
+      if (count === 0) {
+        await advanceMessageAlertState(tx, count, false);
+        return null;
+      }
       const state = await tx.pushNotificationState.findUnique({
         where: { key: MESSAGE_ALERT_STATE_KEY },
       });
-      if (
-        count === 0 ||
-        !state ||
-        state.threshold !== 1 ||
-        state.badgeDeliveredVersion !== claim.version
-      ) {
+      if (!state || state.threshold !== 1 || state.badgeDeliveredVersion !== claim.version) {
         return null;
       }
       return new Date(now().getTime() + badgeLeaseDurationMs);

@@ -383,6 +383,11 @@ describe("durable push event coordination", () => {
     await alert;
 
     expect(submittedAlerts).toBe(0);
+    expect(store.pushNotificationStates.get("message-alert")?.threshold).toBe(0);
+
+    seedMessage({ status: "pending" });
+    await coordinated.notifyMessageReceived("next-cycle-message");
+    expect(submittedAlerts).toBe(1);
   });
 
   it("does not let an alert claim from an earlier queue cycle submit in a later cycle", async () => {
