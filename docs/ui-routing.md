@@ -36,6 +36,7 @@ shortcuts are ignored for non-admin operators.
 | `/messages?status=uploading`    | Filter uploads still in progress                                   |
 | `/messages/:id`                 | Single-message review screen with audio player                     |
 | `/questions/new`                | Open the new-question upload flow                                  |
+| `/questions/:id/answers`        | Recordings linked to one question across installations             |
 | `/tokens`                       | API token CRUD and usage sparklines                                |
 | `/installations`                | Installation history, rollover, and scoped stats (admin actions)   |
 | `/settings`                     | Account, theme, and phone-client connection                        |

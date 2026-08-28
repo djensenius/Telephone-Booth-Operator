@@ -886,6 +886,18 @@ describe("Question answers feature", () => {
     expect(await screen.findByText("No answers on the line")).toBeTruthy();
   });
 
+  it("shows an operator-facing error when answers fail to load", async () => {
+    server.use(
+      http.get(
+        "http://localhost/v1/questions/:id/messages",
+        () => new HttpResponse(null, { status: 500 }),
+      ),
+    );
+
+    renderPath(`/questions/${questionId}/answers`);
+    expect(await screen.findByText("Could not load the answers to this question.")).toBeTruthy();
+  });
+
   it("keeps answers from ended installations read-only", async () => {
     server.use(
       http.get("http://localhost/v1/questions/:id/messages", () =>
