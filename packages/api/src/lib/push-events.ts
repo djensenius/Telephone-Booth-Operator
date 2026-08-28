@@ -139,10 +139,15 @@ export const createPushEventCoordinator = ({
       update: {},
     });
     if (!force && state.badgeCount === count) return state.badgeVersion;
+    const cycleAlertConsumed = state.threshold === 1;
     const updated = await tx.pushNotificationState.update({
       where: { key: MESSAGE_ALERT_STATE_KEY },
       data: {
-        active: count > 0 && (force || count > state.badgeCount),
+        active:
+          count > 0 &&
+          !cycleAlertConsumed &&
+          (state.active || state.badgeCount === 0),
+        threshold: count === 0 ? 0 : state.threshold,
         badgeCount: count,
         badgeVersion: { increment: 1 },
       },
@@ -229,7 +234,6 @@ export const createPushEventCoordinator = ({
             badge: claim.count,
             threadId: "moderation-queue",
             collapseId: "message-moderation-queue",
-            mutableContent: true,
             category: "BOOTH_MESSAGE",
             data: {
               awaitingModeration: claim.count,
@@ -251,29 +255,34 @@ export const createPushEventCoordinator = ({
         return;
       }
 
-      const completed = await database.pushNotificationState.updateMany({
-        where: {
-          key: MESSAGE_ALERT_STATE_KEY,
-          active: true,
-          badgeVersion: claim.version,
-          badgeLeaseToken: claim.leaseToken,
-        },
-        data: {
-          active: false,
-          badgeDeliveredVersion: claim.version,
-          badgeLeaseToken: null,
-          badgeLeaseExpiresAt: null,
-        },
-      });
-      if (completed.count === 0) {
-        await releaseMessageAlert(claim.leaseToken);
-        const latest = await database.pushNotificationState.findUnique({
+      const completed = await database.$transaction(async (tx) => {
+        await tx.$queryRaw`
+          SELECT 1 AS locked
+          FROM (SELECT pg_advisory_xact_lock(hashtext(${QUEUE_HIGH_STATE_KEY}))) AS acquired
+        `;
+        const latest = await tx.pushNotificationState.findUnique({
           where: { key: MESSAGE_ALERT_STATE_KEY },
         });
-        if (latest && !latest.active && latest.badgeVersion > claim.version) {
-          await queueModerationBadgeRefresh();
-          await dispatchModerationBadges();
-        }
+        if (!latest || latest.badgeLeaseToken !== claim.leaseToken) return null;
+        await tx.pushNotificationState.update({
+          where: { key: MESSAGE_ALERT_STATE_KEY },
+          data: {
+            active: false,
+            threshold: latest.badgeCount > 0 ? 1 : 0,
+            badgeDeliveredVersion: claim.version,
+            badgeLeaseToken: null,
+            badgeLeaseExpiresAt: null,
+          },
+        });
+        return latest;
+      });
+      if (!completed) {
+        await releaseMessageAlert(claim.leaseToken);
+        return;
+      }
+      if (completed.badgeVersion > claim.version) {
+        await queueModerationBadgeRefresh();
+        await dispatchModerationBadges();
       }
     }
   };

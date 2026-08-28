@@ -140,7 +140,7 @@ describe("durable push event coordination", () => {
           markFirstAlertStarted();
           await firstAlertGate;
         }
-        if (!(await beforeSubmit?.())) return;
+        if (!(await beforeSubmit?.())) throw new Error("stale alert claim");
         submittedCounts.push(Number(notification.data?.awaitingModeration));
       },
     });
@@ -155,7 +155,7 @@ describe("durable push event coordination", () => {
     expect(submittedCounts).toEqual([2]);
   });
 
-  it("submits a newer aggregate after an older request passes its fence", async () => {
+  it("submits a corrective badge after an older alert passes its fence", async () => {
     seedMessage({ status: "pending" });
     let releaseFirstPost = (): void => undefined;
     let markFirstFencePassed = (): void => undefined;
@@ -165,21 +165,28 @@ describe("durable push event coordination", () => {
     const firstPostGate = new Promise<void>((resolve) => {
       releaseFirstPost = resolve;
     });
-    const submittedCounts: number[] = [];
+    const submitted: Array<{ kind: "alert" | "badge"; count: number }> = [];
     let alertCount = 0;
     const coordinated = createPushEventCoordinator({
       database: fakeDb as never,
       send: async (notification, beforeSubmit) => {
-        if (notification.kind !== "alert" || notification.preferenceKey !== "messageReceived") {
+        if (notification.kind === "badge") {
+          submitted.push({ kind: "badge", count: notification.badge });
+          return;
+        }
+        if (notification.preferenceKey !== "messageReceived") {
           return;
         }
         alertCount += 1;
-        if (!(await beforeSubmit?.())) return;
+        if (!(await beforeSubmit?.())) throw new Error("stale alert claim");
         if (alertCount === 1) {
           markFirstFencePassed();
           await firstPostGate;
         }
-        submittedCounts.push(Number(notification.data?.awaitingModeration));
+        submitted.push({
+          kind: "alert",
+          count: Number(notification.data?.awaitingModeration),
+        });
       },
     });
 
@@ -188,11 +195,13 @@ describe("durable push event coordination", () => {
     seedMessage({ status: "pending" });
     await coordinated.notifyMessageReceived("message-2");
 
-    expect(submittedCounts).toEqual([]);
     releaseFirstPost();
     await first;
 
-    expect(submittedCounts).toEqual([1, 2]);
+    expect(submitted.filter(({ kind }) => kind === "alert")).toEqual([
+      { kind: "alert", count: 1 },
+    ]);
+    expect(submitted.at(-1)).toEqual({ kind: "badge", count: 2 });
   });
 
   it("submits a corrective badge after a superseded alert reaches APNs", async () => {
@@ -233,6 +242,75 @@ describe("durable push event coordination", () => {
     await alert;
 
     expect(submitted.at(-1)).toEqual({ kind: "badge", count: 0 });
+  });
+
+  it("keeps an in-flight alert pending when the queue decreases but remains non-empty", async () => {
+    const older = seedMessage({ status: "pending" });
+    seedMessage({ status: "pending" });
+    let releaseFirstPost = (): void => undefined;
+    let markFirstFencePassed = (): void => undefined;
+    const firstFencePassed = new Promise<void>((resolve) => {
+      markFirstFencePassed = resolve;
+    });
+    const firstPostGate = new Promise<void>((resolve) => {
+      releaseFirstPost = resolve;
+    });
+    const submitted: Array<{ kind: "alert" | "badge"; count: number }> = [];
+    const coordinated = createPushEventCoordinator({
+      database: fakeDb as never,
+      send: async (notification, beforeSubmit) => {
+        if (notification.kind === "badge") {
+          submitted.push({ kind: "badge", count: notification.badge });
+          return;
+        }
+        if (notification.preferenceKey !== "messageReceived") {
+          return;
+        }
+        if (!(await beforeSubmit?.())) throw new Error("stale alert claim");
+        markFirstFencePassed();
+        await firstPostGate;
+        submitted.push({
+          kind: "alert",
+          count: Number(notification.data?.awaitingModeration),
+        });
+      },
+    });
+
+    const alert = coordinated.notifyMessageReceived("new-message");
+    await firstFencePassed;
+    store.messages.get(older.id)!.status = "approved";
+    await coordinated.observeModerationQueue("message.decision");
+    releaseFirstPost();
+    await alert;
+
+    expect(submitted.filter(({ kind }) => kind === "alert")).toEqual([
+      { kind: "alert", count: 2 },
+    ]);
+    expect(submitted.at(-1)).toEqual({ kind: "badge", count: 1 });
+  });
+
+  it("sends one message alert per non-empty queue cycle", async () => {
+    const firstMessage = seedMessage({ status: "pending" });
+    const submittedCounts: number[] = [];
+    const coordinated = createPushEventCoordinator({
+      database: fakeDb as never,
+      send: async (notification) => {
+        if (notification.kind === "alert" && notification.preferenceKey === "messageReceived") {
+          submittedCounts.push(Number(notification.data?.awaitingModeration));
+        }
+      },
+    });
+
+    await coordinated.notifyMessageReceived(firstMessage.id);
+    const secondMessage = seedMessage({ status: "pending" });
+    await coordinated.notifyMessageReceived(secondMessage.id);
+    store.messages.get(firstMessage.id)!.status = "approved";
+    store.messages.get(secondMessage.id)!.status = "approved";
+    await coordinated.observeModerationQueue("queue.empty");
+    const thirdMessage = seedMessage({ status: "pending" });
+    await coordinated.notifyMessageReceived(thirdMessage.id);
+
+    expect(submittedCounts).toEqual([1, 1]);
   });
 
   it("skips the aggregate alert when no messages remain", async () => {
@@ -280,6 +358,35 @@ describe("durable push event coordination", () => {
         )
         .map((notification) => notification.data?.awaitingModeration),
     ).toEqual([1]);
+  });
+
+  it("recovers a new queue cycle after a previously delivered cycle emptied", async () => {
+    store.pushNotificationStates.set("message-alert", {
+      key: "message-alert",
+      active: false,
+      threshold: 0,
+      badgeCount: 0,
+      badgeVersion: 2,
+      badgeDeliveredVersion: 2,
+      badgeLeaseToken: null,
+      badgeLeaseExpiresAt: null,
+      updatedAt: new Date(),
+    });
+    seedMessage({ status: "pending" });
+    const submittedCounts: number[] = [];
+    const coordinated = createPushEventCoordinator({
+      database: fakeDb as never,
+      send: async (notification) => {
+        if (notification.kind === "alert" && notification.preferenceKey === "messageReceived") {
+          submittedCounts.push(Number(notification.data?.awaitingModeration));
+        }
+      },
+    });
+
+    await coordinated.reconcileModerationBadgeState();
+    await coordinated.dispatchMessageAlerts();
+
+    expect(submittedCounts).toEqual([1]);
   });
 
   it("keeps an aggregate alert valid across an unrelated badge refresh", async () => {

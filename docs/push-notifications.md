@@ -17,15 +17,14 @@ turn it on, and how to configure them in production.
    (`apnsToken` + `platform`). Tokens are stored in the `mobile_devices` table.
 2. When a message hits `POST /v1/messages/{id}/complete`, the API computes the
    current **awaiting-moderation** count (messages with status `received` or
-   `pending`) and fans out an alert such as **"2 messages waiting"** to every
-   registered device whose preferences opt in. Message alerts share an APNs
-   collapse identifier, and the iOS notification service extension removes
-   the older delivered message-queue alert before presenting the newest count.
-   The alert also carries the same count in `aps.badge`, so the icon updates
-   immediately even before the separate durable badge refresh arrives.
-   The service extension ships in
-   [`Telephone-Booth-Operator-Mobile#133`](https://github.com/djensenius/Telephone-Booth-Operator-Mobile/pull/133)
-   for iOS, macOS, and visionOS.
+   `pending`) and fans out one alert for each empty-to-non-empty queue cycle,
+   such as **"2 messages waiting"**, to every registered device whose
+   preferences opt in. Further arrivals update the durable badge count without
+   adding more lock-screen alerts. This avoids depending on unsupported
+   notification-extension access to the containing app's delivered alerts.
+   If the first alert is still in flight, its durable lease keeps it current as
+   the count changes. The app removes the delivered queue alert when the
+   operator opens the matching message content.
 3. Every queue-changing operation records the latest badge count in durable
    delivery state. A database lease serializes badge-only pushes across API
    replicas, coalesces changes that arrive during an in-flight send, and lets a
