@@ -67,7 +67,8 @@ describeWithDatabase("push event coordination with PostgreSQL", () => {
     });
     const blocker = db.$transaction(async (tx) => {
       await tx.$queryRaw`
-        SELECT pg_advisory_xact_lock(hashtext(${"moderation-queue-high"}))
+        SELECT 1 AS locked
+        FROM (SELECT pg_advisory_xact_lock(hashtext(${"moderation-queue-high"}))) AS acquired
       `;
       markBlockerLocked();
       await blockerGate;

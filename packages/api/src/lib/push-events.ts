@@ -395,7 +395,8 @@ export const createPushEventCoordinator = ({
     const threshold = moderationQueueHighThreshold();
     await database.$transaction(async (tx) => {
       await tx.$queryRaw`
-        SELECT pg_advisory_xact_lock(hashtext(${QUEUE_HIGH_STATE_KEY}))
+        SELECT 1 AS locked
+        FROM (SELECT pg_advisory_xact_lock(hashtext(${QUEUE_HIGH_STATE_KEY}))) AS acquired
       `;
       const count = await tx.message.count({
         where: { status: { in: [...AWAITING_MODERATION_STATUSES] } },
@@ -427,7 +428,8 @@ export const createPushEventCoordinator = ({
     const threshold = moderationQueueHighThreshold();
     const result = await database.$transaction(async (tx) => {
       await tx.$queryRaw`
-        SELECT pg_advisory_xact_lock(hashtext(${QUEUE_HIGH_STATE_KEY}))
+        SELECT 1 AS locked
+        FROM (SELECT pg_advisory_xact_lock(hashtext(${QUEUE_HIGH_STATE_KEY}))) AS acquired
       `;
       const count = await tx.message.count({
         where: { status: { in: [...AWAITING_MODERATION_STATUSES] } },
@@ -515,7 +517,8 @@ export const createPushEventCoordinator = ({
       try {
         const result = await database.$transaction(async (tx) => {
           await tx.$queryRaw`
-            SELECT pg_advisory_xact_lock(hashtext(${QUEUE_HIGH_STATE_KEY}))
+            SELECT 1 AS locked
+            FROM (SELECT pg_advisory_xact_lock(hashtext(${QUEUE_HIGH_STATE_KEY}))) AS acquired
           `;
           const count = await tx.message.count({
             where: { status: { in: [...AWAITING_MODERATION_STATUSES] } },
@@ -572,7 +575,8 @@ export const createPushEventCoordinator = ({
           // advisory lock prevents stale concurrent observations from
           // overwriting a newer crossing state.
           await tx.$queryRaw`
-            SELECT pg_advisory_xact_lock(hashtext(${QUEUE_HIGH_STATE_KEY}))
+            SELECT 1 AS locked
+            FROM (SELECT pg_advisory_xact_lock(hashtext(${QUEUE_HIGH_STATE_KEY}))) AS acquired
           `;
           const count = await tx.message.count({
             where: { status: { in: [...AWAITING_MODERATION_STATUSES] } },
