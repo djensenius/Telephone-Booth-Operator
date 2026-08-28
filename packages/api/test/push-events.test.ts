@@ -117,7 +117,7 @@ describe("durable push event coordination", () => {
     expect(state?.badgeLeaseToken).toBeNull();
   });
 
-  it("keeps one generic queue alert valid as the queue count increases", async () => {
+  it("coalesces overlapping arrivals to the newest valid alert count", async () => {
     seedMessage({ status: "pending" });
     let releaseFirstAlert = (): void => undefined;
     let markFirstAlertStarted = (): void => undefined;
@@ -127,6 +127,7 @@ describe("durable push event coordination", () => {
     const firstAlertGate = new Promise<void>((resolve) => {
       releaseFirstAlert = resolve;
     });
+    let alertAttempts = 0;
     const submittedAlerts: ApnsNotification[] = [];
     const coordinated = createPushEventCoordinator({
       database: fakeDb as never,
@@ -134,8 +135,11 @@ describe("durable push event coordination", () => {
         if (notification.kind !== "alert" || notification.preferenceKey !== "messageReceived") {
           return;
         }
-        markFirstAlertStarted();
-        await firstAlertGate;
+        alertAttempts += 1;
+        if (alertAttempts === 1) {
+          markFirstAlertStarted();
+          await firstAlertGate;
+        }
         if (!(await beforeSubmit?.())) throw new Error("stale alert claim");
         submittedAlerts.push(notification);
       },
@@ -148,24 +152,25 @@ describe("durable push event coordination", () => {
     releaseFirstAlert();
     await first;
 
+    expect(alertAttempts).toBe(2);
     expect(submittedAlerts).toEqual([
       expect.objectContaining({
         kind: "alert",
         title: "Messages waiting",
+        body: "There are 2 messages waiting to be reviewed.",
+        collapseId: "message-moderation-queue",
         data: { notificationKind: "messageQueue" },
       }),
     ]);
   });
 
-  it("sends one message alert per non-empty queue cycle", async () => {
+  it("sends a replacement alert for each sequential message arrival", async () => {
     const firstMessage = seedMessage({ status: "pending" });
-    let submittedAlerts = 0;
+    const sent: ApnsNotification[] = [];
     const coordinated = createPushEventCoordinator({
       database: fakeDb as never,
       send: async (notification) => {
-        if (notification.kind === "alert" && notification.preferenceKey === "messageReceived") {
-          submittedAlerts += 1;
-        }
+        sent.push(notification);
       },
     });
 
@@ -178,10 +183,51 @@ describe("durable push event coordination", () => {
     const thirdMessage = seedMessage({ status: "pending" });
     await coordinated.notifyMessageReceived(thirdMessage.id);
 
-    expect(submittedAlerts).toBe(2);
+    expect(
+      sent.filter(
+        (notification) =>
+          notification.kind === "alert" && notification.preferenceKey === "messageReceived",
+      ),
+    ).toEqual([
+      {
+        kind: "alert",
+        preferenceKey: "messageReceived",
+        title: "Message waiting",
+        body: "You have a new message to review.",
+        threadId: "moderation-queue",
+        collapseId: "message-moderation-queue",
+        category: "BOOTH_MESSAGE",
+        data: { notificationKind: "messageQueue" },
+      },
+      {
+        kind: "alert",
+        preferenceKey: "messageReceived",
+        title: "Messages waiting",
+        body: "There are 2 messages waiting to be reviewed.",
+        threadId: "moderation-queue",
+        collapseId: "message-moderation-queue",
+        category: "BOOTH_MESSAGE",
+        data: { notificationKind: "messageQueue" },
+      },
+      {
+        kind: "alert",
+        preferenceKey: "messageReceived",
+        title: "Message waiting",
+        body: "You have a new message to review.",
+        threadId: "moderation-queue",
+        collapseId: "message-moderation-queue",
+        category: "BOOTH_MESSAGE",
+        data: { notificationKind: "messageQueue" },
+      },
+    ]);
+    expect(
+      sent
+        .filter((notification) => notification.kind === "badge")
+        .map((notification) => notification.badge),
+    ).toEqual([1, 2, 0, 1]);
   });
 
-  it("skips the aggregate alert when no messages remain", async () => {
+  it("skips the replacement alert when no messages remain", async () => {
     const sent: ApnsNotification[] = [];
     const coordinated = createPushEventCoordinator({
       database: fakeDb as never,
@@ -205,7 +251,7 @@ describe("durable push event coordination", () => {
     });
   });
 
-  it("recovers a message alert when reconciliation first observes a queue increase", async () => {
+  it("does not synthesize an arrival alert from queue reconciliation", async () => {
     seedMessage({ status: "pending" });
     const sent: ApnsNotification[] = [];
     const coordinated = createPushEventCoordinator({
@@ -223,36 +269,12 @@ describe("durable push event coordination", () => {
         (notification) =>
           notification.kind === "alert" && notification.preferenceKey === "messageReceived",
       ),
-    ).toHaveLength(1);
-  });
-
-  it("recovers a new queue cycle after a previously delivered cycle emptied", async () => {
-    store.pushNotificationStates.set("message-alert", {
-      key: "message-alert",
-      active: false,
-      threshold: 0,
-      badgeCount: 0,
-      badgeVersion: 2,
-      badgeDeliveredVersion: 2,
-      badgeLeaseToken: null,
-      badgeLeaseExpiresAt: null,
-      updatedAt: new Date(),
-    });
-    seedMessage({ status: "pending" });
-    let submittedAlerts = 0;
-    const coordinated = createPushEventCoordinator({
-      database: fakeDb as never,
-      send: async (notification) => {
-        if (notification.kind === "alert" && notification.preferenceKey === "messageReceived") {
-          submittedAlerts += 1;
-        }
-      },
-    });
-
-    await coordinated.reconcileModerationBadgeState();
-    await coordinated.dispatchMessageAlerts();
-
-    expect(submittedAlerts).toBe(1);
+    ).toEqual([]);
+    expect(
+      sent
+        .filter((notification) => notification.kind === "badge")
+        .map((notification) => notification.badge),
+    ).toEqual([1]);
   });
 
   it("keeps an aggregate alert valid across an unrelated badge refresh", async () => {
@@ -287,7 +309,7 @@ describe("durable push event coordination", () => {
     expect(submittedAlerts).toBe(1);
   });
 
-  it("consumes a failed queue-cycle alert without retrying successful targets", async () => {
+  it("consumes a failed replacement alert until a newer message arrives", async () => {
     seedMessage({ status: "pending" });
     let alertAttempts = 0;
     const coordinated = createPushEventCoordinator({
@@ -305,7 +327,7 @@ describe("durable push event coordination", () => {
 
     let state = store.pushNotificationStates.get("message-alert");
     expect(state?.active).toBe(false);
-    expect(state?.threshold).toBe(1);
+    expect(state?.threshold).toBe(0);
     expect(state?.badgeDeliveredVersion).toBe(state?.badgeVersion);
     expect(state?.badgeLeaseToken).toBeNull();
 
@@ -315,6 +337,10 @@ describe("durable push event coordination", () => {
     expect(alertAttempts).toBe(1);
     expect(state?.active).toBe(false);
     expect(state?.badgeDeliveredVersion).toBe(state?.badgeVersion);
+
+    seedMessage({ status: "pending" });
+    await coordinated.notifyMessageReceived("message-2");
+    expect(alertAttempts).toBe(2);
   });
 
   it("keeps aggregate alerts pending while APNs delivery is disabled", async () => {
@@ -353,7 +379,7 @@ describe("durable push event coordination", () => {
     expect(state?.badgeDeliveredVersion).toBe(state?.badgeVersion);
   });
 
-  it("invalidates a claimed queue alert from the live queue before its observer runs", async () => {
+  it("invalidates a claimed replacement alert when the live queue drains", async () => {
     const message = seedMessage({ status: "pending" });
     let releaseAlert = (): void => undefined;
     let markAlertStarted = (): void => undefined;
@@ -390,7 +416,7 @@ describe("durable push event coordination", () => {
     expect(submittedAlerts).toBe(1);
   });
 
-  it("does not let an alert claim from an earlier queue cycle submit in a later cycle", async () => {
+  it("does not let a stale alert submit after a newer queue cycle starts", async () => {
     const firstMessage = seedMessage({ status: "pending" });
     let releaseFirstAlert = (): void => undefined;
     let markFirstAlertStarted = (): void => undefined;

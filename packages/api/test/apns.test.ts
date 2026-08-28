@@ -4,7 +4,7 @@ vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.
 
 import {
   fanOutBadgeNotification,
-  fanOutQueueCycleNotification,
+  fanOutReplacementNotification,
   fanOutNotification,
   findTargetDevices,
   resetApnsSenderForTests,
@@ -90,7 +90,7 @@ describe("APNs fan-out diagnostics", () => {
     ).rejects.toThrow("APNs badge fan-out failed for 1 user");
   });
 
-  it("does not retry a queue-cycle alert after a partial fan-out failure", async () => {
+  it("does not retry a replacement alert after a partial fan-out failure", async () => {
     seedMobileDevice({ userId: "operator-1", platform: "ios" });
     setApnsSenderForTests({
       send: async () => {
@@ -99,11 +99,11 @@ describe("APNs fan-out diagnostics", () => {
     });
     const error = vi.spyOn(log, "error").mockImplementation(() => undefined as never);
 
-    await fanOutQueueCycleNotification({
+    await fanOutReplacementNotification({
       kind: "alert",
       preferenceKey: "messageReceived",
       title: "Messages waiting",
-      body: "Open the moderation queue to review new booth recordings.",
+      body: "There are 2 messages waiting to be reviewed.",
     });
 
     expect(error).toHaveBeenCalledWith(
@@ -113,7 +113,7 @@ describe("APNs fan-out diagnostics", () => {
         preferenceKey: "messageReceived",
         userId: "operator-1",
       }),
-      "APNs sender rejected queue-cycle alert",
+      "APNs sender rejected replacement alert",
     );
   });
 

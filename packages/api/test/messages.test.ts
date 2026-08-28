@@ -355,7 +355,7 @@ describe("messages routes", () => {
           kind: "alert",
           preferenceKey: "messageReceived",
           title: "Messages waiting",
-          body: "Open the moderation queue to review new booth recordings.",
+          body: "There are 2 messages waiting to be reviewed.",
           badge: undefined,
           collapseId: "message-moderation-queue",
           data: {
