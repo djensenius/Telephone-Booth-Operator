@@ -122,7 +122,8 @@ describeWithDatabase("push event coordination with PostgreSQL", () => {
       expect(submittedCounts.at(-1)).toBe(expectedCount);
       const state = await db.pushNotificationState.findUnique({ where: { key: "message-alert" } });
       expect(state?.badgeCount).toBe(expectedCount);
-      expect(state?.badgeDeliveredVersion).toBe(state?.badgeVersion);
+      expect(state?.active).toBe(false);
+      expect(state?.threshold).toBe(1);
     } finally {
       releaseBlocker();
       await blocker;
