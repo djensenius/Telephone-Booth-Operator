@@ -4,11 +4,13 @@ vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.
 
 import {
   fanOutBadgeNotification,
+  fanOutDurableNotification,
   fanOutNotification,
   findTargetDevices,
   resetApnsSenderForTests,
   setApnsSenderForTests,
 } from "../src/lib/apns.js";
+import type { ApnsNotification } from "../src/lib/apns.js";
 import { log } from "../src/lib/logger.js";
 import { resetFakeDb, seedMobileDevice } from "./support/fake-db.js";
 
@@ -86,6 +88,24 @@ describe("APNs fan-out diagnostics", () => {
         badge: 3,
       }),
     ).rejects.toThrow("APNs badge fan-out failed for 1 user");
+  });
+
+  it("propagates durable alert fan-out failures for outbox retry", async () => {
+    seedMobileDevice({ userId: "operator-1", platform: "ios" });
+    setApnsSenderForTests({
+      send: async () => {
+        throw new Error("APNs unavailable");
+      },
+    });
+
+    await expect(
+      fanOutDurableNotification({
+        kind: "alert",
+        preferenceKey: "messageReceived",
+        title: "1 message waiting",
+        body: "A new booth recording is ready to moderate.",
+      }),
+    ).rejects.toThrow("APNs durable alert delivery failed for 1 operator users");
   });
 
   it("passes the badge delivery fence through fan-out", async () => {

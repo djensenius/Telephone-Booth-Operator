@@ -359,7 +359,6 @@ describe("messages routes", () => {
           badge: 2,
           collapseId: "message-moderation-queue",
           data: {
-            messageId: slot.id,
             awaitingModeration: 2,
             notificationKind: "messageQueue",
           },

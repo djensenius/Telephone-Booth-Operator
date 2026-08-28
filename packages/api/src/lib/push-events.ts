@@ -3,6 +3,7 @@ import type { ApnsDeliveryFence, ApnsNotification } from "./apns.js";
 import {
   APNS_DELIVERY_FENCE_MINIMUM_MS,
   fanOutBadgeNotification,
+  fanOutDurableNotification,
   fanOutNotification,
   isApnsDeliveryConfigured,
 } from "./apns.js";
@@ -80,6 +81,10 @@ type PushEventDatabase = {
 type PushEventCoordinatorOptions = {
   database: PushEventDatabase;
   send: (notification: ApnsNotification, beforeSubmit?: ApnsDeliveryFence) => Promise<void>;
+  sendMessageAlert?: (
+    notification: ApnsNotification,
+    beforeSubmit?: ApnsDeliveryFence,
+  ) => Promise<void>;
   now?: () => Date;
   createLeaseToken?: () => string;
   badgeLeaseDurationMs?: number;
@@ -92,6 +97,8 @@ type BadgeClaim = {
   leaseToken: string;
 };
 
+type MessageAlertClaim = BadgeClaim;
+
 export const moderationQueueHighThreshold = (env: NodeJS.ProcessEnv = process.env): number => {
   const parsed = Number.parseInt(env.MODERATION_QUEUE_HIGH_THRESHOLD ?? "", 10);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : DEFAULT_QUEUE_HIGH_THRESHOLD;
@@ -100,12 +107,14 @@ export const moderationQueueHighThreshold = (env: NodeJS.ProcessEnv = process.en
 export const createPushEventCoordinator = ({
   database,
   send,
+  sendMessageAlert = send,
   now = () => new Date(),
   createLeaseToken = randomUUID,
   badgeLeaseDurationMs = BADGE_LEASE_DURATION_MS,
   badgeDeliveryEnabled = () => true,
 }: PushEventCoordinatorOptions): {
   dispatchModerationBadges(): Promise<void>;
+  dispatchMessageAlerts(): Promise<void>;
   notifyMessageFlagged(messageId: string, moderationId: string, flagged: boolean): Promise<void>;
   notifyMessageReceived(messageId: string): Promise<void>;
   observeModerationQueue(operation: string): Promise<void>;
@@ -123,7 +132,7 @@ export const createPushEventCoordinator = ({
         key: MESSAGE_ALERT_STATE_KEY,
         active: false,
         threshold: 0,
-        badgeCount: count,
+        badgeCount: 0,
         badgeVersion: 0,
         badgeDeliveredVersion: 0,
       },
@@ -133,11 +142,133 @@ export const createPushEventCoordinator = ({
     const updated = await tx.pushNotificationState.update({
       where: { key: MESSAGE_ALERT_STATE_KEY },
       data: {
+        active: count > 0 && (force || count > state.badgeCount),
         badgeCount: count,
         badgeVersion: { increment: 1 },
       },
     });
     return updated.badgeVersion;
+  };
+
+  const claimMessageAlert = async (): Promise<MessageAlertClaim | null> => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const state = await database.pushNotificationState.findUnique({
+        where: { key: MESSAGE_ALERT_STATE_KEY },
+      });
+      if (!state || !state.active || state.badgeVersion <= state.badgeDeliveredVersion) return null;
+
+      const claimedAt = now();
+      if (state.badgeLeaseExpiresAt && state.badgeLeaseExpiresAt > claimedAt) return null;
+
+      const leaseToken = createLeaseToken();
+      const claimed = await database.pushNotificationState.updateMany({
+        where: {
+          key: MESSAGE_ALERT_STATE_KEY,
+          active: true,
+          badgeVersion: state.badgeVersion,
+          badgeLeaseToken: state.badgeLeaseToken,
+          badgeLeaseExpiresAt: state.badgeLeaseExpiresAt,
+        },
+        data: {
+          badgeLeaseToken: leaseToken,
+          badgeLeaseExpiresAt: new Date(claimedAt.getTime() + badgeLeaseDurationMs),
+        },
+      });
+      if (claimed.count === 1) {
+        return {
+          count: state.badgeCount,
+          version: state.badgeVersion,
+          leaseToken,
+        };
+      }
+    }
+    return null;
+  };
+
+  const releaseMessageAlert = async (leaseToken: string): Promise<void> => {
+    await database.pushNotificationState.updateMany({
+      where: { key: MESSAGE_ALERT_STATE_KEY, badgeLeaseToken: leaseToken },
+      data: { badgeLeaseToken: null, badgeLeaseExpiresAt: null },
+    });
+  };
+
+  const renewMessageAlert = async (claim: MessageAlertClaim): Promise<Date | null> => {
+    const leaseExpiresAt = new Date(now().getTime() + badgeLeaseDurationMs);
+    const renewed = await database.pushNotificationState.updateMany({
+      where: {
+        key: MESSAGE_ALERT_STATE_KEY,
+        active: true,
+        badgeVersion: claim.version,
+        badgeLeaseToken: claim.leaseToken,
+      },
+      data: { badgeLeaseExpiresAt: leaseExpiresAt },
+    });
+    if (renewed.count !== 1) return null;
+    return leaseExpiresAt.getTime() - now().getTime() >= APNS_DELIVERY_FENCE_MINIMUM_MS
+      ? leaseExpiresAt
+      : null;
+  };
+
+  const dispatchMessageAlerts = async (): Promise<void> => {
+    if (!badgeDeliveryEnabled()) return;
+
+    for (let delivered = 0; delivered < BADGE_DISPATCH_BATCH_SIZE; delivered += 1) {
+      const claim = await claimMessageAlert();
+      if (!claim) return;
+
+      try {
+        await sendMessageAlert(
+          {
+            kind: "alert",
+            preferenceKey: "messageReceived",
+            title: claim.count === 1 ? "1 message waiting" : `${claim.count} messages waiting`,
+            body:
+              claim.count === 1
+                ? "A new booth recording is ready to moderate."
+                : "Booth recordings are ready to moderate.",
+            badge: claim.count,
+            threadId: "moderation-queue",
+            collapseId: "message-moderation-queue",
+            mutableContent: true,
+            category: "BOOTH_MESSAGE",
+            data: {
+              awaitingModeration: claim.count,
+              notificationKind: "messageQueue",
+            },
+          },
+          () => renewMessageAlert(claim),
+        );
+      } catch (error) {
+        await releaseMessageAlert(claim.leaseToken);
+        log.warn(
+          { component: "apns", err: error, count: claim.count, version: claim.version },
+          "aggregate message notification delivery failed",
+        );
+        const latest = await database.pushNotificationState.findUnique({
+          where: { key: MESSAGE_ALERT_STATE_KEY },
+        });
+        if (latest?.active && latest.badgeVersion > claim.version) continue;
+        return;
+      }
+
+      const completed = await database.pushNotificationState.updateMany({
+        where: {
+          key: MESSAGE_ALERT_STATE_KEY,
+          active: true,
+          badgeVersion: claim.version,
+          badgeLeaseToken: claim.leaseToken,
+        },
+        data: {
+          active: false,
+          badgeDeliveredVersion: claim.version,
+          badgeLeaseToken: null,
+          badgeLeaseExpiresAt: null,
+        },
+      });
+      if (completed.count === 0) {
+        await releaseMessageAlert(claim.leaseToken);
+      }
+    }
   };
 
   const claimModerationBadge = async (): Promise<BadgeClaim | null> => {
@@ -338,6 +469,7 @@ export const createPushEventCoordinator = ({
 
   return {
     dispatchModerationBadges,
+    dispatchMessageAlerts,
     queueModerationBadgeRefresh,
     reconcileModerationBadgeState,
 
@@ -404,46 +536,14 @@ export const createPushEventCoordinator = ({
               badgeVersion: { increment: 1 },
             },
           });
-          const alertVersion = await advanceMessageAlertState(tx, count, true);
+          await advanceMessageAlertState(tx, count, true);
           return {
             count,
-            alertVersion,
             shouldNotifyQueueHigh: nextActive && !activeAtThisThreshold,
           };
         });
 
-        if (result.count > 0) {
-          await send(
-            {
-              kind: "alert",
-              preferenceKey: "messageReceived",
-              title:
-                result.count === 1 ? "1 message waiting" : `${result.count} messages waiting`,
-              body:
-                result.count === 1
-                  ? "A new booth recording is ready to moderate."
-                  : "Booth recordings are ready to moderate.",
-              badge: result.count,
-              threadId: "moderation-queue",
-              collapseId: "message-moderation-queue",
-              mutableContent: true,
-              category: "BOOTH_MESSAGE",
-              data: {
-                messageId,
-                awaitingModeration: result.count,
-                notificationKind: "messageQueue",
-              },
-            },
-            async () => {
-              const latest = await database.pushNotificationState.findUnique({
-                where: { key: MESSAGE_ALERT_STATE_KEY },
-              });
-              return latest?.badgeVersion === result.alertVersion
-                ? new Date(now().getTime() + badgeLeaseDurationMs)
-                : null;
-            },
-          );
-        }
+        await dispatchMessageAlerts();
         await dispatchModerationBadges();
         if (result.shouldNotifyQueueHigh) {
           await sendQueueHighNotification(result.count, threshold);
@@ -512,6 +612,12 @@ export const createPushEventCoordinator = ({
 const coordinator = createPushEventCoordinator({
   database: db as unknown as PushEventDatabase,
   badgeDeliveryEnabled: isApnsDeliveryConfigured,
+  sendMessageAlert: (notification, beforeSubmit) => {
+    if (notification.kind !== "alert") {
+      throw new Error("Durable message delivery requires an alert notification");
+    }
+    return fanOutDurableNotification(notification, beforeSubmit);
+  },
   send: (notification, beforeSubmit) =>
     notification.kind === "badge"
       ? fanOutBadgeNotification(notification, beforeSubmit)
@@ -532,6 +638,8 @@ export const observeModerationQueue = (operation: string): Promise<void> =>
 
 export const dispatchModerationBadges = (): Promise<void> => coordinator.dispatchModerationBadges();
 
+export const dispatchMessageAlerts = (): Promise<void> => coordinator.dispatchMessageAlerts();
+
 export const reconcileModerationBadgeState = (): Promise<void> =>
   coordinator.reconcileModerationBadgeState();
 
@@ -547,6 +655,7 @@ export const startModerationBadgeDispatcher = (): { stop: () => void } => {
     running = true;
     try {
       await reconcileModerationBadgeState();
+      await dispatchMessageAlerts();
     } catch (error) {
       log.warn({ component: "apns", err: error }, "moderation badge dispatcher failed");
     } finally {

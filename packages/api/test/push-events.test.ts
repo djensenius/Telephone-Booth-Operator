@@ -127,7 +127,7 @@ describe("durable push event coordination", () => {
     const firstAlertGate = new Promise<void>((resolve) => {
       releaseFirstAlert = resolve;
     });
-    const submittedMessageIds: string[] = [];
+    const submittedCounts: number[] = [];
     let alertCount = 0;
     const coordinated = createPushEventCoordinator({
       database: fakeDb as never,
@@ -141,7 +141,7 @@ describe("durable push event coordination", () => {
           await firstAlertGate;
         }
         if (!(await beforeSubmit?.())) return;
-        submittedMessageIds.push(String(notification.data?.messageId));
+        submittedCounts.push(Number(notification.data?.awaitingModeration));
       },
     });
 
@@ -152,7 +152,47 @@ describe("durable push event coordination", () => {
     releaseFirstAlert();
     await first;
 
-    expect(submittedMessageIds).toEqual(["message-2"]);
+    expect(submittedCounts).toEqual([2]);
+  });
+
+  it("submits a newer aggregate after an older request passes its fence", async () => {
+    seedMessage({ status: "pending" });
+    let releaseFirstPost = (): void => undefined;
+    let markFirstFencePassed = (): void => undefined;
+    const firstFencePassed = new Promise<void>((resolve) => {
+      markFirstFencePassed = resolve;
+    });
+    const firstPostGate = new Promise<void>((resolve) => {
+      releaseFirstPost = resolve;
+    });
+    const submittedCounts: number[] = [];
+    let alertCount = 0;
+    const coordinated = createPushEventCoordinator({
+      database: fakeDb as never,
+      send: async (notification, beforeSubmit) => {
+        if (notification.kind !== "alert" || notification.preferenceKey !== "messageReceived") {
+          return;
+        }
+        alertCount += 1;
+        if (!(await beforeSubmit?.())) return;
+        if (alertCount === 1) {
+          markFirstFencePassed();
+          await firstPostGate;
+        }
+        submittedCounts.push(Number(notification.data?.awaitingModeration));
+      },
+    });
+
+    const first = coordinated.notifyMessageReceived("message-1");
+    await firstFencePassed;
+    seedMessage({ status: "pending" });
+    await coordinated.notifyMessageReceived("message-2");
+
+    expect(submittedCounts).toEqual([]);
+    releaseFirstPost();
+    await first;
+
+    expect(submittedCounts).toEqual([1, 2]);
   });
 
   it("skips the aggregate alert when no messages remain", async () => {
@@ -179,6 +219,29 @@ describe("durable push event coordination", () => {
     });
   });
 
+  it("recovers a message alert when reconciliation first observes a queue increase", async () => {
+    seedMessage({ status: "pending" });
+    const sent: ApnsNotification[] = [];
+    const coordinated = createPushEventCoordinator({
+      database: fakeDb as never,
+      send: async (notification) => {
+        sent.push(notification);
+      },
+    });
+
+    await coordinated.reconcileModerationBadgeState();
+    await coordinated.dispatchMessageAlerts();
+
+    expect(
+      sent
+        .filter(
+          (notification) =>
+            notification.kind === "alert" && notification.preferenceKey === "messageReceived",
+        )
+        .map((notification) => notification.data?.awaitingModeration),
+    ).toEqual([1]);
+  });
+
   it("keeps an aggregate alert valid across an unrelated badge refresh", async () => {
     seedMessage({ status: "pending" });
     let releaseAlert = (): void => undefined;
@@ -189,7 +252,7 @@ describe("durable push event coordination", () => {
     const alertGate = new Promise<void>((resolve) => {
       releaseAlert = resolve;
     });
-    const submittedMessageIds: string[] = [];
+    const submittedCounts: number[] = [];
     const coordinated = createPushEventCoordinator({
       database: fakeDb as never,
       send: async (notification, beforeSubmit) => {
@@ -199,7 +262,7 @@ describe("durable push event coordination", () => {
         markAlertStarted();
         await alertGate;
         if (await beforeSubmit?.()) {
-          submittedMessageIds.push(String(notification.data?.messageId));
+          submittedCounts.push(Number(notification.data?.awaitingModeration));
         }
       },
     });
@@ -210,7 +273,75 @@ describe("durable push event coordination", () => {
     releaseAlert();
     await alert;
 
-    expect(submittedMessageIds).toEqual(["message-1"]);
+    expect(submittedCounts).toEqual([1]);
+  });
+
+  it("retains a failed aggregate alert for a later retry", async () => {
+    seedMessage({ status: "pending" });
+    let alertAttempts = 0;
+    const sentCounts: number[] = [];
+    const coordinated = createPushEventCoordinator({
+      database: fakeDb as never,
+      send: async (notification) => {
+        if (notification.kind !== "alert" || notification.preferenceKey !== "messageReceived") {
+          return;
+        }
+        alertAttempts += 1;
+        if (alertAttempts === 1) throw new Error("APNs unavailable");
+        sentCounts.push(Number(notification.data?.awaitingModeration));
+      },
+    });
+
+    await coordinated.notifyMessageReceived("message-1");
+
+    let state = store.pushNotificationStates.get("message-alert");
+    expect(state?.active).toBe(true);
+    expect(state?.badgeDeliveredVersion).toBe(0);
+    expect(state?.badgeLeaseToken).toBeNull();
+
+    await coordinated.dispatchMessageAlerts();
+
+    state = store.pushNotificationStates.get("message-alert");
+    expect(alertAttempts).toBe(2);
+    expect(sentCounts).toEqual([1]);
+    expect(state?.active).toBe(false);
+    expect(state?.badgeDeliveredVersion).toBe(state?.badgeVersion);
+  });
+
+  it("keeps aggregate alerts pending while APNs delivery is disabled", async () => {
+    seedMessage({ status: "pending" });
+    let enabled = false;
+    const send = vi.fn(async (_notification: ApnsNotification) => undefined);
+    const coordinated = createPushEventCoordinator({
+      database: fakeDb as never,
+      send,
+      badgeDeliveryEnabled: () => enabled,
+    });
+
+    await coordinated.notifyMessageReceived("message-1");
+
+    let state = store.pushNotificationStates.get("message-alert");
+    expect(
+      send.mock.calls.some(
+        ([notification]) =>
+          notification.kind === "alert" && notification.preferenceKey === "messageReceived",
+      ),
+    ).toBe(false);
+    expect(state?.active).toBe(true);
+    expect(state?.badgeDeliveredVersion).toBe(0);
+
+    enabled = true;
+    await coordinated.dispatchMessageAlerts();
+
+    state = store.pushNotificationStates.get("message-alert");
+    expect(
+      send.mock.calls.some(
+        ([notification]) =>
+          notification.kind === "alert" && notification.preferenceKey === "messageReceived",
+      ),
+    ).toBe(true);
+    expect(state?.active).toBe(false);
+    expect(state?.badgeDeliveredVersion).toBe(state?.badgeVersion);
   });
 
   it("invalidates an aggregate alert when the queue count decreases", async () => {
@@ -223,7 +354,7 @@ describe("durable push event coordination", () => {
     const alertGate = new Promise<void>((resolve) => {
       releaseAlert = resolve;
     });
-    const submittedMessageIds: string[] = [];
+    const submittedCounts: number[] = [];
     const coordinated = createPushEventCoordinator({
       database: fakeDb as never,
       send: async (notification, beforeSubmit) => {
@@ -233,7 +364,7 @@ describe("durable push event coordination", () => {
         markAlertStarted();
         await alertGate;
         if (await beforeSubmit?.()) {
-          submittedMessageIds.push(String(notification.data?.messageId));
+          submittedCounts.push(Number(notification.data?.awaitingModeration));
         }
       },
     });
@@ -245,7 +376,7 @@ describe("durable push event coordination", () => {
     releaseAlert();
     await alert;
 
-    expect(submittedMessageIds).toEqual([]);
+    expect(submittedCounts).toEqual([]);
   });
 
   it("recovers pending badge delivery after a stale lease and coordinator restart", async () => {
@@ -366,7 +497,7 @@ describe("durable push event coordination", () => {
     expect(state?.badgeCount).toBe(0);
     expect(state?.badgeVersion).toBe(2);
     expect(state?.badgeDeliveredVersion).toBe(2);
-    expect(sent).toEqual([
+    expect(sent.filter((notification) => notification.kind === "badge")).toEqual([
       { kind: "badge", badge: 1, data: { awaitingModeration: 1 } },
       { kind: "badge", badge: 0, data: { awaitingModeration: 0 } },
     ]);

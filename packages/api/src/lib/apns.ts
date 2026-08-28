@@ -195,6 +195,34 @@ export const fanOutNotification = async (
   }
 };
 
+/// Reliable fan-out for durable alerts. Failures propagate so an outbox
+/// dispatcher can retain the pending version and retry it later.
+export const fanOutDurableNotification = async (
+  notification: ApnsAlertNotification,
+  beforeSubmit?: ApnsDeliveryFence,
+): Promise<void> => {
+  if (!isApnsDeliveryConfigured()) {
+    throw new Error("APNs delivery is not configured");
+  }
+
+  const { results } = await sendToOperatorUsers(notification, beforeSubmit);
+  const failures = results.flatMap((result) =>
+    result.status === "rejected"
+      ? [
+          result.reason instanceof Error
+            ? result.reason
+            : new Error("APNs sender rejected durable alert fan-out", { cause: result.reason }),
+        ]
+      : [],
+  );
+  if (failures.length > 0) {
+    throw new AggregateError(
+      failures,
+      `APNs durable alert delivery failed for ${failures.length} operator users`,
+    );
+  }
+};
+
 /// Reliable fan-out for durable badge delivery. Unlike alert fan-out, database
 /// and sender failures propagate so the dispatcher can retain and retry the
 /// pending badge version.
