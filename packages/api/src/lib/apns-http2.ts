@@ -196,7 +196,9 @@ export class Http2ApnsSender {
       throw new Error("APNs delivery fence rejected a stale badge claim");
     }
     const results = await Promise.allSettled(
-      devices.map((device) => this.deliver(device, jwt, payload, collapseId, leaseExpiresAt)),
+      devices.map((device) =>
+        this.deliver(device, jwt, payload, collapseId, leaseExpiresAt, beforeSubmit),
+      ),
     );
     const failures = results.flatMap((result) =>
       result.status === "rejected"
@@ -231,8 +233,14 @@ export class Http2ApnsSender {
     payload: string,
     collapseId: string | undefined,
     leaseExpiresAt: Date | null,
+    beforeSubmit: ApnsDeliveryFence | undefined,
   ): Promise<void> {
-    if (leaseExpiresAt && leaseExpiresAt.getTime() - Date.now() < APNS_DELIVERY_FENCE_MINIMUM_MS) {
+    const refreshedLeaseExpiresAt = beforeSubmit ? await beforeSubmit() : leaseExpiresAt;
+    if (
+      beforeSubmit &&
+      (!refreshedLeaseExpiresAt ||
+        refreshedLeaseExpiresAt.getTime() - Date.now() < APNS_DELIVERY_FENCE_MINIMUM_MS)
+    ) {
       throw new Error("APNs delivery fence expired before submission");
     }
 
