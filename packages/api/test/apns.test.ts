@@ -4,7 +4,7 @@ vi.mock("../src/lib/db.js", async () => ({ db: (await import("./support/fake-db.
 
 import {
   fanOutBadgeNotification,
-  fanOutDurableNotification,
+  fanOutQueueCycleNotification,
   fanOutNotification,
   findTargetDevices,
   resetApnsSenderForTests,
@@ -90,22 +90,31 @@ describe("APNs fan-out diagnostics", () => {
     ).rejects.toThrow("APNs badge fan-out failed for 1 user");
   });
 
-  it("propagates durable alert fan-out failures for outbox retry", async () => {
+  it("does not retry a queue-cycle alert after a partial fan-out failure", async () => {
     seedMobileDevice({ userId: "operator-1", platform: "ios" });
     setApnsSenderForTests({
       send: async () => {
         throw new Error("APNs unavailable");
       },
     });
+    const error = vi.spyOn(log, "error").mockImplementation(() => undefined as never);
 
-    await expect(
-      fanOutDurableNotification({
-        kind: "alert",
+    await fanOutQueueCycleNotification({
+      kind: "alert",
+      preferenceKey: "messageReceived",
+      title: "Messages waiting",
+      body: "Open the moderation queue to review new booth recordings.",
+    });
+
+    expect(error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "apns",
+        notificationKind: "alert",
         preferenceKey: "messageReceived",
-        title: "1 message waiting",
-        body: "A new booth recording is ready to moderate.",
+        userId: "operator-1",
       }),
-    ).rejects.toThrow("APNs durable alert delivery failed for 1 operator user");
+      "APNs sender rejected queue-cycle alert",
+    );
   });
 
   it("passes the badge delivery fence through fan-out", async () => {

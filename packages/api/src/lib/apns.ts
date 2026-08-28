@@ -32,7 +32,7 @@ type ApnsAlertNotification = {
   threadId?: string;
   /// Optional collapse identifier so APNs keeps only the newest queued alert.
   collapseId?: string;
-  /// Allows a notification service extension to replace older delivered alerts.
+  /// Requests service-extension processing when a target provides one.
   mutableContent?: boolean;
   /// Custom payload merged with the standard `aps` envelope.
   data?: Record<string, unknown>;
@@ -195,9 +195,10 @@ export const fanOutNotification = async (
   }
 };
 
-/// Reliable fan-out for durable alerts. Failures propagate so an outbox
-/// dispatcher can retain the pending version and retry it later.
-export const fanOutDurableNotification = async (
+/// Best-effort fan-out for the single alert attempt in a queue cycle.
+/// Per-target failures are logged but not retried because retrying the whole
+/// fan-out can duplicate an alert on targets that already accepted it.
+export const fanOutQueueCycleNotification = async (
   notification: ApnsAlertNotification,
   beforeSubmit?: ApnsDeliveryFence,
 ): Promise<void> => {
@@ -205,21 +206,18 @@ export const fanOutDurableNotification = async (
     throw new Error("APNs delivery is not configured");
   }
 
-  const { results } = await sendToOperatorUsers(notification, beforeSubmit);
-  const failures = results.flatMap((result) =>
-    result.status === "rejected"
-      ? [
-          result.reason instanceof Error
-            ? result.reason
-            : new Error("APNs sender rejected durable alert fan-out", { cause: result.reason }),
-        ]
-      : [],
-  );
-  if (failures.length > 0) {
-    const target = failures.length === 1 ? "operator user" : "operator users";
-    throw new AggregateError(
-      failures,
-      `APNs durable alert delivery failed for ${failures.length} ${target}`,
+  const { userIds, results } = await sendToOperatorUsers(notification, beforeSubmit);
+  for (const [index, result] of results.entries()) {
+    if (result.status === "fulfilled") continue;
+    log.error(
+      {
+        component: "apns",
+        errorName: result.reason instanceof Error ? result.reason.name : "unknown",
+        notificationKind: notification.kind,
+        preferenceKey: notification.preferenceKey,
+        userId: userIds[index],
+      },
+      "APNs sender rejected queue-cycle alert",
     );
   }
 };

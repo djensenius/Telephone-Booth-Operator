@@ -3,7 +3,7 @@ import type { ApnsDeliveryFence, ApnsNotification } from "./apns.js";
 import {
   APNS_DELIVERY_FENCE_MINIMUM_MS,
   fanOutBadgeNotification,
-  fanOutDurableNotification,
+  fanOutQueueCycleNotification,
   fanOutNotification,
   isApnsDeliveryConfigured,
 } from "./apns.js";
@@ -97,7 +97,9 @@ type BadgeClaim = {
   leaseToken: string;
 };
 
-type MessageAlertClaim = BadgeClaim;
+type MessageAlertClaim = {
+  version: number;
+};
 
 export const moderationQueueHighThreshold = (env: NodeJS.ProcessEnv = process.env): number => {
   const parsed = Number.parseInt(env.MODERATION_QUEUE_HIGH_THRESHOLD ?? "", 10);
@@ -143,10 +145,7 @@ export const createPushEventCoordinator = ({
     const updated = await tx.pushNotificationState.update({
       where: { key: MESSAGE_ALERT_STATE_KEY },
       data: {
-        active:
-          count > 0 &&
-          !cycleAlertConsumed &&
-          (state.active || state.badgeCount === 0),
+        active: count > 0 && !cycleAlertConsumed && (state.active || state.badgeCount === 0),
         threshold: count === 0 ? 0 : state.threshold,
         badgeCount: count,
         badgeVersion: { increment: 1 },
@@ -162,56 +161,51 @@ export const createPushEventCoordinator = ({
       });
       if (!state || !state.active || state.badgeVersion <= state.badgeDeliveredVersion) return null;
 
-      const claimedAt = now();
-      if (state.badgeLeaseExpiresAt && state.badgeLeaseExpiresAt > claimedAt) return null;
-
-      const leaseToken = createLeaseToken();
       const claimed = await database.pushNotificationState.updateMany({
         where: {
           key: MESSAGE_ALERT_STATE_KEY,
           active: true,
           badgeVersion: state.badgeVersion,
-          badgeLeaseToken: state.badgeLeaseToken,
-          badgeLeaseExpiresAt: state.badgeLeaseExpiresAt,
         },
         data: {
-          badgeLeaseToken: leaseToken,
-          badgeLeaseExpiresAt: new Date(claimedAt.getTime() + badgeLeaseDurationMs),
+          active: false,
+          threshold: 1,
+          badgeDeliveredVersion: state.badgeVersion,
+          badgeLeaseToken: null,
+          badgeLeaseExpiresAt: null,
         },
       });
       if (claimed.count === 1) {
         return {
-          count: state.badgeCount,
           version: state.badgeVersion,
-          leaseToken,
         };
       }
     }
     return null;
   };
 
-  const releaseMessageAlert = async (leaseToken: string): Promise<void> => {
-    await database.pushNotificationState.updateMany({
-      where: { key: MESSAGE_ALERT_STATE_KEY, badgeLeaseToken: leaseToken },
-      data: { badgeLeaseToken: null, badgeLeaseExpiresAt: null },
+  const validateMessageAlert = async (claim: MessageAlertClaim): Promise<Date | null> => {
+    return database.$transaction(async (tx) => {
+      await tx.$queryRaw`
+        SELECT 1 AS locked
+        FROM (SELECT pg_advisory_xact_lock(hashtext(${QUEUE_HIGH_STATE_KEY}))) AS acquired
+      `;
+      const count = await tx.message.count({
+        where: { status: { in: [...AWAITING_MODERATION_STATUSES] } },
+      });
+      const state = await tx.pushNotificationState.findUnique({
+        where: { key: MESSAGE_ALERT_STATE_KEY },
+      });
+      if (
+        count === 0 ||
+        !state ||
+        state.threshold !== 1 ||
+        state.badgeDeliveredVersion !== claim.version
+      ) {
+        return null;
+      }
+      return new Date(now().getTime() + badgeLeaseDurationMs);
     });
-  };
-
-  const renewMessageAlert = async (claim: MessageAlertClaim): Promise<Date | null> => {
-    const leaseExpiresAt = new Date(now().getTime() + badgeLeaseDurationMs);
-    const renewed = await database.pushNotificationState.updateMany({
-      where: {
-        key: MESSAGE_ALERT_STATE_KEY,
-        active: true,
-        badgeVersion: claim.version,
-        badgeLeaseToken: claim.leaseToken,
-      },
-      data: { badgeLeaseExpiresAt: leaseExpiresAt },
-    });
-    if (renewed.count !== 1) return null;
-    return leaseExpiresAt.getTime() - now().getTime() >= APNS_DELIVERY_FENCE_MINIMUM_MS
-      ? leaseExpiresAt
-      : null;
   };
 
   const dispatchMessageAlerts = async (): Promise<void> => {
@@ -226,63 +220,22 @@ export const createPushEventCoordinator = ({
           {
             kind: "alert",
             preferenceKey: "messageReceived",
-            title: claim.count === 1 ? "1 message waiting" : `${claim.count} messages waiting`,
-            body:
-              claim.count === 1
-                ? "A new booth recording is ready to moderate."
-                : "Booth recordings are ready to moderate.",
-            badge: claim.count,
+            title: "Messages waiting",
+            body: "Open the moderation queue to review new booth recordings.",
             threadId: "moderation-queue",
             collapseId: "message-moderation-queue",
             category: "BOOTH_MESSAGE",
             data: {
-              awaitingModeration: claim.count,
               notificationKind: "messageQueue",
             },
           },
-          () => renewMessageAlert(claim),
+          () => validateMessageAlert(claim),
         );
       } catch (error) {
-        await releaseMessageAlert(claim.leaseToken);
         log.warn(
-          { component: "apns", err: error, count: claim.count, version: claim.version },
-          "aggregate message notification delivery failed",
+          { component: "apns", err: error, version: claim.version },
+          "queue-cycle message notification delivery failed",
         );
-        const latest = await database.pushNotificationState.findUnique({
-          where: { key: MESSAGE_ALERT_STATE_KEY },
-        });
-        if (latest?.active && latest.badgeVersion > claim.version) continue;
-        return;
-      }
-
-      const completed = await database.$transaction(async (tx) => {
-        await tx.$queryRaw`
-          SELECT 1 AS locked
-          FROM (SELECT pg_advisory_xact_lock(hashtext(${QUEUE_HIGH_STATE_KEY}))) AS acquired
-        `;
-        const latest = await tx.pushNotificationState.findUnique({
-          where: { key: MESSAGE_ALERT_STATE_KEY },
-        });
-        if (!latest || latest.badgeLeaseToken !== claim.leaseToken) return null;
-        await tx.pushNotificationState.update({
-          where: { key: MESSAGE_ALERT_STATE_KEY },
-          data: {
-            active: false,
-            threshold: latest.badgeCount > 0 ? 1 : 0,
-            badgeDeliveredVersion: claim.version,
-            badgeLeaseToken: null,
-            badgeLeaseExpiresAt: null,
-          },
-        });
-        return latest;
-      });
-      if (!completed) {
-        await releaseMessageAlert(claim.leaseToken);
-        return;
-      }
-      if (completed.badgeVersion > claim.version) {
-        await queueModerationBadgeRefresh();
-        await dispatchModerationBadges();
       }
     }
   };
@@ -636,7 +589,7 @@ const coordinator = createPushEventCoordinator({
     if (notification.kind !== "alert") {
       throw new Error("Durable message delivery requires an alert notification");
     }
-    return fanOutDurableNotification(notification, beforeSubmit);
+    return fanOutQueueCycleNotification(notification, beforeSubmit);
   },
   send: (notification, beforeSubmit) =>
     notification.kind === "badge"

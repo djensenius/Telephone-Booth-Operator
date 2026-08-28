@@ -95,10 +95,10 @@ describeWithDatabase("push event coordination with PostgreSQL", () => {
           ),
         ),
     };
-    const submittedCounts: number[] = [];
+    let submittedAlerts = 0;
     const send = vi.fn(async (notification: ApnsNotification) => {
       if (notification.kind === "alert" && notification.preferenceKey === "messageReceived") {
-        submittedCounts.push(Number(notification.data?.awaitingModeration));
+        submittedAlerts += 1;
       }
     });
     const firstCoordinator = createPushEventCoordinator({ database: database as never, send });
@@ -109,7 +109,10 @@ describeWithDatabase("push event coordination with PostgreSQL", () => {
       await Promise.race([
         firstWaiting,
         new Promise<never>((_resolve, reject) => {
-          setTimeout(() => reject(new Error("first coordinator did not reach advisory lock")), 1_000);
+          setTimeout(
+            () => reject(new Error("first coordinator did not reach advisory lock")),
+            1_000,
+          );
         }),
       ]);
       const secondMessageId = await createPendingMessage();
@@ -118,8 +121,7 @@ describeWithDatabase("push event coordination with PostgreSQL", () => {
       await Promise.all([firstNotification, secondNotification]);
 
       const expectedCount = baseline + 2;
-      expect(submittedCounts).not.toContain(baseline + 1);
-      expect(submittedCounts.at(-1)).toBe(expectedCount);
+      expect(submittedAlerts).toBe(1);
       const state = await db.pushNotificationState.findUnique({ where: { key: "message-alert" } });
       expect(state?.badgeCount).toBe(expectedCount);
       expect(state?.active).toBe(false);
