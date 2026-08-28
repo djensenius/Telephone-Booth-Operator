@@ -17,8 +17,12 @@ turn it on, and how to configure them in production.
    (`apnsToken` + `platform`). Tokens are stored in the `mobile_devices` table.
 2. When a message hits `POST /v1/messages/{id}/complete`, the API computes the
    current **awaiting-moderation** count (messages with status `received` or
-   `pending`) and fans out an alert push to every registered device whose
-   preferences opt in.
+   `pending`) and fans out an alert such as **"2 messages waiting"** to every
+   registered device whose preferences opt in. Message alerts share an APNs
+   collapse identifier, and the iOS notification service extension removes
+   the older delivered message-queue alert before presenting the newest count.
+   The alert also carries the same count in `aps.badge`, so the icon updates
+   immediately even before the separate durable badge refresh arrives.
 3. Every queue-changing operation records the latest badge count in durable
    delivery state. A database lease serializes badge-only pushes across API
    replicas, coalesces changes that arrive during an in-flight send, and lets a

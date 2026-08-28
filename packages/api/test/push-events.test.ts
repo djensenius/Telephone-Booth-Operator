@@ -117,6 +117,113 @@ describe("durable push event coordination", () => {
     expect(state?.badgeLeaseToken).toBeNull();
   });
 
+  it("does not submit an aggregate alert after a newer queue version exists", async () => {
+    seedMessage({ status: "pending" });
+    let releaseFirstAlert = (): void => undefined;
+    let markFirstAlertStarted = (): void => undefined;
+    const firstAlertStarted = new Promise<void>((resolve) => {
+      markFirstAlertStarted = resolve;
+    });
+    const firstAlertGate = new Promise<void>((resolve) => {
+      releaseFirstAlert = resolve;
+    });
+    const submittedMessageIds: string[] = [];
+    let alertCount = 0;
+    const coordinated = createPushEventCoordinator({
+      database: fakeDb as never,
+      send: async (notification, beforeSubmit) => {
+        if (notification.kind !== "alert" || notification.preferenceKey !== "messageReceived") {
+          return;
+        }
+        alertCount += 1;
+        if (alertCount === 1) {
+          markFirstAlertStarted();
+          await firstAlertGate;
+        }
+        if (!(await beforeSubmit?.())) return;
+        submittedMessageIds.push(String(notification.data?.messageId));
+      },
+    });
+
+    const first = coordinated.notifyMessageReceived("message-1");
+    await firstAlertStarted;
+    seedMessage({ status: "pending" });
+    await coordinated.notifyMessageReceived("message-2");
+    releaseFirstAlert();
+    await first;
+
+    expect(submittedMessageIds).toEqual(["message-2"]);
+  });
+
+  it("keeps an aggregate alert valid across an unrelated badge refresh", async () => {
+    seedMessage({ status: "pending" });
+    let releaseAlert = (): void => undefined;
+    let markAlertStarted = (): void => undefined;
+    const alertStarted = new Promise<void>((resolve) => {
+      markAlertStarted = resolve;
+    });
+    const alertGate = new Promise<void>((resolve) => {
+      releaseAlert = resolve;
+    });
+    const submittedMessageIds: string[] = [];
+    const coordinated = createPushEventCoordinator({
+      database: fakeDb as never,
+      send: async (notification, beforeSubmit) => {
+        if (notification.kind !== "alert" || notification.preferenceKey !== "messageReceived") {
+          return;
+        }
+        markAlertStarted();
+        await alertGate;
+        if (await beforeSubmit?.()) {
+          submittedMessageIds.push(String(notification.data?.messageId));
+        }
+      },
+    });
+
+    const alert = coordinated.notifyMessageReceived("message-1");
+    await alertStarted;
+    await coordinated.queueModerationBadgeRefresh();
+    releaseAlert();
+    await alert;
+
+    expect(submittedMessageIds).toEqual(["message-1"]);
+  });
+
+  it("invalidates an aggregate alert when the queue count decreases", async () => {
+    const message = seedMessage({ status: "pending" });
+    let releaseAlert = (): void => undefined;
+    let markAlertStarted = (): void => undefined;
+    const alertStarted = new Promise<void>((resolve) => {
+      markAlertStarted = resolve;
+    });
+    const alertGate = new Promise<void>((resolve) => {
+      releaseAlert = resolve;
+    });
+    const submittedMessageIds: string[] = [];
+    const coordinated = createPushEventCoordinator({
+      database: fakeDb as never,
+      send: async (notification, beforeSubmit) => {
+        if (notification.kind !== "alert" || notification.preferenceKey !== "messageReceived") {
+          return;
+        }
+        markAlertStarted();
+        await alertGate;
+        if (await beforeSubmit?.()) {
+          submittedMessageIds.push(String(notification.data?.messageId));
+        }
+      },
+    });
+
+    const alert = coordinated.notifyMessageReceived(message.id);
+    await alertStarted;
+    store.messages.get(message.id)!.status = "approved";
+    await coordinated.observeModerationQueue("message.decision");
+    releaseAlert();
+    await alert;
+
+    expect(submittedMessageIds).toEqual([]);
+  });
+
   it("recovers pending badge delivery after a stale lease and coordinator restart", async () => {
     const now = new Date("2026-08-18T12:00:00.000Z");
     store.pushNotificationStates.set("moderation-queue-high", {

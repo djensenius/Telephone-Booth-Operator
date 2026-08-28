@@ -24,10 +24,16 @@ type ApnsAlertNotification = {
   title: string;
   /// Alert body.
   body: string;
+  /// Optional application badge count updated with the alert.
+  badge?: number;
   /// Optional category for action-button rendering.
   category?: string;
   /// Optional thread identifier so iOS coalesces related alerts.
   threadId?: string;
+  /// Optional collapse identifier so APNs keeps only the newest queued alert.
+  collapseId?: string;
+  /// Allows a notification service extension to replace older delivered alerts.
+  mutableContent?: boolean;
   /// Custom payload merged with the standard `aps` envelope.
   data?: Record<string, unknown>;
 };
@@ -153,11 +159,14 @@ const sendToOperatorUsers = async (
 /// All errors are swallowed: this is a best-effort, fire-and-forget path
 /// invoked from request handlers that must not fail if APNs (or the
 /// mobile_devices table) is unavailable.
-export const fanOutNotification = async (notification: ApnsNotification): Promise<void> => {
+export const fanOutNotification = async (
+  notification: ApnsNotification,
+  beforeSubmit?: ApnsDeliveryFence,
+): Promise<void> => {
   if (!isApnsDeliveryConfigured()) return;
   const preferenceKey = notification.kind === "alert" ? notification.preferenceKey : undefined;
   try {
-    const { userIds, results } = await sendToOperatorUsers(notification);
+    const { userIds, results } = await sendToOperatorUsers(notification, beforeSubmit);
     for (const [index, result] of results.entries()) {
       if (result.status === "fulfilled") continue;
       log.error(

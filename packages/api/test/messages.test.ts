@@ -300,6 +300,10 @@ describe("messages routes", () => {
       kind: ApnsNotification["kind"];
       badge?: number;
       preferenceKey?: string;
+      title?: string;
+      body?: string;
+      collapseId?: string;
+      data?: Record<string, unknown>;
     }> = [];
     setApnsSenderForTests({
       send: async (userId, notification) => {
@@ -307,7 +311,14 @@ describe("messages routes", () => {
           userId,
           kind: notification.kind,
           ...(notification.kind === "alert"
-            ? { preferenceKey: notification.preferenceKey }
+            ? {
+                preferenceKey: notification.preferenceKey,
+                title: notification.title,
+                body: notification.body,
+                badge: notification.badge,
+                collapseId: notification.collapseId,
+                data: notification.data,
+              }
             : { badge: notification.badge }),
         });
       },
@@ -343,6 +354,15 @@ describe("messages routes", () => {
           userId: "operator-1",
           kind: "alert",
           preferenceKey: "messageReceived",
+          title: "2 messages waiting",
+          body: "Booth recordings are ready to moderate.",
+          badge: 2,
+          collapseId: "message-moderation-queue",
+          data: {
+            messageId: slot.id,
+            awaitingModeration: 2,
+            notificationKind: "messageQueue",
+          },
         },
         {
           userId: "operator-1",

@@ -27,7 +27,10 @@ describe("buildApnsPayload", () => {
       preferenceKey: "messageReceived",
       title: "New booth message",
       body: "A new recording is ready to moderate.",
-      threadId: "message:abc",
+      threadId: "moderation-queue",
+      collapseId: "message-moderation-queue",
+      mutableContent: true,
+      badge: 2,
       category: "BOOTH_MESSAGE",
       data: { messageId: "abc" },
     });
@@ -37,7 +40,9 @@ describe("buildApnsPayload", () => {
       aps: {
         alert: { title: "New booth message", body: "A new recording is ready to moderate." },
         sound: "default",
-        "thread-id": "message:abc",
+        "thread-id": "moderation-queue",
+        "mutable-content": 1,
+        badge: 2,
         category: "BOOTH_MESSAGE",
       },
     });

@@ -143,6 +143,8 @@ export const buildApnsPayload = (notification: ApnsNotification): Record<string,
   if (notification.kind === "alert") {
     if (notification.threadId) aps["thread-id"] = notification.threadId;
     if (notification.category) aps.category = notification.category;
+    if (notification.mutableContent) aps["mutable-content"] = 1;
+    if (notification.badge !== undefined) aps.badge = notification.badge;
   }
   return { ...notification.data, aps };
 };
@@ -184,7 +186,8 @@ export class Http2ApnsSender {
     if (devices.length === 0) return;
     const jwt = await this.providerToken();
     const payload = JSON.stringify(buildApnsPayload(notification));
-    const collapseId = notification.kind === "badge" ? MODERATION_BADGE_COLLAPSE_ID : undefined;
+    const collapseId =
+      notification.kind === "badge" ? MODERATION_BADGE_COLLAPSE_ID : notification.collapseId;
     const leaseExpiresAt = beforeSubmit ? await beforeSubmit() : null;
     if (
       beforeSubmit &&
