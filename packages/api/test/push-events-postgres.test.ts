@@ -50,7 +50,7 @@ describeWithDatabase("push event coordination with PostgreSQL", () => {
 
   it("reads the newest queue count after a competing replica holds the advisory lock", async () => {
     const baseline = await db.message.count({
-      where: { status: { in: ["pending", "flagged"] } },
+      where: { status: { in: ["received", "pending"] } },
     });
     const firstMessageId = await createPendingMessage();
     let releaseBlocker!: () => void;
