@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { z } from "zod";
 import {
@@ -128,6 +128,9 @@ const InstructionListSchema = z.object({
   nextCursor: z.guid().nullable(),
 });
 const MessageListSchema = z.object({ items: z.array(MessageSchema) });
+const MessagePageSchema = MessageListSchema.extend({
+  nextCursor: z.string().nullable(),
+});
 const InstallationListSchema = z.object({ items: z.array(InstallationSchema) });
 const SystemCurrentListSchema = z.object({
   items: z.array(BoothSystemSnapshotEnvelopeSchema),
@@ -140,6 +143,7 @@ export type StatusHistory = z.infer<typeof StatusHistorySchema>;
 export type QuestionList = z.infer<typeof QuestionListSchema>;
 export type InstructionList = z.infer<typeof InstructionListSchema>;
 export type MessageList = z.infer<typeof MessageListSchema>;
+export type MessagePage = z.infer<typeof MessagePageSchema>;
 export type InstallationList = z.infer<typeof InstallationListSchema>;
 export type SystemCurrentList = z.infer<typeof SystemCurrentListSchema>;
 export type StatsSummary = SharedStatsSummary;
@@ -322,6 +326,17 @@ export const questions = {
     apiFetch<QuestionList>(`/v1/questions${query({ ids: ids.join(","), limit: ids.length })}`, {
       schema: QuestionListSchema,
     }),
+  messages: (
+    id: string,
+    params: {
+      readonly cursor?: string;
+      readonly limit?: number;
+    } = {},
+  ) =>
+    apiFetch<MessagePage>(
+      `/v1/questions/${id}/messages${query({ cursor: params.cursor, limit: params.limit ?? 50 })}`,
+      { schema: MessagePageSchema },
+    ),
   create: (input: QuestionCreate) =>
     apiFetch<Question>("/v1/questions", {
       method: "POST",
@@ -768,6 +783,7 @@ export const apiQueryKeys = {
     ["instructions", "list", filter ?? "all"] as const,
   messages: (filter?: MessageStatus | "all", scope?: InstallationScope) =>
     ["messages", "list", filter ?? "all", scope ?? null] as const,
+  questionMessages: (id: string) => ["messages", "list", "question", id] as const,
   message: (id: string) => ["messages", id] as const,
   transcriptions: (id: string) => ["messages", id, "transcriptions"] as const,
   tokens: ["api-tokens", "list"] as const,
@@ -1017,6 +1033,23 @@ export function useQuestionsByIds(ids: readonly string[]) {
   });
 }
 
+export function useQuestionMessages(questionId: string) {
+  return useInfiniteQuery({
+    queryKey: apiQueryKeys.questionMessages(questionId),
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) =>
+      questions.messages(questionId, {
+        ...(pageParam === null ? {} : { cursor: pageParam }),
+        limit: 50,
+      }),
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+    // Refresh the loaded window before its first SAS URL expires, while a
+    // bounded fallback still reconciles remote additions and deletions that
+    // did not arrive over this replica's process-local WebSocket.
+    refetchInterval: (query) => questionMessagesRefreshInterval(query.state.data),
+  });
+}
+
 export function useCreateQuestion() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -1123,6 +1156,30 @@ export interface MessagesListOptions {
 // connected to another API replica converge promptly when it misses a message
 // envelope, while the socket remains the low-latency path.
 const MESSAGE_INVALIDATION_POLL_MS = 5_000;
+const QUESTION_MESSAGES_MAX_REFRESH_MS = 4 * 60_000;
+const QUESTION_MESSAGES_REFRESH_SKEW_MS = 30_000;
+const QUESTION_MESSAGES_MIN_REFRESH_MS = 5_000;
+
+export function questionMessagesRefreshInterval(
+  data: { readonly pages: readonly MessagePage[] } | undefined,
+  now = Date.now(),
+): number {
+  let delay = QUESTION_MESSAGES_MAX_REFRESH_MS;
+  for (const page of data?.pages ?? []) {
+    for (const message of page.items) {
+      try {
+        const expiry = new URL(message.audio.url).searchParams.get("se");
+        if (expiry === null) continue;
+        const expiryTime = Date.parse(expiry);
+        if (Number.isNaN(expiryTime)) continue;
+        delay = Math.min(delay, expiryTime - now - QUESTION_MESSAGES_REFRESH_SKEW_MS);
+      } catch {
+        // Non-URL fixture/local values use the bounded reconciliation fallback.
+      }
+    }
+  }
+  return Math.max(QUESTION_MESSAGES_MIN_REFRESH_MS, delay);
+}
 
 export function useMessagesList(filter: MessageStatus | "all", options: MessagesListOptions = {}) {
   const limit = options.limit ?? 100;

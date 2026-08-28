@@ -1302,6 +1302,7 @@ export const fakeDb = {
     findMany: async ({
       where = {},
       include,
+      cursor,
       take,
       skip = 0,
       orderBy,
@@ -1311,9 +1312,11 @@ export const fakeDb = {
         status?: string | { in: readonly string[] };
         createdAt?: { gte: Date };
         installationId?: ScopeFilter;
-        OR?: readonly MessageRelationFilter[];
+        questionId?: string | null;
+        OR?: readonly (MessageRelationFilter | Record<string, unknown>)[];
       };
       include?: { audio?: boolean; transcriptions?: unknown; moderations?: unknown };
+      cursor?: { id: string };
       take?: number;
       skip?: number;
       orderBy?: unknown;
@@ -1331,15 +1334,29 @@ export const fakeDb = {
       } else if (status?.in) {
         messages = messages.filter((message) => status.in.includes(message.status));
       }
+      if (where.questionId !== undefined) {
+        messages = messages.filter((message) => message.questionId === where.questionId);
+      }
       if (where.createdAt?.gte)
         messages = messages.filter((message) => message.createdAt >= where.createdAt.gte);
       if (where.OR) {
         const clauses = where.OR;
         messages = messages.filter((message) =>
-          clauses.some((clause) => matchesTranscriptionFilter(message, clause)),
+          clauses.some((clause) =>
+            "transcriptions" in clause
+              ? matchesTranscriptionFilter(message, clause)
+              : matchesWhere(
+                  message as unknown as Record<string, unknown>,
+                  clause as Record<string, unknown>,
+                ),
+          ),
         );
       }
       messages = sortByCreatedIdOrder(messages, orderBy as CreatedIdOrder | undefined);
+      if (cursor) {
+        const index = messages.findIndex((message) => message.id === cursor.id);
+        messages = index >= 0 ? messages.slice(index) : [];
+      }
       if (skip > 0) messages = messages.slice(skip);
       if (take !== undefined) messages = messages.slice(0, take);
       if (select?.audio) return messages.map((message) => projectAudio(message, select.audio));

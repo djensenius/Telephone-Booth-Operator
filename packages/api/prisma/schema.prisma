@@ -224,6 +224,7 @@ model Message {
   @@index([status, createdAt])
   @@index([installationId, status, createdAt])
   @@index([installationId, status, processingLeaseExpiresAt, createdAt])
+  @@index([questionId, createdAt, id])
 }
 
 model File {

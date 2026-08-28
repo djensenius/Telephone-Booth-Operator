@@ -31,6 +31,7 @@ import {
   resetFakeDb,
   seedFile,
   seedInstallation,
+  seedMessage,
   seedQuestion,
   store,
   timeOutNextQuestionDraw,
@@ -80,6 +81,96 @@ describe("questions routes", () => {
       },
     });
     expect(forbidden.status).toBe(403);
+  });
+
+  it("lists linked messages across installations with deletion-safe cursor pagination", async () => {
+    const app = createApp();
+    const question = seedQuestion({ status: "archived" });
+    const otherQuestion = seedQuestion();
+    const createdAt = new Date("2026-08-28T16:00:00.000Z");
+    const newer = seedMessage({
+      id: "22222222-2222-4222-8222-222222222222",
+      questionId: question.id,
+      installationId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      createdAt,
+    });
+    const older = seedMessage({
+      id: "11111111-1111-4111-8111-111111111111",
+      questionId: question.id,
+      installationId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      createdAt,
+    });
+    seedMessage({ questionId: otherQuestion.id });
+    seedMessage({ questionId: null });
+
+    const unauthenticated = await app.request(`/v1/questions/${question.id}/messages`);
+    expect(unauthenticated.status).toBe(401);
+
+    const first = await app.request(`/v1/questions/${question.id}/messages?limit=1`, {
+      headers: { cookie: operatorCookie() },
+    });
+    expect(first.status, await first.clone().text()).toBe(200);
+    const firstPage = (await first.json()) as {
+      items: Array<{ id: string; questionId: string }>;
+      nextCursor: string | null;
+    };
+    expect(firstPage).toMatchObject({
+      items: [{ id: newer.id, questionId: question.id }],
+    });
+    expect(firstPage.nextCursor).toEqual(expect.any(String));
+    expect(firstPage.nextCursor).not.toBe(newer.id);
+    if (firstPage.nextCursor === null) throw new Error("expected a continuation cursor");
+
+    store.messages.delete(newer.id);
+    const second = await app.request(
+      `/v1/questions/${question.id}/messages?limit=1&cursor=${encodeURIComponent(firstPage.nextCursor)}`,
+      { headers: { cookie: operatorCookie() } },
+    );
+    expect(second.status, await second.clone().text()).toBe(200);
+    await expect(second.json()).resolves.toMatchObject({
+      items: [{ id: older.id, questionId: question.id }],
+      nextCursor: null,
+    });
+
+    const invalidCursor = await app.request(
+      `/v1/questions/${question.id}/messages?cursor=not-a-cursor`,
+      { headers: { cookie: operatorCookie() } },
+    );
+    expect(invalidCursor.status).toBe(400);
+    const nonCanonicalCursor = await app.request(
+      `/v1/questions/${question.id}/messages?cursor=${encodeURIComponent(`${firstPage.nextCursor}!`)}`,
+      { headers: { cookie: operatorCookie() } },
+    );
+    expect(nonCanonicalCursor.status).toBe(400);
+    const emptyCursor = await app.request(`/v1/questions/${question.id}/messages?cursor=`, {
+      headers: { cookie: operatorCookie() },
+    });
+    expect(emptyCursor.status).toBe(400);
+
+    const missing = await app.request(`/v1/questions/${crypto.randomUUID()}/messages`, {
+      headers: { cookie: operatorCookie() },
+    });
+    expect(missing.status).toBe(404);
+  });
+
+  it("does not skip the first unseen question at a page boundary", async () => {
+    const newer = seedQuestion({ createdAt: new Date("2026-08-28T16:00:00.000Z") });
+    const older = seedQuestion({ createdAt: new Date("2026-08-27T16:00:00.000Z") });
+    const app = createApp();
+    const cookie = operatorCookie();
+
+    const first = await app.request("/v1/questions?limit=1", { headers: { cookie } });
+    const firstPage = (await first.json()) as { items: Array<{ id: string }>; nextCursor: string };
+    expect(firstPage.items.map((item) => item.id)).toEqual([newer.id]);
+    expect(firstPage.nextCursor).toBe(newer.id);
+
+    const second = await app.request(`/v1/questions?limit=1&cursor=${firstPage.nextCursor}`, {
+      headers: { cookie },
+    });
+    await expect(second.json()).resolves.toMatchObject({
+      items: [{ id: older.id }],
+      nextCursor: null,
+    });
   });
 
   it("creates as draft, activates, randomly selects, deactivates, and archives", async () => {

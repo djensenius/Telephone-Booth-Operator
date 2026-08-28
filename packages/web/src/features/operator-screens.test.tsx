@@ -15,7 +15,13 @@ import {
 } from "vite-plus/test";
 import { App } from "../app/App.js";
 import { createAppRouter } from "../app/router.js";
-import { ApiError, apiFetch, sha256Hex } from "../lib/api-client.js";
+import {
+  ApiError,
+  type MessagePage,
+  apiFetch,
+  questionMessagesRefreshInterval,
+  sha256Hex,
+} from "../lib/api-client.js";
 import {
   clearDebugConnectionTokens,
   readDebugConnectionToken,
@@ -113,10 +119,12 @@ let revokedToken = false;
 let lastCreatedTokenScope: string | undefined;
 let lastMessageUrl = "";
 let messageUrls: string[] = [];
+let questionMessageUrls: string[] = [];
 let sessionsUrls: string[] = [];
 let eventsUrls: string[] = [];
 let statsUrls: string[] = [];
 let lastDecision: { decision: string; notes?: string } | null = null;
+let retranscribedMessages: string[] = [];
 let uploadReservationBody: unknown;
 let blobUploadContentType: string | null = null;
 let writeTextMock: ReturnType<typeof vi.fn>;
@@ -204,6 +212,10 @@ const server = setupServer(
     deactivatedQuestionId = String(params.id);
     return HttpResponse.json({ ...question, id: String(params.id), status: "draft" });
   }),
+  http.get("http://localhost/v1/questions/:id/messages", ({ request }) => {
+    questionMessageUrls.push(request.url);
+    return HttpResponse.json({ items: [message], nextCursor: null });
+  }),
   http.get("http://localhost/v1/messages", ({ request }) => {
     lastMessageUrl = request.url;
     messageUrls.push(request.url);
@@ -225,6 +237,10 @@ const server = setupServer(
       decidedAt: "2026-01-02T00:05:00.000Z",
       ...(lastDecision.notes !== undefined ? { notes: lastDecision.notes } : {}),
     });
+  }),
+  http.post("http://localhost/v1/messages/:id/transcribe", ({ params }) => {
+    retranscribedMessages.push(String(params.id));
+    return HttpResponse.json(pendingPushTranscription);
   }),
   http.delete("http://localhost/v1/messages/:id", ({ params }) => {
     deletedMessages.push(String(params.id));
@@ -388,10 +404,12 @@ beforeEach(() => {
   lastCreatedTokenScope = undefined;
   lastMessageUrl = "";
   messageUrls = [];
+  questionMessageUrls = [];
   sessionsUrls = [];
   eventsUrls = [];
   statsUrls = [];
   lastDecision = null;
+  retranscribedMessages = [];
   uploadReservationBody = undefined;
   blobUploadContentType = null;
   installBrowserStubs();
@@ -570,6 +588,20 @@ describe("Questions feature", () => {
     expect(screen.getByText(/randomized weighted ticket bag/u)).toBeTruthy();
   });
 
+  it("opens the paged answer list from a question", async () => {
+    renderPath("/questions");
+    fireEvent.click(
+      await screen.findByRole("link", {
+        name: "View answers to What did the city sound like today?",
+      }),
+    );
+
+    expect(await screen.findByRole("heading", { name: "Answers" })).toBeTruthy();
+    expect(await screen.findAllByText("What did the city sound like today?")).not.toHaveLength(0);
+    expect(await screen.findAllByRole("article")).toHaveLength(1);
+    await waitFor(() => expect(questionMessageUrls).toHaveLength(1));
+  });
+
   it("opens the new question dialog", async () => {
     renderPath("/questions");
     fireEvent.click(await screen.findByText("New question"));
@@ -696,11 +728,169 @@ describe("Questions feature", () => {
     expect(screen.queryByText("New question")).toBeNull();
     expect(screen.queryByText("Deactivate")).toBeNull();
     expect(screen.queryByText("Delete")).toBeNull();
+    expect(
+      screen.getByRole("link", {
+        name: "View answers to What did the city sound like today?",
+      }),
+    ).toBeTruthy();
   });
 
   it("has no critical axe violations", async () => {
     const { container } = renderPath("/questions");
     await screen.findByText("What did the city sound like today?");
+    await expectNoCriticalAxe(container);
+  });
+});
+
+describe("Question answers feature", () => {
+  it("loads additional answer pages without duplicating rows", async () => {
+    const nextCursor = "opaque-answer-cursor";
+    const olderMessage = {
+      ...message,
+      id: "22222222-2222-4222-8222-222222222223",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      receivedAt: "2026-01-01T00:01:00.000Z",
+    };
+    server.use(
+      http.get("http://localhost/v1/questions/:id/messages", ({ request }) => {
+        questionMessageUrls.push(request.url);
+        const cursor = new URL(request.url).searchParams.get("cursor");
+        return cursor === null
+          ? HttpResponse.json({ items: [message], nextCursor })
+          : HttpResponse.json({ items: [olderMessage], nextCursor: null });
+      }),
+    );
+
+    renderPath(`/questions/${questionId}/answers`);
+    expect(await screen.findAllByRole("article")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Load more answers" }));
+
+    await waitFor(() => expect(screen.getAllByRole("article")).toHaveLength(2));
+    expect(questionMessageUrls.some((url) => url.includes(`cursor=${nextCursor}`))).toBe(true);
+  });
+
+  it("refreshes an answer immediately after a moderation decision", async () => {
+    let answerRequests = 0;
+    const refreshedAudioUrl = "https://media.example/refreshed-message.flac";
+    server.use(
+      http.get("http://localhost/v1/questions/:id/messages", () => {
+        answerRequests += 1;
+        return HttpResponse.json({
+          items: [
+            {
+              ...message,
+              status: lastDecision?.decision === "approve" ? "approved" : "received",
+              audio: {
+                ...message.audio,
+                url: lastDecision === null ? message.audio.url : refreshedAudioUrl,
+              },
+            },
+          ],
+          nextCursor: null,
+        });
+      }),
+    );
+
+    renderPath(`/questions/${questionId}/answers`);
+    const card = await screen.findByRole("article");
+    const audio = card.querySelector("audio");
+    expect(audio).not.toBeNull();
+    fireEvent.play(audio as HTMLAudioElement);
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+
+    await waitFor(() => expect(answerRequests).toBeGreaterThan(1));
+    expect(await screen.findByText("approved")).toBeTruthy();
+    expect(audio?.getAttribute("src")).toBe(message.audio.url);
+    fireEvent.ended(audio as HTMLAudioElement);
+    expect(audio?.getAttribute("src")).toBe(refreshedAudioUrl);
+  });
+
+  it("releases a failed audio URL when a renewed link arrives", async () => {
+    const refreshedAudioUrl = "https://media.example/renewed-message.flac";
+    server.use(
+      http.get("http://localhost/v1/questions/:id/messages", () =>
+        HttpResponse.json({
+          items: [
+            {
+              ...message,
+              status: lastDecision?.decision === "approve" ? "approved" : "received",
+              audio: {
+                ...message.audio,
+                url: lastDecision === null ? message.audio.url : refreshedAudioUrl,
+              },
+            },
+          ],
+          nextCursor: null,
+        }),
+      ),
+    );
+
+    renderPath(`/questions/${questionId}/answers`);
+    const card = await screen.findByRole("article");
+    const audio = card.querySelector("audio");
+    expect(audio).not.toBeNull();
+    fireEvent.play(audio as HTMLAudioElement);
+    fireEvent.error(audio as HTMLAudioElement);
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+
+    expect(await screen.findByText("approved")).toBeTruthy();
+    expect(audio?.getAttribute("src")).toBe(refreshedAudioUrl);
+  });
+
+  it("refreshes an answer immediately after retranscription", async () => {
+    let answerRequests = 0;
+    server.use(
+      http.get("http://localhost/v1/questions/:id/messages", () => {
+        answerRequests += 1;
+        return HttpResponse.json({
+          items: [
+            {
+              ...message,
+              ...(retranscribedMessages.includes(messageId)
+                ? { latestTranscription: pendingPushTranscription }
+                : {}),
+            },
+          ],
+          nextCursor: null,
+        });
+      }),
+    );
+
+    renderPath(`/questions/${questionId}/answers`);
+    fireEvent.click(await screen.findByRole("button", { name: "Re-run transcription" }));
+
+    await waitFor(() => expect(answerRequests).toBeGreaterThan(1));
+    expect(await screen.findByText("Waiting on transcription device")).toBeTruthy();
+  });
+
+  it("shows a successful empty state when a question has no answers", async () => {
+    server.use(
+      http.get("http://localhost/v1/questions/:id/messages", () =>
+        HttpResponse.json({ items: [], nextCursor: null }),
+      ),
+    );
+    renderPath(`/questions/${questionId}/answers`);
+    expect(await screen.findByText("No answers on the line")).toBeTruthy();
+  });
+
+  it("keeps answers from ended installations read-only", async () => {
+    server.use(
+      http.get("http://localhost/v1/questions/:id/messages", () =>
+        HttpResponse.json({
+          items: [{ ...message, installationId: "ee111111-1111-4111-8111-111111111111" }],
+          nextCursor: null,
+        }),
+      ),
+    );
+    renderPath(`/questions/${questionId}/answers`);
+    expect(await screen.findByText("Archived era — read-only")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+  });
+
+  it("has no critical axe violations", async () => {
+    const { container } = renderPath(`/questions/${questionId}/answers`);
+    await screen.findByRole("heading", { name: "Answers" });
     await expectNoCriticalAxe(container);
   });
 });
@@ -1492,5 +1682,30 @@ describe("API client helpers", () => {
     await expect(sha256Hex(new Blob(["a"]))).resolves.toBe(
       "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
     );
+  });
+
+  it("refreshes question pages before their earliest audio link expires", () => {
+    const now = Date.parse("2026-08-28T18:00:00.000Z");
+    const expiresAt = new Date(now + 60_000).toISOString();
+    const data: { pages: MessagePage[] } = {
+      pages: [
+        {
+          items: [
+            {
+              ...message,
+              status: "received",
+              audio: {
+                ...message.audio,
+                url: `https://media.example/message.flac?se=${encodeURIComponent(expiresAt)}`,
+              },
+            },
+          ],
+          nextCursor: null,
+        },
+      ],
+    };
+
+    expect(questionMessagesRefreshInterval(data, now)).toBe(30_000);
+    expect(questionMessagesRefreshInterval(undefined, now)).toBe(4 * 60_000);
   });
 });
