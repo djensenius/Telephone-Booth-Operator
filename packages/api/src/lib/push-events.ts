@@ -267,6 +267,13 @@ export const createPushEventCoordinator = ({
       });
       if (completed.count === 0) {
         await releaseMessageAlert(claim.leaseToken);
+        const latest = await database.pushNotificationState.findUnique({
+          where: { key: MESSAGE_ALERT_STATE_KEY },
+        });
+        if (latest && !latest.active && latest.badgeVersion > claim.version) {
+          await queueModerationBadgeRefresh();
+          await dispatchModerationBadges();
+        }
       }
     }
   };

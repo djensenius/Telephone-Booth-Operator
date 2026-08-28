@@ -216,9 +216,10 @@ export const fanOutDurableNotification = async (
       : [],
   );
   if (failures.length > 0) {
+    const target = failures.length === 1 ? "operator user" : "operator users";
     throw new AggregateError(
       failures,
-      `APNs durable alert delivery failed for ${failures.length} operator users`,
+      `APNs durable alert delivery failed for ${failures.length} ${target}`,
     );
   }
 };

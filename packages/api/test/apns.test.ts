@@ -105,7 +105,7 @@ describe("APNs fan-out diagnostics", () => {
         title: "1 message waiting",
         body: "A new booth recording is ready to moderate.",
       }),
-    ).rejects.toThrow("APNs durable alert delivery failed for 1 operator users");
+    ).rejects.toThrow("APNs durable alert delivery failed for 1 operator user");
   });
 
   it("passes the badge delivery fence through fan-out", async () => {

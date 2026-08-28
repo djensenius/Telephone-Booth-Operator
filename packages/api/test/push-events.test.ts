@@ -195,6 +195,46 @@ describe("durable push event coordination", () => {
     expect(submittedCounts).toEqual([1, 2]);
   });
 
+  it("submits a corrective badge after a superseded alert reaches APNs", async () => {
+    const message = seedMessage({ status: "pending" });
+    let releaseAlertPost = (): void => undefined;
+    let markAlertFencePassed = (): void => undefined;
+    const alertFencePassed = new Promise<void>((resolve) => {
+      markAlertFencePassed = resolve;
+    });
+    const alertPostGate = new Promise<void>((resolve) => {
+      releaseAlertPost = resolve;
+    });
+    const submitted: Array<{ kind: "alert" | "badge"; count: number }> = [];
+    const coordinated = createPushEventCoordinator({
+      database: fakeDb as never,
+      send: async (notification, beforeSubmit) => {
+        if (notification.kind === "alert" && notification.preferenceKey === "messageReceived") {
+          if (!(await beforeSubmit?.())) return;
+          markAlertFencePassed();
+          await alertPostGate;
+          submitted.push({
+            kind: "alert",
+            count: Number(notification.data?.awaitingModeration),
+          });
+          return;
+        }
+        if (notification.kind === "badge") {
+          submitted.push({ kind: "badge", count: notification.badge });
+        }
+      },
+    });
+
+    const alert = coordinated.notifyMessageReceived(message.id);
+    await alertFencePassed;
+    store.messages.get(message.id)!.status = "approved";
+    await coordinated.observeModerationQueue("message.decision");
+    releaseAlertPost();
+    await alert;
+
+    expect(submitted.at(-1)).toEqual({ kind: "badge", count: 0 });
+  });
+
   it("skips the aggregate alert when no messages remain", async () => {
     const sent: ApnsNotification[] = [];
     const coordinated = createPushEventCoordinator({
