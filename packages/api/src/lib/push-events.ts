@@ -3,7 +3,7 @@ import type { ApnsDeliveryFence, ApnsNotification } from "./apns.js";
 import {
   APNS_DELIVERY_FENCE_MINIMUM_MS,
   fanOutBadgeNotification,
-  fanOutQueueCycleNotification,
+  fanOutReplacementNotification,
   fanOutNotification,
   isApnsDeliveryConfigured,
 } from "./apns.js";
@@ -98,6 +98,7 @@ type BadgeClaim = {
 };
 
 type MessageAlertClaim = {
+  count: number;
   version: number;
 };
 
@@ -123,11 +124,11 @@ export const createPushEventCoordinator = ({
   queueModerationBadgeRefresh(): Promise<void>;
   reconcileModerationBadgeState(): Promise<void>;
 } => {
-  const advanceMessageAlertState = async (
+  const updateMessageAlertState = async (
     tx: PushEventTransaction,
     count: number,
-    force: boolean,
-  ): Promise<number> => {
+    shouldAlert: boolean,
+  ): Promise<void> => {
     const state = await tx.pushNotificationState.upsert({
       where: { key: MESSAGE_ALERT_STATE_KEY },
       create: {
@@ -140,18 +141,16 @@ export const createPushEventCoordinator = ({
       },
       update: {},
     });
-    if (!force && state.badgeCount === count) return state.badgeVersion;
-    const cycleAlertConsumed = state.threshold === 1;
-    const updated = await tx.pushNotificationState.update({
+    if (!shouldAlert && state.badgeCount === count) return;
+    await tx.pushNotificationState.update({
       where: { key: MESSAGE_ALERT_STATE_KEY },
       data: {
-        active: count > 0 && !cycleAlertConsumed && (state.active || state.badgeCount === 0),
-        threshold: count === 0 ? 0 : state.threshold,
+        active: shouldAlert && count > 0,
+        threshold: 0,
         badgeCount: count,
         badgeVersion: { increment: 1 },
       },
     });
-    return updated.badgeVersion;
   };
 
   const claimMessageAlert = async (): Promise<MessageAlertClaim | null> => {
@@ -169,7 +168,6 @@ export const createPushEventCoordinator = ({
         },
         data: {
           active: false,
-          threshold: 1,
           badgeDeliveredVersion: state.badgeVersion,
           badgeLeaseToken: null,
           badgeLeaseExpiresAt: null,
@@ -177,6 +175,7 @@ export const createPushEventCoordinator = ({
       });
       if (claimed.count === 1) {
         return {
+          count: state.badgeCount,
           version: state.badgeVersion,
         };
       }
@@ -193,14 +192,17 @@ export const createPushEventCoordinator = ({
       const count = await tx.message.count({
         where: { status: { in: [...AWAITING_MODERATION_STATUSES] } },
       });
-      if (count === 0) {
-        await advanceMessageAlertState(tx, count, false);
-        return null;
-      }
       const state = await tx.pushNotificationState.findUnique({
         where: { key: MESSAGE_ALERT_STATE_KEY },
       });
-      if (!state || state.threshold !== 1 || state.badgeDeliveredVersion !== claim.version) {
+      if (
+        count !== claim.count ||
+        !state ||
+        state.active ||
+        state.badgeCount !== claim.count ||
+        state.badgeVersion !== claim.version ||
+        state.badgeDeliveredVersion !== claim.version
+      ) {
         return null;
       }
       return new Date(now().getTime() + badgeLeaseDurationMs);
@@ -219,8 +221,11 @@ export const createPushEventCoordinator = ({
           {
             kind: "alert",
             preferenceKey: "messageReceived",
-            title: "Messages waiting",
-            body: "Open the moderation queue to review new booth recordings.",
+            title: claim.count === 1 ? "Message waiting" : "Messages waiting",
+            body:
+              claim.count === 1
+                ? "You have a new message to review."
+                : `There are ${claim.count} messages waiting to be reviewed.`,
             threadId: "moderation-queue",
             collapseId: "message-moderation-queue",
             category: "BOOTH_MESSAGE",
@@ -232,8 +237,8 @@ export const createPushEventCoordinator = ({
         );
       } catch (error) {
         log.warn(
-          { component: "apns", err: error, version: claim.version },
-          "queue-cycle message notification delivery failed",
+          { component: "apns", err: error, count: claim.count, version: claim.version },
+          "replacement message notification delivery failed",
         );
       }
     }
@@ -362,7 +367,7 @@ export const createPushEventCoordinator = ({
       const count = await tx.message.count({
         where: { status: { in: [...AWAITING_MODERATION_STATUSES] } },
       });
-      await advanceMessageAlertState(tx, count, false);
+      await updateMessageAlertState(tx, count, false);
       await tx.pushNotificationState.upsert({
         where: { key: QUEUE_HIGH_STATE_KEY },
         create: {
@@ -395,7 +400,7 @@ export const createPushEventCoordinator = ({
       const count = await tx.message.count({
         where: { status: { in: [...AWAITING_MODERATION_STATUSES] } },
       });
-      await advanceMessageAlertState(tx, count, false);
+      await updateMessageAlertState(tx, count, false);
       const nextActive = count >= threshold;
       const state = await tx.pushNotificationState.upsert({
         where: { key: QUEUE_HIGH_STATE_KEY },
@@ -507,7 +512,7 @@ export const createPushEventCoordinator = ({
               badgeVersion: { increment: 1 },
             },
           });
-          await advanceMessageAlertState(tx, count, true);
+          await updateMessageAlertState(tx, count, true);
           return {
             count,
             shouldNotifyQueueHigh: nextActive && !activeAtThisThreshold,
@@ -542,7 +547,7 @@ export const createPushEventCoordinator = ({
           const count = await tx.message.count({
             where: { status: { in: [...AWAITING_MODERATION_STATUSES] } },
           });
-          await advanceMessageAlertState(tx, count, false);
+          await updateMessageAlertState(tx, count, false);
           const state = await tx.pushNotificationState.upsert({
             where: { key: QUEUE_HIGH_STATE_KEY },
             create: {
@@ -588,7 +593,7 @@ const coordinator = createPushEventCoordinator({
     if (notification.kind !== "alert") {
       throw new Error("Durable message delivery requires an alert notification");
     }
-    return fanOutQueueCycleNotification(notification, beforeSubmit);
+    return fanOutReplacementNotification(notification, beforeSubmit);
   },
   send: (notification, beforeSubmit) =>
     notification.kind === "badge"

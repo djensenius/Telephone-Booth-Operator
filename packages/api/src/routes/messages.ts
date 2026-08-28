@@ -378,8 +378,8 @@ messagesRouter.post(
     // In push/disabled transcription modes this is a no-op — the external app
     // decides when to transcribe and posts the result back.
     kickPipelineForMessage(id);
-    // The coordinated push updates the durable badge state and only submits
-    // the aggregate alert while its count remains current.
+    // The coordinated push updates the durable badge state and replaces the
+    // aggregate message alert with the current review-queue count.
     void notifyMessageReceived(id);
     return c.json({ id, status: "pending", receivedAt: receivedAt.toISOString() });
   },

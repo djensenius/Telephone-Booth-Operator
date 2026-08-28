@@ -195,10 +195,10 @@ export const fanOutNotification = async (
   }
 };
 
-/// Best-effort fan-out for the single alert attempt in a queue cycle.
-/// Per-target failures are logged but not retried because retrying the whole
-/// fan-out can duplicate an alert on targets that already accepted it.
-export const fanOutQueueCycleNotification = async (
+/// Best-effort fan-out for a count-aware alert that replaces the previous
+/// moderation-queue notification. Per-target failures are logged but not
+/// retried so devices that already accepted the alert do not sound twice.
+export const fanOutReplacementNotification = async (
   notification: ApnsAlertNotification,
   beforeSubmit?: ApnsDeliveryFence,
 ): Promise<void> => {
@@ -217,7 +217,7 @@ export const fanOutQueueCycleNotification = async (
         preferenceKey: notification.preferenceKey,
         userId: userIds[index],
       },
-      "APNs sender rejected queue-cycle alert",
+      "APNs sender rejected replacement alert",
     );
   }
 };
