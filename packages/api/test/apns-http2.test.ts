@@ -168,6 +168,40 @@ describe("loadApnsConfigFromEnv", () => {
 });
 
 describe("Http2ApnsSender", () => {
+  it("passes an alert collapse identifier to the APNs request", async () => {
+    seedMobileDevice({ userId: "operator-1", platform: "ios" });
+    let submittedCollapseId: string | undefined;
+    class CollapseSender extends Http2ApnsSender {
+      protected override post(
+        _token: string,
+        _topic: string,
+        _jwt: string,
+        _payload: string,
+        collapseId: string | undefined,
+      ): Promise<{ status: number }> {
+        submittedCollapseId = collapseId;
+        return Promise.resolve({ status: 200 });
+      }
+    }
+    const sender = new CollapseSender({
+      teamId: "TEAM123",
+      keyId: "KEY123",
+      authKey: validAuthKey,
+      bundleId: "com.example.app",
+      environment: "development",
+    });
+
+    await sender.send("operator-1", {
+      kind: "alert",
+      preferenceKey: "messageReceived",
+      title: "2 messages waiting",
+      body: "Booth recordings are ready to moderate.",
+      collapseId: "message-moderation-queue",
+    });
+
+    expect(submittedCollapseId).toBe("message-moderation-queue");
+  });
+
   it("waits for device attempts and propagates transient APNs failures", async () => {
     seedMobileDevice({ userId: "operator-1", platform: "ios" });
     class TransientFailureSender extends Http2ApnsSender {

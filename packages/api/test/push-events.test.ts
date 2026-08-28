@@ -155,6 +155,30 @@ describe("durable push event coordination", () => {
     expect(submittedMessageIds).toEqual(["message-2"]);
   });
 
+  it("skips the aggregate alert when no messages remain", async () => {
+    const sent: ApnsNotification[] = [];
+    const coordinated = createPushEventCoordinator({
+      database: fakeDb as never,
+      send: async (notification) => {
+        sent.push(notification);
+      },
+    });
+
+    await coordinated.notifyMessageReceived("already-moderated");
+
+    expect(
+      sent.filter(
+        (notification) =>
+          notification.kind === "alert" && notification.preferenceKey === "messageReceived",
+      ),
+    ).toEqual([]);
+    expect(sent).toContainEqual({
+      kind: "badge",
+      badge: 0,
+      data: { awaitingModeration: 0 },
+    });
+  });
+
   it("keeps an aggregate alert valid across an unrelated badge refresh", async () => {
     seedMessage({ status: "pending" });
     let releaseAlert = (): void => undefined;

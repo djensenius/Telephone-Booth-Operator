@@ -407,44 +407,44 @@ export const createPushEventCoordinator = ({
             },
           });
           const alertVersion = await advanceMessageAlertState(tx, count, true);
+          if (count > 0) {
+            await send(
+              {
+                kind: "alert",
+                preferenceKey: "messageReceived",
+                title: count === 1 ? "1 message waiting" : `${count} messages waiting`,
+                body:
+                  count === 1
+                    ? "A new booth recording is ready to moderate."
+                    : "Booth recordings are ready to moderate.",
+                badge: count,
+                threadId: "moderation-queue",
+                collapseId: "message-moderation-queue",
+                mutableContent: true,
+                category: "BOOTH_MESSAGE",
+                data: {
+                  messageId,
+                  awaitingModeration: count,
+                  notificationKind: "messageQueue",
+                },
+              },
+              async () => {
+                const latest = await tx.pushNotificationState.findUnique({
+                  where: { key: MESSAGE_ALERT_STATE_KEY },
+                });
+                return latest?.badgeVersion === alertVersion
+                  ? new Date(now().getTime() + badgeLeaseDurationMs)
+                  : null;
+              },
+            );
+          }
           return {
             count,
-            alertVersion,
             shouldNotifyQueueHigh: nextActive && !activeAtThisThreshold,
           };
         });
 
         await dispatchModerationBadges();
-        await send(
-          {
-            kind: "alert",
-            preferenceKey: "messageReceived",
-            title:
-              result.count === 1 ? "1 message waiting" : `${result.count} messages waiting`,
-            body:
-              result.count === 1
-                ? "A new booth recording is ready to moderate."
-                : "Booth recordings are ready to moderate.",
-            badge: result.count,
-            threadId: "moderation-queue",
-            collapseId: "message-moderation-queue",
-            mutableContent: true,
-            category: "BOOTH_MESSAGE",
-            data: {
-              messageId,
-              awaitingModeration: result.count,
-              notificationKind: "messageQueue",
-            },
-          },
-          async () => {
-            const latest = await database.pushNotificationState.findUnique({
-              where: { key: MESSAGE_ALERT_STATE_KEY },
-            });
-            return latest?.badgeVersion === result.alertVersion
-              ? new Date(now().getTime() + badgeLeaseDurationMs)
-              : null;
-          },
-        );
         if (result.shouldNotifyQueueHigh) {
           await sendQueueHighNotification(result.count, threshold);
         }

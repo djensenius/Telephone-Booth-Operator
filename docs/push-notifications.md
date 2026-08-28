@@ -23,6 +23,9 @@ turn it on, and how to configure them in production.
    the older delivered message-queue alert before presenting the newest count.
    The alert also carries the same count in `aps.badge`, so the icon updates
    immediately even before the separate durable badge refresh arrives.
+   The service extension ships in
+   [`Telephone-Booth-Operator-Mobile#133`](https://github.com/djensenius/Telephone-Booth-Operator-Mobile/pull/133)
+   for iOS, macOS, and visionOS.
 3. Every queue-changing operation records the latest badge count in durable
    delivery state. A database lease serializes badge-only pushes across API
    replicas, coalesces changes that arrive during an in-flight send, and lets a
