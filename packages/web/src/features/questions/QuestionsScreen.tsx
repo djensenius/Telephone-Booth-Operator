@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, JSX } from "react";
 import { createPortal } from "react-dom";
+import { Link } from "@tanstack/react-router";
 import { GlassPanel } from "../../components/booth/index.js";
 import {
   AUDIO_UPLOAD_ACCEPT,
@@ -371,47 +372,56 @@ export function QuestionsScreen({
               </div>
               <h2>{question.prompt}</h2>
               <QuestionAudio url={question.audio.url} durationMs={question.audio.durationMs} />
-              {isAdmin ? (
-                <div className="question-card__actions">
-                  {question.status === "archived" ? (
-                    <span className="question-card__archived-note">
-                      Archived questions are read-only.
-                    </span>
-                  ) : question.status === "active" ? (
-                    <button
-                      type="button"
-                      disabled={deactivateQuestion.isPending}
-                      onClick={() => void deactivateQuestion.mutateAsync(question.id)}
-                    >
-                      Deactivate
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={activateQuestion.isPending}
-                      onClick={() => void activateQuestion.mutateAsync(question.id)}
-                    >
-                      Activate
-                    </button>
-                  )}
-                  {question.status === "archived" ? null : (
-                    <>
+              <div className="question-card__actions">
+                <Link
+                  to="/questions/$id/answers"
+                  params={{ id: question.id }}
+                  aria-label={`View answers to ${question.prompt}`}
+                >
+                  View answers
+                </Link>
+                {isAdmin ? (
+                  <>
+                    {question.status === "archived" ? (
+                      <span className="question-card__archived-note">
+                        Archived questions are read-only.
+                      </span>
+                    ) : question.status === "active" ? (
                       <button
                         type="button"
-                        onClick={(event) => {
-                          editReturnFocusRef.current = event.currentTarget;
-                          setEditQuestion(question);
-                        }}
+                        disabled={deactivateQuestion.isPending}
+                        onClick={() => void deactivateQuestion.mutateAsync(question.id)}
                       >
-                        Edit question
+                        Deactivate
                       </button>
-                      <button type="button" onClick={() => setDeleteId(question.id)}>
-                        Delete
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={activateQuestion.isPending}
+                        onClick={() => void activateQuestion.mutateAsync(question.id)}
+                      >
+                        Activate
                       </button>
-                    </>
-                  )}
-                </div>
-              ) : null}
+                    )}
+                    {question.status === "archived" ? null : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            editReturnFocusRef.current = event.currentTarget;
+                            setEditQuestion(question);
+                          }}
+                        >
+                          Edit question
+                        </button>
+                        <button type="button" onClick={() => setDeleteId(question.id)}>
+                          Delete
+                        </button>
+                      </>
+                    )}
+                  </>
+                ) : null}
+              </div>
             </li>
           ))}
         </ul>

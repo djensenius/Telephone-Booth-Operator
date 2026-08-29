@@ -23,6 +23,7 @@ import { InstallationsScreen } from "../features/installations/InstallationsScre
 import { InstructionsScreen } from "../features/instructions/InstructionsScreen.js";
 import { MessageDetail } from "../features/messages/MessageDetail.js";
 import { MessagesScreen } from "../features/messages/MessagesScreen.js";
+import { QuestionAnswersScreen } from "../features/questions/QuestionAnswersScreen.js";
 import { QuestionsScreen } from "../features/questions/QuestionsScreen.js";
 import { SessionDetailScreen, SessionsScreen } from "../features/sessions/SessionsScreen.js";
 import { SettingsScreen } from "../features/settings/SettingsScreen.js";
@@ -247,6 +248,15 @@ const newQuestionRoute = createRoute({
   component: () => protectedScreen(<QuestionsScreen startNew />),
 });
 
+const questionAnswersRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/questions/$id/answers",
+  component: () => {
+    const { id } = questionAnswersRoute.useParams();
+    return protectedScreen(<QuestionAnswersScreen questionId={id} />);
+  },
+});
+
 const tokensRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/tokens",
@@ -354,6 +364,7 @@ const routeTree = rootRoute.addChildren([
   messageDetailRoute,
   questionsRoute,
   newQuestionRoute,
+  questionAnswersRoute,
   tokensRoute,
   settingsRoute,
   debugRoute,

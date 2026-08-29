@@ -14,6 +14,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { Prisma, type File, type Question } from "../generated/prisma/client.js";
 import { recordAudit } from "../lib/audit.js";
+import { decodeCursor, encodeCursor } from "../lib/cursor.js";
 import { db } from "../lib/db.js";
 import {
   lockInstallationForWrite,
@@ -25,11 +26,11 @@ import {
   scopeWhere,
 } from "../lib/installation.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
-import { serializeQuestion } from "../lib/serializers.js";
+import { serializeMessage, serializeQuestion } from "../lib/serializers.js";
 import { requireAdmin, type AuthVariables } from "../lib/session.js";
 
 const listQuerySchema = z.object({
-  cursor: z.guid().optional(),
+  cursor: z.string().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   // `any` includes archived questions; the bare default hides them.
   status: z.union([QuestionStatusSchema, z.literal("any")]).optional(),
@@ -45,6 +46,19 @@ const listQuerySchema = z.object({
 });
 
 const idParamSchema = z.object({ id: z.guid() });
+const questionMessagesQuerySchema = z.object({
+  cursor: z.string().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});
+type CreatedAtKeyset = Array<{ createdAt: { lt: Date } } | { createdAt: Date; id: { lt: string } }>;
+const createdAtKeysetFromCursor = (raw: string): CreatedAtKeyset | null => {
+  const decoded = decodeCursor(raw);
+  if (!decoded || encodeCursor(decoded) !== raw || !z.guid().safeParse(decoded.id).success) {
+    return null;
+  }
+  const createdAt = new Date(decoded.timestamp);
+  return [{ createdAt: { lt: createdAt } }, { createdAt, id: { lt: decoded.id } }];
+};
 const questionDrawIdSchema = z.guid();
 const QUESTION_DRAW_ID_HEADER = "x-question-draw-id";
 const questionDrawHistorySchema = z.array(
@@ -66,23 +80,26 @@ export const questionsRouter = new Hono<{ Variables: AuthVariables & ApiTokenVar
 
 questionsRouter.get("/", zValidator("query", listQuerySchema), async (c) => {
   const { cursor, limit, status, installationId, ids } = c.req.valid("query");
+  const keyset = !ids && cursor !== undefined ? createdAtKeysetFromCursor(cursor) : null;
+  if (!ids && cursor !== undefined && keyset === null) {
+    return c.json({ error: "invalid_cursor" }, 400);
+  }
   // Default management view hides archived questions but shows drafts; an
   // explicit status filter overrides this, and `any` drops the filter so a
   // caller resolving prompts for historical messages can still find them.
   // An explicit id list is the whole filter: it already names the rows, and
   // narrowing it by era or status would defeat the point of asking.
-  const where = ids
+  const where: Prisma.QuestionWhereInput = ids
     ? { id: { in: ids } }
     : {
         ...scopeWhere(await resolveInstallationScope(installationId)),
         ...(status === "any" ? {} : status ? { status } : { status: { not: "archived" as const } }),
+        ...(keyset === null ? {} : { AND: [{ OR: keyset }] }),
       };
   // An id list is already bounded by the schema at 200, and a caller resolving
   // named rows cannot page: it asked for these questions, not for a window over
   // them. Paginating here would silently drop the tail of a long list.
-  const page = ids
-    ? { take: ids.length }
-    : { take: limit + 1, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) };
+  const page = ids ? { take: ids.length } : { take: limit + 1 };
   const questions = await db.question.findMany({
     where,
     include: { audio: true },
@@ -90,10 +107,50 @@ questionsRouter.get("/", zValidator("query", listQuerySchema), async (c) => {
     ...page,
   });
   if (ids) return c.json({ items: questions.map(serializeQuestion), nextCursor: null });
-  const items = questions.slice(0, limit).map(serializeQuestion);
-  const next = questions.length > limit ? questions[limit]?.id : null;
+  const pageItems = questions.slice(0, limit);
+  const items = pageItems.map(serializeQuestion);
+  const last = pageItems.at(-1);
+  const next =
+    questions.length > limit && last
+      ? encodeCursor({ timestamp: last.createdAt.toISOString(), id: last.id })
+      : null;
   return c.json({ items, nextCursor: next ?? null });
 });
+
+questionsRouter.get(
+  "/:id/messages",
+  zValidator("param", idParamSchema),
+  zValidator("query", questionMessagesQuerySchema),
+  async (c) => {
+    const { id } = c.req.valid("param");
+    const { cursor, limit } = c.req.valid("query");
+    const keyset = cursor === undefined ? null : createdAtKeysetFromCursor(cursor);
+    if (cursor !== undefined && keyset === null) {
+      return c.json({ error: "invalid_cursor" }, 400);
+    }
+    const question = await db.question.findUnique({ where: { id } });
+    if (!question) return c.json({ error: "not_found" }, 404);
+
+    const messages = await db.message.findMany({
+      where: { questionId: id, ...(keyset === null ? {} : { OR: keyset }) },
+      include: {
+        audio: true,
+        transcriptions: { orderBy: { createdAt: "desc" }, take: 1 },
+        moderations: { orderBy: { createdAt: "desc" }, take: 1 },
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: limit + 1,
+    });
+    const pageItems = messages.slice(0, limit);
+    const items = pageItems.map((message) => serializeMessage(message as never));
+    const last = pageItems.at(-1);
+    const next =
+      messages.length > limit && last
+        ? encodeCursor({ timestamp: last.createdAt.toISOString(), id: last.id })
+        : null;
+    return c.json({ items, nextCursor: next ?? null });
+  },
+);
 
 questionsRouter.post("/", requireAdmin(), zValidator("json", QuestionCreateSchema), async (c) => {
   const body = c.req.valid("json");

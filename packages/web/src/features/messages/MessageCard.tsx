@@ -49,6 +49,12 @@ export function MessageCard({
   frozen = false,
 }: MessageCardProps): JSX.Element {
   const [expanded, setExpanded] = useState(false);
+  const [activeAudioUrl, setActiveAudioUrl] = useState<string | null>(null);
+  const [failedAudioUrl, setFailedAudioUrl] = useState<string | null>(null);
+  const audioUrl =
+    activeAudioUrl !== null && activeAudioUrl !== failedAudioUrl
+      ? activeAudioUrl
+      : message.audio.url;
   const receivedAt = message.receivedAt ?? message.createdAt;
   const relative = relativeTime(receivedAt, now) ?? "Not received";
   const absolute = absoluteTime(receivedAt) ?? "Not received";
@@ -91,7 +97,21 @@ export function MessageCard({
           Upload in progress — playback is available once the booth finishes sending.
         </p>
       ) : (
-        <audio className="message-card__audio" controls preload="none" src={message.audio.url}>
+        <audio
+          className="message-card__audio"
+          controls
+          preload="none"
+          src={audioUrl}
+          onPlay={() => setActiveAudioUrl(audioUrl)}
+          onEnded={() => {
+            setActiveAudioUrl(null);
+            setFailedAudioUrl(null);
+          }}
+          onError={() => {
+            setFailedAudioUrl(audioUrl);
+            setActiveAudioUrl(null);
+          }}
+        >
           Message audio
         </audio>
       )}

@@ -128,7 +128,8 @@ paths:
       parameters:
         - name: cursor
           in: query
-          schema: { type: string, format: uuid }
+          description: Opaque continuation token returned by the previous page.
+          schema: { type: string, minLength: 1 }
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
@@ -169,6 +170,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/QuestionList" }
+        "400": { description: invalid cursor }
     post:
       summary: Create a new question from an already-uploaded audio file.
       tags: [questions]
@@ -258,6 +260,36 @@ paths:
         "204": { description: removed }
         "404": { description: not found }
         "409": { description: the question's installation has ended }
+
+  /v1/questions/{id}/messages:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      summary: List every message recorded in answer to a question.
+      description: |
+        Returns linked recordings across installation boundaries, including
+        rollover stragglers filed after the question's original installation
+        ended. Results are newest first and include every moderation status.
+      tags: [questions, messages]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      parameters:
+        - name: cursor
+          in: query
+          description: Opaque continuation token returned by the previous page.
+          schema: { type: string, minLength: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessagePage" }
+        "400": { description: invalid cursor }
+        "404": { description: question not found }
 
   /v1/questions/{id}/activate:
     parameters:
@@ -2538,7 +2570,7 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/Question" }
-        nextCursor: { anyOf: [{ type: string, format: uuid }, { type: "null" }] }
+        nextCursor: { type: [string, "null"] }
     Instruction:
       type: object
       required: [id, description, status, createdAt, audio]
@@ -2643,6 +2675,15 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/Message" }
+    MessagePage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Message" }
+        nextCursor:
+          type: [string, "null"]
     MessageProcessingClaimRequest:
       type: object
       properties:
@@ -3378,7 +3419,17 @@ components:
     StatsSummary:
       type: object
       required:
-        [booth, messages, actions, interactions, calls, realtime, dayStartedAt, generatedAt, timeZone]
+        [
+          booth,
+          messages,
+          actions,
+          interactions,
+          calls,
+          realtime,
+          dayStartedAt,
+          generatedAt,
+          timeZone,
+        ]
       properties:
         booth: { $ref: "#/components/schemas/BoothStatus" }
         messages:

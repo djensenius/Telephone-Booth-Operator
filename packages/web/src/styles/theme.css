@@ -1403,6 +1403,7 @@ textarea:focus-visible,
 .feature-toolbar button,
 .feature-table button,
 .feature-dialog button,
+.question-card__actions a,
 .question-card__actions button,
 .message-card__actions a,
 .message-card__actions button,
@@ -1612,6 +1613,22 @@ textarea:focus-visible,
   color: var(--text-muted);
   font-size: 0.9rem;
   font-style: italic;
+}
+
+.question-answers__prompt {
+  max-width: 60ch;
+  padding: 14px 16px;
+  color: var(--text-primary);
+  background: var(--surface-panel-raised);
+  border-inline-start: 4px solid var(--accent-red);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-display);
+  font-size: clamp(1.1rem, 2vw, 1.35rem);
+}
+
+.question-answers__pagination {
+  justify-content: center;
+  margin-block-start: 16px;
 }
 
 /* Message review queue — card list. Replaces the old wide table, which
