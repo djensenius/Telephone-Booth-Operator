@@ -310,6 +310,7 @@ export function BoothEnvelopeBridge(): null {
         const message = envelope.message;
         queryClient.setQueryData(apiQueryKeys.message(message.id), message);
         void queryClient.invalidateQueries({ queryKey: ["messages", "list"] });
+        void queryClient.invalidateQueries({ queryKey: ["questions", "list"] });
         void queryClient.invalidateQueries({ queryKey: apiQueryKeys.transcriptions(message.id) });
       }
     });

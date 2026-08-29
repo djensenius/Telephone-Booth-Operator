@@ -72,6 +72,10 @@ const QUESTION_DRAW_TRANSACTION = {
   maxWait: 1_000,
   timeout: 5_000,
 } as const;
+const managementQuestionInclude = {
+  audio: true,
+  _count: { select: { messages: true } },
+} as const;
 
 // No era is open and one could not be resolved. Distinct from a conflict: the
 // caller's request was fine, the installation bookkeeping was not.
@@ -102,7 +106,7 @@ questionsRouter.get("/", zValidator("query", listQuerySchema), async (c) => {
   const page = ids ? { take: ids.length } : { take: limit + 1 };
   const questions = await db.question.findMany({
     where,
-    include: { audio: true },
+    include: managementQuestionInclude,
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     ...page,
   });
@@ -181,7 +185,7 @@ questionsRouter.post("/", requireAdmin(), zValidator("json", QuestionCreateSchem
           weight: body.weight ?? 1,
           installationId: era,
         },
-        include: { audio: true },
+        include: managementQuestionInclude,
       });
     });
     recordAudit(c, { targetId: question.id });
@@ -252,7 +256,7 @@ questionsRouter.patch(
         if (result.count === 0) throw new QuestionArchivedError();
         const current = await tx.question.findUnique({
           where: { id },
-          include: { audio: true },
+          include: managementQuestionInclude,
         });
         if (!current) throw new QuestionArchivedError();
         return current;
@@ -284,7 +288,7 @@ questionsRouter.post(
         tx.question.update({
           where: { id },
           data: { status: "active", retiredAt: null },
-          include: { audio: true },
+          include: managementQuestionInclude,
         }),
       );
       return c.json(serializeQuestion(updated));
@@ -310,7 +314,7 @@ questionsRouter.post(
         tx.question.update({
           where: { id },
           data: { status: "draft", retiredAt: null },
-          include: { audio: true },
+          include: managementQuestionInclude,
         }),
       );
       return c.json(serializeQuestion(updated));

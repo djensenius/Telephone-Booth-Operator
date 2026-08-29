@@ -132,6 +132,36 @@ describe("BoothWebSocketProvider", () => {
     expect(screen.getByText("MOCK")).toBeDefined();
   });
 
+  it("invalidates question response counts when a message frame arrives", async () => {
+    const client = renderProvider();
+    const questionsKey = apiQueryKeys.questions();
+    client.setQueryData(questionsKey, { items: [], nextCursor: null });
+    await waitFor(() => expect(FakeSocket.instances).toHaveLength(1));
+    const socket = FakeSocket.instances[0]!;
+    act(() => socket.emit("open"));
+
+    act(() =>
+      socket.emit("message", {
+        data: JSON.stringify({
+          kind: "message",
+          message: {
+            id: "22222222-2222-4222-8222-222222222222",
+            status: "received",
+            questionId: "11111111-1111-4111-8111-111111111111",
+            createdAt: "2026-08-29T00:00:00.000Z",
+            audio: {
+              url: "https://media.example/message.flac",
+              sha256: "a".repeat(64),
+              durationMs: 9000,
+            },
+          },
+        }),
+      }),
+    );
+
+    await waitFor(() => expect(client.getQueryState(questionsKey)?.isInvalidated).toBe(true));
+  });
+
   it("keeps the app-wide badge current without mounting the status screen", async () => {
     vi.setSystemTime(new Date("2026-05-01T00:10:00.000Z"));
     vi.stubGlobal(

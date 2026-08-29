@@ -1004,6 +1004,7 @@ export function useQuestionsList(
         ...(options.installationId ? { installationId: options.installationId } : {}),
         limit: 100,
       }),
+    refetchInterval: 30_000,
   });
 }
 
@@ -1221,6 +1222,7 @@ export function useDeleteMessage() {
     mutationFn: messages.delete,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["messages"] });
+      void queryClient.invalidateQueries({ queryKey: ["questions", "list"] });
     },
   });
 }

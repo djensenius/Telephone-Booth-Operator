@@ -504,6 +504,27 @@ const attachAudio = <T extends { audioId: string }>(record: T): T & { audio: Fak
   return { ...record, audio };
 };
 
+type QuestionInclude = {
+  audio?: boolean;
+  _count?: { select?: { messages?: boolean } };
+};
+
+const attachQuestionRelations = (
+  question: FakeQuestion,
+  include: QuestionInclude,
+): FakeQuestion & { audio?: FakeFile; _count?: { messages: number } } => {
+  const result: FakeQuestion & { audio?: FakeFile; _count?: { messages: number } } = include.audio
+    ? attachAudio(question)
+    : { ...question };
+  if (include._count?.select?.messages) {
+    result._count = {
+      messages: [...store.messages.values()].filter((message) => message.questionId === question.id)
+        .length,
+    };
+  }
+  return result;
+};
+
 // Mirrors Prisma's `select: { audio: { select: { … } } }` projection, used by
 // the installation purge to resolve the blobs an era owns.
 const projectAudio = (
@@ -1037,11 +1058,11 @@ export const fakeDb = {
       include,
     }: {
       where: { id: string };
-      include?: { audio?: boolean };
+      include?: QuestionInclude;
     }) => {
       const question = store.questions.get(where.id) ?? null;
       if (!question) return null;
-      return include?.audio ? attachAudio(question) : question;
+      return include ? attachQuestionRelations(question, include) : question;
     },
     create: async ({
       data,
@@ -1055,7 +1076,7 @@ export const fakeDb = {
         createdAt?: Date;
         installationId?: string;
       };
-      include?: { audio?: boolean };
+      include?: QuestionInclude;
     }) => {
       const question: FakeQuestion = {
         id: randomUUID(),
@@ -1071,7 +1092,7 @@ export const fakeDb = {
       };
       assertQuestionUnique(question);
       store.questions.set(question.id, question);
-      return include?.audio ? attachAudio(question) : question;
+      return include ? attachQuestionRelations(question, include) : question;
     },
     findMany: async (
       params: {
@@ -1079,7 +1100,7 @@ export const fakeDb = {
         where?: Record<string, unknown>;
         skip?: number;
         take?: number;
-        include?: { audio?: boolean };
+        include?: QuestionInclude;
         select?: { audio?: { select?: Record<string, boolean> } };
       } = {},
     ) => {
@@ -1093,7 +1114,9 @@ export const fakeDb = {
       }
       const selected = typeof take === "number" ? questions.slice(0, take) : questions;
       if (select?.audio) return selected.map((question) => projectAudio(question, select.audio));
-      return include?.audio ? selected.map(attachAudio) : selected;
+      return include
+        ? selected.map((question) => attachQuestionRelations(question, include))
+        : selected;
     },
     count: async ({ where = {} }: { where?: Record<string, unknown> } = {}) =>
       [...store.questions.values()].filter((question) => matchesWhere(question, where)).length,
@@ -1104,13 +1127,13 @@ export const fakeDb = {
     }: {
       where?: Record<string, unknown>;
       skip?: number;
-      include?: { audio?: boolean };
+      include?: QuestionInclude;
     }) => {
       const question = [...store.questions.values()]
         .filter((item) => matchesWhere(item, where))
         .sort((a, b) => a.id.localeCompare(b.id))[skip];
       if (!question) return null;
-      return include?.audio ? attachAudio(question) : question;
+      return include ? attachQuestionRelations(question, include) : question;
     },
     update: async ({
       where,
@@ -1119,13 +1142,13 @@ export const fakeDb = {
     }: {
       where: { id: string };
       data: Partial<FakeQuestion>;
-      include?: { audio?: boolean };
+      include?: QuestionInclude;
     }) => {
       const existing = store.questions.get(where.id);
       if (!existing) throw new Error("question not found");
       const updated = { ...existing, ...data };
       store.questions.set(where.id, updated);
-      return include?.audio ? attachAudio(updated) : updated;
+      return include ? attachQuestionRelations(updated, include) : updated;
     },
     upsert: async ({
       where,

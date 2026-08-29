@@ -48,6 +48,7 @@ const question = {
   prompt: "What did the city sound like today?",
   status: "active",
   weight: 1,
+  messageCount: 1,
   createdAt: "2026-01-01T00:00:00.000Z",
   audio: { url: "https://media.example/question.flac", sha256: sha, durationMs: 12000 },
 };
@@ -585,6 +586,7 @@ describe("Questions feature", () => {
   it("renders the question library", async () => {
     renderPath("/questions");
     expect(await screen.findByText("What did the city sound like today?")).toBeTruthy();
+    expect(screen.getAllByText("1 response")).not.toHaveLength(0);
     expect(screen.getByText(/randomized weighted ticket bag/u)).toBeTruthy();
   });
 

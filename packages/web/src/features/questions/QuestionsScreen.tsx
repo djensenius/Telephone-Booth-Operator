@@ -369,6 +369,11 @@ export function QuestionsScreen({
                 </span>
                 <span className="question-card__date">Added {date(question.createdAt)}</span>
                 <span className="question-card__date">Weight {question.weight}</span>
+                {question.messageCount === undefined ? null : (
+                  <span className="question-card__date">
+                    {question.messageCount} {question.messageCount === 1 ? "response" : "responses"}
+                  </span>
+                )}
               </div>
               <h2>{question.prompt}</h2>
               <QuestionAudio url={question.audio.url} durationMs={question.audio.durationMs} />
