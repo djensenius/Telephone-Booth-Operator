@@ -232,6 +232,7 @@ export const QuestionSchema = z.object({
   prompt: z.string().min(1).max(280),
   status: QuestionStatusSchema,
   weight: QuestionWeightSchema.default(1),
+  messageCount: z.number().int().nonnegative().optional(),
   createdAt: z.string().datetime(),
   audio: AudioRefSchema,
 });

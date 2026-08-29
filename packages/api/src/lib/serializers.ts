@@ -27,6 +27,7 @@ import { generateSasUrl } from "./azure-blob.js";
 import { normalizeTranslationText } from "./translation-text.js";
 
 export type WithAudio<T> = T & { audio: File };
+export type WithMessageCount<T> = T & { _count?: { messages: number } };
 
 const iso = (date: Date): string => date.toISOString();
 
@@ -36,11 +37,14 @@ export const audioRef = (file: File) => ({
   durationMs: file.durationMs,
 });
 
-export const serializeQuestion = (question: WithAudio<Question>): QuestionPayload => ({
+export const serializeQuestion = (
+  question: WithAudio<WithMessageCount<Question>>,
+): QuestionPayload => ({
   id: question.id,
   prompt: question.prompt,
   status: question.status,
   weight: question.weight,
+  ...(question._count ? { messageCount: question._count.messages } : {}),
   createdAt: iso(question.createdAt),
   audio: audioRef(question.audio),
 });

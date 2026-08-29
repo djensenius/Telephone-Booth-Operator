@@ -2530,6 +2530,10 @@ components:
         prompt: { type: string, minLength: 1, maxLength: 280 }
         status: { $ref: "#/components/schemas/QuestionStatus" }
         weight: { type: integer, minimum: 1, maximum: 100 }
+        messageCount:
+          type: integer
+          minimum: 0
+          description: Number of recorded messages linked to the question when requested.
         createdAt: { type: string, format: date-time }
         audio: { $ref: "#/components/schemas/AudioRef" }
     QuestionStatus:

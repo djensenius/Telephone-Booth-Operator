@@ -363,6 +363,9 @@ describe("QuestionStatusSchema", () => {
       },
     };
     expect(QuestionSchema.parse(question).status).toBe("active");
+    expect(QuestionSchema.parse(question).messageCount).toBeUndefined();
+    expect(QuestionSchema.parse({ ...question, messageCount: 2 }).messageCount).toBe(2);
+    expect(() => QuestionSchema.parse({ ...question, messageCount: -1 })).toThrow();
     const { status: _status, ...withoutStatus } = question;
     expect(() => QuestionSchema.parse(withoutStatus)).toThrow();
   });

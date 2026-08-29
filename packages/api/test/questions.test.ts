@@ -199,8 +199,16 @@ describe("questions routes", () => {
     });
     expect(create.status, await create.clone().text()).toBe(201);
     const question = await create.json();
-    expect(question).toMatchObject({ prompt: "What did you hear?", status: "draft", weight: 1 });
+    expect(question).toMatchObject({
+      prompt: "What did you hear?",
+      status: "draft",
+      weight: 1,
+      messageCount: 0,
+    });
     expect(question.audio).toMatchObject({ sha256: "1".repeat(64), durationMs: 2500 });
+    seedMessage({ questionId: question.id });
+    seedMessage({ questionId: question.id });
+    seedMessage({ questionId: null });
 
     const update = await app.request(`/v1/questions/${question.id}`, {
       method: "PATCH",
@@ -212,13 +220,14 @@ describe("questions routes", () => {
       id: question.id,
       prompt: "What can you hear?",
       weight: 3,
+      messageCount: 2,
     });
 
     // Drafts are listed for management but not served to the phone.
     const list = await app.request("/v1/questions?limit=10", { headers: { cookie } });
     expect(list.status).toBe(200);
     await expect(list.json()).resolves.toMatchObject({
-      items: [{ id: question.id, status: "draft" }],
+      items: [{ id: question.id, status: "draft", messageCount: 2 }],
       nextCursor: null,
     });
 
@@ -231,7 +240,11 @@ describe("questions routes", () => {
       headers: { cookie },
     });
     expect(activate.status, await activate.clone().text()).toBe(200);
-    await expect(activate.json()).resolves.toMatchObject({ id: question.id, status: "active" });
+    await expect(activate.json()).resolves.toMatchObject({
+      id: question.id,
+      status: "active",
+      messageCount: 2,
+    });
 
     const missingBearer = await app.request("/v1/questions/random");
     expect(missingBearer.status).toBe(401);
@@ -250,7 +263,11 @@ describe("questions routes", () => {
       headers: { cookie },
     });
     expect(deactivate.status).toBe(200);
-    await expect(deactivate.json()).resolves.toMatchObject({ id: question.id, status: "draft" });
+    await expect(deactivate.json()).resolves.toMatchObject({
+      id: question.id,
+      status: "draft",
+      messageCount: 2,
+    });
     const afterDeactivate = await app.request("/v1/questions/random", { headers: phoneHeaders });
     expect(afterDeactivate.status).toBe(404);
 
