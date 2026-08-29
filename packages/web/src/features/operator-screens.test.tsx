@@ -52,7 +52,12 @@ const question = {
   createdAt: "2026-01-01T00:00:00.000Z",
   audio: { url: "https://media.example/question.flac", sha256: sha, durationMs: 12000 },
 };
-const questionTwo = { ...question, id: questionTwoId, prompt: "Who are you calling?" };
+const questionTwo = {
+  ...question,
+  id: questionTwoId,
+  prompt: "Who are you calling?",
+  messageCount: 2,
+};
 const message = {
   id: messageId,
   status: "received",
@@ -584,9 +589,15 @@ describe("Status feature", () => {
 
 describe("Questions feature", () => {
   it("renders the question library", async () => {
+    server.use(
+      http.get("http://localhost/v1/questions", () =>
+        HttpResponse.json({ items: [question, questionTwo], nextCursor: null }),
+      ),
+    );
     renderPath("/questions");
     expect(await screen.findByText("What did the city sound like today?")).toBeTruthy();
-    expect(screen.getAllByText("1 response")).not.toHaveLength(0);
+    expect(screen.getByText("1 response")).toBeTruthy();
+    expect(screen.getByText("2 responses")).toBeTruthy();
     expect(screen.getByText(/randomized weighted ticket bag/u)).toBeTruthy();
   });
 

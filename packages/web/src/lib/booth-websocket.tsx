@@ -43,6 +43,7 @@ const BoothWebSocketContext = createContext<BoothWebSocketApi | null>(null);
 // seconds of polling, long enough that a down API is not hammered.
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
+const SEEN_MESSAGE_ID_LIMIT = 1_000;
 
 export function BoothWebSocketProvider({
   enabled,
@@ -235,6 +236,7 @@ export function BoothEnvelopeBridge(): null {
   const statusQuery = useStatusCurrent();
   const { setLastStatusAt, setRuntimeMode, setStatus } = useBoothStatus();
   const latestStatusRef = useRef<BoothStatus | null>(null);
+  const seenMessageIdsRef = useRef<Set<string>>(new Set());
 
   const syncStatus = useCallback(
     (status: BoothStatus): void => {
@@ -290,6 +292,7 @@ export function BoothEnvelopeBridge(): null {
     return ws.subscribe((envelope) => {
       if (envelope.kind === "installation") {
         clearStatus();
+        seenMessageIdsRef.current.clear();
         invalidateInstallationScopedQueries(queryClient);
         return;
       }
@@ -308,9 +311,19 @@ export function BoothEnvelopeBridge(): null {
       }
       if (envelope.kind === "message") {
         const message = envelope.message;
+        const isFirstFrame = !seenMessageIdsRef.current.has(message.id);
+        if (isFirstFrame) {
+          seenMessageIdsRef.current.add(message.id);
+          if (seenMessageIdsRef.current.size > SEEN_MESSAGE_ID_LIMIT) {
+            const oldestMessageId = seenMessageIdsRef.current.values().next().value;
+            if (oldestMessageId !== undefined) seenMessageIdsRef.current.delete(oldestMessageId);
+          }
+        }
         queryClient.setQueryData(apiQueryKeys.message(message.id), message);
         void queryClient.invalidateQueries({ queryKey: ["messages", "list"] });
-        void queryClient.invalidateQueries({ queryKey: ["questions", "list"] });
+        if (isFirstFrame) {
+          void queryClient.invalidateQueries({ queryKey: ["questions", "list"] });
+        }
         void queryClient.invalidateQueries({ queryKey: apiQueryKeys.transcriptions(message.id) });
       }
     });
