@@ -174,7 +174,7 @@ export const loadExhibitionReportEnvironment = async (
 export const operatorCookieHeader = (raw: string): string => {
   const cookie = raw.trim();
   if (cookie.length === 0) throw new Error("OPERATOR_COOKIE cannot be empty.");
-  if (cookie.startsWith("__Host-booth_session=") || cookie.startsWith("booth_session=")) {
+  if (/(?:^|;\s*)(?:__Host-booth_session|booth_session)=/.test(cookie)) {
     return cookie;
   }
   return `__Host-booth_session=${cookie}`;
@@ -331,25 +331,24 @@ const outputPathFor = (
   return isAbsolute(requested) ? requested : resolve(REPOSITORY_ROOT, requested);
 };
 
-export const messagesForReport = <T extends Pick<Message, "createdAt" | "installationId">>(
+export const messagesForReport = <T extends Pick<Message, "id" | "createdAt" | "installationId">>(
   messages: readonly T[],
   installationId: string,
   start: Date,
   end: Date,
 ): T[] =>
   messages.filter((message) => {
-    if (
-      message.installationId !== undefined &&
-      message.installationId !== null &&
-      message.installationId !== installationId
-    ) {
-      return false;
-    }
     const createdAt = new Date(message.createdAt).getTime();
     if (!Number.isFinite(createdAt)) {
       throw new Error(`Message has an invalid createdAt value: ${message.createdAt}.`);
     }
-    return createdAt >= start.getTime() && createdAt <= end.getTime();
+    if (createdAt < start.getTime() || createdAt > end.getTime()) return false;
+    if (message.installationId === undefined) {
+      throw new Error(
+        `Message ${message.id} did not include installationId, so report scoping cannot be verified.`,
+      );
+    }
+    return message.installationId === installationId;
   });
 
 export const assertOverviewMessagesComplete = (

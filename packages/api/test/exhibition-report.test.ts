@@ -185,7 +185,23 @@ describe("exhibition report helpers", () => {
         new Date("2026-08-20T00:00:00.000Z"),
         new Date("2026-08-21T00:00:00.000Z"),
       ).map((message) => message.id),
-    ).toEqual(["inside", "legacy"]);
+    ).toEqual(["inside"]);
+  });
+
+  it("rejects in-window question messages without installation scope", () => {
+    expect(() =>
+      messagesForReport(
+        [
+          {
+            id: "missing-installation",
+            createdAt: "2026-08-20T12:00:00.000Z",
+          },
+        ],
+        "installation-a",
+        new Date("2026-08-20T00:00:00.000Z"),
+        new Date("2026-08-21T00:00:00.000Z"),
+      ),
+    ).toThrow("did not include installationId, so report scoping cannot be verified");
   });
 
   it("refuses to report when the stats API may have truncated recordings", () => {
@@ -202,6 +218,9 @@ describe("exhibition report helpers", () => {
     expect(operatorCookieHeader("signed-value")).toBe("__Host-booth_session=signed-value");
     expect(operatorCookieHeader("__Host-booth_session=signed-value")).toBe(
       "__Host-booth_session=signed-value",
+    );
+    expect(operatorCookieHeader("other=value; __Host-booth_session=signed-value")).toBe(
+      "other=value; __Host-booth_session=signed-value",
     );
   });
 
@@ -313,5 +332,7 @@ describe("exhibition report helpers", () => {
     expect(html).toContain("--red-strong: rgb(179 19 47)");
     expect(html).toContain('local("Univers Bold")');
     expect(html).toContain('local("Univers Condensed")');
+    expect(html).toContain("<h2>Selected answer transcriptions</h2>");
+    expect(html).not.toContain("<h2>Name this space</h2>");
   });
 });

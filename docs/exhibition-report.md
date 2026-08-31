@@ -29,9 +29,10 @@ header:
 export OPERATOR_COOKIE='replace-with-the-authenticated-cookie-header'
 ```
 
-The value may be either the complete
-`__Host-booth_session=<value>` pair or just the value copied from the browser;
-the CLI adds the production cookie name when it is omitted.
+The value may be a complete raw cookie header containing the session cookie in
+any position, the `__Host-booth_session=<value>` pair by itself, or just the
+value copied from the browser. The CLI adds the production cookie name when it
+is omitted.
 
 The CLI also accepts `PUBLIC_API_URL` or the phone client's
 `BOOTH_OPERATOR_BASE_URL` when `OPERATOR_API_URL` is not set. The phone
@@ -118,7 +119,8 @@ Question answer counts use message `createdAt` values inside the same report
 window as the overview metrics. The CLI enumerates questions across all
 installation eras, then includes the selected installation's questions plus
 any earlier question that has an in-range message assigned to the selected
-installation.
+installation. Unscoped messages are excluded, and the CLI stops instead of
+guessing if an in-range API response omits its installation identifier.
 
 The current overview endpoint can aggregate at most 5,000 recordings. The CLI
 refuses to write a report when the response reaches that boundary, because

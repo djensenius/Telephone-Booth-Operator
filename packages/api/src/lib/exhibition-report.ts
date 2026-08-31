@@ -785,7 +785,7 @@ export const renderExhibitionReportHtml = (report: ExhibitionReportData): string
 
     <section class="transcripts-section">
       <p class="section-kicker">Visitor voices</p>
-      <h2>Name this space</h2>
+      <h2>Selected answer transcriptions</h2>
       <p class="transcript-prompt">${promptSummary}</p>
       ${transcriptEntries}
     </section>
