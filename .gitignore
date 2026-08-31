@@ -13,6 +13,7 @@ coverage/
 .DS_Store
 playwright-report/
 test-results/
+reports/
 *.tsbuildinfo
 packages/web/src/api/schema.gen.ts
 packages/api/src/generated/

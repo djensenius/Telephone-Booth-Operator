@@ -40,6 +40,10 @@ backfill-installation-summaries:
 backfill-installation-summaries-apply:
     pnpm --filter @telephone-booth-operator/api run backfill:installation-summaries -- --apply
 
+# Generate a standalone, print-ready exhibition report through the operator API.
+exhibition-report env_file="../env":
+    pnpm --filter @telephone-booth-operator/api run report:exhibition -- --load-env "{{env_file}}"
+
 # Check the Prisma client can talk to a real database (needs DATABASE_URL).
 db-smoke:
     pnpm --filter @telephone-booth-operator/api run db:smoke
