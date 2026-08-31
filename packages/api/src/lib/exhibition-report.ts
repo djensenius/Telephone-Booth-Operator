@@ -121,8 +121,9 @@ const metricCard = (label: string, value: number, detail: string): string => `
 
 const normalizePrompt = (value: string): string =>
   value
+    .normalize("NFKC")
     .toLocaleLowerCase("en-CA")
-    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/[^\p{L}\p{M}\p{N}]+/gu, " ")
     .trim();
 
 export const promptMatches = (prompt: string, target: string): boolean => {

@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -190,6 +190,9 @@ export const operatorApiRoot = (baseUrl: string): string => {
   const parsedBase = new URL(baseUrl);
   if (parsedBase.protocol !== "https:" && parsedBase.protocol !== "http:") {
     throw new Error("OPERATOR_API_URL must use http or https.");
+  }
+  if (parsedBase.search.length > 0 || parsedBase.hash.length > 0) {
+    throw new Error("OPERATOR_API_URL must not include a query string or fragment.");
   }
   const hostname = parsedBase.hostname.toLowerCase();
   const isLoopback = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
@@ -516,11 +519,14 @@ export const generateExhibitionReport = async (
     dateKeyInTimeZone(reportEnd, options.timeZone),
   );
   await mkdir(dirname(outputPath), { recursive: true, mode: 0o700 });
-  await writeFile(outputPath, renderExhibitionReportHtml(report), {
-    encoding: "utf8",
-    mode: 0o600,
-  });
-  await chmod(outputPath, 0o600);
+  const outputFile = await open(outputPath, "a", 0o600);
+  try {
+    await outputFile.chmod(0o600);
+    await outputFile.truncate(0);
+    await outputFile.writeFile(renderExhibitionReportHtml(report), "utf8");
+  } finally {
+    await outputFile.close();
+  }
 
   // oxlint-disable-next-line no-console
   console.log(`Wrote exhibition report to ${outputPath}`);

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -105,6 +105,11 @@ describe("exhibition report helpers", () => {
     expect(promptMatches("Describe this place.", "what would you name this space")).toBe(false);
   });
 
+  it("matches prompt fragments written in non-Latin scripts", () => {
+    expect(promptMatches("你会给这个空间起什么名字？", "这个空间")).toBe(true);
+    expect(promptMatches("ماذا تسمي هذه المساحة؟", "تسمي هذه المساحة")).toBe(true);
+  });
+
   it("accepts the package-manager argument separator", () => {
     expect(
       parseExhibitionReportArgs(["--", "--load-env", "../env", "--time-zone", "America/Vancouver"]),
@@ -148,6 +153,12 @@ describe("exhibition report helpers", () => {
     expect(operatorApiRoot("http://[::1]:8787/")).toBe("http://[::1]:8787");
     expect(() => operatorApiRoot("http://operator.example.test")).toThrow(
       "must use https except for localhost loopback addresses",
+    );
+    expect(() => operatorApiRoot("https://operator.example.test?tenant=gallery")).toThrow(
+      "must not include a query string or fragment",
+    );
+    expect(() => operatorApiRoot("https://operator.example.test#operator")).toThrow(
+      "must not include a query string or fragment",
     );
   });
 
@@ -566,6 +577,8 @@ describe("exhibition report helpers", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
 
     try {
+      await writeFile(output, "stale report", { mode: 0o644 });
+      await chmod(output, 0o644);
       await expect(
         generateExhibitionReport(
           {
@@ -590,6 +603,7 @@ describe("exhibition report helpers", () => {
       expect(html).toContain("No successful transcription is available");
       expect(html).not.toContain("After cutoff");
       expect(html).not.toContain("Describe an unrelated installation.");
+      expect((await stat(output)).mode & 0o777).toBe(0o600);
 
       const requestUrls = requests.map((path) => new URL(path, apiRoot));
       const overviewRequests = requestUrls.filter((url) => url.pathname === "/v1/stats/overview");

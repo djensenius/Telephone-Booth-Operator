@@ -40,7 +40,8 @@ client's `BOOTH_OPERATOR_TOKEN` cannot be reused: it is a static booth token,
 while report endpoints require an OIDC operator token or session cookie.
 Credentials are read only into request headers and are never written to the
 report. The API URL must use HTTPS, except for explicit loopback development
-addresses such as `http://localhost`.
+addresses such as `http://localhost`, and it must not contain a query string or
+fragment.
 
 If the variables already live in another local env file, load it directly:
 
