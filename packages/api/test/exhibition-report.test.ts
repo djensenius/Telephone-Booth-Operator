@@ -1,8 +1,8 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vite-plus/test";
-import type { Transcription } from "@telephone-booth-operator/shared";
+import { describe, expect, it, vi } from "vite-plus/test";
+import type { StatsOverview, Transcription } from "@telephone-booth-operator/shared";
 import {
   buildLocalDayRanges,
   countsByLocalDay,
@@ -15,11 +15,13 @@ import {
 import {
   DEFAULT_TRANSCRIPT_PROMPT,
   assertOverviewMessagesComplete,
+  generateExhibitionReport,
   loadExhibitionReportEnvironment,
   messagesForReport,
   operatorApiRoot,
   operatorCookieHeader,
   parseExhibitionReportArgs,
+  type ApiClient,
 } from "../scripts/exhibition-report.js";
 
 describe("exhibition report helpers", () => {
@@ -267,6 +269,363 @@ describe("exhibition report helpers", () => {
         },
       ])?.text,
     ).toBe("Newest success");
+  });
+
+  it("paginates and renders an active cross-era report with bounded transcription requests", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "exhibition-report-orchestration-"));
+    const output = join(directory, "report.html");
+    const apiRoot = "https://operator.example.test";
+    const fixedNow = new Date("2026-08-20T05:00:00.000Z");
+    const installationId = "11111111-1111-4111-8111-111111111111";
+    const currentQuestionId = "22222222-2222-4222-8222-222222222222";
+    const unrelatedQuestionId = "33333333-3333-4333-8333-333333333333";
+    const rolloverQuestionId = "44444444-4444-4444-8444-444444444444";
+    const afterCutoffMessageId = "55555555-5555-4555-8555-555555555555";
+    const embeddedMessageId = "66666666-6666-4666-8666-666666666666";
+    const noTranscriptMessageId = "77777777-7777-4777-8777-777777777777";
+    const failedMessageId = "88888888-8888-4888-8888-888888888888";
+    const rolloverMessageId = "99999999-9999-4999-8999-999999999999";
+    const unrelatedMessageId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const audio = {
+      url: `${apiRoot}/audio/test.flac`,
+      sha256: "a".repeat(64),
+      durationMs: 1_000,
+    };
+    const transcription = (
+      id: string,
+      messageId: string,
+      status: Transcription["status"],
+      text: string | null,
+      createdAt: string,
+    ): Transcription => ({
+      id,
+      messageId,
+      provider: "on_device",
+      model: null,
+      status,
+      text,
+      language: "en",
+      durationMs: 1_000,
+      latencyMs: 20,
+      error: status === "failed" ? "provider failed" : null,
+      requestedById: null,
+      createdAt,
+      completedAt: status === "pending" ? null : createdAt,
+      translationStatus: null,
+      translatedText: null,
+      translatedLanguage: null,
+      translationProvider: null,
+      translationModel: null,
+      translationError: null,
+      translationLatencyMs: null,
+      translationCompletedAt: null,
+    });
+    const embeddedTranscription = transcription(
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      embeddedMessageId,
+      "succeeded",
+      "Embedded success",
+      "2026-08-20T04:51:00.000Z",
+    );
+    const failedTranscription = transcription(
+      "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      failedMessageId,
+      "failed",
+      null,
+      "2026-08-20T04:31:00.000Z",
+    );
+    const recoveredTranscription = transcription(
+      "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      failedMessageId,
+      "succeeded",
+      "Recovered success",
+      "2026-08-20T04:30:30.000Z",
+    );
+    const rolloverTranscription = transcription(
+      "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      rolloverMessageId,
+      "succeeded",
+      "Cross-era success",
+      "2026-08-20T04:21:00.000Z",
+    );
+    const overview: StatsOverview = {
+      window: "custom",
+      rangeStart: "2026-08-20T04:00:00.000Z",
+      rangeEnd: fixedNow.toISOString(),
+      generatedAt: fixedNow.toISOString(),
+      timezone: "UTC",
+      interactions: {
+        total: 5,
+        inProgressNow: 0,
+        noSelection: 1,
+        messagesLeft: 4,
+        averageDurationMs: 10_000,
+        longestDurationMs: 20_000,
+        outcomes: { recording_completed: 4 },
+        perDay: [],
+      },
+      calls: {
+        total: 5,
+        completed: 5,
+        inProgress: 0,
+        averageDurationMs: 10_000,
+        longestDurationMs: 20_000,
+        outcomes: { recording_completed: 4 },
+        perDay: [],
+      },
+      messages: {
+        total: 3,
+        approved: 3,
+        allRecordings: 4,
+        byStatus: { approved: 3, pending: 1 },
+        averageDurationMs: 1_000,
+      },
+      playback: { totalPlaybacks: 2 },
+      actions: {
+        digitsDialed: {},
+        leaveMessageSelections: 4,
+        listenMessageSelections: 2,
+        instructionSelections: 0,
+        wrongNumberAttempts: 0,
+        messagePlaybackStarts: 2,
+        instructionPlaybackStarts: 0,
+      },
+      pickupsHangups: { pickups: 5, hangups: 5, digitsDialed: {} },
+      uploads: { succeeded: 4, failed: 0, failureRate: 0 },
+      topQuestions: [],
+      hourly: [],
+      busiest: { hour: 0, dayOfWeek: 4 },
+      lastActivityAt: "2026-08-20T04:50:00.000Z",
+      boothBreakdown: [],
+    };
+    const currentQuestion = {
+      id: currentQuestionId,
+      prompt: DEFAULT_TRANSCRIPT_PROMPT,
+      status: "active",
+      weight: 1,
+      messageCount: 4,
+      createdAt: "2026-08-20T04:00:00.000Z",
+      audio,
+    };
+    const unrelatedQuestion = {
+      id: unrelatedQuestionId,
+      prompt: "Describe an unrelated installation.",
+      status: "archived",
+      weight: 1,
+      messageCount: 1,
+      createdAt: "2026-08-01T04:00:00.000Z",
+      audio,
+    };
+    const rolloverQuestion = {
+      id: rolloverQuestionId,
+      prompt: `${DEFAULT_TRANSCRIPT_PROMPT} Please be specific.`,
+      status: "archived",
+      weight: 1,
+      messageCount: 1,
+      createdAt: "2026-08-01T04:00:00.000Z",
+      audio,
+    };
+    const message = (
+      id: string,
+      questionId: string,
+      installation: string,
+      createdAt: string,
+      latestTranscription?: Transcription | null,
+    ) => ({
+      id,
+      status: "approved",
+      installationId: installation,
+      questionId,
+      createdAt,
+      audio,
+      ...(latestTranscription !== undefined ? { latestTranscription } : {}),
+    });
+    const requests: string[] = [];
+    const responseFor = (path: string): unknown => {
+      const url = new URL(path, apiRoot);
+      if (url.pathname === "/v1/installations/current") {
+        return {
+          id: installationId,
+          name: "Orchestration Test",
+          notes: null,
+          location: "Test Gallery",
+          startedAt: "2026-08-20T04:00:00.000Z",
+          endedAt: null,
+          endedById: null,
+          summary: null,
+          createdAt: "2026-08-20T04:00:00.000Z",
+          isActive: true,
+        };
+      }
+      if (url.pathname === "/v1/stats/overview") return overview;
+      if (url.pathname === "/v1/questions") {
+        const scope = url.searchParams.get("installationId");
+        const cursor = url.searchParams.get("cursor");
+        if (scope === installationId) {
+          return { items: [currentQuestion], nextCursor: null };
+        }
+        if (scope === "all" && cursor === null) {
+          return {
+            items: [currentQuestion, unrelatedQuestion],
+            nextCursor: "question-page-2",
+          };
+        }
+        if (scope === "all" && cursor === "question-page-2") {
+          return { items: [rolloverQuestion], nextCursor: null };
+        }
+      }
+      if (url.pathname === `/v1/questions/${currentQuestionId}/messages`) {
+        if (url.searchParams.get("cursor") === null) {
+          return {
+            items: [
+              message(
+                afterCutoffMessageId,
+                currentQuestionId,
+                installationId,
+                "2026-08-20T05:00:00.001Z",
+                transcription(
+                  "ffffffff-ffff-4fff-8fff-ffffffffffff",
+                  afterCutoffMessageId,
+                  "succeeded",
+                  "After cutoff",
+                  "2026-08-20T05:00:01.000Z",
+                ),
+              ),
+              message(
+                embeddedMessageId,
+                currentQuestionId,
+                installationId,
+                "2026-08-20T04:50:00.000Z",
+                embeddedTranscription,
+              ),
+            ],
+            nextCursor: "current-message-page-2",
+          };
+        }
+        return {
+          items: [
+            message(
+              noTranscriptMessageId,
+              currentQuestionId,
+              installationId,
+              "2026-08-20T04:40:00.000Z",
+              null,
+            ),
+            message(
+              failedMessageId,
+              currentQuestionId,
+              installationId,
+              "2026-08-20T04:30:00.000Z",
+              failedTranscription,
+            ),
+          ],
+          nextCursor: null,
+        };
+      }
+      if (url.pathname === `/v1/questions/${unrelatedQuestionId}/messages`) {
+        return {
+          items: [
+            message(
+              unrelatedMessageId,
+              unrelatedQuestionId,
+              "abababab-abab-4bab-8bab-abababababab",
+              "2026-08-20T04:25:00.000Z",
+              null,
+            ),
+          ],
+          nextCursor: null,
+        };
+      }
+      if (url.pathname === `/v1/questions/${rolloverQuestionId}/messages`) {
+        return {
+          items: [
+            message(
+              rolloverMessageId,
+              rolloverQuestionId,
+              installationId,
+              "2026-08-20T04:20:00.000Z",
+            ),
+          ],
+          nextCursor: null,
+        };
+      }
+      if (url.pathname === `/v1/messages/${failedMessageId}/transcriptions`) {
+        return { items: [failedTranscription, recoveredTranscription] };
+      }
+      if (url.pathname === `/v1/messages/${rolloverMessageId}/transcriptions`) {
+        return { items: [rolloverTranscription] };
+      }
+      throw new Error(`Unexpected report request: ${url.pathname}${url.search}`);
+    };
+    const client: ApiClient = {
+      get: (path, schema) => {
+        requests.push(path);
+        return Promise.resolve(schema.parse(responseFor(path)));
+      },
+    };
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    try {
+      await expect(
+        generateExhibitionReport(
+          {
+            envFile: null,
+            output,
+            installation: "active",
+            timeZone: "America/Toronto",
+            targetPrompt: DEFAULT_TRANSCRIPT_PROMPT,
+            title: "Orchestration report",
+            help: false,
+          },
+          { OPERATOR_API_URL: apiRoot },
+          { client, now: () => fixedNow },
+        ),
+      ).resolves.toBe(output);
+
+      const html = await readFile(output, "utf8");
+      expect(html).toContain("Orchestration report");
+      expect(html).toContain("Embedded success");
+      expect(html).toContain("Recovered success");
+      expect(html).toContain("Cross-era success");
+      expect(html).toContain("No successful transcription is available");
+      expect(html).not.toContain("After cutoff");
+      expect(html).not.toContain("Describe an unrelated installation.");
+
+      const requestUrls = requests.map((path) => new URL(path, apiRoot));
+      const overviewRequests = requestUrls.filter((url) => url.pathname === "/v1/stats/overview");
+      expect(overviewRequests).toHaveLength(2);
+      expect(
+        overviewRequests.every((url) => url.searchParams.get("end") === fixedNow.toISOString()),
+      ).toBe(true);
+      expect(
+        requestUrls.some(
+          (url) =>
+            url.pathname === "/v1/questions" &&
+            url.searchParams.get("cursor") === "question-page-2",
+        ),
+      ).toBe(true);
+      expect(
+        requestUrls.some(
+          (url) =>
+            url.pathname === `/v1/questions/${currentQuestionId}/messages` &&
+            url.searchParams.get("cursor") === "current-message-page-2",
+        ),
+      ).toBe(true);
+      expect(
+        requestUrls
+          .filter((url) => /^\/v1\/messages\/[^/]+\/transcriptions$/.test(url.pathname))
+          .map((url) => url.pathname)
+          .sort(),
+      ).toEqual(
+        [
+          `/v1/messages/${failedMessageId}/transcriptions`,
+          `/v1/messages/${rolloverMessageId}/transcriptions`,
+        ].sort(),
+      );
+    } finally {
+      log.mockRestore();
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("renders escaped report content and printable controls", () => {

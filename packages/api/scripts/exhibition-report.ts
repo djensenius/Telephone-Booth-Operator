@@ -10,6 +10,7 @@ import {
   type Message,
   type Question,
   type StatsOverview,
+  type Transcription,
 } from "@telephone-booth-operator/shared";
 import { parse as parseEnvFile } from "dotenv";
 import { z } from "zod";
@@ -60,8 +61,13 @@ type QuestionWithMessages = {
   messages: Message[];
 };
 
-type ApiClient = {
+export type ApiClient = {
   get: <T>(path: string, schema: z.ZodType<T>) => Promise<T>;
+};
+
+type ExhibitionReportDependencies = {
+  client?: ApiClient;
+  now?: () => Date;
 };
 
 const help = `Usage: pnpm --filter @telephone-booth-operator/api run report:exhibition -- [options]
@@ -193,12 +199,7 @@ export const operatorApiRoot = (baseUrl: string): string => {
   return parsedBase.toString().replace(/\/+$/, "");
 };
 
-const createApiClient = (
-  baseUrl: string,
-  token: string | undefined,
-  cookie: string | undefined,
-) => {
-  const root = operatorApiRoot(baseUrl);
+const createApiClient = (root: string, token: string | undefined, cookie: string | undefined) => {
   const headers: Record<string, string> = { accept: "application/json" };
   if (token) {
     const value = /^Bearer\s+/i.test(token) ? token : `Bearer ${token}`;
@@ -398,11 +399,17 @@ const buildTranscripts = async (
   );
 
   const transcripts = await mapInBatches(targetMessages, 6, async ({ question, message }) => {
-    const history = await client.get(
-      `/v1/messages/${encodeURIComponent(message.id)}/transcriptions`,
-      TranscriptionListSchema,
-    );
-    const transcription = selectLatestSuccessfulTranscription(history.items);
+    const embedded = message.latestTranscription;
+    let transcription: Transcription | null;
+    if (embedded === null || embedded?.status === "succeeded") {
+      transcription = embedded;
+    } else {
+      const history = await client.get(
+        `/v1/messages/${encodeURIComponent(message.id)}/transcriptions`,
+        TranscriptionListSchema,
+      );
+      transcription = selectLatestSuccessfulTranscription(history.items);
+    }
     return {
       messageId: message.id,
       prompt: question.prompt,
@@ -418,6 +425,7 @@ const buildTranscripts = async (
 export const generateExhibitionReport = async (
   options: CliOptions,
   env: NodeJS.ProcessEnv = process.env,
+  dependencies: ExhibitionReportDependencies = {},
 ): Promise<string> => {
   const baseUrl = (
     env.OPERATOR_API_URL ??
@@ -427,8 +435,10 @@ export const generateExhibitionReport = async (
   if (!baseUrl) {
     throw new Error("Set OPERATOR_API_URL, PUBLIC_API_URL, or BOOTH_OPERATOR_BASE_URL.");
   }
-  const client = createApiClient(baseUrl, env.OPERATOR_TOKEN, env.OPERATOR_COOKIE);
-  const generatedAt = new Date();
+  const root = operatorApiRoot(baseUrl);
+  const client =
+    dependencies.client ?? createApiClient(root, env.OPERATOR_TOKEN, env.OPERATOR_COOKIE);
+  const generatedAt = dependencies.now?.() ?? new Date();
   const installation =
     options.installation === "active"
       ? await client.get("/v1/installations/current", InstallationSchema)
@@ -483,7 +493,7 @@ export const generateExhibitionReport = async (
         .map(({ question }) => question.prompt),
     ),
   ];
-  const sourceHost = new URL(baseUrl).host;
+  const sourceHost = new URL(root).host;
   const report: ExhibitionReportData = {
     title: options.title ?? `${installation.name} Exhibition Report`,
     installationName: installation.name,
