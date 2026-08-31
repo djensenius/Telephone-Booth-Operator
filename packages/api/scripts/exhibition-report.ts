@@ -455,15 +455,16 @@ export const generateExhibitionReport = async (
   const reportEnd = new Date(Math.min(configuredEnd.getTime(), generatedAt.getTime()));
   const dayRanges = buildLocalDayRanges(installationStart, reportEnd, options.timeZone);
 
-  const [totalOverview, dailyOverviews, scopedQuestions, allQuestions] = await Promise.all([
-    fetchOverview(client, installation.id, installationStart, reportEnd),
+  const totalOverview = await fetchOverview(client, installation.id, installationStart, reportEnd);
+  assertOverviewMessagesComplete(totalOverview.messages);
+
+  const [dailyOverviews, scopedQuestions, allQuestions] = await Promise.all([
     mapInBatches(dayRanges, 4, (range) =>
       fetchOverview(client, installation.id, range.start, range.end),
     ),
     fetchQuestions(client, installation.id),
     fetchQuestions(client, "all"),
   ]);
-  assertOverviewMessagesComplete(totalOverview.messages);
 
   const scopedQuestionIds = new Set(scopedQuestions.map((question) => question.id));
   const questions = [

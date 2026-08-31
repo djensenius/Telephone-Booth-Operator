@@ -24,6 +24,65 @@ import {
   type ApiClient,
 } from "../scripts/exhibition-report.js";
 
+const statsOverviewFixture = ({
+  rangeStart,
+  rangeEnd,
+  allRecordings,
+}: {
+  rangeStart: string;
+  rangeEnd: string;
+  allRecordings: number;
+}): StatsOverview => ({
+  window: "custom",
+  rangeStart,
+  rangeEnd,
+  generatedAt: rangeEnd,
+  timezone: "UTC",
+  interactions: {
+    total: 5,
+    inProgressNow: 0,
+    noSelection: 1,
+    messagesLeft: 4,
+    averageDurationMs: 10_000,
+    longestDurationMs: 20_000,
+    outcomes: { recording_completed: 4 },
+    perDay: [],
+  },
+  calls: {
+    total: 5,
+    completed: 5,
+    inProgress: 0,
+    averageDurationMs: 10_000,
+    longestDurationMs: 20_000,
+    outcomes: { recording_completed: 4 },
+    perDay: [],
+  },
+  messages: {
+    total: 3,
+    approved: 3,
+    allRecordings,
+    byStatus: { approved: 3, pending: 1 },
+    averageDurationMs: 1_000,
+  },
+  playback: { totalPlaybacks: 2 },
+  actions: {
+    digitsDialed: {},
+    leaveMessageSelections: 4,
+    listenMessageSelections: 2,
+    instructionSelections: 0,
+    wrongNumberAttempts: 0,
+    messagePlaybackStarts: 2,
+    instructionPlaybackStarts: 0,
+  },
+  pickupsHangups: { pickups: 5, hangups: 5, digitsDialed: {} },
+  uploads: { succeeded: 4, failed: 0, failureRate: 0 },
+  topQuestions: [],
+  hourly: [],
+  busiest: { hour: 0, dayOfWeek: 4 },
+  lastActivityAt: "2026-08-20T04:50:00.000Z",
+  boothBreakdown: [],
+});
+
 describe("exhibition report helpers", () => {
   it("builds local calendar ranges across daylight-saving changes", () => {
     const ranges = buildLocalDayRanges(
@@ -227,6 +286,68 @@ describe("exhibition report helpers", () => {
     );
   });
 
+  it("fails before daily and question scans when the total may be truncated", async () => {
+    const apiRoot = "https://operator.example.test";
+    const fixedNow = new Date("2026-08-20T05:00:00.000Z");
+    const installationId = "11111111-1111-4111-8111-111111111111";
+    const requests: string[] = [];
+    const client: ApiClient = {
+      get: (path, schema) => {
+        requests.push(path);
+        const url = new URL(path, apiRoot);
+        if (url.pathname === "/v1/installations/current") {
+          return Promise.resolve(
+            schema.parse({
+              id: installationId,
+              name: "Oversized Test",
+              notes: null,
+              location: null,
+              startedAt: "2026-08-20T04:00:00.000Z",
+              endedAt: null,
+              endedById: null,
+              summary: null,
+              createdAt: "2026-08-20T04:00:00.000Z",
+              isActive: true,
+            }),
+          );
+        }
+        if (url.pathname === "/v1/stats/overview") {
+          return Promise.resolve(
+            schema.parse(
+              statsOverviewFixture({
+                rangeStart: "2026-08-20T04:00:00.000Z",
+                rangeEnd: fixedNow.toISOString(),
+                allRecordings: 5_000,
+              }),
+            ),
+          );
+        }
+        return Promise.reject(new Error(`Unexpected report request: ${url.pathname}${url.search}`));
+      },
+    };
+
+    await expect(
+      generateExhibitionReport(
+        {
+          envFile: null,
+          output: null,
+          installation: "active",
+          timeZone: "America/Toronto",
+          targetPrompt: DEFAULT_TRANSCRIPT_PROMPT,
+          title: null,
+          help: false,
+        },
+        { OPERATOR_API_URL: apiRoot },
+        { client, now: () => fixedNow },
+      ),
+    ).rejects.toThrow("can exceed the stats API limit");
+
+    expect(requests.map((path) => new URL(path, apiRoot).pathname)).toEqual([
+      "/v1/installations/current",
+      "/v1/stats/overview",
+    ]);
+  });
+
   it("accepts either a raw session value or a complete cookie pair", () => {
     expect(operatorCookieHeader("signed-value")).toBe("__Host-booth_session=signed-value");
     expect(operatorCookieHeader("__Host-booth_session=signed-value")).toBe(
@@ -359,56 +480,11 @@ describe("exhibition report helpers", () => {
       "Cross-era success",
       "2026-08-20T04:21:00.000Z",
     );
-    const overview: StatsOverview = {
-      window: "custom",
+    const overview = statsOverviewFixture({
       rangeStart: "2026-08-20T04:00:00.000Z",
       rangeEnd: fixedNow.toISOString(),
-      generatedAt: fixedNow.toISOString(),
-      timezone: "UTC",
-      interactions: {
-        total: 5,
-        inProgressNow: 0,
-        noSelection: 1,
-        messagesLeft: 4,
-        averageDurationMs: 10_000,
-        longestDurationMs: 20_000,
-        outcomes: { recording_completed: 4 },
-        perDay: [],
-      },
-      calls: {
-        total: 5,
-        completed: 5,
-        inProgress: 0,
-        averageDurationMs: 10_000,
-        longestDurationMs: 20_000,
-        outcomes: { recording_completed: 4 },
-        perDay: [],
-      },
-      messages: {
-        total: 3,
-        approved: 3,
-        allRecordings: 4,
-        byStatus: { approved: 3, pending: 1 },
-        averageDurationMs: 1_000,
-      },
-      playback: { totalPlaybacks: 2 },
-      actions: {
-        digitsDialed: {},
-        leaveMessageSelections: 4,
-        listenMessageSelections: 2,
-        instructionSelections: 0,
-        wrongNumberAttempts: 0,
-        messagePlaybackStarts: 2,
-        instructionPlaybackStarts: 0,
-      },
-      pickupsHangups: { pickups: 5, hangups: 5, digitsDialed: {} },
-      uploads: { succeeded: 4, failed: 0, failureRate: 0 },
-      topQuestions: [],
-      hourly: [],
-      busiest: { hour: 0, dayOfWeek: 4 },
-      lastActivityAt: "2026-08-20T04:50:00.000Z",
-      boothBreakdown: [],
-    };
+      allRecordings: 4,
+    });
     const currentQuestion = {
       id: currentQuestionId,
       prompt: DEFAULT_TRANSCRIPT_PROMPT,
