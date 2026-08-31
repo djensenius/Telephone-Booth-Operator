@@ -116,6 +116,8 @@ The report follows the definitions in [Analytics](analytics.md):
 The CLI requests `/v1/stats/overview` once for the installation total and once
 for each local calendar day. Question and transcript detail comes from the
 cursor-paginated question, question-message, and transcription endpoints.
+For an active installation, the total request uses `end=now` and the API's
+returned `rangeEnd` becomes the fixed cutoff for every later request and row.
 Question answer counts use message `createdAt` values inside the same report
 window as the overview metrics. The CLI enumerates questions across all
 installation eras, then includes the selected installation's questions plus

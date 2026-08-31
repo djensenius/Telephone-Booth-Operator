@@ -67,7 +67,6 @@ export type ApiClient = {
 
 type ExhibitionReportDependencies = {
   client?: ApiClient;
-  now?: () => Date;
 };
 
 const help = `Usage: pnpm --filter @telephone-booth-operator/api run report:exhibition -- [options]
@@ -308,12 +307,12 @@ const mapInBatches = async <T, R>(
   return results;
 };
 
-const fetchOverview = (client: ApiClient, installationId: string, start: Date, end: Date) =>
+const fetchOverview = (client: ApiClient, installationId: string, start: Date, end: Date | "now") =>
   client.get(
     queryPath("/v1/stats/overview", {
       installationId,
       start: start.toISOString(),
-      end: end.toISOString(),
+      end: end === "now" ? end : end.toISOString(),
     }),
     StatsOverviewSchema,
   );
@@ -441,7 +440,6 @@ export const generateExhibitionReport = async (
   const root = operatorApiRoot(baseUrl);
   const client =
     dependencies.client ?? createApiClient(root, env.OPERATOR_TOKEN, env.OPERATOR_COOKIE);
-  const generatedAt = dependencies.now?.() ?? new Date();
   const installation =
     options.installation === "active"
       ? await client.get("/v1/installations/current", InstallationSchema)
@@ -451,12 +449,16 @@ export const generateExhibitionReport = async (
         );
 
   const installationStart = new Date(installation.startedAt);
-  const configuredEnd = installation.endedAt ? new Date(installation.endedAt) : generatedAt;
-  const reportEnd = new Date(Math.min(configuredEnd.getTime(), generatedAt.getTime()));
-  const dayRanges = buildLocalDayRanges(installationStart, reportEnd, options.timeZone);
-
-  const totalOverview = await fetchOverview(client, installation.id, installationStart, reportEnd);
+  const requestedEnd = installation.endedAt ? new Date(installation.endedAt) : "now";
+  const totalOverview = await fetchOverview(
+    client,
+    installation.id,
+    installationStart,
+    requestedEnd,
+  );
   assertOverviewMessagesComplete(totalOverview.messages);
+  const reportEnd = new Date(totalOverview.rangeEnd);
+  const dayRanges = buildLocalDayRanges(installationStart, reportEnd, options.timeZone);
 
   const [dailyOverviews, scopedQuestions, allQuestions] = await Promise.all([
     mapInBatches(dayRanges, 4, (range) =>
@@ -472,11 +474,14 @@ export const generateExhibitionReport = async (
       [...scopedQuestions, ...allQuestions].map((question) => [question.id, question]),
     ).values(),
   ];
+  const questionsAtCutoff = questions.filter(
+    (question) => new Date(question.createdAt).getTime() <= reportEnd.getTime(),
+  );
 
   const questionsWithMessages = (
-    await mapInBatches(questions, 4, async (question) => {
+    await mapInBatches(questionsAtCutoff, 4, async (question) => {
       const messages =
-        question.messageCount === 0 || new Date(question.createdAt).getTime() > reportEnd.getTime()
+        question.messageCount === 0
           ? []
           : await fetchQuestionMessages(
               client,
@@ -504,7 +509,8 @@ export const generateExhibitionReport = async (
     location: installation.location,
     installationStartedAt: installation.startedAt,
     installationEndedAt: installation.endedAt,
-    generatedAt: generatedAt.toISOString(),
+    reportCutoffAt: reportEnd.toISOString(),
+    generatedAt: totalOverview.generatedAt,
     timeZone: options.timeZone,
     sourceHost,
     targetPrompt: options.targetPrompt,

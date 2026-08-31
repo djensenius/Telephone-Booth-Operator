@@ -338,7 +338,7 @@ describe("exhibition report helpers", () => {
           help: false,
         },
         { OPERATOR_API_URL: apiRoot },
-        { client, now: () => fixedNow },
+        { client },
       ),
     ).rejects.toThrow("can exceed the stats API limit");
 
@@ -346,6 +346,7 @@ describe("exhibition report helpers", () => {
       "/v1/installations/current",
       "/v1/stats/overview",
     ]);
+    expect(new URL(requests[1] ?? "", apiRoot).searchParams.get("end")).toBe("now");
   });
 
   it("accepts either a raw session value or a complete cookie pair", () => {
@@ -410,6 +411,7 @@ describe("exhibition report helpers", () => {
     const fixedNow = new Date("2026-08-20T05:00:00.000Z");
     const installationId = "11111111-1111-4111-8111-111111111111";
     const currentQuestionId = "22222222-2222-4222-8222-222222222222";
+    const futureQuestionId = "23232323-2323-4232-8232-232323232323";
     const unrelatedQuestionId = "33333333-3333-4333-8333-333333333333";
     const rolloverQuestionId = "44444444-4444-4444-8444-444444444444";
     const afterCutoffMessageId = "55555555-5555-4555-8555-555555555555";
@@ -494,6 +496,15 @@ describe("exhibition report helpers", () => {
       createdAt: "2026-08-20T04:00:00.000Z",
       audio,
     };
+    const futureQuestion = {
+      id: futureQuestionId,
+      prompt: `${DEFAULT_TRANSCRIPT_PROMPT} Future cutoff question.`,
+      status: "active",
+      weight: 1,
+      messageCount: 1,
+      createdAt: "2026-08-20T05:00:00.001Z",
+      audio,
+    };
     const unrelatedQuestion = {
       id: unrelatedQuestionId,
       prompt: "Describe an unrelated installation.",
@@ -549,11 +560,11 @@ describe("exhibition report helpers", () => {
         const scope = url.searchParams.get("installationId");
         const cursor = url.searchParams.get("cursor");
         if (scope === installationId) {
-          return { items: [currentQuestion], nextCursor: null };
+          return { items: [currentQuestion, futureQuestion], nextCursor: null };
         }
         if (scope === "all" && cursor === null) {
           return {
-            items: [currentQuestion, unrelatedQuestion],
+            items: [currentQuestion, futureQuestion, unrelatedQuestion],
             nextCursor: "question-page-2",
           };
         }
@@ -667,7 +678,7 @@ describe("exhibition report helpers", () => {
             help: false,
           },
           { OPERATOR_API_URL: apiRoot },
-          { client, now: () => fixedNow },
+          { client },
         ),
       ).resolves.toBe(output);
 
@@ -678,15 +689,17 @@ describe("exhibition report helpers", () => {
       expect(html).toContain("Cross-era success");
       expect(html).toContain("No successful transcription is available");
       expect(html).not.toContain("After cutoff");
+      expect(html).not.toContain("Future cutoff question.");
       expect(html).not.toContain("Describe an unrelated installation.");
       expect((await stat(output)).mode & 0o777).toBe(0o600);
 
       const requestUrls = requests.map((path) => new URL(path, apiRoot));
       const overviewRequests = requestUrls.filter((url) => url.pathname === "/v1/stats/overview");
       expect(overviewRequests).toHaveLength(2);
-      expect(
-        overviewRequests.every((url) => url.searchParams.get("end") === fixedNow.toISOString()),
-      ).toBe(true);
+      expect(overviewRequests.map((url) => url.searchParams.get("end"))).toEqual([
+        "now",
+        fixedNow.toISOString(),
+      ]);
       expect(
         requestUrls.some(
           (url) =>
@@ -725,6 +738,7 @@ describe("exhibition report helpers", () => {
       location: "Gallery",
       installationStartedAt: "2026-08-20T14:00:00.000Z",
       installationEndedAt: null,
+      reportCutoffAt: "2026-08-21T14:00:00.000Z",
       generatedAt: "2026-08-21T14:00:00.000Z",
       timeZone: "America/Toronto",
       sourceHost: "operator.example.test",

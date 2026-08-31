@@ -39,6 +39,7 @@ export type ExhibitionReportData = {
   location: string | null;
   installationStartedAt: string;
   installationEndedAt: string | null;
+  reportCutoffAt: string;
   generatedAt: string;
   timeZone: string;
   sourceHost: string;
@@ -194,7 +195,6 @@ export const buildLocalDayRanges = (start: Date, end: Date, timeZone: string): L
 
 export const renderExhibitionReportHtml = (report: ExhibitionReportData): string => {
   const maxAnswers = Math.max(1, ...report.questions.map((question) => question.answers));
-  const periodEnd = report.installationEndedAt ?? report.generatedAt;
   const location = report.location
     ? `<span>${escapeHtml(report.location)}</span><span class="separator">/</span>`
     : "";
@@ -729,7 +729,7 @@ export const renderExhibitionReportHtml = (report: ExhibitionReportData): string
         ${location}
         <span>${escapeHtml(formatInstant(report.installationStartedAt, report.timeZone))}</span>
         <span class="separator">to</span>
-        <span>${escapeHtml(formatInstant(periodEnd, report.timeZone))}</span>
+        <span>${escapeHtml(formatInstant(report.reportCutoffAt, report.timeZone))}</span>
       </p>
     </header>
 
