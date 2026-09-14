@@ -3,7 +3,7 @@ import type {
   QuestionStatus,
   Transcription,
 } from "@telephone-booth-operator/shared";
-import { dateKeysInUtcRange, rangesForDateInTimeZone } from "./time-zone.js";
+import { dateKeyInTimeZone, dateKeysInUtcRange, rangesForDateInTimeZone } from "./time-zone.js";
 
 export type ExhibitionMetricCounts = {
   interactions: number;
@@ -31,6 +31,42 @@ export type ExhibitionTranscript = {
   recordedAt: string;
   messageStatus: MessageStatus;
   text: string | null;
+  nonApprovalReason: string | null;
+};
+
+export type ExhibitionFunFacts = {
+  averageApprovedMessageDurationMs: number | null;
+  longestApprovedMessageDurationMs: number | null;
+  maxMessagePlaybacksInInteraction: number;
+};
+
+export type ExhibitionPeakHour = {
+  hours: number[];
+  interactions: number;
+};
+
+export type ExhibitionBusiestDay = {
+  dates: string[];
+  interactions: number;
+};
+
+export type ExhibitionTimeHighlights = {
+  weekdayPeak: ExhibitionPeakHour | null;
+  weekendPeak: ExhibitionPeakHour | null;
+};
+
+export type ExhibitionEmailHighlights = {
+  pickupHours: ExhibitionTimeHighlights;
+  messageLeavingHours: ExhibitionTimeHighlights;
+  messageListeningHours: ExhibitionTimeHighlights;
+  busiestDay: ExhibitionBusiestDay | null;
+  approvedAudioDurationMs: number;
+  listeningInteractions: number;
+  repeatListeningInteractions: number;
+  mostAnsweredQuestion: {
+    prompt: string;
+    answers: number;
+  } | null;
 };
 
 export type ExhibitionReportData = {
@@ -43,9 +79,11 @@ export type ExhibitionReportData = {
   generatedAt: string;
   timeZone: string;
   sourceHost: string;
-  targetPrompt: string;
+  targetPrompts: string[];
   matchedPrompts: string[];
   totals: ExhibitionMetricCounts;
+  funFacts: ExhibitionFunFacts;
+  emailHighlights: ExhibitionEmailHighlights;
   days: ExhibitionDay[];
   questions: ExhibitionQuestion[];
   transcripts: ExhibitionTranscript[];
@@ -72,6 +110,10 @@ export type LocalDayRange = {
 };
 
 const numberFormat = new Intl.NumberFormat("en-CA");
+const percentFormat = new Intl.NumberFormat("en-CA", {
+  style: "percent",
+  maximumFractionDigits: 1,
+});
 
 const escapeHtml = (value: string): string =>
   value
@@ -113,10 +155,10 @@ const humanStatus = (status: string): string =>
     .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
     .join(" ");
 
-const metricCard = (label: string, value: number, detail: string): string => `
+const metricCard = (label: string, value: number | string, detail: string): string => `
   <article class="metric-card">
     <p class="metric-label">${escapeHtml(label)}</p>
-    <p class="metric-value">${numberFormat.format(value)}</p>
+    <p class="metric-value">${escapeHtml(typeof value === "number" ? numberFormat.format(value) : value)}</p>
     <p class="metric-detail">${escapeHtml(detail)}</p>
   </article>`;
 
@@ -166,6 +208,221 @@ export const countsByLocalDay = (
   return [...countsByDate].map(([date, counts]) => ({ date, counts }));
 };
 
+type ApprovedMessageCandidate = {
+  id: string;
+  status: MessageStatus;
+  audio: {
+    durationMs: number | null;
+  };
+};
+
+export const approvedMessageDurationFacts = (
+  messages: readonly ApprovedMessageCandidate[],
+  expectedApprovedMessages: number,
+): {
+  averageDurationMs: number | null;
+  longestDurationMs: number | null;
+  totalDurationMs: number;
+} => {
+  const approvedMessages = [
+    ...new Map(
+      messages
+        .filter((message) => message.status === "approved")
+        .map((message) => [message.id, message]),
+    ).values(),
+  ];
+  if (approvedMessages.length !== expectedApprovedMessages) {
+    throw new Error(
+      `The report found ${approvedMessages.length.toLocaleString("en-CA")} approved question messages, but the stats API reported ${expectedApprovedMessages.toLocaleString("en-CA")}. Message duration facts cannot be verified.`,
+    );
+  }
+
+  const missingDuration = approvedMessages.find((message) => message.audio.durationMs === null);
+  if (missingDuration) {
+    throw new Error(
+      `Approved message ${missingDuration.id} has no audio duration, so message duration facts cannot be verified.`,
+    );
+  }
+  const durations = approvedMessages.map((message) => message.audio.durationMs as number);
+  if (durations.length === 0) {
+    return { averageDurationMs: null, longestDurationMs: null, totalDurationMs: 0 };
+  }
+  const totalDurationMs = durations.reduce((total, duration) => total + duration, 0);
+  return {
+    averageDurationMs: totalDurationMs / durations.length,
+    longestDurationMs: Math.max(...durations),
+    totalDurationMs,
+  };
+};
+
+type PlaybackEventCandidate = {
+  id: string;
+  boothId: string;
+  bootId: string;
+  occurredAt: string;
+  sessionId?: string | null | undefined;
+  payload: unknown;
+};
+
+type PlaybackSessionCandidate = {
+  id: string;
+  boothId: string;
+  bootId: string;
+  startedAt: string;
+  endedAt: string | null;
+};
+
+const isMessagePlayback = (payload: unknown): boolean =>
+  typeof payload === "object" &&
+  payload !== null &&
+  (payload as { to?: unknown }).to === "playing_message";
+
+export const messagePlaybackFacts = (
+  events: readonly PlaybackEventCandidate[],
+  expectedMessagePlaybacks: number,
+  sessions: readonly PlaybackSessionCandidate[],
+): {
+  maxMessagePlaybacksInInteraction: number;
+  listeningInteractions: number;
+  repeatListeningInteractions: number;
+  playbackOccurredAts: string[];
+} => {
+  const counts = new Map<string, number>();
+  const playbackEvents = [
+    ...new Map(
+      events.filter((event) => isMessagePlayback(event.payload)).map((event) => [event.id, event]),
+    ).values(),
+  ];
+  if (playbackEvents.length !== expectedMessagePlaybacks) {
+    throw new Error(
+      `The report found ${playbackEvents.length.toLocaleString("en-CA")} message playback events, but the stats API reported ${expectedMessagePlaybacks.toLocaleString("en-CA")}. Per-interaction playback facts cannot be verified.`,
+    );
+  }
+
+  const sessionWindows = new Map<
+    string,
+    Array<{ id: string; startedAt: number; endedAt: number }>
+  >();
+  for (const session of sessions) {
+    const startedAt = new Date(session.startedAt).getTime();
+    const endedAt =
+      session.endedAt === null ? Number.POSITIVE_INFINITY : new Date(session.endedAt).getTime();
+    if (!Number.isFinite(startedAt) || Number.isNaN(endedAt)) {
+      throw new Error(
+        `Session ${session.id} has an invalid time range, so per-interaction playback facts cannot be verified.`,
+      );
+    }
+    const key = `${session.boothId}\0${session.bootId}`;
+    const windows = sessionWindows.get(key) ?? [];
+    windows.push({ id: session.id, startedAt, endedAt });
+    sessionWindows.set(key, windows);
+  }
+
+  for (const event of playbackEvents) {
+    let sessionId = event.sessionId;
+    if (!sessionId) {
+      const occurredAt = new Date(event.occurredAt).getTime();
+      if (!Number.isFinite(occurredAt)) {
+        throw new Error(
+          `Message playback event ${event.id} has an invalid occurredAt value, so per-interaction playback facts cannot be verified.`,
+        );
+      }
+      const key = `${event.boothId}\0${event.bootId}`;
+      const matchingSessions = (sessionWindows.get(key) ?? []).filter(
+        (session) => session.startedAt <= occurredAt && occurredAt <= session.endedAt,
+      );
+      if (matchingSessions.length === 1) {
+        sessionId = matchingSessions[0]!.id;
+      } else {
+        const detail =
+          matchingSessions.length === 0
+            ? "did not fall inside a call session"
+            : "fell inside more than one call session";
+        throw new Error(
+          `Message playback event ${event.id} has no sessionId and ${detail}, so per-interaction playback facts cannot be verified.`,
+        );
+      }
+    }
+    if (!sessionId) {
+      throw new Error(
+        `Message playback event ${event.id} has no sessionId, so per-interaction playback facts cannot be verified.`,
+      );
+    }
+    counts.set(sessionId, (counts.get(sessionId) ?? 0) + 1);
+  }
+  const totals = [...counts.values()];
+  return {
+    maxMessagePlaybacksInInteraction: totals.length === 0 ? 0 : Math.max(...totals),
+    listeningInteractions: totals.length,
+    repeatListeningInteractions: totals.filter((total) => total > 1).length,
+    playbackOccurredAts: playbackEvents.map((event) => event.occurredAt),
+  };
+};
+
+const peakHour = (buckets: readonly number[]): ExhibitionPeakHour | null => {
+  const interactions = Math.max(...buckets);
+  if (interactions === 0) return null;
+  return {
+    hours: buckets.flatMap((count, hour) => (count === interactions ? [hour] : [])),
+    interactions,
+  };
+};
+
+export const activityTimeHighlights = (
+  occurredAts: readonly string[],
+  timeZone: string,
+  expectedActivities: number,
+  activityLabel: string,
+): ExhibitionTimeHighlights => {
+  if (occurredAts.length !== expectedActivities) {
+    throw new Error(
+      `The report found ${occurredAts.length.toLocaleString("en-CA")} ${activityLabel}, but the stats API reported ${expectedActivities.toLocaleString("en-CA")}. Weekday and weekend hourly facts cannot be verified.`,
+    );
+  }
+  const weekday = Array.from({ length: 24 }, () => 0);
+  const weekend = Array.from({ length: 24 }, () => 0);
+  const hourFormatter = new Intl.DateTimeFormat("en-CA-u-ca-iso8601", {
+    timeZone,
+    hour: "2-digit",
+    hourCycle: "h23",
+  });
+
+  for (const occurredAt of occurredAts) {
+    const instant = new Date(occurredAt);
+    if (!Number.isFinite(instant.getTime())) {
+      throw new Error(`${activityLabel} has an invalid timestamp: ${occurredAt}.`);
+    }
+    const rawHour = hourFormatter
+      .formatToParts(instant)
+      .find((part) => part.type === "hour")?.value;
+    if (rawHour === undefined) {
+      throw new Error(`Unable to resolve the local hour for ${occurredAt} in ${timeZone}.`);
+    }
+    const hour = Number(rawHour);
+    const date = dateKeyInTimeZone(instant, timeZone);
+    const { year, month, day } = parseDateKey(date);
+    const dayOfWeek = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+    const buckets = dayOfWeek === 0 || dayOfWeek === 6 ? weekend : weekday;
+    buckets[hour] = (buckets[hour] ?? 0) + 1;
+  }
+
+  return {
+    weekdayPeak: peakHour(weekday),
+    weekendPeak: peakHour(weekend),
+  };
+};
+
+export const busiestExhibitionDay = (
+  days: readonly ExhibitionDay[],
+): ExhibitionBusiestDay | null => {
+  const interactions = Math.max(0, ...days.map((day) => day.counts.interactions));
+  if (interactions === 0) return null;
+  return {
+    dates: days.filter((day) => day.counts.interactions === interactions).map((day) => day.date),
+    interactions,
+  };
+};
+
 export const selectLatestSuccessfulTranscription = (
   transcriptions: readonly Transcription[],
 ): Transcription | null =>
@@ -193,15 +450,134 @@ export const buildLocalDayRanges = (start: Date, end: Date, timeZone: string): L
   return ranges;
 };
 
+const formatCompactDuration = (milliseconds: number | null): string => {
+  if (milliseconds === null) return "N/A";
+  const totalSeconds = Math.max(1, Math.round(milliseconds / 1_000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes === 0 ? `${seconds}s` : seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
+};
+
+const formatLongDuration = (milliseconds: number): string => {
+  const totalMinutes = Math.round(milliseconds / 60_000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) return `${numberFormat.format(totalMinutes)} min`;
+  if (minutes === 0) return `${numberFormat.format(hours)} hr`;
+  return `${numberFormat.format(hours)} hr ${numberFormat.format(minutes)} min`;
+};
+
+const hourLabel = (hour: number): string => {
+  const suffix = hour < 12 ? "a.m." : "p.m.";
+  return `${hour % 12 || 12} ${suffix}`;
+};
+
+const hourRangeLabel = (hour: number): string => {
+  const next = (hour + 1) % 24;
+  const startSuffix = hour < 12 ? "a.m." : "p.m.";
+  const endSuffix = next < 12 ? "a.m." : "p.m.";
+  const start = hour % 12 || 12;
+  const end = next % 12 || 12;
+  return startSuffix === endSuffix
+    ? `${start}-${end} ${startSuffix}`
+    : `${hourLabel(hour)}-${hourLabel(next)}`;
+};
+
+const joinList = (items: readonly string[]): string => {
+  if (items.length <= 1) return items[0] ?? "";
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}`;
+};
+
+const peakHourSummary = (peak: ExhibitionPeakHour | null, unit: string): string | null => {
+  if (!peak) return null;
+  const ranges = joinList(peak.hours.map(hourRangeLabel));
+  const each = peak.hours.length > 1 ? " each" : "";
+  return `${ranges} (${numberFormat.format(peak.interactions)} ${unit}${each})`;
+};
+
+const activityHourLine = (
+  label: string,
+  unit: string,
+  highlights: ExhibitionTimeHighlights,
+): string | null => {
+  const weekday = peakHourSummary(highlights.weekdayPeak, unit);
+  const weekend = peakHourSummary(highlights.weekendPeak, unit);
+  if (weekday && weekend) {
+    return `${label} peaked at ${weekday} on weekdays and ${weekend} on weekends.`;
+  }
+  if (weekday) return `${label} peaked at ${weekday} on weekdays.`;
+  if (weekend) return `${label} peaked at ${weekend} on weekends.`;
+  return null;
+};
+
+export const exhibitionEmailHighlightLines = (report: ExhibitionReportData): string[] => {
+  const lines = [
+    activityHourLine("Pickups", "pickups", report.emailHighlights.pickupHours),
+    activityHourLine(
+      "Leaving messages",
+      "messages left",
+      report.emailHighlights.messageLeavingHours,
+    ),
+    activityHourLine(
+      "Listening to messages",
+      "listens",
+      report.emailHighlights.messageListeningHours,
+    ),
+  ].filter((line): line is string => line !== null);
+
+  if (report.emailHighlights.busiestDay) {
+    const dates = joinList(
+      report.emailHighlights.busiestDay.dates.map((date) => formatDateKey(date)),
+    );
+    const noun = report.emailHighlights.busiestDay.dates.length === 1 ? "day" : "days";
+    lines.push(
+      `${dates} ${report.emailHighlights.busiestDay.dates.length === 1 ? "was" : "were"} the busiest ${noun}, with ${numberFormat.format(report.emailHighlights.busiestDay.interactions)} pickups.`,
+    );
+  }
+
+  if (report.totals.interactions > 0) {
+    lines.push(
+      `${percentFormat.format(report.totals.messagesLeft / report.totals.interactions)} of pickups ended with a recorded message (${numberFormat.format(report.totals.messagesLeft)} of ${numberFormat.format(report.totals.interactions)}).`,
+    );
+  }
+  if (report.totals.messagesApproved > 0) {
+    lines.push(
+      `The approved recordings add up to ${formatLongDuration(report.emailHighlights.approvedAudioDurationMs)} of visitor audio.`,
+    );
+  }
+  if (report.emailHighlights.mostAnsweredQuestion) {
+    lines.push(
+      `"${report.emailHighlights.mostAnsweredQuestion.prompt}" was the most answered question, with ${numberFormat.format(report.emailHighlights.mostAnsweredQuestion.answers)} responses.`,
+    );
+  }
+  if (report.emailHighlights.listeningInteractions > 0) {
+    lines.push(
+      `${numberFormat.format(report.emailHighlights.repeatListeningInteractions)} of ${numberFormat.format(report.emailHighlights.listeningInteractions)} listening interactions played more than one message; the record was ${numberFormat.format(report.funFacts.maxMessagePlaybacksInInteraction)} listens in one pickup.`,
+    );
+  }
+  return lines;
+};
+
 export const renderExhibitionReportHtml = (report: ExhibitionReportData): string => {
   const maxAnswers = Math.max(1, ...report.questions.map((question) => question.answers));
   const location = report.location
     ? `<span>${escapeHtml(report.location)}</span><span class="separator">/</span>`
     : "";
+  const transcriptPrompts = [
+    ...new Set([
+      ...report.matchedPrompts,
+      ...report.transcripts.map((transcript) => transcript.prompt),
+    ]),
+  ];
   const promptSummary =
-    report.matchedPrompts.length > 0
-      ? report.matchedPrompts.map((prompt) => `&ldquo;${escapeHtml(prompt)}&rdquo;`).join(", ")
-      : `No question matched &ldquo;${escapeHtml(report.targetPrompt)}&rdquo;.`;
+    transcriptPrompts.length > 0
+      ? `Responses are grouped below for ${transcriptPrompts
+          .map((prompt) => `&ldquo;${escapeHtml(prompt)}&rdquo;`)
+          .join(", ")}.`
+      : `No question matched ${report.targetPrompts
+          .map((prompt) => `&ldquo;${escapeHtml(prompt)}&rdquo;`)
+          .join(" or ")}.`;
 
   const dayRows = report.days
     .map(
@@ -234,32 +610,55 @@ export const renderExhibitionReportHtml = (report: ExhibitionReportData): string
     })
     .join("");
 
-  const transcriptEntries =
-    report.transcripts.length === 0
+  const transcriptGroups =
+    transcriptPrompts.length === 0
       ? `<p class="empty-state">No answers with transcripts were found for the matching question.</p>`
-      : report.transcripts
-          .map((transcript, index) => {
-            const original =
-              transcript.text === null
-                ? `<p class="transcript-unavailable">No successful transcription is available for this answer.</p>`
-                : transcript.text.length === 0
-                  ? `<p class="transcript-unavailable">No speech was detected in this recording.</p>`
-                  : `<p class="transcript-text">${escapeHtml(transcript.text)}</p>`;
+      : transcriptPrompts
+          .map((prompt, groupIndex) => {
+            const transcripts = report.transcripts.filter(
+              (transcript) => transcript.prompt === prompt,
+            );
+            const transcriptEntries =
+              transcripts.length === 0
+                ? `<p class="empty-state">No recorded answers were found for this question.</p>`
+                : transcripts
+                    .map((transcript, index) => {
+                      const approved = transcript.messageStatus === "approved";
+                      const original =
+                        transcript.text === null
+                          ? `<p class="transcript-unavailable">No successful transcription is available for this answer.</p>`
+                          : transcript.text.length === 0
+                            ? `<p class="transcript-unavailable">No speech was detected in this recording.</p>`
+                            : `<p class="transcript-text">${escapeHtml(transcript.text)}</p>`;
+                      const reason =
+                        !approved && transcript.nonApprovalReason
+                          ? `<p class="transcript-reason"><strong>Reason:</strong> ${escapeHtml(transcript.nonApprovalReason)}</p>`
+                          : "";
+                      return `
+                        <article class="transcript${approved ? "" : " transcript--not-approved"}">
+                          <header>
+                            <span class="transcript-number">${index + 1}</span>
+                            <p>
+                              ${escapeHtml(formatInstant(transcript.recordedAt, report.timeZone))}
+                              <span class="separator">/</span>
+                              ${escapeHtml(humanStatus(transcript.messageStatus))}
+                            </p>
+                          </header>
+                          ${original}
+                          ${reason}
+                        </article>`;
+                    })
+                    .join("");
+            const answerLabel = transcripts.length === 1 ? "recorded answer" : "recorded answers";
             return `
-              <article class="transcript">
-                <header>
-                  <span class="transcript-number">${index + 1}</span>
-                  <div>
-                    <h3>${escapeHtml(transcript.prompt)}</h3>
-                    <p>
-                      ${escapeHtml(formatInstant(transcript.recordedAt, report.timeZone))}
-                      <span class="separator">/</span>
-                      ${escapeHtml(humanStatus(transcript.messageStatus))}
-                    </p>
-                  </div>
+              <div class="transcript-group">
+                <header class="transcript-group-header">
+                  <p class="transcript-group-kicker">Question ${groupIndex + 1}</p>
+                  <h3 class="transcript-group-prompt">${escapeHtml(prompt)}</h3>
+                  <p class="transcript-group-count">${numberFormat.format(transcripts.length)} ${answerLabel}</p>
                 </header>
-                ${original}
-              </article>`;
+                ${transcriptEntries}
+              </div>`;
           })
           .join("");
 
@@ -431,6 +830,9 @@ export const renderExhibitionReportHtml = (report: ExhibitionReportData): string
       grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 14px;
     }
+    .metrics--fun {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
     .metric-card {
       min-height: 170px;
       padding: 22px;
@@ -537,6 +939,36 @@ export const renderExhibitionReportHtml = (report: ExhibitionReportData): string
       color: var(--muted);
       font-style: italic;
     }
+    .transcript-group + .transcript-group {
+      margin-top: 52px;
+      padding-top: 46px;
+      border-top: 4px solid var(--red-wash);
+    }
+    .transcript-group-header {
+      margin-bottom: 18px;
+      break-after: avoid;
+    }
+    .transcript-group-kicker,
+    .transcript-group-count {
+      margin: 0;
+      color: var(--muted);
+    }
+    .transcript-group-kicker {
+      font-family: var(--font-display);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .transcript-group-prompt {
+      margin: 4px 0;
+      font-family: var(--font-display);
+      font-size: 1.55rem;
+      line-height: 1.2;
+    }
+    .transcript-group-count {
+      font-size: 0.82rem;
+    }
     .transcript {
       padding: 28px 0;
       border-top: 1px solid var(--line);
@@ -562,13 +994,8 @@ export const renderExhibitionReportHtml = (report: ExhibitionReportData): string
       font-family: var(--font-display);
       font-weight: 750;
     }
-    .transcript h3 {
-      margin: 0;
-      font-family: var(--font-display);
-      font-size: 1rem;
-    }
     .transcript header p {
-      margin: 2px 0 0;
+      margin: 9px 0 0;
       color: var(--muted);
       font-size: 0.78rem;
     }
@@ -581,6 +1008,20 @@ export const renderExhibitionReportHtml = (report: ExhibitionReportData): string
       font-family: var(--font-body);
       font-size: 1.08rem;
       line-height: 1.7;
+    }
+    .transcript--not-approved .transcript-text {
+      opacity: 0.68;
+      text-decoration: line-through;
+      text-decoration-color: var(--red);
+      text-decoration-thickness: 2px;
+    }
+    .transcript-reason {
+      margin: 12px 0 0 54px;
+      padding: 10px 12px;
+      border-left: 3px solid var(--red);
+      color: var(--ink);
+      background: var(--red-wash);
+      font-size: 0.9rem;
     }
     .transcript-unavailable,
     .empty-state {
@@ -679,6 +1120,12 @@ export const renderExhibitionReportHtml = (report: ExhibitionReportData): string
       .transcripts-section {
         break-before: page;
       }
+      .transcript-group + .transcript-group {
+        margin-top: 0;
+        padding-top: 0;
+        border-top: 0;
+        break-before: page;
+      }
       .print-button {
         display: none;
       }
@@ -746,6 +1193,29 @@ export const renderExhibitionReportHtml = (report: ExhibitionReportData): string
     </section>
 
     <section>
+      <p class="section-kicker">Fun facts</p>
+      <h2>Standout visitor moments</h2>
+      <p class="section-intro">A few details behind the headline totals.</p>
+      <div class="metrics metrics--fun">
+        ${metricCard(
+          "Average approved message",
+          formatCompactDuration(report.funFacts.averageApprovedMessageDurationMs),
+          `Across ${numberFormat.format(report.totals.messagesApproved)} approved recordings`,
+        )}
+        ${metricCard(
+          "Longest approved message",
+          formatCompactDuration(report.funFacts.longestApprovedMessageDurationMs),
+          "The longest recording approved for playback",
+        )}
+        ${metricCard(
+          "Most listens in one interaction",
+          report.funFacts.maxMessagePlaybacksInInteraction,
+          "Message playback starts during a single pickup",
+        )}
+      </div>
+    </section>
+
+    <section>
       <p class="section-kicker">Daily activity</p>
       <h2>Day-by-day breakdown</h2>
       <p class="section-intro">Calendar days use ${escapeHtml(report.timeZone)}.</p>
@@ -788,7 +1258,7 @@ export const renderExhibitionReportHtml = (report: ExhibitionReportData): string
       <p class="section-kicker">Visitor voices</p>
       <h2>Selected answer transcriptions</h2>
       <p class="transcript-prompt">${promptSummary}</p>
-      ${transcriptEntries}
+      ${transcriptGroups}
     </section>
 
     <section>

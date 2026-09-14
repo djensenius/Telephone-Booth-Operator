@@ -4,16 +4,23 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { StatsOverview, Transcription } from "@telephone-booth-operator/shared";
 import {
+  activityTimeHighlights,
+  approvedMessageDurationFacts,
+  busiestExhibitionDay,
   buildLocalDayRanges,
   countsByLocalDay,
   countsFromOverview,
+  exhibitionEmailHighlightLines,
+  messagePlaybackFacts,
   promptMatches,
   renderExhibitionReportHtml,
   selectLatestSuccessfulTranscription,
   type ExhibitionReportData,
 } from "../src/lib/exhibition-report.js";
 import {
+  DEFAULT_FUTURE_TRANSCRIPT_PROMPT,
   DEFAULT_TRANSCRIPT_PROMPT,
+  DEFAULT_TRANSCRIPT_PROMPTS,
   assertOverviewMessagesComplete,
   generateExhibitionReport,
   loadExhibitionReportEnvironment,
@@ -28,10 +35,12 @@ const statsOverviewFixture = ({
   rangeStart,
   rangeEnd,
   allRecordings,
+  approved = 3,
 }: {
   rangeStart: string;
   rangeEnd: string;
   allRecordings: number;
+  approved?: number;
 }): StatsOverview => ({
   window: "custom",
   rangeStart,
@@ -58,10 +67,10 @@ const statsOverviewFixture = ({
     perDay: [],
   },
   messages: {
-    total: 3,
-    approved: 3,
+    total: approved,
+    approved,
     allRecordings,
-    byStatus: { approved: 3, pending: 1 },
+    byStatus: { approved, pending: Math.max(0, allRecordings - approved) },
     averageDurationMs: 1_000,
   },
   playback: { totalPlaybacks: 2 },
@@ -108,6 +117,181 @@ describe("exhibition report helpers", () => {
       messagesLeft: 17,
       messagesApproved: 11,
       messagesListenedTo: 9,
+    });
+  });
+
+  it("calculates complete approved-message duration facts", () => {
+    expect(
+      approvedMessageDurationFacts(
+        [
+          {
+            id: "approved-a",
+            status: "approved",
+            audio: { durationMs: 1_000 },
+          },
+          {
+            id: "approved-b",
+            status: "approved",
+            audio: { durationMs: 2_000 },
+          },
+          {
+            id: "rejected",
+            status: "rejected",
+            audio: { durationMs: 10_000 },
+          },
+        ],
+        2,
+      ),
+    ).toEqual({
+      averageDurationMs: 1_500,
+      longestDurationMs: 2_000,
+      totalDurationMs: 3_000,
+    });
+  });
+
+  it("refuses partial or durationless approved-message facts", () => {
+    expect(() =>
+      approvedMessageDurationFacts(
+        [{ id: "approved", status: "approved", audio: { durationMs: 1_000 } }],
+        2,
+      ),
+    ).toThrow("Message duration facts cannot be verified");
+    expect(() =>
+      approvedMessageDurationFacts(
+        [{ id: "approved", status: "approved", audio: { durationMs: null } }],
+        1,
+      ),
+    ).toThrow("has no audio duration");
+  });
+
+  it("groups repeat message playbacks by interaction", () => {
+    expect(
+      messagePlaybackFacts(
+        [
+          {
+            id: "play-a",
+            boothId: "booth",
+            bootId: "boot",
+            occurredAt: "2026-08-20T14:00:00.000Z",
+            sessionId: "session-a",
+            payload: { to: "playing_message" },
+          },
+          {
+            id: "play-b",
+            boothId: "booth",
+            bootId: "boot",
+            occurredAt: "2026-08-20T14:01:00.000Z",
+            sessionId: "session-a",
+            payload: { to: "playing_message" },
+          },
+          {
+            id: "play-c",
+            boothId: "booth",
+            bootId: "boot",
+            occurredAt: "2026-08-20T14:02:00.000Z",
+            sessionId: "session-b",
+            payload: { to: "playing_message" },
+          },
+          {
+            id: "other",
+            boothId: "booth",
+            bootId: "boot",
+            occurredAt: "2026-08-20T14:03:00.000Z",
+            sessionId: "session-b",
+            payload: { to: "playing_instructions" },
+          },
+        ],
+        3,
+        [],
+      ),
+    ).toEqual({
+      maxMessagePlaybacksInInteraction: 2,
+      listeningInteractions: 2,
+      repeatListeningInteractions: 1,
+      playbackOccurredAts: [
+        "2026-08-20T14:00:00.000Z",
+        "2026-08-20T14:01:00.000Z",
+        "2026-08-20T14:02:00.000Z",
+      ],
+    });
+  });
+
+  it("correlates a legacy playback event to one unambiguous session", () => {
+    expect(
+      messagePlaybackFacts(
+        [
+          {
+            id: "legacy-playback",
+            boothId: "booth",
+            bootId: "boot",
+            occurredAt: "2026-08-20T14:01:00.000Z",
+            payload: { to: "playing_message" },
+          },
+        ],
+        1,
+        [
+          {
+            id: "session",
+            boothId: "booth",
+            bootId: "boot",
+            startedAt: "2026-08-20T14:00:00.000Z",
+            endedAt: "2026-08-20T14:02:00.000Z",
+          },
+        ],
+      ),
+    ).toEqual({
+      maxMessagePlaybacksInInteraction: 1,
+      listeningInteractions: 1,
+      repeatListeningInteractions: 0,
+      playbackOccurredAts: ["2026-08-20T14:01:00.000Z"],
+    });
+  });
+
+  it("finds local weekday and weekend peak hours", () => {
+    expect(
+      activityTimeHighlights(
+        [
+          "2026-08-20T14:15:00.000Z",
+          "2026-08-20T14:45:00.000Z",
+          "2026-08-21T15:00:00.000Z",
+          "2026-08-22T18:00:00.000Z",
+          "2026-08-22T18:30:00.000Z",
+        ],
+        "America/Toronto",
+        5,
+        "interactions",
+      ),
+    ).toEqual({
+      weekdayPeak: { hours: [10], interactions: 2 },
+      weekendPeak: { hours: [14], interactions: 2 },
+    });
+  });
+
+  it("identifies tied busiest exhibition days", () => {
+    expect(
+      busiestExhibitionDay([
+        {
+          date: "2026-08-20",
+          counts: {
+            interactions: 10,
+            messagesLeft: 3,
+            messagesApproved: 2,
+            messagesListenedTo: 4,
+          },
+        },
+        {
+          date: "2026-08-21",
+          counts: {
+            interactions: 10,
+            messagesLeft: 2,
+            messagesApproved: 2,
+            messagesListenedTo: 3,
+          },
+        },
+      ]),
+    ).toEqual({
+      dates: ["2026-08-20", "2026-08-21"],
+      interactions: 10,
     });
   });
 
@@ -178,8 +362,19 @@ describe("exhibition report helpers", () => {
     });
   });
 
-  it("uses the live installation prompt by default", () => {
-    expect(parseExhibitionReportArgs([]).targetPrompt).toBe(DEFAULT_TRANSCRIPT_PROMPT);
+  it("uses both live installation prompts by default", () => {
+    expect(parseExhibitionReportArgs([]).targetPrompts).toEqual(DEFAULT_TRANSCRIPT_PROMPTS);
+  });
+
+  it("accepts repeated transcript question options", () => {
+    expect(
+      parseExhibitionReportArgs([
+        "--transcript-question",
+        "First prompt",
+        "--transcript-question",
+        "Second prompt",
+      ]).targetPrompts,
+    ).toEqual(["First prompt", "Second prompt"]);
   });
 
   it("loads an explicit env file without mixing ambient report credentials", async () => {
@@ -333,7 +528,7 @@ describe("exhibition report helpers", () => {
           output: null,
           installation: "active",
           timeZone: "America/Toronto",
-          targetPrompt: DEFAULT_TRANSCRIPT_PROMPT,
+          targetPrompts: [...DEFAULT_TRANSCRIPT_PROMPTS],
           title: null,
           help: false,
         },
@@ -411,9 +606,11 @@ describe("exhibition report helpers", () => {
     const fixedNow = new Date("2026-08-20T05:00:00.000Z");
     const installationId = "11111111-1111-4111-8111-111111111111";
     const currentQuestionId = "22222222-2222-4222-8222-222222222222";
+    const hopeQuestionId = "21212121-2121-4121-8121-212121212121";
     const futureQuestionId = "23232323-2323-4232-8232-232323232323";
     const unrelatedQuestionId = "33333333-3333-4333-8333-333333333333";
     const rolloverQuestionId = "44444444-4444-4444-8444-444444444444";
+    const hopeMessageId = "45454545-4545-4545-8545-454545454545";
     const afterCutoffMessageId = "55555555-5555-4555-8555-555555555555";
     const embeddedMessageId = "66666666-6666-4666-8666-666666666666";
     const noTranscriptMessageId = "77777777-7777-4777-8777-777777777777";
@@ -482,10 +679,18 @@ describe("exhibition report helpers", () => {
       "Cross-era success",
       "2026-08-20T04:21:00.000Z",
     );
+    const hopeTranscription = transcription(
+      "abababab-abab-4bab-8bab-abababababab",
+      hopeMessageId,
+      "succeeded",
+      "Hopeful future",
+      "2026-08-20T04:11:00.000Z",
+    );
     const overview = statsOverviewFixture({
       rangeStart: "2026-08-20T04:00:00.000Z",
       rangeEnd: fixedNow.toISOString(),
-      allRecordings: 4,
+      allRecordings: 5,
+      approved: 4,
     });
     const currentQuestion = {
       id: currentQuestionId,
@@ -493,6 +698,15 @@ describe("exhibition report helpers", () => {
       status: "active",
       weight: 1,
       messageCount: 4,
+      createdAt: "2026-08-20T04:00:00.000Z",
+      audio,
+    };
+    const hopeQuestion = {
+      id: hopeQuestionId,
+      prompt: DEFAULT_FUTURE_TRANSCRIPT_PROMPT,
+      status: "active",
+      weight: 1,
+      messageCount: 1,
       createdAt: "2026-08-20T04:00:00.000Z",
       audio,
     };
@@ -529,15 +743,67 @@ describe("exhibition report helpers", () => {
       installation: string,
       createdAt: string,
       latestTranscription?: Transcription | null,
+      status: "approved" | "rejected" | "pending" | "received" = "approved",
+      notes: string | null = null,
     ) => ({
       id,
-      status: "approved",
+      status,
       installationId: installation,
       questionId,
+      notes,
       createdAt,
       audio,
       ...(latestTranscription !== undefined ? { latestTranscription } : {}),
     });
+    const sessionIds = [
+      "10101010-1010-4010-8010-101010101010",
+      "20202020-2020-4020-8020-202020202020",
+      "30303030-3030-4030-8030-303030303030",
+      "40404040-4040-4040-8040-404040404040",
+      "50505050-5050-4050-8050-505050505050",
+    ];
+    const session = (id: string, startedAt: string, outcome: string) => ({
+      id,
+      boothId: "booth-1",
+      bootId: "12121212-1212-4121-8121-121212121212",
+      startedAt,
+      endedAt: new Date(new Date(startedAt).getTime() + 60_000).toISOString(),
+      digitsDialed: "2",
+      outcome,
+      recordingId: null,
+      durationMs: 60_000,
+      version: null,
+    });
+    const sessions = sessionIds.map((id, index) =>
+      session(
+        id,
+        `2026-08-20T04:${String(index * 10 + 5).padStart(2, "0")}:00.000Z`,
+        index < 4 ? "recording_completed" : "hung_up_during_prompt",
+      ),
+    );
+    const stateTransition = (id: string, sessionId: string, occurredAt: string, to: string) => ({
+      id,
+      eventId: id,
+      boothId: "booth-1",
+      bootId: "12121212-1212-4121-8121-121212121212",
+      type: "state_transition",
+      occurredAt,
+      sessionId,
+      recordingId: null,
+      payload: { to },
+      version: null,
+      receivedAt: occurredAt,
+    });
+    const stateTransitionEvents = [
+      stateTransition("playback-1", sessionIds[0]!, "2026-08-20T04:06:00.000Z", "playing_message"),
+      stateTransition(
+        "instructions-1",
+        sessionIds[1]!,
+        "2026-08-20T04:16:00.000Z",
+        "playing_instructions",
+      ),
+      stateTransition("playback-2", sessionIds[0]!, "2026-08-20T04:07:00.000Z", "playing_message"),
+    ];
     const requests: string[] = [];
     const responseFor = (path: string): unknown => {
       const url = new URL(path, apiRoot);
@@ -560,11 +826,11 @@ describe("exhibition report helpers", () => {
         const scope = url.searchParams.get("installationId");
         const cursor = url.searchParams.get("cursor");
         if (scope === installationId) {
-          return { items: [currentQuestion, futureQuestion], nextCursor: null };
+          return { items: [currentQuestion, hopeQuestion, futureQuestion], nextCursor: null };
         }
         if (scope === "all" && cursor === null) {
           return {
-            items: [currentQuestion, futureQuestion, unrelatedQuestion],
+            items: [currentQuestion, hopeQuestion, futureQuestion, unrelatedQuestion],
             nextCursor: "question-page-2",
           };
         }
@@ -615,6 +881,22 @@ describe("exhibition report helpers", () => {
               installationId,
               "2026-08-20T04:30:00.000Z",
               failedTranscription,
+              "rejected",
+              "Audio was too quiet <to use>",
+            ),
+          ],
+          nextCursor: null,
+        };
+      }
+      if (url.pathname === `/v1/questions/${hopeQuestionId}/messages`) {
+        return {
+          items: [
+            message(
+              hopeMessageId,
+              hopeQuestionId,
+              installationId,
+              "2026-08-20T04:10:00.000Z",
+              hopeTranscription,
             ),
           ],
           nextCursor: null,
@@ -653,6 +935,18 @@ describe("exhibition report helpers", () => {
       if (url.pathname === `/v1/messages/${rolloverMessageId}/transcriptions`) {
         return { items: [rolloverTranscription] };
       }
+      if (url.pathname === "/v1/sessions") {
+        if (url.searchParams.get("cursor") === null) {
+          return { items: sessions.slice(0, 3), nextCursor: "session-page-2" };
+        }
+        return { items: sessions.slice(3), nextCursor: null };
+      }
+      if (url.pathname === "/v1/events") {
+        if (url.searchParams.get("cursor") === null) {
+          return { items: stateTransitionEvents.slice(0, 2), nextCursor: "event-page-2" };
+        }
+        return { items: stateTransitionEvents.slice(2), nextCursor: null };
+      }
       throw new Error(`Unexpected report request: ${url.pathname}${url.search}`);
     };
     const client: ApiClient = {
@@ -673,7 +967,7 @@ describe("exhibition report helpers", () => {
             output,
             installation: "active",
             timeZone: "America/Toronto",
-            targetPrompt: DEFAULT_TRANSCRIPT_PROMPT,
+            targetPrompts: [...DEFAULT_TRANSCRIPT_PROMPTS],
             title: "Orchestration report",
             help: false,
           },
@@ -686,7 +980,26 @@ describe("exhibition report helpers", () => {
       expect(html).toContain("Orchestration report");
       expect(html).toContain("Embedded success");
       expect(html).toContain("Recovered success");
+      expect(html).toContain('class="transcript transcript--not-approved"');
+      expect(html).toContain(
+        '<p class="transcript-reason"><strong>Reason:</strong> Audio was too quiet &lt;to use&gt;</p>',
+      );
       expect(html).toContain("Cross-era success");
+      expect(html).toContain("Hopeful future");
+      expect(html).toContain(DEFAULT_FUTURE_TRANSCRIPT_PROMPT);
+      const nameQuestionHeading = html.indexOf(
+        `<h3 class="transcript-group-prompt">${DEFAULT_TRANSCRIPT_PROMPT}</h3>`,
+      );
+      const futureQuestionHeading = html.indexOf(
+        `<h3 class="transcript-group-prompt">${DEFAULT_FUTURE_TRANSCRIPT_PROMPT}</h3>`,
+      );
+      expect(nameQuestionHeading).toBeGreaterThan(-1);
+      expect(futureQuestionHeading).toBeGreaterThan(nameQuestionHeading);
+      expect(html).toContain(
+        `<h3 class="transcript-group-prompt">${DEFAULT_TRANSCRIPT_PROMPT}</h3>`,
+      );
+      expect(html).toContain("Average approved message");
+      expect(html).toContain("Most listens in one interaction");
       expect(html).toContain("No successful transcription is available");
       expect(html).not.toContain("After cutoff");
       expect(html).not.toContain("Future cutoff question.");
@@ -725,6 +1038,18 @@ describe("exhibition report helpers", () => {
           `/v1/messages/${rolloverMessageId}/transcriptions`,
         ].sort(),
       );
+      expect(
+        requestUrls.some(
+          (url) =>
+            url.pathname === "/v1/sessions" && url.searchParams.get("cursor") === "session-page-2",
+        ),
+      ).toBe(true);
+      expect(
+        requestUrls.some(
+          (url) =>
+            url.pathname === "/v1/events" && url.searchParams.get("cursor") === "event-page-2",
+        ),
+      ).toBe(true);
     } finally {
       log.mockRestore();
       await rm(directory, { recursive: true, force: true });
@@ -742,13 +1067,43 @@ describe("exhibition report helpers", () => {
       generatedAt: "2026-08-21T14:00:00.000Z",
       timeZone: "America/Toronto",
       sourceHost: "operator.example.test",
-      targetPrompt: "what would you name this space",
+      targetPrompts: [
+        "what would you name this space",
+        "what do you hope the future holds for this space",
+      ],
       matchedPrompts: ["What would you name this space?"],
       totals: {
         interactions: 10,
         messagesLeft: 4,
         messagesApproved: 3,
         messagesListenedTo: 2,
+      },
+      funFacts: {
+        averageApprovedMessageDurationMs: 30_000,
+        longestApprovedMessageDurationMs: 60_000,
+        maxMessagePlaybacksInInteraction: 2,
+      },
+      emailHighlights: {
+        pickupHours: {
+          weekdayPeak: { hours: [10], interactions: 6 },
+          weekendPeak: { hours: [14], interactions: 4 },
+        },
+        messageLeavingHours: {
+          weekdayPeak: { hours: [11], interactions: 3 },
+          weekendPeak: { hours: [15], interactions: 2 },
+        },
+        messageListeningHours: {
+          weekdayPeak: { hours: [12], interactions: 4 },
+          weekendPeak: { hours: [16], interactions: 2 },
+        },
+        busiestDay: { dates: ["2026-08-20"], interactions: 10 },
+        approvedAudioDurationMs: 90_000,
+        listeningInteractions: 2,
+        repeatListeningInteractions: 1,
+        mostAnsweredQuestion: {
+          prompt: "Question <one>?",
+          answers: 4,
+        },
       },
       days: [
         {
@@ -777,6 +1132,7 @@ describe("exhibition report helpers", () => {
           recordedAt: "2026-08-20T15:00:00.000Z",
           messageStatus: "approved",
           text: "<script>alert('no')</script>",
+          nonApprovalReason: null,
         },
       ],
     };
@@ -795,7 +1151,25 @@ describe("exhibition report helpers", () => {
     expect(html).toContain("--red-strong: rgb(179 19 47)");
     expect(html).toContain('local("Univers Bold")');
     expect(html).toContain('local("Univers Condensed")');
+    expect(html).toContain("Average approved message");
+    expect(html).toContain("Longest approved message");
+    expect(html).toContain("Most listens in one interaction");
     expect(html).toContain("<h2>Selected answer transcriptions</h2>");
+    expect(html).toContain(
+      '<h3 class="transcript-group-prompt">What would you name this space?</h3>',
+    );
     expect(html).not.toContain("<h2>Name this space</h2>");
+
+    const emailLines = exhibitionEmailHighlightLines(report);
+    expect(emailLines).toContain(
+      "Pickups peaked at 10-11 a.m. (6 pickups) on weekdays and 2-3 p.m. (4 pickups) on weekends.",
+    );
+    expect(emailLines).toContain(
+      "Leaving messages peaked at 11 a.m.-12 p.m. (3 messages left) on weekdays and 3-4 p.m. (2 messages left) on weekends.",
+    );
+    expect(emailLines).toContain(
+      "Listening to messages peaked at 12-1 p.m. (4 listens) on weekdays and 4-5 p.m. (2 listens) on weekends.",
+    );
+    expect(emailLines).toContain("40% of pickups ended with a recorded message (4 of 10).");
   });
 });

@@ -2,6 +2,8 @@ import { mkdir, open, readFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  BoothEventListSchema,
+  CallSessionListSchema,
   InstallationSchema,
   MessageSchema,
   QuestionSchema,
@@ -15,9 +17,14 @@ import {
 import { parse as parseEnvFile } from "dotenv";
 import { z } from "zod";
 import {
+  activityTimeHighlights,
+  approvedMessageDurationFacts,
+  busiestExhibitionDay,
   buildLocalDayRanges,
   countsByLocalDay,
   countsFromOverview,
+  exhibitionEmailHighlightLines,
+  messagePlaybackFacts,
   promptMatches,
   renderExhibitionReportHtml,
   selectLatestSuccessfulTranscription,
@@ -29,9 +36,16 @@ import { DEFAULT_TIME_ZONE, dateKeyInTimeZone, isValidTimeZone } from "../src/li
 
 const REPOSITORY_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const PAGE_LIMIT = 200;
+const OBSERVABILITY_PAGE_LIMIT = 500;
 const API_TIMEOUT_MS = 30_000;
 const OVERVIEW_MESSAGE_LIMIT = 5_000;
 export const DEFAULT_TRANSCRIPT_PROMPT = "What name would you give this space as it exists now?";
+export const DEFAULT_FUTURE_TRANSCRIPT_PROMPT =
+  "Week 4 - What do you hope the future holds for this space?";
+export const DEFAULT_TRANSCRIPT_PROMPTS = [
+  DEFAULT_TRANSCRIPT_PROMPT,
+  DEFAULT_FUTURE_TRANSCRIPT_PROMPT,
+] as const;
 
 const QuestionPageSchema = z.object({
   items: z.array(QuestionSchema),
@@ -51,7 +65,7 @@ type CliOptions = {
   output: string | null;
   installation: string;
   timeZone: string;
-  targetPrompt: string;
+  targetPrompts: string[];
   title: string | null;
   help: boolean;
 };
@@ -81,7 +95,8 @@ Options:
   --load-env <path>             Use report variables from an env file
   --installation <active|uuid>  Installation to report (default: active)
   --time-zone <iana-zone>       Calendar time zone (default: America/Toronto)
-  --transcript-question <text>  Prompt fragment for the transcript section
+  --transcript-question <text>  Prompt fragment for the transcript section;
+                                repeat to include multiple questions
   --title <text>                Report title
   --output <path>               Output HTML path, relative to the repository root
   --help                        Show this help
@@ -99,7 +114,7 @@ export const parseExhibitionReportArgs = (argv: readonly string[]): CliOptions =
     output: null,
     installation: "active",
     timeZone: DEFAULT_TIME_ZONE,
-    targetPrompt: DEFAULT_TRANSCRIPT_PROMPT,
+    targetPrompts: [],
     title: null,
     help: false,
   };
@@ -124,7 +139,7 @@ export const parseExhibitionReportArgs = (argv: readonly string[]): CliOptions =
         index += 1;
         break;
       case "--transcript-question":
-        options.targetPrompt = valueAfter(argv, index, option);
+        options.targetPrompts.push(valueAfter(argv, index, option));
         index += 1;
         break;
       case "--title":
@@ -151,8 +166,11 @@ export const parseExhibitionReportArgs = (argv: readonly string[]): CliOptions =
   if (!isValidTimeZone(options.timeZone)) {
     throw new Error(`Invalid IANA time zone: ${options.timeZone}.`);
   }
-  if (options.targetPrompt.trim().length === 0) {
+  if (options.targetPrompts.some((targetPrompt) => targetPrompt.trim().length === 0)) {
     throw new Error("--transcript-question cannot be empty.");
+  }
+  if (options.targetPrompts.length === 0) {
+    options.targetPrompts = [...DEFAULT_TRANSCRIPT_PROMPTS];
   }
   return options;
 };
@@ -317,6 +335,63 @@ const fetchOverview = (client: ApiClient, installationId: string, start: Date, e
     StatsOverviewSchema,
   );
 
+const fetchCallSessions = async (
+  client: ApiClient,
+  installationId: string,
+  start: Date,
+  end: Date,
+): Promise<z.infer<typeof CallSessionListSchema>["items"]> => {
+  const sessions: z.infer<typeof CallSessionListSchema>["items"] = [];
+  let cursor: string | null = null;
+  do {
+    const page: z.infer<typeof CallSessionListSchema> = await client.get(
+      queryPath("/v1/sessions", {
+        installationId,
+        limit: OBSERVABILITY_PAGE_LIMIT,
+        cursor,
+      }),
+      CallSessionListSchema,
+    );
+    for (const session of page.items) {
+      const startedAt = new Date(session.startedAt).getTime();
+      if (!Number.isFinite(startedAt)) {
+        throw new Error(`Session ${session.id} has an invalid startedAt value.`);
+      }
+      if (startedAt >= start.getTime() && startedAt <= end.getTime()) sessions.push(session);
+    }
+    const oldest = page.items.at(-1);
+    if (oldest && new Date(oldest.startedAt).getTime() < start.getTime()) break;
+    cursor = page.nextCursor;
+  } while (cursor !== null);
+  return sessions;
+};
+
+const fetchStateTransitionEvents = async (
+  client: ApiClient,
+  installationId: string,
+  start: Date,
+  end: Date,
+): Promise<z.infer<typeof BoothEventListSchema>["items"]> => {
+  const events: z.infer<typeof BoothEventListSchema>["items"] = [];
+  let cursor: string | null = null;
+  do {
+    const page: z.infer<typeof BoothEventListSchema> = await client.get(
+      queryPath("/v1/events", {
+        installationId,
+        type: "state_transition",
+        since: start.toISOString(),
+        until: end.toISOString(),
+        limit: OBSERVABILITY_PAGE_LIMIT,
+        cursor,
+      }),
+      BoothEventListSchema,
+    );
+    events.push(...page.items);
+    cursor = page.nextCursor;
+  } while (cursor !== null);
+  return events;
+};
+
 const slugify = (value: string): string => {
   const slug = value
     .toLocaleLowerCase("en-CA")
@@ -390,10 +465,10 @@ const buildQuestionReports = (rows: readonly QuestionWithMessages[]): Exhibition
 const buildTranscripts = async (
   client: ApiClient,
   rows: readonly QuestionWithMessages[],
-  targetPrompt: string,
+  targetPrompts: readonly string[],
 ): Promise<ExhibitionTranscript[]> => {
   const targetMessages = rows.flatMap(({ question, messages }) =>
-    promptMatches(question.prompt, targetPrompt)
+    targetPrompts.some((targetPrompt) => promptMatches(question.prompt, targetPrompt))
       ? messages
           .filter((message) => message.status !== "uploading")
           .map((message) => ({ question, message }))
@@ -412,12 +487,22 @@ const buildTranscripts = async (
       );
       transcription = selectLatestSuccessfulTranscription(history.items);
     }
+    const operatorReason = message.notes?.trim();
+    const moderation = message.latestModeration;
+    const moderationReason =
+      moderation?.status === "succeeded" &&
+      moderation.transcriptionId === (transcription?.id ?? null) &&
+      moderation.reasonSummary?.trim()
+        ? moderation.reasonSummary.trim()
+        : null;
     return {
       messageId: message.id,
       prompt: question.prompt,
       recordedAt: message.receivedAt ?? message.createdAt,
       messageStatus: message.status,
       text: transcription?.text ?? null,
+      nonApprovalReason:
+        message.status === "approved" ? null : operatorReason || moderationReason || null,
     } satisfies ExhibitionTranscript;
   });
 
@@ -460,13 +545,16 @@ export const generateExhibitionReport = async (
   const reportEnd = new Date(totalOverview.rangeEnd);
   const dayRanges = buildLocalDayRanges(installationStart, reportEnd, options.timeZone);
 
-  const [dailyOverviews, scopedQuestions, allQuestions] = await Promise.all([
-    mapInBatches(dayRanges, 4, (range) =>
-      fetchOverview(client, installation.id, range.start, range.end),
-    ),
-    fetchQuestions(client, installation.id),
-    fetchQuestions(client, "all"),
-  ]);
+  const [dailyOverviews, scopedQuestions, allQuestions, sessions, stateTransitionEvents] =
+    await Promise.all([
+      mapInBatches(dayRanges, 4, (range) =>
+        fetchOverview(client, installation.id, range.start, range.end),
+      ),
+      fetchQuestions(client, installation.id),
+      fetchQuestions(client, "all"),
+      fetchCallSessions(client, installation.id, installationStart, reportEnd),
+      fetchStateTransitionEvents(client, installation.id, installationStart, reportEnd),
+    ]);
 
   const scopedQuestionIds = new Set(scopedQuestions.map((question) => question.id));
   const questions = [
@@ -494,14 +582,62 @@ export const generateExhibitionReport = async (
     })
   ).filter(({ question, messages }) => scopedQuestionIds.has(question.id) || messages.length > 0);
   const questionReports = buildQuestionReports(questionsWithMessages);
-  const transcripts = await buildTranscripts(client, questionsWithMessages, options.targetPrompt);
+  const transcripts = await buildTranscripts(client, questionsWithMessages, options.targetPrompts);
+  const reportMessages = [
+    ...new Map(
+      questionsWithMessages
+        .flatMap(({ messages }) => messages)
+        .map((message) => [message.id, message]),
+    ).values(),
+  ];
+  const expectedApprovedMessages = totalOverview.messages.approved ?? totalOverview.messages.total;
+  const durationFacts = approvedMessageDurationFacts(reportMessages, expectedApprovedMessages);
+  const playbackFacts = messagePlaybackFacts(
+    stateTransitionEvents,
+    totalOverview.playback.totalPlaybacks,
+    sessions,
+  );
+  const pickupHours = activityTimeHighlights(
+    sessions.map((session) => session.startedAt),
+    options.timeZone,
+    totalOverview.interactions.total,
+    "interactions",
+  );
+  const messageLeavingHours = activityTimeHighlights(
+    sessions
+      .filter((session) => session.outcome === "recording_completed")
+      .map((session) => session.startedAt),
+    options.timeZone,
+    totalOverview.interactions.messagesLeft,
+    "message-leaving interactions",
+  );
+  const messageListeningHours = activityTimeHighlights(
+    playbackFacts.playbackOccurredAts,
+    options.timeZone,
+    totalOverview.playback.totalPlaybacks,
+    "message playbacks",
+  );
+  const days = countsByLocalDay(dayRanges, dailyOverviews);
+  const mostAnsweredQuestion = questionReports.find((question) => question.answers > 0) ?? null;
   const matchedPrompts = [
     ...new Set(
       questionsWithMessages
-        .filter(({ question }) => promptMatches(question.prompt, options.targetPrompt))
+        .filter(({ question }) =>
+          options.targetPrompts.some((targetPrompt) =>
+            promptMatches(question.prompt, targetPrompt),
+          ),
+        )
         .map(({ question }) => question.prompt),
     ),
-  ];
+  ].sort((left, right) => {
+    const rank = (prompt: string): number => {
+      const index = options.targetPrompts.findIndex((targetPrompt) =>
+        promptMatches(prompt, targetPrompt),
+      );
+      return index === -1 ? options.targetPrompts.length : index;
+    };
+    return rank(left) - rank(right) || left.localeCompare(right, "en-CA", { sensitivity: "base" });
+  });
   const sourceHost = new URL(root).host;
   const report: ExhibitionReportData = {
     title: options.title ?? `${installation.name} Exhibition Report`,
@@ -513,10 +649,27 @@ export const generateExhibitionReport = async (
     generatedAt: totalOverview.generatedAt,
     timeZone: options.timeZone,
     sourceHost,
-    targetPrompt: options.targetPrompt,
+    targetPrompts: options.targetPrompts,
     matchedPrompts,
     totals: countsFromOverview(totalOverview),
-    days: countsByLocalDay(dayRanges, dailyOverviews),
+    funFacts: {
+      averageApprovedMessageDurationMs: durationFacts.averageDurationMs,
+      longestApprovedMessageDurationMs: durationFacts.longestDurationMs,
+      maxMessagePlaybacksInInteraction: playbackFacts.maxMessagePlaybacksInInteraction,
+    },
+    emailHighlights: {
+      pickupHours,
+      messageLeavingHours,
+      messageListeningHours,
+      busiestDay: busiestExhibitionDay(days),
+      approvedAudioDurationMs: durationFacts.totalDurationMs,
+      listeningInteractions: playbackFacts.listeningInteractions,
+      repeatListeningInteractions: playbackFacts.repeatListeningInteractions,
+      mostAnsweredQuestion: mostAnsweredQuestion
+        ? { prompt: mostAnsweredQuestion.prompt, answers: mostAnsweredQuestion.answers }
+        : null,
+    },
+    days,
     questions: questionReports,
     transcripts,
   };
@@ -546,7 +699,15 @@ export const generateExhibitionReport = async (
     console.log(`Transcript prompt: ${matchedPrompts.join(" | ")}`);
   } else {
     // oxlint-disable-next-line no-console
-    console.warn(`No question matched "${options.targetPrompt}".`);
+    console.warn(
+      `No question matched the configured transcript prompts: ${options.targetPrompts.join(" | ")}.`,
+    );
+  }
+  // oxlint-disable-next-line no-console
+  console.log("Email highlights:");
+  for (const line of exhibitionEmailHighlightLines(report)) {
+    // oxlint-disable-next-line no-console
+    console.log(`- ${line}`);
   }
   return outputPath;
 };

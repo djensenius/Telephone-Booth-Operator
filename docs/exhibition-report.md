@@ -8,9 +8,27 @@ The report includes:
 
 - installation totals and local-calendar-day counts for interactions, messages
   left, messages approved, and message playback starts;
+- the average and longest approved-message duration, plus the most message
+  playbacks recorded during one handset pickup;
 - every question with its total and approved answer counts;
-- every answer and available transcription for the question matching
-  `What name would you give this space as it exists now?`.
+- every answer and available transcription for the questions matching
+  `What name would you give this space as it exists now?` and
+  `Week 4 - What do you hope the future holds for this space?`.
+
+The transcript section groups answers under separate question headings in the
+configured prompt order, with the "name this space" question first by default.
+Each later question group starts on a new printed page.
+
+Transcriptions for messages that are not currently approved are struck through.
+When available, the report prints the operator's decision note as the reason,
+falling back to a successful moderation summary tied to the displayed
+transcription. It leaves the reason blank rather than inferring one.
+
+After writing the HTML file, the CLI also prints aggregate, email-ready
+highlights. These include the most popular local hour on weekdays and weekends
+for pickups, leaving messages, and listening to messages; the busiest calendar
+day; the share of pickups that produced a recording; total approved audio time;
+the most answered question; and repeat-listening activity.
 
 ## Authentication
 
@@ -91,8 +109,12 @@ pnpm --filter @telephone-booth-operator/api run report:exhibition -- \
   --output reports/example-gallery.html
 pnpm --filter @telephone-booth-operator/api run report:exhibition -- \
   --load-env ../env \
-  --transcript-question "What name would you give this space as it exists now?"
+  --transcript-question "What name would you give this space as it exists now?" \
+  --transcript-question "Week 4 - What do you hope the future holds for this space?"
 ```
+
+Supplying one or more `--transcript-question` options replaces the two default
+prompt fragments.
 
 Run
 `pnpm --filter @telephone-booth-operator/api run report:exhibition -- --help`
@@ -124,6 +146,19 @@ installation eras, then includes the selected installation's questions plus
 any earlier question that has an in-range message assigned to the selected
 installation. Unscoped messages are excluded, and the CLI stops instead of
 guessing if an in-range API response omits its installation identifier.
+
+Message-duration facts use every approved, question-associated message in the
+report window and require duration metadata for each one. The CLI verifies this
+count against the overview response instead of silently producing a partial
+longest-message result. Pickup and message-leaving hours come from paginated call
+sessions converted to the selected report time zone; a message-left hour uses
+the start time of a session whose outcome is `recording_completed`, matching the
+headline counting rule. Listening hours use the actual timestamps of paginated
+`playing_message` state transitions. Per-interaction listening facts group those
+transitions by `sessionId`, and the CLI verifies all detail counts against the
+overview totals. For a legacy playback event without a `sessionId`, the CLI
+assigns it only when its booth, boot, and timestamp fall inside exactly one call
+session; otherwise it stops rather than guessing.
 
 The current overview endpoint can aggregate at most 5,000 recordings. The CLI
 refuses to write a report when the response reaches that boundary, because
