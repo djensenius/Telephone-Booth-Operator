@@ -686,10 +686,28 @@ describe("exhibition report helpers", () => {
       "Hopeful future",
       "2026-08-20T04:11:00.000Z",
     );
+    const idlessModeration = {
+      id: "19191919-1919-4191-8191-191919191919",
+      messageId: noTranscriptMessageId,
+      transcriptionId: null,
+      provider: "openai",
+      model: "moderation-test",
+      status: "succeeded",
+      flagged: true,
+      recommendation: "reject",
+      maxScore: 0.9,
+      categories: { violence: 0.9 },
+      reasonSummary: "Unlinked moderation reason",
+      latencyMs: 25,
+      error: null,
+      requestedById: null,
+      createdAt: "2026-08-20T04:41:00.000Z",
+      completedAt: "2026-08-20T04:41:01.000Z",
+    };
     const overview = statsOverviewFixture({
       rangeStart: "2026-08-20T04:00:00.000Z",
       rangeEnd: fixedNow.toISOString(),
-      allRecordings: 5,
+      allRecordings: 6,
       approved: 4,
     });
     const currentQuestion = {
@@ -868,13 +886,17 @@ describe("exhibition report helpers", () => {
         }
         return {
           items: [
-            message(
-              noTranscriptMessageId,
-              currentQuestionId,
-              installationId,
-              "2026-08-20T04:40:00.000Z",
-              null,
-            ),
+            {
+              ...message(
+                noTranscriptMessageId,
+                currentQuestionId,
+                installationId,
+                "2026-08-20T04:40:00.000Z",
+                null,
+                "rejected",
+              ),
+              latestModeration: idlessModeration,
+            },
             message(
               failedMessageId,
               currentQuestionId,
@@ -984,6 +1006,7 @@ describe("exhibition report helpers", () => {
       expect(html).toContain(
         '<p class="transcript-reason"><strong>Reason:</strong> Audio was too quiet &lt;to use&gt;</p>',
       );
+      expect(html).not.toContain("Unlinked moderation reason");
       expect(html).toContain("Cross-era success");
       expect(html).toContain("Hopeful future");
       expect(html).toContain(DEFAULT_FUTURE_TRANSCRIPT_PROMPT);
@@ -1079,6 +1102,7 @@ describe("exhibition report helpers", () => {
         messagesListenedTo: 2,
       },
       funFacts: {
+        approvedQuestionMessageCount: 3,
         averageApprovedMessageDurationMs: 30_000,
         longestApprovedMessageDurationMs: 60_000,
         maxMessagePlaybacksInInteraction: 2,
@@ -1159,6 +1183,16 @@ describe("exhibition report helpers", () => {
       '<h3 class="transcript-group-prompt">What would you name this space?</h3>',
     );
     expect(html).not.toContain("<h2>Name this space</h2>");
+    expect(
+      renderExhibitionReportHtml({
+        ...report,
+        funFacts: {
+          ...report.funFacts,
+          averageApprovedMessageDurationMs: 0,
+          longestApprovedMessageDurationMs: 0,
+        },
+      }),
+    ).toContain('<p class="metric-value">0s</p>');
 
     const emailLines = exhibitionEmailHighlightLines(report);
     expect(emailLines).toContain(

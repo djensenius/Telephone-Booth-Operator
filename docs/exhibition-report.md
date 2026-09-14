@@ -8,8 +8,8 @@ The report includes:
 
 - installation totals and local-calendar-day counts for interactions, messages
   left, messages approved, and message playback starts;
-- the average and longest approved-message duration, plus the most message
-  playbacks recorded during one handset pickup;
+- the average and longest approved question-response duration, plus the most
+  message playbacks recorded during one handset pickup;
 - every question with its total and approved answer counts;
 - every answer and available transcription for the questions matching
   `What name would you give this space as it exists now?` and
@@ -28,7 +28,8 @@ After writing the HTML file, the CLI also prints aggregate, email-ready
 highlights. These include the most popular local hour on weekdays and weekends
 for pickups, leaving messages, and listening to messages; the busiest calendar
 day; the share of pickups that produced a recording; total approved audio time;
-the most answered question; and repeat-listening activity.
+the most answered question; and repeat-listening activity. Duration highlights
+refer specifically to approved responses associated with a question.
 
 ## Authentication
 
@@ -149,16 +150,17 @@ guessing if an in-range API response omits its installation identifier.
 
 Message-duration facts use every approved, question-associated message in the
 report window and require duration metadata for each one. The CLI verifies this
-count against the overview response instead of silently producing a partial
-longest-message result. Pickup and message-leaving hours come from paginated call
-sessions converted to the selected report time zone; a message-left hour uses
-the start time of a session whose outcome is `recording_completed`, matching the
-headline counting rule. Listening hours use the actual timestamps of paginated
-`playing_message` state transitions. Per-interaction listening facts group those
-transitions by `sessionId`, and the CLI verifies all detail counts against the
-overview totals. For a legacy playback event without a `sessionId`, the CLI
-assigns it only when its booth, boot, and timestamp fall inside exactly one call
-session; otherwise it stops rather than guessing.
+count against the question summary instead of the headline approved-message
+total, which can also include recordings without a question. Pickup and
+message-leaving hours come from paginated call sessions converted to the
+selected report time zone; a message-left hour uses the start time of a session
+whose outcome is `recording_completed`, matching the headline counting rule.
+Listening hours use the actual timestamps of paginated `playing_message` state
+transitions. Per-interaction listening facts group those transitions by
+`sessionId`, and the CLI verifies all detail counts against the overview totals.
+For a legacy playback event without a `sessionId`, the CLI assigns it only when
+its booth, boot, and timestamp fall inside exactly one call session; otherwise
+it stops rather than guessing.
 
 The current overview endpoint can aggregate at most 5,000 recordings. The CLI
 refuses to write a report when the response reaches that boundary, because

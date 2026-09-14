@@ -490,8 +490,9 @@ const buildTranscripts = async (
     const operatorReason = message.notes?.trim();
     const moderation = message.latestModeration;
     const moderationReason =
+      transcription !== null &&
       moderation?.status === "succeeded" &&
-      moderation.transcriptionId === (transcription?.id ?? null) &&
+      moderation.transcriptionId === transcription.id &&
       moderation.reasonSummary?.trim()
         ? moderation.reasonSummary.trim()
         : null;
@@ -590,8 +591,11 @@ export const generateExhibitionReport = async (
         .map((message) => [message.id, message]),
     ).values(),
   ];
-  const expectedApprovedMessages = totalOverview.messages.approved ?? totalOverview.messages.total;
-  const durationFacts = approvedMessageDurationFacts(reportMessages, expectedApprovedMessages);
+  const approvedQuestionMessageCount = questionReports.reduce(
+    (total, question) => total + question.approvedAnswers,
+    0,
+  );
+  const durationFacts = approvedMessageDurationFacts(reportMessages, approvedQuestionMessageCount);
   const playbackFacts = messagePlaybackFacts(
     stateTransitionEvents,
     totalOverview.playback.totalPlaybacks,
@@ -653,6 +657,7 @@ export const generateExhibitionReport = async (
     matchedPrompts,
     totals: countsFromOverview(totalOverview),
     funFacts: {
+      approvedQuestionMessageCount,
       averageApprovedMessageDurationMs: durationFacts.averageDurationMs,
       longestApprovedMessageDurationMs: durationFacts.longestDurationMs,
       maxMessagePlaybacksInInteraction: playbackFacts.maxMessagePlaybacksInInteraction,

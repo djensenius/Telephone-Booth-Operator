@@ -35,6 +35,7 @@ export type ExhibitionTranscript = {
 };
 
 export type ExhibitionFunFacts = {
+  approvedQuestionMessageCount: number;
   averageApprovedMessageDurationMs: number | null;
   longestApprovedMessageDurationMs: number | null;
   maxMessagePlaybacksInInteraction: number;
@@ -218,7 +219,7 @@ type ApprovedMessageCandidate = {
 
 export const approvedMessageDurationFacts = (
   messages: readonly ApprovedMessageCandidate[],
-  expectedApprovedMessages: number,
+  expectedApprovedQuestionMessages: number,
 ): {
   averageDurationMs: number | null;
   longestDurationMs: number | null;
@@ -231,9 +232,9 @@ export const approvedMessageDurationFacts = (
         .map((message) => [message.id, message]),
     ).values(),
   ];
-  if (approvedMessages.length !== expectedApprovedMessages) {
+  if (approvedMessages.length !== expectedApprovedQuestionMessages) {
     throw new Error(
-      `The report found ${approvedMessages.length.toLocaleString("en-CA")} approved question messages, but the stats API reported ${expectedApprovedMessages.toLocaleString("en-CA")}. Message duration facts cannot be verified.`,
+      `The report found ${approvedMessages.length.toLocaleString("en-CA")} approved question-associated messages, but the question summary reported ${expectedApprovedQuestionMessages.toLocaleString("en-CA")}. Message duration facts cannot be verified.`,
     );
   }
 
@@ -452,7 +453,7 @@ export const buildLocalDayRanges = (start: Date, end: Date, timeZone: string): L
 
 const formatCompactDuration = (milliseconds: number | null): string => {
   if (milliseconds === null) return "N/A";
-  const totalSeconds = Math.max(1, Math.round(milliseconds / 1_000));
+  const totalSeconds = Math.max(0, Math.round(milliseconds / 1_000));
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return minutes === 0 ? `${seconds}s` : seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
@@ -541,9 +542,13 @@ export const exhibitionEmailHighlightLines = (report: ExhibitionReportData): str
       `${percentFormat.format(report.totals.messagesLeft / report.totals.interactions)} of pickups ended with a recorded message (${numberFormat.format(report.totals.messagesLeft)} of ${numberFormat.format(report.totals.interactions)}).`,
     );
   }
-  if (report.totals.messagesApproved > 0) {
+  if (report.funFacts.approvedQuestionMessageCount > 0) {
+    const subject =
+      report.funFacts.approvedQuestionMessageCount === 1
+        ? "The approved question response adds"
+        : "Approved question responses add";
     lines.push(
-      `The approved recordings add up to ${formatLongDuration(report.emailHighlights.approvedAudioDurationMs)} of visitor audio.`,
+      `${subject} up to ${formatLongDuration(report.emailHighlights.approvedAudioDurationMs)} of visitor audio.`,
     );
   }
   if (report.emailHighlights.mostAnsweredQuestion) {
@@ -1200,7 +1205,7 @@ export const renderExhibitionReportHtml = (report: ExhibitionReportData): string
         ${metricCard(
           "Average approved message",
           formatCompactDuration(report.funFacts.averageApprovedMessageDurationMs),
-          `Across ${numberFormat.format(report.totals.messagesApproved)} approved recordings`,
+          `Across ${numberFormat.format(report.funFacts.approvedQuestionMessageCount)} approved question responses`,
         )}
         ${metricCard(
           "Longest approved message",
