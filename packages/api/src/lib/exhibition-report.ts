@@ -460,12 +460,15 @@ const formatCompactDuration = (milliseconds: number | null): string => {
 };
 
 const formatLongDuration = (milliseconds: number): string => {
-  const totalMinutes = Math.round(milliseconds / 60_000);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  if (hours === 0) return `${numberFormat.format(totalMinutes)} min`;
-  if (minutes === 0) return `${numberFormat.format(hours)} hr`;
-  return `${numberFormat.format(hours)} hr ${numberFormat.format(minutes)} min`;
+  const totalSeconds = Math.max(0, Math.round(milliseconds / 1_000));
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  const parts: string[] = [];
+  if (hours > 0) parts.push(`${numberFormat.format(hours)} hr`);
+  if (minutes > 0) parts.push(`${numberFormat.format(minutes)} min`);
+  if (seconds > 0 || parts.length === 0) parts.push(`${numberFormat.format(seconds)} sec`);
+  return parts.join(" ");
 };
 
 const hourLabel = (hour: number): string => {
@@ -490,16 +493,20 @@ const joinList = (items: readonly string[]): string => {
   return `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}`;
 };
 
-const peakHourSummary = (peak: ExhibitionPeakHour | null, unit: string): string | null => {
+const peakHourSummary = (
+  peak: ExhibitionPeakHour | null,
+  unit: { singular: string; plural: string },
+): string | null => {
   if (!peak) return null;
   const ranges = joinList(peak.hours.map(hourRangeLabel));
   const each = peak.hours.length > 1 ? " each" : "";
-  return `${ranges} (${numberFormat.format(peak.interactions)} ${unit}${each})`;
+  const label = peak.interactions === 1 ? unit.singular : unit.plural;
+  return `${ranges} (${numberFormat.format(peak.interactions)} ${label}${each})`;
 };
 
 const activityHourLine = (
   label: string,
-  unit: string,
+  unit: { singular: string; plural: string },
   highlights: ExhibitionTimeHighlights,
 ): string | null => {
   const weekday = peakHourSummary(highlights.weekdayPeak, unit);
@@ -514,15 +521,19 @@ const activityHourLine = (
 
 export const exhibitionEmailHighlightLines = (report: ExhibitionReportData): string[] => {
   const lines = [
-    activityHourLine("Pickups", "pickups", report.emailHighlights.pickupHours),
+    activityHourLine(
+      "Pickups",
+      { singular: "pickup", plural: "pickups" },
+      report.emailHighlights.pickupHours,
+    ),
     activityHourLine(
       "Leaving messages",
-      "messages left",
+      { singular: "message left", plural: "messages left" },
       report.emailHighlights.messageLeavingHours,
     ),
     activityHourLine(
       "Listening to messages",
-      "listens",
+      { singular: "listen", plural: "listens" },
       report.emailHighlights.messageListeningHours,
     ),
   ].filter((line): line is string => line !== null);

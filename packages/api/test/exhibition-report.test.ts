@@ -1204,6 +1204,43 @@ describe("exhibition report helpers", () => {
     expect(emailLines).toContain(
       "Listening to messages peaked at 12-1 p.m. (4 listens) on weekdays and 4-5 p.m. (2 listens) on weekends.",
     );
+    expect(emailLines).toContain(
+      "Approved question responses add up to 1 min 30 sec of visitor audio.",
+    );
     expect(emailLines).toContain("40% of pickups ended with a recorded message (4 of 10).");
+
+    const singularLines = exhibitionEmailHighlightLines({
+      ...report,
+      funFacts: {
+        ...report.funFacts,
+        approvedQuestionMessageCount: 1,
+      },
+      emailHighlights: {
+        ...report.emailHighlights,
+        pickupHours: {
+          weekdayPeak: { hours: [10], interactions: 1 },
+          weekendPeak: null,
+        },
+        messageLeavingHours: {
+          weekdayPeak: { hours: [11], interactions: 1 },
+          weekendPeak: null,
+        },
+        messageListeningHours: {
+          weekdayPeak: { hours: [12], interactions: 1 },
+          weekendPeak: null,
+        },
+        approvedAudioDurationMs: 29_000,
+      },
+    });
+    expect(singularLines).toContain("Pickups peaked at 10-11 a.m. (1 pickup) on weekdays.");
+    expect(singularLines).toContain(
+      "Leaving messages peaked at 11 a.m.-12 p.m. (1 message left) on weekdays.",
+    );
+    expect(singularLines).toContain(
+      "Listening to messages peaked at 12-1 p.m. (1 listen) on weekdays.",
+    );
+    expect(singularLines).toContain(
+      "The approved question response adds up to 29 sec of visitor audio.",
+    );
   });
 });
