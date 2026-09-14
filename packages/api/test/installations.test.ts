@@ -33,10 +33,7 @@ import {
   resetInstallationCacheForTests,
 } from "../src/lib/installation.js";
 import { resetApnsSenderForTests, setApnsSenderForTests } from "../src/lib/apns.js";
-import {
-  resetStatsCacheForTests,
-  statsOverviewCacheSizeForTests,
-} from "../src/routes/stats.js";
+import { resetStatsCacheForTests, statsOverviewCacheSizeForTests } from "../src/routes/stats.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { fakeBlobs, resetFakeAzure, seedBlobData } from "./support/fake-azure.js";
 import {
