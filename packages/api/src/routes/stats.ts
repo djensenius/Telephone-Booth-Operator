@@ -28,6 +28,7 @@ import {
 } from "../lib/interaction-analytics.js";
 import { countMessagesAwaitingModeration } from "../lib/moderation-badge.js";
 import {
+  getInstallationState,
   resolveInstallationScope,
   scopeCacheKey,
   scopeWhere,
@@ -91,7 +92,10 @@ const computeStatsSummary = async (
   const actions = summarizeInteractionActions(stateTransitionEvents);
 
   return StatsSummarySchema.parse({
-    booth: latestStatus ? serializeStatus(latestStatus) : defaultStatus(),
+    booth: {
+      ...(latestStatus ? serializeStatus(latestStatus) : defaultStatus()),
+      installationState: await getInstallationState(),
+    },
     messages: {
       pending: pendingCount,
       awaitingModeration,

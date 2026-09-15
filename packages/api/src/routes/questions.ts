@@ -172,9 +172,7 @@ questionsRouter.post("/", requireAdmin(), zValidator("json", QuestionCreateSchem
   // the insert makes the two queue instead of overlapping — unlike a booth
   // recording, an admin write has no reason to accept that race.
   try {
-    // Resolved before the transaction: this is the call that lazily opens an
-    // era on a fresh database, and it must not run while holding a pooled
-    // connection of its own.
+    // An operator must explicitly start an installation before adding prompts.
     const preferredEra = await requireActiveInstallation();
     const question = await runWithOpenEra(preferredEra, async (tx, era) => {
       return tx.question.create({
@@ -191,9 +189,6 @@ questionsRouter.post("/", requireAdmin(), zValidator("json", QuestionCreateSchem
     recordAudit(c, { targetId: question.id });
     return c.json(serializeQuestion(question), 201);
   } catch (err) {
-    // Every era ending underneath the retry: bookkeeping is in a state the
-    // operator has to resolve, not something to report as a conflict.
-    if (err instanceof NoOpenEraError) return c.json({ error: "no_open_installation" }, 503);
     // Only a genuine uniqueness collision is the caller's problem. Anything
     // else is ours, and reporting it as a conflict would send the operator
     // round a retry loop that cannot succeed.
@@ -414,7 +409,7 @@ questionsRouter.get("/random", requireApiToken(), async (c) => {
       // A draw is a write to the installation's durable ticket bag. Locking the
       // era makes concurrent replicas consume distinct tickets.
       const installationId = await lockOpenInstallationExclusively(tx);
-      if (installationId === null) return null;
+      if (installationId === null) throw new NoOpenEraError();
 
       const installation = await tx.installation.findUnique({
         where: { id: installationId },

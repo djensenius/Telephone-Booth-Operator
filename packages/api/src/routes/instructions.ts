@@ -8,6 +8,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { recordAudit } from "../lib/audit.js";
 import { db } from "../lib/db.js";
+import { requireActiveInstallation } from "../lib/installation.js";
 import { requireApiToken, type ApiTokenVariables } from "../lib/require-api-token.js";
 import { serializeInstruction } from "../lib/serializers.js";
 import { requireAdmin, type AuthVariables } from "../lib/session.js";
@@ -40,12 +41,14 @@ async function randomActiveInstruction() {
 }
 
 instructionsRouter.get("/random", requireApiToken(), async (c) => {
+  await requireActiveInstallation();
   const instruction = await randomActiveInstruction();
   if (!instruction) return c.json({ error: "no_instructions_available" }, 404);
   return c.json(serializeInstruction(instruction));
 });
 
 instructionsRouter.get("/current", requireApiToken(), async (c) => {
+  await requireActiveInstallation();
   const instruction = await randomActiveInstruction();
   if (!instruction) return c.json({ error: "no_instructions_available" }, 404);
   return c.json(serializeInstruction(instruction));

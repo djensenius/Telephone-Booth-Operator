@@ -3,10 +3,12 @@ import { InstallationScopeSchema, StatusUpdateSchema } from "@telephone-booth-op
 import type { StatusUpdate } from "@telephone-booth-operator/shared";
 import { Hono } from "hono";
 import { z } from "zod";
+import type { Prisma } from "../generated/prisma/client.js";
 import { wsBroadcaster } from "../lib/broadcaster.js";
 import { db } from "../lib/db.js";
 import {
-  requireActiveInstallation,
+  getInstallationState,
+  runWithOpenEra,
   resolveInstallationScope,
   scopeWhere,
 } from "../lib/installation.js";
@@ -46,8 +48,12 @@ const historyQuerySchema = z.object({
 // has since been closed belongs to a frozen summary, and rewriting it to
 // `aborted` afterwards would make that summary disagree with its own
 // drill-down.
-async function reconcileStaleSessionsOnIdle(idleTime: Date, installationId: string): Promise<void> {
-  await db.callSession.updateMany({
+async function reconcileStaleSessionsOnIdle(
+  idleTime: Date,
+  installationId: string,
+  tx: Prisma.TransactionClient,
+): Promise<void> {
+  await tx.callSession.updateMany({
     where: { endedAt: null, startedAt: { lte: idleTime }, installationId },
     data: {
       endedAt: idleTime,
@@ -87,6 +93,7 @@ statusRouter.get(
   requireOperatorOrApiToken(["operator", "monitor"]),
   zValidator("query", currentQuerySchema),
   async (c) => {
+    c.header("Cache-Control", "no-store");
     // Authenticated read of the latest booth snapshot. Operator clients use a
     // session cookie or operator bearer; the booth/phone client uses its API token.
     const { installationId } = c.req.valid("query");
@@ -94,73 +101,78 @@ statusRouter.get(
       where: scopeWhere(await resolveInstallationScope(installationId)),
       orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
     });
-    return c.json(latest ? serializeStatus(latest) : defaultStatus());
+    return c.json({
+      ...(latest ? serializeStatus(latest) : defaultStatus()),
+      installationState: await getInstallationState(),
+    });
   },
 );
 
 statusRouter.put("/", requireApiToken(), zValidator("json", StatusUpdateSchema), async (c) => {
   const update = c.req.valid("json");
   const reportedAt = update.updatedAt ? new Date(update.updatedAt) : new Date();
-  const installationId = await requireActiveInstallation();
-  // The run the report belongs to. That is normally the newest row, but a
-  // delayed report belongs to the run that was current at its own timestamp —
-  // the booth supplies `updatedAt`, so `id` breaks ties and keeps the choice
-  // deterministic when two rows share a millisecond.
-  const [enclosing, successor] = await Promise.all([
-    db.boothStatusSnapshot.findFirst({
-      where: { installationId, firstSeenAt: { lte: reportedAt } },
-      orderBy: [{ firstSeenAt: "desc" }, { id: "desc" }],
-    }),
-    // The run that started next. A report can fall in the gap between the run
-    // it belongs to and the row that recorded it — the booth reports a status
-    // change before its next heartbeat — so a delayed repeat of the following
-    // run widens that run backwards instead of filing a duplicate row between
-    // two identical ones. This is also the fallback for a report that predates
-    // every stored snapshot.
-    db.boothStatusSnapshot.findFirst({
-      where: { installationId, firstSeenAt: { gt: reportedAt } },
-      orderBy: [{ firstSeenAt: "asc" }, { id: "asc" }],
-    }),
-  ]);
-  const run = [enclosing, successor].find(
-    (candidate) => candidate && isRepeatOf(candidate, update),
-  );
-  // Collapse heartbeats. The booth re-pushes its current status every few
-  // seconds so the operator never shows stale state, which meant an idle booth
-  // wrote one snapshot row per beat and buried the genuine transitions under a
-  // page of identical `idle` rows. When the report is identical to its own
-  // run we fold it into that row instead: widen the [firstSeenAt,
-  // updatedAt] window and count the beat. Distinct fields (a real transition,
-  // a new error, a runtime-mode change) still create a new row, so the history
-  // reads as one row per booth state.
-  //
-  // Concurrent PUTs can interleave between the read and the write; the worst
-  // case is a lost increment or a duplicate row, both harmless for a display
-  // counter on a single-line booth.
-  const snapshot = run
-    ? await db.boothStatusSnapshot.update({
-        where: { id: run.id },
-        data: {
-          firstSeenAt: reportedAt < run.firstSeenAt ? reportedAt : run.firstSeenAt,
-          updatedAt: reportedAt > run.updatedAt ? reportedAt : run.updatedAt,
-          repeatCount: { increment: 1 },
-        },
-      })
-    : await db.boothStatusSnapshot.create({
-        data: {
-          state: update.state,
-          currentQuestionId: update.currentQuestionId ?? null,
-          currentMessageId: update.currentMessageId ?? null,
-          lastError: update.lastError ?? null,
-          runtimeMode: update.runtimeMode ?? null,
-          firstSeenAt: reportedAt,
-          updatedAt: reportedAt,
-          installationId,
-        },
-      });
-  if (update.state === "idle") {
-    await reconcileStaleSessionsOnIdle(snapshot.updatedAt, installationId);
-  }
+  const snapshot = await runWithOpenEra(undefined, async (tx, installationId) => {
+    // The run the report belongs to. That is normally the newest row, but a
+    // delayed report belongs to the run that was current at its own timestamp —
+    // the booth supplies `updatedAt`, so `id` breaks ties and keeps the choice
+    // deterministic when two rows share a millisecond.
+    const [enclosing, successor] = await Promise.all([
+      tx.boothStatusSnapshot.findFirst({
+        where: { installationId, firstSeenAt: { lte: reportedAt } },
+        orderBy: [{ firstSeenAt: "desc" }, { id: "desc" }],
+      }),
+      // The run that started next. A report can fall in the gap between the run
+      // it belongs to and the row that recorded it — the booth reports a status
+      // change before its next heartbeat — so a delayed repeat of the following
+      // run widens that run backwards instead of filing a duplicate row between
+      // two identical ones. This is also the fallback for a report that predates
+      // every stored snapshot.
+      tx.boothStatusSnapshot.findFirst({
+        where: { installationId, firstSeenAt: { gt: reportedAt } },
+        orderBy: [{ firstSeenAt: "asc" }, { id: "asc" }],
+      }),
+    ]);
+    const run = [enclosing, successor].find(
+      (candidate) => candidate && isRepeatOf(candidate, update),
+    );
+    // Collapse heartbeats. The booth re-pushes its current status every few
+    // seconds so the operator never shows stale state, which meant an idle booth
+    // wrote one snapshot row per beat and buried the genuine transitions under a
+    // page of identical `idle` rows. When the report is identical to its own
+    // run we fold it into that row instead: widen the [firstSeenAt,
+    // updatedAt] window and count the beat. Distinct fields (a real transition,
+    // a new error, a runtime-mode change) still create a new row, so the history
+    // reads as one row per booth state.
+    //
+    // Concurrent PUTs can interleave between the read and the write; the worst
+    // case is a lost increment or a duplicate row, both harmless for a display
+    // counter on a single-line booth.
+    const snapshot = run
+      ? await tx.boothStatusSnapshot.update({
+          where: { id: run.id },
+          data: {
+            firstSeenAt: reportedAt < run.firstSeenAt ? reportedAt : run.firstSeenAt,
+            updatedAt: reportedAt > run.updatedAt ? reportedAt : run.updatedAt,
+            repeatCount: { increment: 1 },
+          },
+        })
+      : await tx.boothStatusSnapshot.create({
+          data: {
+            state: update.state,
+            currentQuestionId: update.currentQuestionId ?? null,
+            currentMessageId: update.currentMessageId ?? null,
+            lastError: update.lastError ?? null,
+            runtimeMode: update.runtimeMode ?? null,
+            firstSeenAt: reportedAt,
+            updatedAt: reportedAt,
+            installationId,
+          },
+        });
+    if (update.state === "idle") {
+      await reconcileStaleSessionsOnIdle(snapshot.updatedAt, installationId, tx);
+    }
+    return snapshot;
+  });
   wsBroadcaster.broadcast({ kind: "status", status: serializeStatus(snapshot) });
   return c.body(null, 204);
 });

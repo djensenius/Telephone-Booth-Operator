@@ -22,7 +22,7 @@ import { downloadBlob, headBlob, uploadBlob } from "./azure-blob.js";
 import { createTar, readTar } from "./archive.js";
 import { boundAuditFields } from "./audit.js";
 import { db } from "./db.js";
-import { closeOutInstallation, invalidateActiveInstallationCache } from "./installation.js";
+import { closeOutInstallation } from "./installation.js";
 
 export const EXPORT_FORMAT = "telephone-booth-export";
 // 1: original shape. 2: BoothStatusSnapshot carries `firstSeenAt`/`repeatCount`.
@@ -707,7 +707,6 @@ export const restoreImportArchive = async (archive: Buffer): Promise<ImportSumma
   );
 
   // A restore can replace which era is open, so the cached id is now suspect.
-  invalidateActiveInstallationCache();
 
   return { rows, blobsUploaded, blobsSkipped };
 };

@@ -240,10 +240,8 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
       : [];
   const sessionEra = new Map(knownSessions.map((row) => [row.id, row]));
 
-  // Whether the session's era is closed is asked of the database, not inferred
-  // by comparing against the cached active id: that cache is per-replica and
-  // briefly stale, which would let a straggler through on the replica that did
-  // not serve the admin's rollover.
+  // Ask the database whether each session's era is closed; another replica
+  // may have completed a rollover since this request resolved the active era.
   const eraIds = [
     ...new Set(
       knownSessions
@@ -296,10 +294,9 @@ eventsRouter.post("/", requireApiToken(), zValidator("json", BoothEventBatchSche
   // 2. Atomically upsert sessions and insert events in a single transaction.
   //    If either step fails the entire batch is rolled back — no orphan
   //    sessions without source events.
-  // Hold the era open for the length of this transaction. If the cached one has
-  // ended, `runWithOpenEra` resolves — and if the booth is first past the
-  // rollover, opens — another and retries: a booth write must never fail on
-  // bookkeeping, but it must not land in a frozen era either.
+  // Follow a concurrent manual rollover while holding the destination open.
+  // Without a new open era, return an inactive conflict and leave the batch
+  // unacknowledged for the booth to retry after an explicit start.
   const inserted = await runWithOpenEra(installationId, async (tx, locked) => {
     eraForNewRows = locked;
 

@@ -5,12 +5,14 @@ and a set of metadata (name, notes, location). It exists so the booth can be
 torn down and set up again without last year's numbers polluting this year's
 stats — and without throwing last year's numbers away.
 
-At most one installation is active at a time — never two. There is briefly
-none between ending an era and the booth's next write, which is normal rather
-than a fault; see [Reading history](#reading-history).
+At most one installation is active at a time — never two. Ending one leaves
+the booth **between exhibitions** until an operator explicitly starts the next.
+Offline is expected during this gap; heartbeats, events, uploads, and reads
+never start an installation.
 
 > Why it works this way, and what was rejected:
-> [ADR 0013](adr/0013-installations-as-data-scope.md).
+> [ADR 0013](adr/0013-installations-as-data-scope.md) and its lifecycle update,
+> [ADR 0015](adr/0015-between-exhibitions.md).
 
 ## What is and isn't scoped
 
@@ -48,18 +50,20 @@ action. It is admin-only, runs in one transaction, and **deletes nothing**:
    long as it is signed in, not just while the Status screen is open.
 
 A caller can be midway through answering when an operator ends the era. That
-recording still lands: a question retired _by a rollover_ stays answerable, and
-the late message is filed under the era that is open when it arrives, where an
-operator will actually see it in the queue. A question an operator retired by
+recording is retained: a question retired _by a rollover_ stays answerable.
+If no era is open, the booth retains the recording in its durable upload spool
+and retries after an operator starts the next era. An already uploaded blob
+and its `uploading` row remain intact while completion is deferred. The late
+message is then filed under the open era, where an operator can review it.
+A question an operator retired by
 hand is still refused — that is a deliberate withdrawal. Late `call_ended`
 events are the mirror image: they are attributed to their session's era and can
 never rewrite a closed era's outcome or frozen summary.
 
 Starting one is also a rollover: `POST /v1/installations` first ends whichever
 era is active, then creates the requested era in the same transaction. This
-keeps a powered-on booth from blocking the operator by auto-opening an unnamed
-era between the manual "end" and "start" steps. If no era is active, the new one
-is simply created.
+allows a direct handover without a downtime gap. If no era is active, the new
+one is simply created.
 
 Two admins ending the same era at once is settled inside the transaction: the
 first to claim it wins and the second gets `409`, so `retiredAt` and `endedAt`
@@ -86,11 +90,21 @@ and SHA-256 dedupe is preserved. This is why `Question.audioId` is not unique,
 and why question prompts are unique _per installation_ rather than globally.
 The checkbox is **off by default**; most new installations want a fresh set.
 
-If the booth is powered on when you end an era, it keeps posting events, and a
-booth write with no active installation lazily opens one — a recording must
-never be dropped over admin bookkeeping. Starting a named installation therefore
-ends whichever era is active and opens the new one in a single rollover, rather
-than making the operator fight the heartbeat race.
+If the booth stays powered on, it stops offering new calls while between
+exhibitions. Infrastructure telemetry can continue without opening an era.
+The API returns `409` with a problem response containing
+`error: "installation_inactive"` for scoped writes and booth content selection.
+This is not a duplicate-recording acknowledgment: clients must keep pending
+recordings and event batches, and retry after an explicit start. A fresh database
+also requires an explicit first installation (or the setup seed).
+
+`GET /v1/status`, the `booth` in `GET /v1/stats/summary`, and
+`GET /v1/monitor/summary` expose `installationState` as `active` or
+`between_exhibitions`. This is independent of heartbeat freshness. An id-less
+synthetic status still conveys lifecycle, but its epoch timestamp is never a
+fresh heartbeat. Older servers omit the field; clients must not infer downtime
+from missing data or an API error. Offline during an active exhibition remains
+an outage, and API/authentication errors remain visible in either lifecycle.
 
 A recording that was already uploading when the era ended is left alone by the
 close-out and re-filed into the open era when the booth calls
@@ -123,10 +137,9 @@ Scoped collection, aggregate, and current-status endpoints take an optional
 This applies to `/v1/stats/*`, `/v1/messages`, `/v1/sessions`, `/v1/events`,
 `/v1/questions`, `/v1/status`, and `/v1/status/history`.
 
-Between ending an era and the booth's next write there is no active
-installation. Reads in that window return an empty result rather than opening
-a new era: only a booth write does that, so loading a screen never changes what
-the booth is recording into.
+Between ending an era and explicitly starting the next there is no active
+installation. Scoped reads in that window return empty results rather than
+opening a new era. Loading a screen never changes the lifecycle.
 
 An ended era is **read-only** for anything its frozen counters describe: the
 API refuses a moderation decision or a delete on one of its recordings

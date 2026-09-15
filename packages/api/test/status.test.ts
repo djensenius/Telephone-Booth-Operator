@@ -24,7 +24,6 @@ vi.mock("../src/lib/require-api-token.js", () => ({
 }));
 
 import { createApp } from "../src/index.js";
-import { resetInstallationCacheForTests } from "../src/lib/installation.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { resetFakeAzure } from "./support/fake-azure.js";
 import {
@@ -44,7 +43,6 @@ const setup = () => {
   resetSessionCryptoForTests();
   resetFakeDb();
   resetFakeAzure();
-  resetInstallationCacheForTests();
   return createApp();
 };
 
@@ -214,7 +212,6 @@ describe("status routes", () => {
       summary: null,
       createdAt: new Date("2026-07-28T12:00:06.000Z"),
     });
-    resetInstallationCacheForTests();
 
     await beat("2026-07-28T12:00:10.000Z");
     await beat("2026-07-28T12:00:20.000Z");

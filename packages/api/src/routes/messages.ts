@@ -112,6 +112,7 @@ messagesRouter.get("/", zValidator("query", listQuerySchema), async (c) => {
 });
 
 messagesRouter.get("/random", requireApiToken(), async (c) => {
+  await requireActiveInstallation();
   const where = { status: "approved" } as const;
   const count = await db.message.count({ where });
   if (count === 0) return c.json({ error: "no_messages_available" }, 404);
@@ -224,6 +225,7 @@ messagesRouter.post("/", requireApiToken(), zValidator("json", MessageCreateSche
     return c.json({ error: "message_already_exists" }, 409);
   }
 
+  await requireActiveInstallation();
   const file = await db.file.upsert({
     where: { sha256: body.sha256 },
     create: {
@@ -247,14 +249,16 @@ messagesRouter.post("/", requireApiToken(), zValidator("json", MessageCreateSche
 
   let message;
   try {
-    message = await db.message.create({
-      data: {
-        status: "uploading",
-        questionId: body.questionId ?? null,
-        audioId: file.id,
-        installationId: await requireActiveInstallation(),
-      },
-    });
+    message = await runWithOpenEra(undefined, async (tx, installationId) =>
+      tx.message.create({
+        data: {
+          status: "uploading",
+          questionId: body.questionId ?? null,
+          audioId: file.id,
+          installationId,
+        },
+      }),
+    );
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       // Lost a create race. The winner's row exists; if it is still
@@ -284,14 +288,16 @@ messagesRouter.post("/", requireApiToken(), zValidator("json", MessageCreateSche
         },
         update: {},
       });
-      message = await db.message.create({
-        data: {
-          status: "uploading",
-          questionId: body.questionId ?? null,
-          audioId: replacement.id,
-          installationId: await requireActiveInstallation(),
-        },
-      });
+      message = await runWithOpenEra(undefined, async (tx, installationId) =>
+        tx.message.create({
+          data: {
+            status: "uploading",
+            questionId: body.questionId ?? null,
+            audioId: replacement.id,
+            installationId,
+          },
+        }),
+      );
       return uploadSlot(message.id);
     }
     throw err;
@@ -344,8 +350,8 @@ messagesRouter.post(
     // but not yet visible — the rollover waits for it, or it waits for the
     // rollover and re-files.
     // The recording's own era is only a hint: it may have ended while the
-    // upload was in flight, in which case another is resolved — or opened —
-    // outside the transaction and the promotion retried.
+    // upload was in flight. Without another open era, completion is deferred
+    // until an operator starts one; the uploaded blob and row remain intact.
     // A retry of a completion that already landed must stay a no-op. Resolving
     // an era for it would open a blank one on the way to an update that
     // matches nothing, so the already-promoted case never gets that far.

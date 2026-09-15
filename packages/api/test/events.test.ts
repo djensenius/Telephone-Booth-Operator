@@ -25,7 +25,6 @@ vi.mock("../src/lib/require-api-token.js", () => ({
 
 import { randomUUID } from "node:crypto";
 import { createApp } from "../src/index.js";
-import { resetInstallationCacheForTests } from "../src/lib/installation.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
 import { resetFakeAzure } from "./support/fake-azure.js";
 import {
@@ -45,7 +44,6 @@ const setup = () => {
   resetSessionCryptoForTests();
   resetFakeDb();
   resetFakeAzure();
-  resetInstallationCacheForTests();
 };
 
 const sampleEvent = (overrides: Record<string, unknown> = {}) => ({
@@ -354,7 +352,8 @@ describe("GET /v1/events", () => {
       }),
     });
 
-    expect(res.status, await res.clone().text()).toBe(200);
+    expect(res.status, await res.clone().text()).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "installation_inactive" });
     const after = store.callSessions.get(settled.id)!;
     expect(after.outcome).toBe("recording_completed");
     expect(after.durationMs).toBe(1000);

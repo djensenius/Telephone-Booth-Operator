@@ -23,6 +23,7 @@ monitorRouter.get(
   requireApiToken("monitor"),
   zValidator("query", querySchema),
   async (c) => {
+    c.header("Cache-Control", "no-store");
     const { timeZone } = c.req.valid("query");
     const generatedAt = new Date();
     const dayStartedAt = startOfDayInTimeZone(generatedAt, timeZone);
@@ -87,6 +88,7 @@ monitorRouter.get(
 
     return c.json(
       MonitorSummarySchema.parse({
+        installationState: scope.kind === "none" ? "between_exhibitions" : "active",
         interactionsToday,
         interactionsTotal: callsTotal,
         callsToday: interactionsToday,
