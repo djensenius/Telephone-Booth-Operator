@@ -455,59 +455,63 @@ describe("BoothWebSocketProvider", () => {
     expect(client.getQueryData(apiQueryKeys.statusHistory)).toEqual({ items: [] });
   });
 
-  it("does not let a delayed status request overwrite a newer live frame", async () => {
-    let resolveFetch: ((response: Response) => void) | undefined;
-    const fetchMock = vi.fn(
-      () =>
-        new Promise<Response>((resolve) => {
-          resolveFetch = resolve;
-        }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
+  it.each([false, true])(
+    "preserves a newer heartbeat when delayed REST is synthetic=%s",
+    async (synthetic) => {
+      let resolveFetch: ((response: Response) => void) | undefined;
+      const fetchMock = vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveFetch = resolve;
+          }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
 
-    const client = renderProvider();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
-    await waitFor(() => expect(FakeSocket.instances).toHaveLength(1));
-    const socket = FakeSocket.instances[0]!;
-    act(() => socket.emit("open"));
-    act(() =>
-      socket.emit("message", {
-        data: JSON.stringify({
-          kind: "status",
-          status: {
-            state: "recording",
-            updatedAt: "2026-05-01T00:10:00.000Z",
+      const client = renderProvider();
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+      await waitFor(() => expect(FakeSocket.instances).toHaveLength(1));
+      const socket = FakeSocket.instances[0]!;
+      act(() => socket.emit("open"));
+      act(() =>
+        socket.emit("message", {
+          data: JSON.stringify({
+            kind: "status",
+            status: {
+              state: "recording",
+              updatedAt: "2026-05-01T00:10:00.000Z",
+              currentQuestionId: null,
+              currentMessageId: null,
+              lastError: null,
+            },
+          }),
+        }),
+      );
+
+      expect(client.getQueryData(apiQueryKeys.status)).toMatchObject({ state: "recording" });
+      const resolveStatusFetch = resolveFetch;
+      if (resolveStatusFetch === undefined) throw new Error("Status request did not start.");
+      await act(async () => {
+        resolveStatusFetch(
+          jsonResponse({
+            state: "idle",
+            updatedAt: synthetic ? "1970-01-01T00:00:00.000Z" : "2026-05-01T00:05:00.000Z",
+            ...(synthetic ? { isSynthetic: true, installationState: "active" } : {}),
             currentQuestionId: null,
             currentMessageId: null,
             lastError: null,
-          },
-        }),
-      }),
-    );
+          }),
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+      });
 
-    expect(client.getQueryData(apiQueryKeys.status)).toMatchObject({ state: "recording" });
-    const resolveStatusFetch = resolveFetch;
-    if (resolveStatusFetch === undefined) throw new Error("Status request did not start.");
-    await act(async () => {
-      resolveStatusFetch(
-        jsonResponse({
-          state: "idle",
-          updatedAt: "2026-05-01T00:05:00.000Z",
-          currentQuestionId: null,
-          currentMessageId: null,
-          lastError: null,
-        }),
-      );
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(client.getQueryData(apiQueryKeys.status)).toMatchObject({
-      state: "recording",
-      updatedAt: "2026-05-01T00:10:00.000Z",
-    });
-    expect(screen.getByText("Recording")).toBeDefined();
-  });
+      expect(client.getQueryData(apiQueryKeys.status)).toMatchObject({
+        state: "recording",
+        updatedAt: "2026-05-01T00:10:00.000Z",
+      });
+      expect(screen.getByText("Recording")).toBeDefined();
+    },
+  );
 
   it("reconciles a delayed exhibition end despite intervening heartbeats", async () => {
     let resolveFetch: ((response: Response) => void) | undefined;

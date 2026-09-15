@@ -312,8 +312,10 @@ export function BoothEnvelopeBridge(): null {
       return;
     }
     const current = queryClient.getQueryData<BoothStatus>(apiQueryKeys.status);
+    const preserveHeartbeat =
+      !statusQuery.data.isSynthetic || statusQuery.data.installationState === "active";
     const reconciled =
-      current && !statusQuery.data.isSynthetic && !isNewerThan(statusQuery.data, current)
+      current && preserveHeartbeat && !isNewerThan(statusQuery.data, current)
         ? { ...current, installationState: statusQuery.data.installationState }
         : statusQuery.data;
     void queryClient.cancelQueries({ queryKey: apiQueryKeys.status, exact: true });
