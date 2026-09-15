@@ -129,6 +129,18 @@ describe("audit metadata bounds", () => {
 describe("audit log middleware", () => {
   beforeEach(setup);
 
+  it("records inactive exhibition conflicts as 409 rather than server failures", async () => {
+    store.installations.clear();
+    const response = await createApp().request("/v1/status", {
+      method: "PUT",
+      headers: { ...phoneHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ state: "idle" }),
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: "installation_inactive" });
+    expect(auditFor("http.put /v1/status")).toMatchObject([{ statusCode: 409 }]);
+  });
+
   it("records the operator, IP and timestamp for an approval", async () => {
     const app = createApp();
     const file = seedFile();
