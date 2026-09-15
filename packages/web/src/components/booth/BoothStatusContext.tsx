@@ -1,6 +1,6 @@
 import { createContext, useContext, useMemo, useState } from "react";
 import type { JSX, PropsWithChildren } from "react";
-import type { BoothState } from "@telephone-booth-operator/shared";
+import type { BoothState, InstallationState } from "@telephone-booth-operator/shared";
 
 export type BoothDisplayStatus = "idle" | "playing" | "recording" | "error";
 export type BoothConnectionStatus = "connected" | "disconnected";
@@ -21,6 +21,8 @@ export function toBoothDisplayStatus(state: BoothState): BoothDisplayStatus {
 }
 
 export interface BoothStatusContextValue {
+  readonly installationState: InstallationState | null;
+  readonly setInstallationState: (state: InstallationState | null) => void;
   readonly status: BoothDisplayStatus;
   readonly connectionStatus: BoothConnectionStatus;
   readonly lastError: string | null;
@@ -63,6 +65,7 @@ function writeBooleanSetting(key: string, value: boolean): void {
 }
 
 export interface BoothStatusProviderProps extends PropsWithChildren {
+  readonly initialInstallationState?: InstallationState | null;
   readonly initialStatus?: BoothDisplayStatus;
   readonly initialConnectionStatus?: BoothConnectionStatus;
   readonly initialLastError?: string | null;
@@ -72,12 +75,16 @@ export interface BoothStatusProviderProps extends PropsWithChildren {
 
 export function BoothStatusProvider({
   children,
+  initialInstallationState = null,
   initialStatus = "idle",
   initialConnectionStatus = "connected",
   initialLastError = null,
   initialRuntimeMode = null,
   initialLastStatusAt = null,
 }: BoothStatusProviderProps): JSX.Element {
+  const [installationState, setInstallationState] = useState<InstallationState | null>(
+    initialInstallationState,
+  );
   const [status, setStatus] = useState<BoothDisplayStatus>(initialStatus);
   const [connectionStatus, setConnectionStatus] =
     useState<BoothConnectionStatus>(initialConnectionStatus);
@@ -103,6 +110,8 @@ export function BoothStatusProvider({
     }
 
     return {
+      installationState,
+      setInstallationState,
       status,
       connectionStatus,
       lastError,
@@ -118,7 +127,16 @@ export function BoothStatusProvider({
       setMuted,
       setReducedMotionOverride,
     };
-  }, [connectionStatus, lastError, lastStatusAt, mutedState, overrideState, runtimeMode, status]);
+  }, [
+    connectionStatus,
+    installationState,
+    lastError,
+    lastStatusAt,
+    mutedState,
+    overrideState,
+    runtimeMode,
+    status,
+  ]);
 
   return <BoothStatusContext.Provider value={value}>{children}</BoothStatusContext.Provider>;
 }

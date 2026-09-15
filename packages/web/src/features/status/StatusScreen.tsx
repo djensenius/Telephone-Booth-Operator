@@ -42,7 +42,11 @@ export function StatusScreen(): JSX.Element {
       collapseStatusHistory(historyQuery.data?.items ?? []).slice(0, STATUS_HISTORY_DISPLAY_LIMIT),
     [historyQuery.data],
   );
-  const current = statusQuery.data === null ? null : (statusQuery.data ?? history[0] ?? null);
+  const betweenExhibitions = statusQuery.data?.installationState === "between_exhibitions";
+  const current =
+    statusQuery.data === null || statusQuery.data?.isSynthetic === true
+      ? null
+      : (statusQuery.data ?? history[0] ?? null);
 
   return (
     <GlassPanel title="Live status panel" className="feature-screen status-screen">
@@ -53,12 +57,18 @@ export function StatusScreen(): JSX.Element {
       </p>
       {statusQuery.isLoading && current === null ? <FeatureSkeleton /> : null}
       {statusQuery.error ? <FeatureError message="Could not read the booth status line." /> : null}
-      {current === null && !statusQuery.isLoading ? (
+      {betweenExhibitions ? (
+        <FeatureEmpty title="Between exhibitions">
+          Offline is expected. Start the next installation to resume calls; pending recordings are
+          retained.
+        </FeatureEmpty>
+      ) : null}
+      {!betweenExhibitions && current === null && !statusQuery.isLoading ? (
         <FeatureEmpty title="No signal yet">
           No status snapshots have arrived from the booth.
         </FeatureEmpty>
       ) : null}
-      {current === null ? null : (
+      {betweenExhibitions || current === null ? null : (
         <>
           <section
             className={`status-indicator status-indicator--${hookLabel(current.state) === "On hook" ? "on" : "off"}`}

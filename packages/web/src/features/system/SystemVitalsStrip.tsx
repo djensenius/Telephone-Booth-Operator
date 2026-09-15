@@ -20,7 +20,11 @@ import {
 } from "@telephone-booth-operator/shared";
 import type { SystemHealthSeverity } from "@telephone-booth-operator/shared";
 import { useNow } from "../../hooks/useNow.js";
-import { useComponentTelemetryCurrent, useSystemCurrent } from "../../lib/api-client.js";
+import {
+  useComponentTelemetryCurrent,
+  useSystemCurrent,
+  useStatusCurrent,
+} from "../../lib/api-client.js";
 import { isTelemetryFresh } from "../../lib/telemetry-freshness.js";
 import { FanVitalTile } from "./FanVitalTile.js";
 import { fmtBytes, fmtNumber, fmtPercent, fmtUptime } from "./format.js";
@@ -53,6 +57,8 @@ function VitalTile({ label, value, severity = "ok", hint }: TileProps): JSX.Elem
 export function SystemVitalsStrip({
   boothId = DEFAULT_BOOTH_ID,
 }: SystemVitalsStripProps): JSX.Element {
+  const statusQuery = useStatusCurrent({ paused: true });
+  const betweenExhibitions = statusQuery.data?.installationState === "between_exhibitions";
   const query = useSystemCurrent(boothId);
   const componentQuery = useComponentTelemetryCurrent({ boothId });
   const nowMilliseconds = useNow();
@@ -95,13 +101,16 @@ export function SystemVitalsStrip({
   // Show a placeholder strip when there's nothing cached yet so the layout
   // doesn't pop in once the first refetch resolves.
   const isEmpty = !snapshot;
-  const status: string = receivedAt
-    ? `Updated ${new Date(receivedAt).toLocaleTimeString()}`
-    : query.isLoading
-      ? "Connecting…"
-      : query.error
-        ? "Booth offline"
-        : "Awaiting first snapshot";
+  const status: string =
+    betweenExhibitions && !query.error
+      ? "Between exhibitions · Offline is expected"
+      : receivedAt
+        ? `Updated ${new Date(receivedAt).toLocaleTimeString()}`
+        : query.isLoading
+          ? "Connecting…"
+          : query.error
+            ? "Booth offline"
+            : "Awaiting first snapshot";
 
   // Severity announcement for assistive technology. We deliberately do NOT
   // place `aria-live` on the tile grid itself, because the strip re-renders
@@ -145,7 +154,9 @@ export function SystemVitalsStrip({
           label="Router battery"
           value={
             routerTelemetryIsUnavailable
-              ? "offline"
+              ? betweenExhibitions && !componentQuery.isError
+                ? "Offline (expected)"
+                : "offline"
               : typeof routerBatteryTemperature === "number"
                 ? `${fmtNumber(routerBatteryTemperature, 1)}°C`
                 : componentQuery.isLoading

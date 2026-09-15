@@ -288,7 +288,7 @@ export async function uploadBlobToSas(
 export const status = {
   current: async (): Promise<BoothStatus | null> => {
     const current = await apiFetch<BoothStatus>("/v1/status", { schema: BoothStatusSchema });
-    return current.isSynthetic === true ? null : current;
+    return current.isSynthetic === true && current.installationState === undefined ? null : current;
   },
   history: (params: { readonly since?: string; readonly limit?: number } = {}) =>
     apiFetch<StatusHistory>(

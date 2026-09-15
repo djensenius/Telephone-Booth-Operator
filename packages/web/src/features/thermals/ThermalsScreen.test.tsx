@@ -176,7 +176,7 @@ function renderEmptyScreen() {
   );
 }
 
-function renderOfflineScreen() {
+function renderOfflineScreen(betweenExhibitions = false) {
   const offlineSource: TelemetrySourceEnvelope = {
     ...preferredSource,
     id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
@@ -197,6 +197,14 @@ function renderOfflineScreen() {
     defaultOptions: { queries: { retry: false, staleTime: Number.POSITIVE_INFINITY } },
   });
   client.setQueryData(apiQueryKeys.systemAll, { items: [] });
+  if (betweenExhibitions) {
+    client.setQueryData(apiQueryKeys.status, {
+      state: "idle",
+      updatedAt: "1970-01-01T00:00:00.000Z",
+      isSynthetic: true,
+      installationState: "between_exhibitions",
+    });
+  }
   client.setQueryData(apiQueryKeys.systemComponents(), [offlineSource]);
   client.setQueryData(apiQueryKeys.currentWeather(offlineSource.boothId), {
     ...currentWeather,
@@ -216,6 +224,14 @@ function renderOfflineScreen() {
 }
 
 describe("ThermalsScreen", () => {
+  it("shows missing telemetry as expected between exhibitions without hiding history", () => {
+    renderOfflineScreen(true);
+    expect(screen.getByText("Telemetry offline (expected)")).toBeDefined();
+    expect(screen.getByText("Offline (expected)")).toBeDefined();
+    expect(screen.queryByText("Telemetry offline")).toBeNull();
+    expect(screen.getByRole("group", { name: "History range" })).toBeDefined();
+  });
+
   afterEach(() => {
     onlineManager.setOnline(true);
     vi.unstubAllGlobals();

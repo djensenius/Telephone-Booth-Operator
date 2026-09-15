@@ -81,6 +81,72 @@ describe("BoothWebSocketProvider", () => {
     vi.unstubAllGlobals();
   });
 
+  it("applies lifecycle from synthetic REST status after a newer heartbeat and resumes", async () => {
+    const client = renderProvider();
+    await act(() =>
+      client.setQueryData(apiQueryKeys.status, {
+        state: "recording",
+        id: 1,
+        updatedAt: "2026-09-15T12:00:00.000Z",
+        installationState: "active",
+      }),
+    );
+    expect(await screen.findByText("Recording")).toBeDefined();
+    await act(() =>
+      client.setQueryData(apiQueryKeys.status, {
+        state: "idle",
+        updatedAt: "1970-01-01T00:00:00.000Z",
+        isSynthetic: true,
+        installationState: "between_exhibitions",
+      }),
+    );
+    expect(await screen.findByText("Between exhibitions")).toBeDefined();
+    expect(screen.queryByText("Booth offline")).toBeNull();
+    await waitFor(() => expect(FakeSocket.instances).toHaveLength(1));
+    act(() =>
+      FakeSocket.instances[0]!.emit("message", {
+        data: JSON.stringify({
+          kind: "status",
+          status: { state: "recording", id: 1, updatedAt: "2026-09-15T12:00:01.000Z" },
+        }),
+      }),
+    );
+    expect(client.getQueryData(apiQueryKeys.status)).toMatchObject({
+      isSynthetic: true,
+      installationState: "between_exhibitions",
+    });
+    await act(() =>
+      client.setQueryData(apiQueryKeys.status, {
+        state: "idle",
+        updatedAt: "1970-01-01T00:00:00.000Z",
+        isSynthetic: true,
+        installationState: "active",
+      }),
+    );
+    await waitFor(() => expect(screen.queryByText("Between exhibitions")).toBeNull());
+    await act(() =>
+      client.setQueryData(apiQueryKeys.status, {
+        state: "recording",
+        id: 2,
+        updatedAt: new Date().toISOString(),
+        installationState: "active",
+      }),
+    );
+    expect(await screen.findByText("Recording")).toBeDefined();
+    act(() =>
+      FakeSocket.instances[0]!.emit("message", {
+        data: JSON.stringify({
+          kind: "status",
+          status: { state: "idle", id: 3, updatedAt: new Date(Date.now() + 1_000).toISOString() },
+        }),
+      }),
+    );
+    expect(client.getQueryData(apiQueryKeys.status)).toMatchObject({
+      state: "idle",
+      installationState: "active",
+    });
+  });
+
   // A socket that errors is closed and replaced once. Its own `close` arrives
   // afterwards, and acting on that late event would open a second connection
   // in parallel with the live one, duplicating every envelope.

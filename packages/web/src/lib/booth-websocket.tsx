@@ -209,6 +209,12 @@ export function useBoothWebSocket(): BoothWebSocketApi {
 // becomes the current status.
 function applyStatusToCache(queryClient: QueryClient, status: BoothStatus): boolean {
   const cached = queryClient.getQueryData<BoothStatus>(apiQueryKeys.status) ?? null;
+  // A delayed booth frame cannot reopen an exhibition or erase the lifecycle
+  // supplied by REST. Live frames contain heartbeat state, not lifecycle.
+  if (cached?.installationState === "between_exhibitions") return false;
+  if (status.installationState === undefined && cached?.installationState !== undefined) {
+    status = { ...status, installationState: cached.installationState };
+  }
   const isCurrent = isNewerThan(status, cached);
   if (isCurrent) {
     // A GET started before this frame may resolve afterwards. Cancel its query
@@ -234,19 +240,51 @@ export function BoothEnvelopeBridge(): null {
   // miss status reports handled by another. Keep bounded REST reconciliation
   // active; accepted live frames cancel older in-flight responses below.
   const statusQuery = useStatusCurrent();
-  const { setLastStatusAt, setRuntimeMode, setStatus } = useBoothStatus();
+  const {
+    setLastStatusAt,
+    setRuntimeMode,
+    setStatus,
+    setInstallationState,
+    setConnectionStatus,
+    setLastError,
+  } = useBoothStatus();
   const latestStatusRef = useRef<BoothStatus | null>(null);
+  const installationStateRef = useRef<BoothStatus["installationState"]>(undefined);
   const seenMessageIdsRef = useRef<Set<string>>(new Set());
+  const pollFailedRef = useRef(false);
+
+  useEffect(() => {
+    if (statusQuery.isError) {
+      pollFailedRef.current = true;
+      setConnectionStatus("disconnected");
+      setLastError("Unable to refresh the exhibition lifecycle from the operator API.");
+    } else if (pollFailedRef.current && statusQuery.isSuccess) {
+      pollFailedRef.current = false;
+      setConnectionStatus("connected");
+      setLastError(null);
+    }
+  }, [statusQuery.isError, statusQuery.isSuccess, setConnectionStatus, setLastError]);
 
   const syncStatus = useCallback(
-    (status: BoothStatus): void => {
+    (status: BoothStatus, authoritative = false): void => {
+      if (authoritative || status.installationState !== undefined) {
+        installationStateRef.current = status.installationState;
+        setInstallationState(status.installationState ?? null);
+      }
+      if (status.isSynthetic === true) {
+        latestStatusRef.current = null;
+        setStatus("idle");
+        setRuntimeMode(null);
+        setLastStatusAt(null);
+        return;
+      }
       if (!isNewerThan(status, latestStatusRef.current)) return;
       latestStatusRef.current = status;
       setStatus(toBoothDisplayStatus(status.state));
       setRuntimeMode(status.runtimeMode ?? null);
       setLastStatusAt(new Date(status.updatedAt));
     },
-    [setLastStatusAt, setRuntimeMode, setStatus],
+    [setLastStatusAt, setRuntimeMode, setStatus, setInstallationState],
   );
 
   const clearStatus = useCallback((): void => {
@@ -268,15 +306,18 @@ export function BoothEnvelopeBridge(): null {
     }
     if (statusQuery.data === null) {
       clearStatus();
+      installationStateRef.current = undefined;
+      setInstallationState(null);
       void queryClient.cancelQueries({ queryKey: apiQueryKeys.statusHistory, exact: true });
       queryClient.setQueryData(apiQueryKeys.statusHistory, { items: [] });
       return;
     }
-    syncStatus(statusQuery.data);
-  }, [statusQuery.data, clearStatus, queryClient, syncStatus]);
+    syncStatus(statusQuery.data, true);
+  }, [statusQuery.data, clearStatus, queryClient, syncStatus, setInstallationState]);
 
   const acceptLiveStatus = useCallback(
     (status: BoothStatus): void => {
+      if (installationStateRef.current === "between_exhibitions") return;
       if (applyStatusToCache(queryClient, status)) syncStatus(status);
     },
     [queryClient, syncStatus],
@@ -292,6 +333,10 @@ export function BoothEnvelopeBridge(): null {
     return ws.subscribe((envelope) => {
       if (envelope.kind === "installation") {
         clearStatus();
+        installationStateRef.current = envelope.installation.isActive
+          ? "active"
+          : "between_exhibitions";
+        setInstallationState(installationStateRef.current);
         seenMessageIdsRef.current.clear();
         invalidateInstallationScopedQueries(queryClient);
         return;
@@ -327,6 +372,6 @@ export function BoothEnvelopeBridge(): null {
         void queryClient.invalidateQueries({ queryKey: apiQueryKeys.transcriptions(message.id) });
       }
     });
-  }, [ws, queryClient, acceptLiveStatus, clearStatus]);
+  }, [ws, queryClient, acceptLiveStatus, clearStatus, setInstallationState]);
   return null;
 }
