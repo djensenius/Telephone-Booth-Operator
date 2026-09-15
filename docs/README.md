@@ -56,3 +56,4 @@ rebuilds it from the filesystem; CI fails if it drifts.
 - [0012 — Refresh-token rotation across API replicas](adr/0012-refresh-token-rotation-race.md)
 - [0013 — Installations as the data scope](adr/0013-installations-as-data-scope.md)
 - [0014 — Router component telemetry through Grafana](adr/0014-router-component-telemetry.md)
+- [0015 — Explicit between-exhibitions downtime](adr/0015-between-exhibitions.md)

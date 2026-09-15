@@ -6,6 +6,7 @@ import {
   CreateApiTokenRequestSchema,
   CurrentWeatherQuerySchema,
   CurrentWeatherSchema,
+  InstallationStateSchema,
   InstallationSummarySchema,
   InstructionSchema,
   InstructionStatusSchema,
@@ -16,12 +17,38 @@ import {
   RouterComponentSnapshotSchema,
   StatsOverviewSchema,
   StatsSummarySchema,
+  StatusUpdateSchema,
   ThermalHistoryQuerySchema,
   ThermalHistorySchema,
   ThermalMetricNameSchema,
 } from "../src/index.js";
 
 describe("BoothStatusSchema", () => {
+  it.each(["active", "between_exhibitions"])("preserves the %s lifecycle", (installationState) => {
+    expect(InstallationStateSchema.parse(installationState)).toBe(installationState);
+    expect(
+      BoothStatusSchema.parse({
+        state: "idle",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        installationState,
+      }).installationState,
+    ).toBe(installationState);
+    expect(StatusUpdateSchema.parse({ state: "idle", installationState })).not.toHaveProperty(
+      "installationState",
+    );
+  });
+
+  it("rejects unknown lifecycle values", () => {
+    expect(() => InstallationStateSchema.parse("paused")).toThrow();
+    expect(() =>
+      BoothStatusSchema.parse({
+        state: "idle",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        installationState: "paused",
+      }),
+    ).toThrow();
+  });
+
   it("accepts a valid status", () => {
     const parsed = BoothStatusSchema.parse({
       state: "idle",
@@ -29,6 +56,7 @@ describe("BoothStatusSchema", () => {
     });
 
     expect(parsed.state).toBe("idle");
+    expect(parsed.installationState).toBeUndefined();
   });
 
   it("accepts callUnavailable", () => {
@@ -158,6 +186,13 @@ describe("MonitorSummarySchema", () => {
     });
 
     expect(parsed.breakdownToday.wrongNumberAttempts).toBe(2);
+    expect(parsed.installationState).toBeUndefined();
+    for (const installationState of ["active", "between_exhibitions"]) {
+      expect(MonitorSummarySchema.parse({ ...parsed, installationState }).installationState).toBe(
+        installationState,
+      );
+    }
+    expect(() => MonitorSummarySchema.parse({ ...parsed, installationState: "paused" })).toThrow();
     const { messagePlaybackStartsTotal: _messagePlaybackStartsTotal, ...withoutPlaybackTotal } =
       parsed;
     expect(() => MonitorSummarySchema.parse(withoutPlaybackTotal)).toThrow();

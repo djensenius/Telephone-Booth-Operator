@@ -119,7 +119,11 @@ export type Moderation = z.infer<typeof ModerationSchema>;
 export const RuntimeModeSchema = z.enum(["real", "mock", "simulator"]);
 export type RuntimeMode = z.infer<typeof RuntimeModeSchema>;
 
+export const InstallationStateSchema = z.enum(["active", "between_exhibitions"]);
+export type InstallationState = z.infer<typeof InstallationStateSchema>;
+
 export const BoothStatusSchema = z.object({
+  installationState: InstallationStateSchema.optional(),
   state: BoothStateSchema,
   updatedAt: z.string().datetime(),
   // True only for the API's id-less placeholder when the selected
@@ -185,6 +189,7 @@ export const InteractionBreakdownSchema = z.object({
 export type InteractionBreakdown = z.infer<typeof InteractionBreakdownSchema>;
 
 export const MonitorSummarySchema = z.object({
+  installationState: InstallationStateSchema.optional(),
   interactionsToday: z.number().int().nonnegative(),
   interactionsTotal: z.number().int().nonnegative(),
   callsToday: z.number().int().nonnegative(),
@@ -202,6 +207,7 @@ export type MonitorSummary = z.infer<typeof MonitorSummarySchema>;
 // Booth-supplied half of the wire shape: collapsing metadata is derived by the
 // operator, never sent by the booth.
 export const StatusUpdateSchema = BoothStatusSchema.omit({
+  installationState: true,
   updatedAt: true,
   isSynthetic: true,
   firstSeenAt: true,

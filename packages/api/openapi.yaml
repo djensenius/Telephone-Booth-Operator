@@ -86,6 +86,11 @@ paths:
             schema: { $ref: "#/components/schemas/StatusUpdate" }
       responses:
         "204": { description: accepted }
+        "409":
+          description: No active installation. Keep the booth between exhibitions until an operator explicitly starts one.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/InstallationInactive" }
 
   /v1/status/history:
     get:
@@ -189,8 +194,17 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Question" }
         "404": { description: audio file not found }
-        "409": { description: duplicate prompt or audio already attached }
-        "503": { description: no installation was open to file the prompt under }
+        "409":
+          description: Duplicate prompt/audio, or installation_inactive when no exhibition is active.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error: { type: string }
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/InstallationInactive" }
 
   /v1/questions/random:
     get:
@@ -221,6 +235,11 @@ paths:
               schema: { $ref: "#/components/schemas/Question" }
         "400": { description: invalid question draw id }
         "404": { description: no questions available }
+        "409":
+          description: Between exhibitions; do not offer new calls until an operator starts an installation.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/InstallationInactive" }
         "503":
           description: question bag busy during installation rollover; retryable
           headers:
@@ -384,6 +403,11 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Instruction" }
         "404": { description: no instructions available }
+        "409":
+          description: Between exhibitions; no new calls.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/InstallationInactive" }
 
   /v1/instructions/current:
     get:
@@ -399,6 +423,11 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Instruction" }
         "404": { description: no instructions available }
+        "409":
+          description: Between exhibitions; no new calls.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/InstallationInactive" }
 
   /v1/instructions/{id}:
     parameters:
@@ -523,7 +552,18 @@ paths:
           description: >-
             Conflicting audio hash: the matching message has already advanced
             past `uploading`, the retry targets a different question, or the
-            hash belongs to a non-message file.
+            hash belongs to a non-message file. Also returned as a problem
+            response with error=installation_inactive when no exhibition is active;
+            retain the recording and retry after an operator starts one.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error: { type: string }
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/InstallationInactive" }
 
   /v1/messages/random:
     get:
@@ -538,6 +578,11 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Message" }
         "404": { description: no approved messages available }
+        "409":
+          description: Between exhibitions; no new calls.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/InstallationInactive" }
 
   /v1/messages/{id}:
     parameters:
@@ -591,7 +636,20 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/MessageComplete" }
         "404": { description: not found }
-        "409": { description: blob not found }
+        "409":
+          description: >-
+            Blob not found, or installation_inactive while between exhibitions.
+            Inactive completions keep their uploading row and blob unchanged;
+            retry after an operator explicitly starts the next installation.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error: { type: string }
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/InstallationInactive" }
         "413": { description: audio blob exceeds maximum allowed size }
         "422": { description: "sha256 metadata missing or mismatch" }
 
@@ -1809,7 +1867,8 @@ paths:
       description: |
         Booth → API. Events are deduplicated on `(boothId, eventId)`. Lazily
         creates a `CallSession` when `call_started` / `call_ended` events
-        arrive.
+        arrive. During between-exhibitions downtime, retain the batch and
+        retry after an operator explicitly starts an installation.
       tags: [events]
       security:
         - apiToken: []
@@ -1827,6 +1886,11 @@ paths:
                   minItems: 1
                   maxItems: 500
       responses:
+        "409":
+          description: Between exhibitions; the batch has not been acknowledged or persisted.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/InstallationInactive" }
         "200":
           description: batch accepted
           content:
@@ -2440,10 +2504,27 @@ components:
           callUnavailable,
           error,
         ]
+    InstallationState:
+      type: string
+      enum: [active, between_exhibitions]
+      description: >-
+        Operator-controlled exhibition lifecycle, independent of connectivity.
+        Between exhibitions, offline is expected and new calls are disabled.
+        Only an explicit installation start resumes activity. Omitted by older servers.
+    InstallationInactive:
+      type: object
+      required: [type, title, status, detail, error]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer, const: 409 }
+        detail: { type: string }
+        error: { type: string, const: installation_inactive }
     BoothStatus:
       type: object
       required: [state, updatedAt, isSynthetic]
       properties:
+        installationState: { $ref: "#/components/schemas/InstallationState" }
         id:
           type: integer
           description: >-
@@ -3550,6 +3631,7 @@ components:
           timeZone,
         ]
       properties:
+        installationState: { $ref: "#/components/schemas/InstallationState" }
         interactionsToday:
           type: integer
           minimum: 0
