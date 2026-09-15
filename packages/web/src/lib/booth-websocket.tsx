@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import { BoothStatusSchema, WsEnvelopeSchema } from "@telephone-booth-operator/shared";
 import type { BoothStatus, WsEnvelope } from "@telephone-booth-operator/shared";
@@ -17,7 +17,7 @@ import {
   apiQueryKeys,
   apiWebSocketUrlFor,
   invalidateInstallationScopedQueries,
-  useStatusCurrent,
+  useStatusReconciliation,
 } from "./api-client.js";
 import { isNewerThan, mergeLiveStatus } from "./status-history.js";
 
@@ -209,6 +209,12 @@ export function useBoothWebSocket(): BoothWebSocketApi {
 // becomes the current status.
 function applyStatusToCache(queryClient: QueryClient, status: BoothStatus): boolean {
   const cached = queryClient.getQueryData<BoothStatus>(apiQueryKeys.status) ?? null;
+  // A delayed booth frame cannot reopen an exhibition or erase the lifecycle
+  // supplied by REST. Live frames contain heartbeat state, not lifecycle.
+  if (cached?.installationState === "between_exhibitions") return false;
+  if (status.installationState === undefined && cached?.installationState !== undefined) {
+    status = { ...status, installationState: cached.installationState };
+  }
   const isCurrent = isNewerThan(status, cached);
   if (isCurrent) {
     // A GET started before this frame may resolve afterwards. Cancel its query
@@ -231,22 +237,47 @@ export function BoothEnvelopeBridge(): null {
   const ws = useBoothWebSocket();
   const queryClient = useQueryClient();
   // The broadcaster is process-local, so a live socket on one API replica can
-  // miss status reports handled by another. Keep bounded REST reconciliation
-  // active; accepted live frames cancel older in-flight responses below.
-  const statusQuery = useStatusCurrent();
-  const { setLastStatusAt, setRuntimeMode, setStatus } = useBoothStatus();
+  // miss status reports handled by another. Reconciliation has its own query:
+  // live cache updates must neither cancel it nor clear its API failures.
+  const statusQuery = useStatusReconciliation();
+  const statusCache = useQuery<BoothStatus | null>({
+    queryKey: apiQueryKeys.status,
+    enabled: false,
+  });
+  const { setLastStatusAt, setRuntimeMode, setStatus, setInstallationState, setLifecycleError } =
+    useBoothStatus();
   const latestStatusRef = useRef<BoothStatus | null>(null);
+  const installationStateRef = useRef<BoothStatus["installationState"]>(undefined);
   const seenMessageIdsRef = useRef<Set<string>>(new Set());
 
+  useEffect(() => {
+    if (statusQuery.isError) {
+      setLifecycleError("Unable to refresh the exhibition lifecycle from the operator API.");
+    } else if (statusQuery.isSuccess) {
+      setLifecycleError(null);
+    }
+  }, [statusQuery.isError, statusQuery.isSuccess, setLifecycleError]);
+
   const syncStatus = useCallback(
-    (status: BoothStatus): void => {
+    (status: BoothStatus, authoritative = false): void => {
+      if (authoritative || status.installationState !== undefined) {
+        installationStateRef.current = status.installationState;
+        setInstallationState(status.installationState ?? null);
+      }
+      if (status.isSynthetic === true) {
+        latestStatusRef.current = null;
+        setStatus("idle");
+        setRuntimeMode(null);
+        setLastStatusAt(null);
+        return;
+      }
       if (!isNewerThan(status, latestStatusRef.current)) return;
       latestStatusRef.current = status;
       setStatus(toBoothDisplayStatus(status.state));
       setRuntimeMode(status.runtimeMode ?? null);
       setLastStatusAt(new Date(status.updatedAt));
     },
-    [setLastStatusAt, setRuntimeMode, setStatus],
+    [setLastStatusAt, setRuntimeMode, setStatus, setInstallationState],
   );
 
   const clearStatus = useCallback((): void => {
@@ -255,6 +286,10 @@ export function BoothEnvelopeBridge(): null {
     setRuntimeMode(null);
     setLastStatusAt(null);
   }, [setLastStatusAt, setRuntimeMode, setStatus]);
+
+  useEffect(() => {
+    if (statusCache.data === undefined) clearStatus();
+  }, [statusCache.data, clearStatus]);
 
   // Hydrate even when the socket opens immediately. A status socket only
   // carries new reports, so the REST snapshot preserves a legitimate
@@ -268,15 +303,29 @@ export function BoothEnvelopeBridge(): null {
     }
     if (statusQuery.data === null) {
       clearStatus();
+      installationStateRef.current = undefined;
+      setInstallationState(null);
+      void queryClient.cancelQueries({ queryKey: apiQueryKeys.status, exact: true });
+      queryClient.setQueryData(apiQueryKeys.status, null);
       void queryClient.cancelQueries({ queryKey: apiQueryKeys.statusHistory, exact: true });
       queryClient.setQueryData(apiQueryKeys.statusHistory, { items: [] });
       return;
     }
-    syncStatus(statusQuery.data);
-  }, [statusQuery.data, clearStatus, queryClient, syncStatus]);
+    const current = queryClient.getQueryData<BoothStatus>(apiQueryKeys.status);
+    const preserveHeartbeat =
+      !statusQuery.data.isSynthetic || statusQuery.data.installationState === "active";
+    const reconciled =
+      current && preserveHeartbeat && !isNewerThan(statusQuery.data, current)
+        ? { ...current, installationState: statusQuery.data.installationState }
+        : statusQuery.data;
+    void queryClient.cancelQueries({ queryKey: apiQueryKeys.status, exact: true });
+    queryClient.setQueryData(apiQueryKeys.status, reconciled);
+    syncStatus(reconciled, true);
+  }, [statusQuery.data, clearStatus, queryClient, syncStatus, setInstallationState]);
 
   const acceptLiveStatus = useCallback(
     (status: BoothStatus): void => {
+      if (installationStateRef.current === "between_exhibitions") return;
       if (applyStatusToCache(queryClient, status)) syncStatus(status);
     },
     [queryClient, syncStatus],
@@ -292,6 +341,10 @@ export function BoothEnvelopeBridge(): null {
     return ws.subscribe((envelope) => {
       if (envelope.kind === "installation") {
         clearStatus();
+        installationStateRef.current = envelope.installation.isActive
+          ? "active"
+          : "between_exhibitions";
+        setInstallationState(installationStateRef.current);
         seenMessageIdsRef.current.clear();
         invalidateInstallationScopedQueries(queryClient);
         return;
@@ -327,6 +380,6 @@ export function BoothEnvelopeBridge(): null {
         void queryClient.invalidateQueries({ queryKey: apiQueryKeys.transcriptions(message.id) });
       }
     });
-  }, [ws, queryClient, acceptLiveStatus, clearStatus]);
+  }, [ws, queryClient, acceptLiveStatus, clearStatus, setInstallationState]);
   return null;
 }

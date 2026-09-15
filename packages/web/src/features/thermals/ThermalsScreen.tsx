@@ -9,6 +9,7 @@ import {
   useCurrentWeather,
   useSystemCurrentAll,
   useThermalHistory,
+  useStatusCurrent,
   type ThermalRange,
 } from "../../lib/api-client.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
@@ -81,10 +82,12 @@ function FleetSourceCard({
   summary,
   selected,
   onSelect,
+  betweenExhibitions,
 }: {
   readonly summary: ThermalCurrentSummary;
   readonly selected: boolean;
   readonly onSelect: () => void;
+  readonly betweenExhibitions: boolean;
 }): JSX.Element {
   const hottest = summary.hottestRouterZone;
   return (
@@ -103,10 +106,10 @@ function FleetSourceCard({
         </span>
         <span
           className={`thermal-fleet-card__status thermal-fleet-card__status--${
-            summary.offline ? "offline" : "online"
+            summary.offline ? (betweenExhibitions ? "expected" : "offline") : "online"
           }`}
         >
-          {summary.offline ? "Offline" : "Current"}
+          {summary.offline ? (betweenExhibitions ? "Offline (expected)" : "Offline") : "Current"}
         </span>
       </span>
       <span className="thermal-fleet-card__readings">
@@ -207,6 +210,9 @@ const ZoneSensorDetails = memo(function ZoneSensorDetails({
 });
 
 export function ThermalsScreen(): JSX.Element {
+  const statusQuery = useStatusCurrent({ paused: true });
+  const betweenExhibitions =
+    !statusQuery.isError && statusQuery.data?.installationState === "between_exhibitions";
   const systemsQuery = useSystemCurrentAll();
   const componentsQuery = useComponentTelemetryCurrent();
   const nowMilliseconds = useNow();
@@ -300,8 +306,20 @@ export function ThermalsScreen(): JSX.Element {
                 {selectedSummary.source.displayName} · {selectedSummary.source.componentId}
               </p>
             </div>
-            <span className={selectedSummary.offline ? "thermal-offline" : "thermal-online"}>
-              {selectedSummary.offline ? "Telemetry offline" : "Telemetry current"}
+            <span
+              className={
+                selectedSummary.offline
+                  ? betweenExhibitions
+                    ? "thermal-expected"
+                    : "thermal-offline"
+                  : "thermal-online"
+              }
+            >
+              {selectedSummary.offline
+                ? betweenExhibitions
+                  ? "Telemetry offline (expected)"
+                  : "Telemetry offline"
+                : "Telemetry current"}
             </span>
           </header>
           <div className="thermal-current-grid">
@@ -380,6 +398,7 @@ export function ThermalsScreen(): JSX.Element {
               <FleetSourceCard
                 key={summary.source.id}
                 summary={summary}
+                betweenExhibitions={betweenExhibitions}
                 selected={summary.source.id === selectedSource?.id}
                 onSelect={() => setSelectedSourceId(summary.source.id)}
               />

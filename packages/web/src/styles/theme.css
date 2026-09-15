@@ -590,6 +590,12 @@ textarea:focus-visible,
   font-size: 0.98rem;
 }
 
+.booth-status-badge--between-exhibitions .booth-status-badge__dot {
+  background: var(--text-muted);
+  box-shadow: none;
+  animation: none;
+}
+
 .booth-status-badge--playing .booth-status-badge__dot {
   background: var(--accent-yellow);
   box-shadow: 0 0 18px color-mix(in srgb, var(--accent-yellow) 58%, transparent);
@@ -2554,6 +2560,7 @@ textarea:focus-visible,
 
 .thermal-online,
 .thermal-offline,
+.thermal-expected,
 .thermal-fleet-card__status {
   display: inline-flex;
   align-items: center;
@@ -2576,6 +2583,12 @@ textarea:focus-visible,
 .thermal-fleet-card__status--offline {
   color: var(--accent-red-strong);
   border-color: color-mix(in srgb, var(--accent-red) 56%, var(--border-subtle));
+}
+
+.thermal-expected,
+.thermal-fleet-card__status--expected {
+  color: var(--text-muted);
+  border-color: var(--border-subtle);
 }
 
 .thermal-current-grid {

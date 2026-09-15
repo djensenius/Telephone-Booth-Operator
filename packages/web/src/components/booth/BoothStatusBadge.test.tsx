@@ -90,6 +90,22 @@ describe("BoothStatusBadge", () => {
     expect(outer).toBeDefined();
   });
 
+  it("treats a stale booth as neutral only when explicitly between exhibitions", () => {
+    render(
+      <BoothStatusProvider
+        initialInstallationState="between_exhibitions"
+        initialStatus="error"
+        initialLastStatusAt={new Date(0)}
+      >
+        <BoothStatusBadge />
+      </BoothStatusProvider>,
+    );
+    expect(screen.getByText("Between exhibitions")).toBeDefined();
+    expect(screen.getByText("Offline is expected")).toBeDefined();
+    expect(screen.queryByText("Booth offline")).toBeNull();
+    expect(screen.queryByText("Error")).toBeNull();
+  });
+
   it("transitions from fresh to warning as time passes", () => {
     const now = new Date();
     render(

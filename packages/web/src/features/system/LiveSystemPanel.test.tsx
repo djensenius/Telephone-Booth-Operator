@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vite-plus/test";
 import type { BoothSystemSnapshotEnvelope } from "@telephone-booth-operator/shared";
 import { apiQueryKeys } from "../../lib/api-client.js";
+import { BoothStatusProvider } from "../../components/booth/BoothStatusContext.js";
 import { LiveSystemPanel } from "./LiveSystemPanel.js";
 
 function renderPanel(envelope?: BoothSystemSnapshotEnvelope) {
@@ -70,6 +71,37 @@ const baseSnapshot = {
 };
 
 describe("LiveSystemPanel", () => {
+  it("shows expected downtime without hiding a real system error", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    client.setQueryData(apiQueryKeys.status, {
+      state: "idle",
+      updatedAt: "1970-01-01T00:00:00.000Z",
+      isSynthetic: true,
+      installationState: "between_exhibitions",
+    });
+    client.setQueryData(apiQueryKeys.system("booth-01"), null);
+    render(
+      <QueryClientProvider client={client}>
+        <BoothStatusProvider>
+          <LiveSystemPanel boothId="booth-01" />
+        </BoothStatusProvider>
+      </QueryClientProvider>,
+    );
+    expect(screen.getByText("Between exhibitions")).toBeDefined();
+    expect(screen.getByText(/No live booth telemetry is expected/)).toBeDefined();
+    const query = client
+      .getQueryCache()
+      .find({ queryKey: apiQueryKeys.system("booth-01"), exact: true });
+    if (!query) throw new Error("missing system query");
+    act(() => query.setState({ status: "error", error: new Error("system unavailable") }));
+    await waitFor(() =>
+      expect(screen.getByText("Could not read the booth's vitals.")).toBeDefined(),
+    );
+    expect(screen.queryByText(/No live booth telemetry is expected/)).toBeNull();
+  });
+
   it("renders the booth client version when provided in the envelope", () => {
     renderPanel({
       boothId: "booth-01",

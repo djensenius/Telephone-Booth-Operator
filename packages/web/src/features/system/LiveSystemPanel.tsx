@@ -2,7 +2,7 @@ import type { JSX } from "react";
 import { useMemo } from "react";
 import type { BoothThrottlingFlags } from "@telephone-booth-operator/shared";
 import { GlassPanel, RuntimeModeBadge } from "../../components/booth/index.js";
-import { useSystemCurrent } from "../../lib/api-client.js";
+import { useSystemCurrent, useStatusCurrent } from "../../lib/api-client.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
 import { fmtBytes, fmtNumber, fmtPercent, fmtUptime } from "./format.js";
 
@@ -28,6 +28,9 @@ interface LiveSystemPanelProps {
 }
 
 export function LiveSystemPanel({ boothId = DEFAULT_BOOTH_ID }: LiveSystemPanelProps): JSX.Element {
+  const statusQuery = useStatusCurrent({ paused: true });
+  const betweenExhibitions =
+    !statusQuery.isError && statusQuery.data?.installationState === "between_exhibitions";
   const query = useSystemCurrent(boothId);
   const snapshot = query.data?.snapshot;
   const receivedAt = query.data?.receivedAt;
@@ -128,12 +131,16 @@ export function LiveSystemPanel({ boothId = DEFAULT_BOOTH_ID }: LiveSystemPanelP
               : "Awaiting first snapshot"}
         </p>
       </header>
+      {betweenExhibitions ? (
+        <p>Between exhibitions — offline is expected until the next installation starts.</p>
+      ) : null}
       {query.isLoading && !snapshot ? <FeatureSkeleton label="Reading the meters…" /> : null}
       {query.error ? <FeatureError message="Could not read the booth's vitals." /> : null}
       {!query.isLoading && !query.error && !snapshot ? (
-        <FeatureEmpty title="No snapshot yet">
-          The booth has not pushed a system snapshot since the operator restarted. Snapshots arrive
-          every five seconds when the booth is online.
+        <FeatureEmpty title={betweenExhibitions ? "Between exhibitions" : "No snapshot yet"}>
+          {betweenExhibitions
+            ? "No live booth telemetry is expected while the installation is offline."
+            : "The booth has not pushed a system snapshot since the operator restarted. Snapshots arrive every five seconds when the booth is online."}
         </FeatureEmpty>
       ) : null}
       {snapshot ? (

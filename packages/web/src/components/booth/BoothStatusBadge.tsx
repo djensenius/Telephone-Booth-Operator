@@ -47,10 +47,12 @@ function useStaleness(): { level: StalenessLevel; label: string | null } {
 }
 
 export function BoothStatusBadge(): JSX.Element {
-  const { status, runtimeMode } = useBoothStatus();
+  const { status, runtimeMode, installationState } = useBoothStatus();
   const { level, label } = useStaleness();
-  const badgeClass =
-    level === "fresh"
+  const betweenExhibitions = installationState === "between_exhibitions";
+  const badgeClass = betweenExhibitions
+    ? "booth-status-badge booth-status-badge--between-exhibitions"
+    : level === "fresh"
       ? `booth-status-badge booth-status-badge--${status}`
       : `booth-status-badge booth-status-badge--${status} booth-status-badge--stale-${level}`;
   return (
@@ -58,14 +60,21 @@ export function BoothStatusBadge(): JSX.Element {
       <span className="booth-status-badge__dot" aria-hidden="true" />
       <span>
         <span className="booth-status-badge__label">Booth status</span>
-        <strong>{STATUS_LABELS[status]}</strong>
-        {label !== null ? (
+        <strong>{betweenExhibitions ? "Between exhibitions" : STATUS_LABELS[status]}</strong>
+        {betweenExhibitions ? (
+          <span className="booth-status-badge__staleness">Offline is expected</span>
+        ) : null}
+        {!betweenExhibitions && label !== null ? (
           <span className="booth-status-badge__staleness" aria-live="polite">
             {label}
           </span>
         ) : null}
       </span>
-      <RuntimeModeBadge mode={runtimeMode} className="booth-status-badge__mode" nested />
+      <RuntimeModeBadge
+        mode={betweenExhibitions ? null : runtimeMode}
+        className="booth-status-badge__mode"
+        nested
+      />
     </div>
   );
 }
