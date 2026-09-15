@@ -572,15 +572,13 @@ const adoptLegacyRows = async (
 
 // Only one installation may be open at a time, enforced by a partial unique
 // index. A restore therefore cannot blindly upsert an archive whose active era
-// differs from the target's: the target was seeded with its own active row by
-// the migration (or lazily by a booth write) and the insert would collide.
+// differs from the target's explicitly started or migration-seeded active row.
 //
 // The archive is authoritative for a restore, so the target's era yields: it is
 // closed out rather than deleted, even when nothing was recorded against it.
-// Deleting it would strand any replica whose cached active id still names it —
-// the next booth write there would fail its foreign key, and a booth write must
-// never fail on bookkeeping. An empty ended era is cheap; a dropped recording
-// is not.
+// Keeping the ended row preserves historical references and pending uploads.
+// Restoring an archive with an active era is an explicit lifecycle operation;
+// subsequent booth writes never open an era on their own.
 const reconcileActiveInstallation = async (
   tx: Prisma.TransactionClient,
   dump: Record<string, Row[]>,
@@ -705,8 +703,6 @@ export const restoreImportArchive = async (archive: Buffer): Promise<ImportSumma
     // the whole database is applied atomically.
     { timeout: 120_000, maxWait: 10_000 },
   );
-
-  // A restore can replace which era is open, so the cached id is now suspect.
 
   return { rows, blobsUploaded, blobsSkipped };
 };

@@ -112,8 +112,8 @@ messagesRouter.get("/", zValidator("query", listQuerySchema), async (c) => {
 });
 
 messagesRouter.get("/random", requireApiToken(), async (c) => {
-  await requireActiveInstallation();
-  const where = { status: "approved" } as const;
+  const installationId = await requireActiveInstallation();
+  const where = { status: "approved", installationId } as const;
   const count = await db.message.count({ where });
   if (count === 0) return c.json({ error: "no_messages_available" }, 404);
 
@@ -192,13 +192,18 @@ messagesRouter.post("/", requireApiToken(), zValidator("json", MessageCreateSche
     metadata: { sha256: body.sha256, questionId: body.questionId ?? null },
   });
   const requestedQuestionId = body.questionId ?? null;
-  const uploadSlot = (id: string) => {
-    recordAudit(c, { targetId: id });
-    const sas = generateSasUrl(blobName, { permissions: "cw", contentType: "audio/flac" });
-    return c.json({ id, uploadUrl: sas.url, blobName }, 201);
-  };
   const matchesReplayRequest = (message: { questionId: string | null; status: string }) =>
     message.status === "uploading" && message.questionId === requestedQuestionId;
+  const uploadSlot = (id: string) =>
+    runWithOpenEra(undefined, async (tx) => {
+      const message = await tx.message.findUnique({ where: { id } });
+      if (!message || !matchesReplayRequest(message)) {
+        return c.json({ error: "message_already_exists" }, 409);
+      }
+      recordAudit(c, { targetId: id });
+      const sas = generateSasUrl(blobName, { permissions: "cw", contentType: "audio/flac" });
+      return c.json({ id, uploadUrl: sas.url, blobName }, 201);
+    });
 
   await requireActiveInstallation();
   const existingFile = await db.file.findUnique({ where: { sha256: body.sha256 } });

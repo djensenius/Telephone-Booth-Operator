@@ -1482,7 +1482,7 @@ export const fakeDb = {
       select,
       skip = 0,
     }: {
-      where?: { status?: string };
+      where?: { status?: string; installationId?: ScopeFilter };
       include?: { audio?: boolean; transcriptions?: unknown; moderations?: unknown };
       orderBy?: { createdAt?: "asc" | "desc"; id?: "asc" | "desc" };
       select?: { id?: boolean };
@@ -1490,6 +1490,11 @@ export const fakeDb = {
     } = {}) => {
       const order = orderBy?.createdAt ?? "desc";
       let messages = [...store.messages.values()];
+      if (where.installationId !== undefined) {
+        messages = messages.filter((message) =>
+          matchesScope(message.installationId, where.installationId),
+        );
+      }
       if (where.status) messages = messages.filter((message) => message.status === where.status);
       messages = messages.sort((a, b) => {
         if (orderBy?.id) {
