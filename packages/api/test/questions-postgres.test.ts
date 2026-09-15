@@ -14,7 +14,6 @@ vi.mock(
 
 import { createApp } from "../src/index.js";
 import { db } from "../src/lib/db.js";
-import { resetInstallationCacheForTests } from "../src/lib/installation.js";
 
 const describeWithDatabase = process.env["RUN_DATABASE_TESTS"] === "1" ? describe : describe.skip;
 
@@ -24,7 +23,6 @@ describeWithDatabase("question draws with PostgreSQL", () => {
   let questionIds: string[] = [];
 
   beforeEach(async () => {
-    resetInstallationCacheForTests();
     const installation = await db.installation.findFirst({
       where: { endedAt: null },
       orderBy: [{ startedAt: "desc" }, { id: "desc" }],
@@ -71,7 +69,6 @@ describeWithDatabase("question draws with PostgreSQL", () => {
   });
 
   afterEach(async () => {
-    resetInstallationCacheForTests();
     await db.question.deleteMany({ where: { id: { in: questionIds } } });
     await db.file.deleteMany({ where: { id: { in: fileIds } } });
     await db.installation.update({

@@ -20,6 +20,7 @@ import {
   seedCallSession,
   seedInstallation,
   seedMessage,
+  store,
 } from "./support/fake-db.js";
 import { phoneHeaders } from "./support/http.js";
 
@@ -37,6 +38,20 @@ describe("/v1/monitor/summary", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
+  });
+
+  it("exposes persistent downtime to monitor-scoped clients without creating an era", async () => {
+    for (const installation of store.installations.values()) installation.endedAt = new Date();
+    const before = store.installations.size;
+    const response = await app.request("/v1/monitor/summary", { headers: phoneHeaders });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      installationState: "between_exhibitions",
+      interactionsToday: 0,
+      messagesToday: 0,
+    });
+    expect(store.installations.size).toBe(before);
+    expect([...store.installations.values()].some((row) => row.endedAt === null)).toBe(false);
   });
 
   it("counts the active installation today and overall", async () => {

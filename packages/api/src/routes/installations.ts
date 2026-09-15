@@ -26,7 +26,6 @@ import { Prisma, type Installation } from "../generated/prisma/client.js";
 import {
   closeOutInstallation,
   findActiveInstallation,
-  invalidateActiveInstallationCache,
   nextInstallationName,
   serializeInstallation,
 } from "../lib/installation.js";
@@ -75,8 +74,7 @@ installationsRouter.get(
 );
 
 // Start a new installation. If one is active, close it out first in the same
-// transaction so booth heartbeats cannot leave the operator stuck between
-// "ended the old era" and "named the new one".
+// transaction for an immediate handover without a between-exhibitions gap.
 installationsRouter.post(
   "/",
   requireAdmin(),
@@ -192,7 +190,6 @@ installationsRouter.post(
       );
     }
 
-    invalidateActiveInstallationCache();
     invalidateStatsCaches();
     if (result.ended) {
       const endedDto = serializeInstallation(result.ended);
@@ -303,7 +300,6 @@ installationsRouter.post(
     // Lost the claim: another admin ended this era first.
     if (!ended) return c.json({ error: "installation_already_ended" }, 409);
 
-    invalidateActiveInstallationCache();
     // The frozen era's rows just changed underneath every cached aggregate.
     invalidateStatsCaches();
     const dto = serializeInstallation(ended);

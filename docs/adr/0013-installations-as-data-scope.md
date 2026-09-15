@@ -2,6 +2,10 @@
 
 **Status:** accepted.
 
+**Lifecycle update:** [ADR 0015](0015-between-exhibitions.md) supersedes the
+automatic-start and active-era-cache behavior described below. No booth write
+now opens an era; downtime persists until an operator explicitly starts one.
+
 ## Context
 
 The booth is an art installation that gets set up, run for a while, torn down,

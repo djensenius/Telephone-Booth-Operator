@@ -2,7 +2,7 @@
 // the currently active installation so that "clearing everything" for a fresh
 // run is a scope change rather than a delete, and past runs stay browsable.
 //
-// Exactly one row has `endedAt IS NULL` at a time. That invariant is enforced
+// At most one row has `endedAt IS NULL` at a time. That invariant is enforced
 // in Postgres by the `Installation_single_active_idx` partial unique index, so
 // a race between two concurrent "start" calls fails loudly at the database
 // rather than silently producing two active eras.
@@ -12,50 +12,18 @@ import {
   InstallationSummarySchema,
   type Installation as InstallationDto,
   type InstallationSummary,
+  type InstallationState,
 } from "@telephone-booth-operator/shared";
+import { HTTPException } from "hono/http-exception";
 import type { Prisma } from "../generated/prisma/client.js";
 import { db } from "./db.js";
 import {
   emptyInteractionBreakdown,
   summarizeInteractionBreakdown,
 } from "./interaction-analytics.js";
-import { log } from "./logger.js";
 
-// Name given to the installation created automatically when none exists.
+// Suggested name for an operator's first installation.
 const DEFAULT_INSTALLATION_NAME = "Installation 1";
-
-// The active installation is read on essentially every write, but changes only
-// when an admin starts or ends one. Cache the id to keep that off the hot path.
-//
-// The cache is invalidated explicitly on start/end, but that only reaches the
-// replica that served the admin request — the documented Azure deployment runs
-// several (see docs/azure-deployment.md). A short TTL therefore bounds how long
-// any other replica can keep stamping rows with an ended era, without putting a
-// query back on every booth write.
-const ACTIVE_CACHE_TTL_MS = 5_000;
-let activeIdCache: string | null = null;
-let activeIdCacheExpiresAt = 0;
-
-const readActiveIdCache = (): string | null =>
-  activeIdCache && Date.now() < activeIdCacheExpiresAt ? activeIdCache : null;
-
-const writeActiveIdCache = (id: string): string => {
-  activeIdCache = id;
-  activeIdCacheExpiresAt = Date.now() + ACTIVE_CACHE_TTL_MS;
-  return id;
-};
-
-export const invalidateActiveInstallationCache = (): void => {
-  activeIdCache = null;
-  activeIdCacheExpiresAt = 0;
-};
-
-// Passing an id primes the cache with a deliberately stale one, which is how a
-// test stands in for a replica that has not seen a rollover yet.
-export const resetInstallationCacheForTests = (staleId?: string): void => {
-  invalidateActiveInstallationCache();
-  if (staleId) writeActiveIdCache(staleId);
-};
 
 type InstallationRow = {
   id: string;
@@ -118,45 +86,15 @@ export const serializeInstallation = (row: InstallationRow): InstallationDto => 
 export const findActiveInstallation = async (): Promise<InstallationRow | null> =>
   db.installation.findFirst({ where: { endedAt: null }, orderBy: { startedAt: "desc" } });
 
-// Resolve the installation that new rows should be tagged with.
-//
-// A booth must never fail to record a call because of an admin bookkeeping
-// gap, so when no active installation exists (a brand-new database, or one
-// where the last era was ended and no new one started yet) we create a default
-// one rather than throwing. The unique index makes the create racy-safe: if a
-// concurrent request wins, we re-read and use theirs.
+export const getInstallationState = async (): Promise<InstallationState> =>
+  (await findActiveInstallation()) ? "active" : "between_exhibitions";
+
+// A fresh database read makes an intentional stop visible on every replica.
+// Writes must still hold the era lock to serialize with a concurrent end.
 export const requireActiveInstallation = async (): Promise<string> => {
-  const cached = readActiveIdCache();
-  if (cached) return cached;
-
   const existing = await findActiveInstallation();
-  if (existing) return writeActiveIdCache(existing.id);
-
-  try {
-    const created = await db.installation.create({
-      data: { name: await nextDefaultName() },
-    });
-    log.info({ installationId: created.id }, "created default installation");
-    return writeActiveIdCache(created.id);
-  } catch {
-    const raced = await findActiveInstallation();
-    if (!raced) throw new Error("Unable to resolve an active installation.");
-    return writeActiveIdCache(raced.id);
-  }
-};
-
-// Resolve an installation that is *provably* open right now.
-//
-// `requireActiveInstallation` answers from a per-replica cache with a short
-// TTL, which is the right trade for the hot write path: a row landing in an era
-// that ended microseconds ago is the accepted rollover race. It is the wrong
-// answer when the caller already knows it is dealing with a straggler — filing
-// a re-homed row into an era that has also ended would put it somewhere nobody
-// is looking, and could create a session that can never be closed. Those paths
-// pay for a fresh read instead.
-export const requireOpenInstallation = async (): Promise<string> => {
-  invalidateActiveInstallationCache();
-  return requireActiveInstallation();
+  if (!existing) throw new NoOpenEraError();
+  return existing.id;
 };
 
 // Whether an era has any booth activity recorded against it. An era with none
@@ -203,8 +141,8 @@ export type InstallationScopeFilter =
 //   "all"           → no filter, i.e. the pre-installations behaviour
 //   <uuid>          → that specific installation
 //
-// Reads never *create* an installation. Between an admin ending an era and the
-// next booth write there is no active one, and the honest answer is an empty
+// Reads never *create* an installation. Between an admin ending an era and
+// explicitly starting the next there is no active one; the answer is an empty
 // result rather than a new era conjured up by someone loading a stats page.
 export const resolveInstallationScope = async (
   raw: string | undefined,
@@ -398,8 +336,7 @@ export const ERA_LOCK_ATTEMPTS = 3;
 // connection, so reaching for the global client to re-resolve a candidate
 // would ask the pool for a second one while holding the first: enough
 // concurrent writers arriving just after a rollover would take every
-// connection and then wait on each other. Creating a missing era is left to
-// the caller, outside its transaction, for the same reason.
+// connection and then wait on each other. Missing eras remain missing.
 type InstallationLock = (tx: Prisma.TransactionClient, installationId: string) => Promise<boolean>;
 
 const lockOpenInstallationWith = async (
@@ -437,40 +374,40 @@ export const lockOpenInstallationExclusively = (
   tx: Prisma.TransactionClient,
 ): Promise<string | null> => lockOpenInstallationWith(tx, lockInstallationExclusively);
 
-export class NoOpenEraError extends Error {
+export class NoOpenEraError extends HTTPException {
   constructor() {
-    super("no open installation to write into");
+    super(409, {
+      message: "installation_inactive",
+      res: Response.json(
+        {
+          type: "about:blank",
+          title: "Between exhibitions",
+          status: 409,
+          detail:
+            "An operator must start an installation before booth activity can resume. Retain pending uploads and retry after it starts.",
+          error: "installation_inactive",
+        },
+        { status: 409, headers: { "content-type": "application/problem+json" } },
+      ),
+    });
     this.name = "NoOpenEraError";
   }
 }
 
 // Run a write inside a transaction that holds an open era for its duration.
 //
-// The candidate era comes from the caller — normally the per-replica cache,
-// which is the right trade for the hot write path. That cache can name an era
-// another replica has just ended, and nothing may have reopened one yet, so a
-// first attempt that finds no open era is retried once against a freshly
-// resolved (and, if the booth is first past the rollover, freshly created)
-// era. Both of those lookups happen outside the transaction: the callback
-// already holds a pooled connection and must not ask for a second.
+// The lock resolver follows a concurrent manual rollover, but never opens an
+// era itself. Intentional downtime is a typed conflict, not an implicit start.
 export const runWithOpenEra = async <T>(
   preferred: string | undefined,
   write: (tx: Prisma.TransactionClient, era: string) => Promise<T>,
   options?: { timeout?: number; maxWait?: number },
 ): Promise<T> => {
-  let candidate = preferred;
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      return await db.$transaction(async (tx) => {
-        const era = await lockOpenInstallation(tx, candidate);
-        if (era === null) throw new NoOpenEraError();
-        return write(tx, era);
-      }, options);
-    } catch (err) {
-      if (attempt > 0 || !(err instanceof NoOpenEraError)) throw err;
-      candidate = await requireOpenInstallation();
-    }
-  }
+  return db.$transaction(async (tx) => {
+    const era = await lockOpenInstallation(tx, preferred);
+    if (era === null) throw new NoOpenEraError();
+    return write(tx, era);
+  }, options);
 };
 
 export const closeOutInstallation = async (

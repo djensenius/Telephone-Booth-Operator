@@ -28,10 +28,7 @@ vi.mock("../src/lib/require-api-token.js", () => ({
 
 import { readTar } from "../src/lib/archive.js";
 import { createApp } from "../src/index.js";
-import {
-  requireActiveInstallation,
-  resetInstallationCacheForTests,
-} from "../src/lib/installation.js";
+import { requireActiveInstallation } from "../src/lib/installation.js";
 import { resetApnsSenderForTests, setApnsSenderForTests } from "../src/lib/apns.js";
 import { resetStatsCacheForTests, statsOverviewCacheSizeForTests } from "../src/routes/stats.js";
 import { resetSessionCryptoForTests } from "../src/lib/session.js";
@@ -58,7 +55,6 @@ const setup = (): void => {
   resetFakeDb();
   resetFakeAzure();
   resetApnsSenderForTests();
-  resetInstallationCacheForTests();
   resetStatsCacheForTests();
 };
 
@@ -493,18 +489,31 @@ describe("installations", () => {
       expect(carried).toHaveLength(0);
     });
 
-    it("closes an era the booth auto-created before the operator named one", async () => {
+    it("stays between exhibitions until an operator explicitly starts one", async () => {
       const app = createApp();
       expect((await endDefault(app)).status).toBe(200);
 
-      // A powered-on booth keeps posting events, and every booth write resolves
-      // the active installation — lazily opening an unnamed one so a recording
-      // is never dropped over admin bookkeeping.
-      await requireActiveInstallation();
-      const opened = [...store.installations.values()].find((row) => row.endedAt === null);
-      expect(opened).toBeDefined();
+      await expect(requireActiveInstallation()).rejects.toThrow();
+      const heartbeat = await app.request("/v1/status", {
+        method: "PUT",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ state: "idle" }),
+      });
+      expect(heartbeat.status).toBe(409);
+      expect(await heartbeat.json()).toMatchObject({ error: "installation_inactive" });
+      expect([...store.installations.values()].filter((row) => row.endedAt === null)).toHaveLength(
+        0,
+      );
+      const status = await app.request("/v1/status", { headers: adminHeaders() });
+      expect(await status.json()).toMatchObject({
+        installationState: "between_exhibitions",
+        isSynthetic: true,
+      });
+      const summary = await app.request("/v1/stats/summary", { headers: adminHeaders() });
+      expect(await summary.json()).toMatchObject({
+        booth: { installationState: "between_exhibitions" },
+      });
 
-      // Starting a named era must not collide with the one the booth just opened.
       const res = await app.request("/v1/installations", {
         method: "POST",
         headers: jsonHeaders(adminHeaders()),
@@ -513,9 +522,18 @@ describe("installations", () => {
       expect(res.status, await res.clone().text()).toBe(201);
       const body = (await res.json()) as { id: string; name: string };
       expect(body.name).toBe("Nuit Blanche");
-      expect(body.id).not.toBe(opened?.id);
-      expect(store.installations.get(opened?.id ?? "")?.endedAt).toBeInstanceOf(Date);
       expect([...store.installations.values()].filter((r) => r.endedAt === null)).toHaveLength(1);
+      const resumed = await app.request("/v1/status", {
+        method: "PUT",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ state: "idle" }),
+      });
+      expect(resumed.status).toBe(204);
+      const activeStatus = await app.request("/v1/status", { headers: adminHeaders() });
+      expect(await activeStatus.json()).toMatchObject({
+        installationState: "active",
+        isSynthetic: false,
+      });
     });
 
     it("copies questions forward when asked, sharing the same audio file", async () => {
@@ -573,6 +591,15 @@ describe("installations", () => {
       // The booth read this question out before the operator ended the era and
       // only finishes uploading afterwards. Dropping it would lose a real
       // recording over admin bookkeeping.
+      expect(
+        (
+          await app.request("/v1/installations", {
+            method: "POST",
+            headers: jsonHeaders(adminHeaders()),
+            body: JSON.stringify({ name: "Next exhibition" }),
+          })
+        ).status,
+      ).toBe(201);
       const res = await app.request("/v1/messages", {
         method: "POST",
         headers: { "content-type": "application/json", ...phoneHeaders },
@@ -588,8 +615,7 @@ describe("installations", () => {
 
     // A session and the events that describe it must land in the same era, or
     // the drill-down from one to the other crosses a scope boundary and comes
-    // back empty. The cached era can be a rollover behind on another replica,
-    // so both rows are resolved from a single, verified-open era.
+    // back empty. Both rows are resolved from a single, verified-open era.
     it("opens a straggler session and its own events in the same era", async () => {
       const app = createApp();
       expect((await endDefault(app)).status).toBe(200);
@@ -600,10 +626,6 @@ describe("installations", () => {
       });
       expect(started.status, await started.clone().text()).toBe(201);
       const openId = ((await started.json()) as { id: string }).id;
-
-      // Pretend this replica never saw the rollover: its cache still names the
-      // era that has since been closed out.
-      resetInstallationCacheForTests(DEFAULT_INSTALLATION_ID);
 
       const sessionId = "aaaaaaaa-0000-4000-8000-00000000fee1";
       const res = await app.request("/v1/events", {
@@ -630,14 +652,9 @@ describe("installations", () => {
       expect(event?.installationId).toBe(openId);
     });
 
-    // The gap between ending an era and the next one opening is real: nothing
-    // is active until a booth write arrives. That write has to open the era it
-    // needs rather than fail, even when this replica's cache still names the
-    // era that ended.
-    it("opens an era for a booth batch that arrives with none active", async () => {
+    it("defers a booth batch that arrives with no active installation", async () => {
       const app = createApp();
       expect((await endDefault(app)).status).toBe(200);
-      resetInstallationCacheForTests(DEFAULT_INSTALLATION_ID);
       expect([...store.installations.values()].filter((row) => row.endedAt === null)).toHaveLength(
         0,
       );
@@ -659,16 +676,17 @@ describe("installations", () => {
           ],
         }),
       });
-      expect(res.status, await res.clone().text()).toBe(200);
+      expect(res.status, await res.clone().text()).toBe(409);
+      expect(await res.json()).toMatchObject({ error: "installation_inactive" });
 
       const opened = [...store.installations.values()].filter((row) => row.endedAt === null);
-      expect(opened).toHaveLength(1);
-      expect(store.callSessions.get(sessionId)?.installationId).toBe(opened[0]?.id);
+      expect(opened).toHaveLength(0);
+      expect(store.callSessions.has(sessionId)).toBe(false);
     });
 
     // The same gap, on the other booth write that has an era of its own to
     // prefer: a recording still uploading when the era ended.
-    it("opens an era for an upload completing with none active", async () => {
+    it("retains an upload until an operator starts the next installation", async () => {
       const app = createApp();
       const sha256 = "2b".repeat(32);
       const initiated = await app.request("/v1/messages", {
@@ -685,18 +703,94 @@ describe("installations", () => {
       });
 
       expect((await endDefault(app)).status).toBe(200);
-      resetInstallationCacheForTests(DEFAULT_INSTALLATION_ID);
+
+      const reinitiated = await app.request("/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ durationMs: 3000, sha256 }),
+      });
+      expect(reinitiated.status).toBe(409);
+      expect(await reinitiated.json()).toMatchObject({ error: "installation_inactive" });
 
       const completed = await app.request(`/v1/messages/${slot.id}/complete`, {
         method: "POST",
         headers: phoneHeaders,
       });
-      expect(completed.status, await completed.clone().text()).toBe(200);
+      expect(completed.status, await completed.clone().text()).toBe(409);
+      expect(await completed.json()).toMatchObject({ error: "installation_inactive" });
+      expect(store.messages.get(slot.id)?.status).toBe("uploading");
+      expect(fakeBlobs.has(slot.blobName)).toBe(true);
+      expect([...store.installations.values()].filter((row) => row.endedAt === null)).toHaveLength(
+        0,
+      );
+      expect(
+        (
+          await app.request("/v1/installations", {
+            method: "POST",
+            headers: jsonHeaders(adminHeaders()),
+            body: JSON.stringify({ name: "Next exhibition" }),
+          })
+        ).status,
+      ).toBe(201);
+      const resumed = await app.request("/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ durationMs: 3000, sha256 }),
+      });
+      expect(resumed.status).toBe(201);
+      expect(await resumed.json()).toMatchObject({ id: slot.id, blobName: slot.blobName });
+      const retried = await app.request(`/v1/messages/${slot.id}/complete`, {
+        method: "POST",
+        headers: phoneHeaders,
+      });
+      expect(retried.status, await retried.clone().text()).toBe(200);
 
       const opened = [...store.installations.values()].filter((row) => row.endedAt === null);
       expect(opened).toHaveLength(1);
       expect(store.messages.get(slot.id)?.installationId).toBe(opened[0]?.id);
       expect(store.messages.get(slot.id)?.status).toBe("pending");
+    });
+
+    it("defers replay admission when an exhibition ends after its preflight read", async () => {
+      const app = createApp();
+      const body = JSON.stringify({ durationMs: 3000, sha256: "2c".repeat(32) });
+      const headers = { "content-type": "application/json", ...phoneHeaders };
+      const initiated = await app.request("/v1/messages", { method: "POST", headers, body });
+      expect(initiated.status).toBe(201);
+      const slot = (await initiated.json()) as { id: string };
+      const findFile = fakeDb.file.findUnique;
+      const lookup = vi.spyOn(fakeDb.file, "findUnique").mockImplementationOnce(async (args) => {
+        const file = await findFile(args);
+        expect((await endDefault(app)).status).toBe(200);
+        return file;
+      });
+      try {
+        const replay = await app.request("/v1/messages", { method: "POST", headers, body });
+        expect(replay.status).toBe(409);
+        expect(await replay.json()).toMatchObject({ error: "installation_inactive" });
+        expect(store.messages.get(slot.id)?.status).toBe("uploading");
+      } finally {
+        lookup.mockRestore();
+      }
+    });
+
+    it("does not play an archived exhibition's approved recordings after restart", async () => {
+      const app = createApp();
+      seedMessage({ status: "approved" });
+      const started = await app.request("/v1/installations", {
+        method: "POST",
+        headers: jsonHeaders(adminHeaders()),
+        body: JSON.stringify({ name: "Next exhibition" }),
+      });
+      expect(started.status).toBe(201);
+      const { id: installationId } = (await started.json()) as { id: string };
+      const empty = await app.request("/v1/messages/random", { headers: phoneHeaders });
+      expect(empty.status).toBe(404);
+      const audio = seedFile({ sha256: "2d".repeat(32) });
+      const current = seedMessage({ status: "approved", audioId: audio.id, installationId });
+      const available = await app.request("/v1/messages/random", { headers: phoneHeaders });
+      expect(available.status).toBe(200);
+      expect(await available.json()).toMatchObject({ id: current.id });
     });
 
     // The booth retries a completion it did not hear the answer to. If the
@@ -726,7 +820,6 @@ describe("installations", () => {
       expect(first.status, await first.clone().text()).toBe(200);
 
       expect((await endDefault(app)).status).toBe(200);
-      resetInstallationCacheForTests(DEFAULT_INSTALLATION_ID);
       const before = store.installations.size;
 
       const retry = await app.request(`/v1/messages/${slot.id}/complete`, {
@@ -754,7 +847,6 @@ describe("installations", () => {
       });
       expect(started.status, await started.clone().text()).toBe(201);
       const openId = ((await started.json()) as { id: string }).id;
-      resetInstallationCacheForTests(DEFAULT_INSTALLATION_ID);
 
       const audio = seedFile({
         id: "ffffffff-0000-4000-8000-0000000000c1",
@@ -770,10 +862,8 @@ describe("installations", () => {
       expect(store.questions.get(created.id)?.installationId).toBe(openId);
     });
 
-    // Between an era ending and the booth's next event there is deliberately
-    // no open era. A read arriving in that gap must answer "nothing to play"
-    // rather than conjure up an era nobody named.
-    it("answers no prompt without opening an era after a rollover", async () => {
+    // Content admission stays closed until an operator explicitly starts an era.
+    it("returns an inactive conflict without opening an era for a question draw", async () => {
       seedQuestion({ status: "active" });
       const app = createApp();
       expect((await endDefault(app)).status).toBe(200);
@@ -781,7 +871,8 @@ describe("installations", () => {
 
       const res = await app.request("/v1/questions/random", { headers: phoneHeaders });
 
-      expect(res.status).toBe(404);
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({ error: "installation_inactive" });
       expect(store.installations.size).toBe(before);
       expect([...store.installations.values()].filter((row) => row.endedAt === null)).toHaveLength(
         0,
@@ -922,6 +1013,15 @@ describe("installations", () => {
       const app = createApp();
       const question = seedQuestion({ status: "active", prompt: "Straggler prompt" });
       expect((await endDefault(app)).status).toBe(200);
+      expect(
+        (
+          await app.request("/v1/installations", {
+            method: "POST",
+            headers: jsonHeaders(adminHeaders()),
+            body: JSON.stringify({ name: "Next exhibition" }),
+          })
+        ).status,
+      ).toBe(201);
 
       const created = await app.request("/v1/messages", {
         method: "POST",
@@ -943,7 +1043,6 @@ describe("installations", () => {
     it("keeps exactly one active era when two starts race", async () => {
       const app = createApp();
       expect((await endDefault(app)).status).toBe(200);
-      await requireActiveInstallation();
 
       const start = (name: string): Promise<Response> =>
         app.request("/v1/installations", {

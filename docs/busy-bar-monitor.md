@@ -1,7 +1,7 @@
 # BUSY Bar companion monitor
 
 The physical BUSY Bar display runs as the standalone
-[Telephone-Booth-Busy-Bar](https://github.com/djensenius/Telephone-Booth-Busy-Bar)
+[BusyBar](https://github.com/djensenius/BusyBar)
 companion service. It is not part of the Operator API image or Compose stack.
 Run exactly one monitor instance on an always-on home server, Portainer host, or
 cloud container.
@@ -26,6 +26,7 @@ The summary endpoint returns aggregate counts for the active installation:
 
 ```json
 {
+  "installationState": "active",
   "interactionsToday": 12,
   "interactionsTotal": 143,
   "callsToday": 12,
@@ -82,6 +83,16 @@ If the active installation has not received a booth status yet, the status
 endpoint returns an id-less placeholder marked `isSynthetic: true`. Its
 timestamp is deliberately non-fresh, and the companion continues treating it
 as "no reported status" rather than a new idle heartbeat.
+
+The status and summary also expose `installationState`. When status explicitly
+reports `between_exhibitions`, the companion preserves this even on a synthetic
+response: offline is expected, booth alarms are suppressed, and telephone cards
+show a neutral `BETWEEN` label. Clock, weather, and smart-home features continue.
+The rear overview explains that an operator must start the next exhibition.
+Older servers that omit the field retain the usual offline behavior.
+Lifecycle confirmation must keep arriving; a failed API poll must not suppress
+alarms indefinitely. BUSY Cloud/device failures and fresh critical hardware
+readings remain visible.
 
 ## Deployment order
 

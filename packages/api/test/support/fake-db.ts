@@ -1482,7 +1482,7 @@ export const fakeDb = {
       select,
       skip = 0,
     }: {
-      where?: { status?: string };
+      where?: { status?: string; installationId?: ScopeFilter };
       include?: { audio?: boolean; transcriptions?: unknown; moderations?: unknown };
       orderBy?: { createdAt?: "asc" | "desc"; id?: "asc" | "desc" };
       select?: { id?: boolean };
@@ -1490,6 +1490,11 @@ export const fakeDb = {
     } = {}) => {
       const order = orderBy?.createdAt ?? "desc";
       let messages = [...store.messages.values()];
+      if (where.installationId !== undefined) {
+        messages = messages.filter((message) =>
+          matchesScope(message.installationId, where.installationId),
+        );
+      }
       if (where.status) messages = messages.filter((message) => message.status === where.status);
       messages = messages.sort((a, b) => {
         if (orderBy?.id) {
@@ -2417,7 +2422,7 @@ export const fakeDb = {
       // constraint violation, not a silently-accepted second era.
       const hasActive = [...store.installations.values()].some((row) => row.endedAt === null);
       if (hasActive && (data.endedAt ?? null) === null) {
-        throw new Error("Unique constraint failed on Installation_single_active_idx");
+        throw uniqueViolation(["Installation_single_active_idx"]);
       }
       const now = new Date();
       const row: FakeInstallation = {
@@ -2643,10 +2648,47 @@ export const fakeDb = {
     const locks: FakeTransactionLocks = { lockedIds: new Set(), releases: [] };
     return transactionLocks.run(locks, async () => {
       const snapshot = snapshotFakeStore();
+      let wrote = false;
+      const mutations = new Set([
+        "create",
+        "createMany",
+        "update",
+        "updateMany",
+        "upsert",
+        "delete",
+        "deleteMany",
+      ]);
+      const client = new Proxy(fakeDb, {
+        get(target, key, receiver): unknown {
+          const model: unknown = Reflect.get(target, key, receiver);
+          if (key === "$queryRaw" && typeof model === "function") {
+            return async (...args: unknown[]): Promise<unknown> => {
+              const result: unknown = await Reflect.apply(model, target, args);
+              const statement = Array.isArray(args[0]) ? args[0].join("") : "";
+              if (/\b(?:UPDATE\s+"|DELETE FROM|INSERT INTO)/u.test(statement)) wrote = true;
+              return result;
+            };
+          }
+          if (model === null || typeof model !== "object") return model;
+          return new Proxy(model, {
+            get(targetModel, methodKey, modelReceiver): unknown {
+              const method: unknown = Reflect.get(targetModel, methodKey, modelReceiver);
+              if (typeof method !== "function" || !mutations.has(String(methodKey))) return method;
+              return async (...args: unknown[]): Promise<unknown> => {
+                const result: unknown = await Reflect.apply(method, targetModel, args);
+                wrote = true;
+                return result;
+              };
+            },
+          });
+        },
+      });
       try {
-        return await fn(fakeDb);
+        return await fn(client);
       } catch (error) {
-        restoreFakeStore(snapshot);
+        // A failed INSERT/read-only transaction has nothing to roll back.
+        // Restoring its snapshot would erase a concurrent transaction's winner.
+        if (wrote) restoreFakeStore(snapshot);
         throw error;
       } finally {
         for (const release of locks.releases.reverse()) release();
