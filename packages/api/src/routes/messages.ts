@@ -200,6 +200,7 @@ messagesRouter.post("/", requireApiToken(), zValidator("json", MessageCreateSche
   const matchesReplayRequest = (message: { questionId: string | null; status: string }) =>
     message.status === "uploading" && message.questionId === requestedQuestionId;
 
+  await requireActiveInstallation();
   const existingFile = await db.file.findUnique({ where: { sha256: body.sha256 } });
   if (existingFile) {
     const existingMessage = await db.message.findUnique({ where: { audioId: existingFile.id } });
@@ -225,7 +226,6 @@ messagesRouter.post("/", requireApiToken(), zValidator("json", MessageCreateSche
     return c.json({ error: "message_already_exists" }, 409);
   }
 
-  await requireActiveInstallation();
   const file = await db.file.upsert({
     where: { sha256: body.sha256 },
     create: {

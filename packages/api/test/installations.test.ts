@@ -704,6 +704,14 @@ describe("installations", () => {
 
       expect((await endDefault(app)).status).toBe(200);
 
+      const reinitiated = await app.request("/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ durationMs: 3000, sha256 }),
+      });
+      expect(reinitiated.status).toBe(409);
+      expect(await reinitiated.json()).toMatchObject({ error: "installation_inactive" });
+
       const completed = await app.request(`/v1/messages/${slot.id}/complete`, {
         method: "POST",
         headers: phoneHeaders,
@@ -724,6 +732,13 @@ describe("installations", () => {
           })
         ).status,
       ).toBe(201);
+      const resumed = await app.request("/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ durationMs: 3000, sha256 }),
+      });
+      expect(resumed.status).toBe(201);
+      expect(await resumed.json()).toMatchObject({ id: slot.id, blobName: slot.blobName });
       const retried = await app.request(`/v1/messages/${slot.id}/complete`, {
         method: "POST",
         headers: phoneHeaders,
