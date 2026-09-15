@@ -101,16 +101,15 @@ export function SystemVitalsStrip({
   // Show a placeholder strip when there's nothing cached yet so the layout
   // doesn't pop in once the first refetch resolves.
   const isEmpty = !snapshot;
-  const status: string =
-    betweenExhibitions && !query.error
+  const status: string = receivedAt
+    ? `Updated ${new Date(receivedAt).toLocaleTimeString()}`
+    : betweenExhibitions && !query.error
       ? "Between exhibitions · Offline is expected"
-      : receivedAt
-        ? `Updated ${new Date(receivedAt).toLocaleTimeString()}`
-        : query.isLoading
-          ? "Connecting…"
-          : query.error
-            ? "Booth offline"
-            : "Awaiting first snapshot";
+      : query.isLoading
+        ? "Connecting…"
+        : query.error
+          ? "Booth offline"
+          : "Awaiting first snapshot";
 
   // Severity announcement for assistive technology. We deliberately do NOT
   // place `aria-live` on the tile grid itself, because the strip re-renders

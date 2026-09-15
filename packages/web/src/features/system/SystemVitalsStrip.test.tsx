@@ -109,6 +109,34 @@ describe("SystemVitalsStrip", () => {
     expect(screen.queryByText("Offline (expected)")).toBeNull();
   });
 
+  it("keeps actual infrastructure freshness visible between exhibitions", () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    client.setQueryData(apiQueryKeys.status, {
+      state: "idle",
+      updatedAt: "1970-01-01T00:00:00.000Z",
+      isSynthetic: true,
+      installationState: "between_exhibitions",
+    });
+    client.setQueryData(apiQueryKeys.system("booth-01"), {
+      boothId: "booth-01",
+      snapshot: baseSnapshot,
+      receivedAt: routerReceivedAt,
+    });
+    client.setQueryData(apiQueryKeys.systemComponents("booth-01"), [routerSource]);
+    render(
+      <QueryClientProvider client={client}>
+        <SystemVitalsStrip boothId="booth-01" />
+      </QueryClientProvider>,
+    );
+    expect(
+      screen.getByText(`Updated ${new Date(routerReceivedAt).toLocaleTimeString()}`),
+    ).toBeDefined();
+    expect(screen.getByText("48.0°C")).toBeDefined();
+    expect(screen.queryByText("Between exhibitions · Offline is expected")).toBeNull();
+  });
+
   it("renders an awaiting-snapshot placeholder when nothing is cached", () => {
     renderStrip();
     expect(screen.getByText("Live vitals")).toBeDefined();
