@@ -72,6 +72,43 @@ describe("SystemVitalsStrip", () => {
     vi.unstubAllGlobals();
   });
 
+  it("shows neutral downtime but preserves a real telemetry failure", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    client.setQueryData(apiQueryKeys.status, {
+      state: "idle",
+      updatedAt: "1970-01-01T00:00:00.000Z",
+      isSynthetic: true,
+      installationState: "between_exhibitions",
+    });
+    client.setQueryData(apiQueryKeys.system("booth-01"), null);
+    client.setQueryData(apiQueryKeys.systemComponents("booth-01"), [
+      {
+        ...routerSource,
+        receivedAt: "1970-01-01T00:00:00.000Z",
+      },
+    ]);
+    render(
+      <QueryClientProvider client={client}>
+        <SystemVitalsStrip boothId="booth-01" />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByText("Between exhibitions · Offline is expected")).toBeDefined();
+    expect(screen.getByText("Offline (expected)")).toBeDefined();
+    for (const queryKey of [
+      apiQueryKeys.system("booth-01"),
+      apiQueryKeys.systemComponents("booth-01"),
+    ]) {
+      const query = client.getQueryCache().find({ queryKey, exact: true });
+      if (!query) throw new Error("missing telemetry query");
+      act(() => query.setState({ status: "error", error: new Error("telemetry unavailable") }));
+    }
+    await waitFor(() => expect(screen.getByText("Booth offline")).toBeDefined());
+    expect(screen.getByText("offline")).toBeDefined();
+    expect(screen.queryByText("Offline (expected)")).toBeNull();
+  });
+
   it("renders an awaiting-snapshot placeholder when nothing is cached", () => {
     renderStrip();
     expect(screen.getByText("Live vitals")).toBeDefined();

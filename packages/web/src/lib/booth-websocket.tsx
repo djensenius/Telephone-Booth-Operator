@@ -240,30 +240,19 @@ export function BoothEnvelopeBridge(): null {
   // miss status reports handled by another. Keep bounded REST reconciliation
   // active; accepted live frames cancel older in-flight responses below.
   const statusQuery = useStatusCurrent();
-  const {
-    setLastStatusAt,
-    setRuntimeMode,
-    setStatus,
-    setInstallationState,
-    setConnectionStatus,
-    setLastError,
-  } = useBoothStatus();
+  const { setLastStatusAt, setRuntimeMode, setStatus, setInstallationState, setLifecycleError } =
+    useBoothStatus();
   const latestStatusRef = useRef<BoothStatus | null>(null);
   const installationStateRef = useRef<BoothStatus["installationState"]>(undefined);
   const seenMessageIdsRef = useRef<Set<string>>(new Set());
-  const pollFailedRef = useRef(false);
 
   useEffect(() => {
     if (statusQuery.isError) {
-      pollFailedRef.current = true;
-      setConnectionStatus("disconnected");
-      setLastError("Unable to refresh the exhibition lifecycle from the operator API.");
-    } else if (pollFailedRef.current && statusQuery.isSuccess) {
-      pollFailedRef.current = false;
-      setConnectionStatus("connected");
-      setLastError(null);
+      setLifecycleError("Unable to refresh the exhibition lifecycle from the operator API.");
+    } else if (statusQuery.isSuccess) {
+      setLifecycleError(null);
     }
-  }, [statusQuery.isError, statusQuery.isSuccess, setConnectionStatus, setLastError]);
+  }, [statusQuery.isError, statusQuery.isSuccess, setLifecycleError]);
 
   const syncStatus = useCallback(
     (status: BoothStatus, authoritative = false): void => {

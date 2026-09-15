@@ -19,6 +19,28 @@ afterEach(() => {
 });
 
 describe("status.current", () => {
+  it.each(["active", "between_exhibitions"])(
+    "retains synthetic %s lifecycle responses",
+    async (installationState) => {
+      const body = {
+        state: "idle",
+        updatedAt: "1970-01-01T00:00:00.000Z",
+        isSynthetic: true,
+        installationState,
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>().mockResolvedValue(
+          new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+        ),
+      );
+      await expect(status.current()).resolves.toMatchObject(body);
+    },
+  );
+
   it("returns null for an explicit synthetic status", async () => {
     vi.stubGlobal(
       "fetch",

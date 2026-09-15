@@ -33,6 +33,7 @@ export interface BoothStatusContextValue {
   readonly setStatus: (status: BoothDisplayStatus) => void;
   readonly setConnectionStatus: (status: BoothConnectionStatus) => void;
   readonly setLastError: (error: string | null) => void;
+  readonly setLifecycleError: (error: string | null) => void;
   readonly setRuntimeMode: (mode: BoothRuntimeMode | null) => void;
   readonly setLastStatusAt: (at: Date | null) => void;
   readonly setMuted: (muted: boolean) => void;
@@ -89,6 +90,7 @@ export function BoothStatusProvider({
   const [connectionStatus, setConnectionStatus] =
     useState<BoothConnectionStatus>(initialConnectionStatus);
   const [lastError, setLastError] = useState<string | null>(initialLastError);
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null);
   const [runtimeMode, setRuntimeMode] = useState<BoothRuntimeMode | null>(initialRuntimeMode);
   const [lastStatusAt, setLastStatusAt] = useState<Date | null>(initialLastStatusAt);
   const [mutedState, setMutedState] = useState(() =>
@@ -113,8 +115,8 @@ export function BoothStatusProvider({
       installationState,
       setInstallationState,
       status,
-      connectionStatus,
-      lastError,
+      connectionStatus: lifecycleError ? "disconnected" : connectionStatus,
+      lastError: lifecycleError ?? lastError,
       runtimeMode,
       lastStatusAt,
       muted: mutedState,
@@ -122,6 +124,7 @@ export function BoothStatusProvider({
       setStatus,
       setConnectionStatus,
       setLastError,
+      setLifecycleError,
       setRuntimeMode,
       setLastStatusAt,
       setMuted,
@@ -131,6 +134,7 @@ export function BoothStatusProvider({
     connectionStatus,
     installationState,
     lastError,
+    lifecycleError,
     lastStatusAt,
     mutedState,
     overrideState,

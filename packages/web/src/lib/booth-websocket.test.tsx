@@ -2,7 +2,7 @@ import type { JSX } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { BoothStatusProvider } from "../components/booth/BoothStatusContext.js";
+import { BoothStatusProvider, useBoothStatus } from "../components/booth/BoothStatusContext.js";
 import { BoothStatusBadge } from "../components/booth/BoothStatusBadge.js";
 import { apiQueryKeys, invalidateInstallationScopedQueries } from "./api-client.js";
 import type { StatusHistory } from "./api-client.js";
@@ -40,7 +40,14 @@ class FakeSocket {
 
 function Probe(): JSX.Element {
   const ws = useBoothWebSocket();
-  return <span data-testid="ws-state">{ws.state}</span>;
+  const booth = useBoothStatus();
+  return (
+    <>
+      <span data-testid="ws-state">{ws.state}</span>
+      <span data-testid="connection-state">{booth.connectionStatus}</span>
+      <span data-testid="connection-error">{booth.lastError}</span>
+    </>
+  );
 }
 
 function jsonResponse(body: unknown): Response {
@@ -80,6 +87,48 @@ describe("BoothWebSocketProvider", () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
+
+  it.each(["poll", "socket"])(
+    "preserves the other channel error when %s recovers first",
+    async (first) => {
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+      });
+      const status = {
+        state: "idle",
+        updatedAt: new Date().toISOString(),
+        installationState: "active",
+      };
+      client.setQueryData(apiQueryKeys.status, status);
+      renderProvider(client);
+      const query = client.getQueryCache().find({ queryKey: apiQueryKeys.status, exact: true });
+      if (!query) throw new Error("missing status query");
+      act(() => query.setState({ status: "error", error: new Error("API unavailable") }));
+      act(() => FakeSocket.instances[0]!.emit("error"));
+      act(() => FakeSocket.instances[0]!.emit("close"));
+      await act(() => vi.advanceTimersByTimeAsync(2_000));
+      const socket = FakeSocket.instances[1]!;
+      if (first === "poll") {
+        await act(() => client.setQueryData(apiQueryKeys.status, status));
+        await waitFor(() =>
+          expect(screen.getByTestId("connection-error").textContent).toContain(
+            "Live status socket",
+          ),
+        );
+        expect(screen.getByTestId("connection-state").textContent).toBe("disconnected");
+        act(() => socket.emit("open"));
+      } else {
+        act(() => socket.emit("open"));
+        expect(screen.getByTestId("connection-error").textContent).toContain(
+          "exhibition lifecycle",
+        );
+        expect(screen.getByTestId("connection-state").textContent).toBe("disconnected");
+        await act(() => client.setQueryData(apiQueryKeys.status, status));
+      }
+      await waitFor(() => expect(screen.getByTestId("connection-error").textContent).toBe(""));
+      expect(screen.getByTestId("connection-state").textContent).toBe("connected");
+    },
+  );
 
   it("applies lifecycle from synthetic REST status after a newer heartbeat and resumes", async () => {
     const client = renderProvider();
