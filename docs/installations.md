@@ -212,7 +212,7 @@ Guardrails:
 - A recording still uploading into the era is moved to the era that is open
   rather than deleted, so the booth's completion call still lands. If no era is
   open to move it to, the purge is refused with `409 uploads_in_flight`; make a
-  call, or wait for the booth to, and try again.
+  deliberate start of the next installation, then try again.
 - The purge is recorded in the [audit log](audit-log.md) as
   `installation.purge`. That entry is global rather than era-scoped, so it
   outlives the rows it describes — after a purge it is the only record that the

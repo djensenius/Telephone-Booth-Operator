@@ -704,6 +704,14 @@ describe("installations", () => {
 
       expect((await endDefault(app)).status).toBe(200);
 
+      const reinitiated = await app.request("/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ durationMs: 3000, sha256 }),
+      });
+      expect(reinitiated.status).toBe(409);
+      expect(await reinitiated.json()).toMatchObject({ error: "installation_inactive" });
+
       const completed = await app.request(`/v1/messages/${slot.id}/complete`, {
         method: "POST",
         headers: phoneHeaders,
@@ -724,6 +732,13 @@ describe("installations", () => {
           })
         ).status,
       ).toBe(201);
+      const resumed = await app.request("/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...phoneHeaders },
+        body: JSON.stringify({ durationMs: 3000, sha256 }),
+      });
+      expect(resumed.status).toBe(201);
+      expect(await resumed.json()).toMatchObject({ id: slot.id, blobName: slot.blobName });
       const retried = await app.request(`/v1/messages/${slot.id}/complete`, {
         method: "POST",
         headers: phoneHeaders,
@@ -734,6 +749,48 @@ describe("installations", () => {
       expect(opened).toHaveLength(1);
       expect(store.messages.get(slot.id)?.installationId).toBe(opened[0]?.id);
       expect(store.messages.get(slot.id)?.status).toBe("pending");
+    });
+
+    it("defers replay admission when an exhibition ends after its preflight read", async () => {
+      const app = createApp();
+      const body = JSON.stringify({ durationMs: 3000, sha256: "2c".repeat(32) });
+      const headers = { "content-type": "application/json", ...phoneHeaders };
+      const initiated = await app.request("/v1/messages", { method: "POST", headers, body });
+      expect(initiated.status).toBe(201);
+      const slot = (await initiated.json()) as { id: string };
+      const findFile = fakeDb.file.findUnique;
+      const lookup = vi.spyOn(fakeDb.file, "findUnique").mockImplementationOnce(async (args) => {
+        const file = await findFile(args);
+        expect((await endDefault(app)).status).toBe(200);
+        return file;
+      });
+      try {
+        const replay = await app.request("/v1/messages", { method: "POST", headers, body });
+        expect(replay.status).toBe(409);
+        expect(await replay.json()).toMatchObject({ error: "installation_inactive" });
+        expect(store.messages.get(slot.id)?.status).toBe("uploading");
+      } finally {
+        lookup.mockRestore();
+      }
+    });
+
+    it("does not play an archived exhibition's approved recordings after restart", async () => {
+      const app = createApp();
+      seedMessage({ status: "approved" });
+      const started = await app.request("/v1/installations", {
+        method: "POST",
+        headers: jsonHeaders(adminHeaders()),
+        body: JSON.stringify({ name: "Next exhibition" }),
+      });
+      expect(started.status).toBe(201);
+      const { id: installationId } = (await started.json()) as { id: string };
+      const empty = await app.request("/v1/messages/random", { headers: phoneHeaders });
+      expect(empty.status).toBe(404);
+      const audio = seedFile({ sha256: "2d".repeat(32) });
+      const current = seedMessage({ status: "approved", audioId: audio.id, installationId });
+      const available = await app.request("/v1/messages/random", { headers: phoneHeaders });
+      expect(available.status).toBe(200);
+      expect(await available.json()).toMatchObject({ id: current.id });
     });
 
     // The booth retries a completion it did not hear the answer to. If the
@@ -805,10 +862,8 @@ describe("installations", () => {
       expect(store.questions.get(created.id)?.installationId).toBe(openId);
     });
 
-    // Between an era ending and the booth's next event there is deliberately
-    // no open era. A read arriving in that gap must answer "nothing to play"
-    // rather than conjure up an era nobody named.
-    it("answers no prompt without opening an era after a rollover", async () => {
+    // Content admission stays closed until an operator explicitly starts an era.
+    it("returns an inactive conflict without opening an era for a question draw", async () => {
       seedQuestion({ status: "active" });
       const app = createApp();
       expect((await endDefault(app)).status).toBe(200);

@@ -176,7 +176,7 @@ them into whatever log shipper you use. There's no built-in tracing
 exporter yet — that's tracked in `docs/adr/` for a future ADR.
 
 The BUSY Bar integration is deployed from the separate
-[Telephone-Booth-Busy-Bar](https://github.com/djensenius/Telephone-Booth-Busy-Bar)
+[BusyBar](https://github.com/djensenius/BusyBar)
 repository, never inside the horizontally scaled API service. Its cloud token
 and monitor-scoped Operator token belong in that companion's secret store, not
 the Operator API environment.
