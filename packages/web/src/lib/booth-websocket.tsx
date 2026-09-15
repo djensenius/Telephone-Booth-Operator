@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import { BoothStatusSchema, WsEnvelopeSchema } from "@telephone-booth-operator/shared";
 import type { BoothStatus, WsEnvelope } from "@telephone-booth-operator/shared";
@@ -17,7 +17,7 @@ import {
   apiQueryKeys,
   apiWebSocketUrlFor,
   invalidateInstallationScopedQueries,
-  useStatusCurrent,
+  useStatusReconciliation,
 } from "./api-client.js";
 import { isNewerThan, mergeLiveStatus } from "./status-history.js";
 
@@ -237,9 +237,13 @@ export function BoothEnvelopeBridge(): null {
   const ws = useBoothWebSocket();
   const queryClient = useQueryClient();
   // The broadcaster is process-local, so a live socket on one API replica can
-  // miss status reports handled by another. Keep bounded REST reconciliation
-  // active; accepted live frames cancel older in-flight responses below.
-  const statusQuery = useStatusCurrent();
+  // miss status reports handled by another. Reconciliation has its own query:
+  // live cache updates must neither cancel it nor clear its API failures.
+  const statusQuery = useStatusReconciliation();
+  const statusCache = useQuery<BoothStatus | null>({
+    queryKey: apiQueryKeys.status,
+    enabled: false,
+  });
   const { setLastStatusAt, setRuntimeMode, setStatus, setInstallationState, setLifecycleError } =
     useBoothStatus();
   const latestStatusRef = useRef<BoothStatus | null>(null);
@@ -283,6 +287,10 @@ export function BoothEnvelopeBridge(): null {
     setLastStatusAt(null);
   }, [setLastStatusAt, setRuntimeMode, setStatus]);
 
+  useEffect(() => {
+    if (statusCache.data === undefined) clearStatus();
+  }, [statusCache.data, clearStatus]);
+
   // Hydrate even when the socket opens immediately. A status socket only
   // carries new reports, so the REST snapshot preserves a legitimate
   // stale/offline warning and later polls reconcile cross-replica gaps.
@@ -297,11 +305,20 @@ export function BoothEnvelopeBridge(): null {
       clearStatus();
       installationStateRef.current = undefined;
       setInstallationState(null);
+      void queryClient.cancelQueries({ queryKey: apiQueryKeys.status, exact: true });
+      queryClient.setQueryData(apiQueryKeys.status, null);
       void queryClient.cancelQueries({ queryKey: apiQueryKeys.statusHistory, exact: true });
       queryClient.setQueryData(apiQueryKeys.statusHistory, { items: [] });
       return;
     }
-    syncStatus(statusQuery.data, true);
+    const current = queryClient.getQueryData<BoothStatus>(apiQueryKeys.status);
+    const reconciled =
+      current && !statusQuery.data.isSynthetic && !isNewerThan(statusQuery.data, current)
+        ? { ...current, installationState: statusQuery.data.installationState }
+        : statusQuery.data;
+    void queryClient.cancelQueries({ queryKey: apiQueryKeys.status, exact: true });
+    queryClient.setQueryData(apiQueryKeys.status, reconciled);
+    syncStatus(reconciled, true);
   }, [statusQuery.data, clearStatus, queryClient, syncStatus, setInstallationState]);
 
   const acceptLiveStatus = useCallback(

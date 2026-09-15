@@ -776,6 +776,7 @@ export function thermalRangeBounds(
 export const apiQueryKeys = {
   me: ["auth", "me"] as const,
   status: ["status", "current"] as const,
+  statusReconciliation: ["status", "reconciliation"] as const,
   statusHistory: ["status", "history"] as const,
   questions: (filter?: QuestionStatus | "all" | "any", scope?: InstallationScope) =>
     ["questions", "list", filter ?? "all", scope ?? null] as const,
@@ -975,6 +976,14 @@ export function useStatusCurrent(options?: { paused?: boolean }) {
     queryKey: apiQueryKeys.status,
     queryFn: status.current,
     refetchInterval: options?.paused ? false : 5_000,
+  });
+}
+
+export function useStatusReconciliation() {
+  return useQuery({
+    queryKey: apiQueryKeys.statusReconciliation,
+    queryFn: status.current,
+    refetchInterval: 5_000,
   });
 }
 

@@ -99,17 +99,35 @@ describe("BoothWebSocketProvider", () => {
         updatedAt: new Date().toISOString(),
         installationState: "active",
       };
-      client.setQueryData(apiQueryKeys.status, status);
+      client.setQueryData(apiQueryKeys.statusReconciliation, status);
       renderProvider(client);
-      const query = client.getQueryCache().find({ queryKey: apiQueryKeys.status, exact: true });
+      const query = client
+        .getQueryCache()
+        .find({ queryKey: apiQueryKeys.statusReconciliation, exact: true });
       if (!query) throw new Error("missing status query");
       act(() => query.setState({ status: "error", error: new Error("API unavailable") }));
+      act(() =>
+        FakeSocket.instances[0]!.emit("message", {
+          data: JSON.stringify({
+            kind: "status",
+            status: {
+              state: "recording",
+              updatedAt: new Date(Date.now() + 1_000).toISOString(),
+            },
+          }),
+        }),
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId("connection-error").textContent).toContain(
+          "exhibition lifecycle",
+        ),
+      );
       act(() => FakeSocket.instances[0]!.emit("error"));
       act(() => FakeSocket.instances[0]!.emit("close"));
       await act(() => vi.advanceTimersByTimeAsync(2_000));
       const socket = FakeSocket.instances[1]!;
       if (first === "poll") {
-        await act(() => client.setQueryData(apiQueryKeys.status, status));
+        await act(() => client.setQueryData(apiQueryKeys.statusReconciliation, status));
         await waitFor(() =>
           expect(screen.getByTestId("connection-error").textContent).toContain(
             "Live status socket",
@@ -123,7 +141,7 @@ describe("BoothWebSocketProvider", () => {
           "exhibition lifecycle",
         );
         expect(screen.getByTestId("connection-state").textContent).toBe("disconnected");
-        await act(() => client.setQueryData(apiQueryKeys.status, status));
+        await act(() => client.setQueryData(apiQueryKeys.statusReconciliation, status));
       }
       await waitFor(() => expect(screen.getByTestId("connection-error").textContent).toBe(""));
       expect(screen.getByTestId("connection-state").textContent).toBe("connected");
@@ -133,7 +151,7 @@ describe("BoothWebSocketProvider", () => {
   it("applies lifecycle from synthetic REST status after a newer heartbeat and resumes", async () => {
     const client = renderProvider();
     await act(() =>
-      client.setQueryData(apiQueryKeys.status, {
+      client.setQueryData(apiQueryKeys.statusReconciliation, {
         state: "recording",
         id: 1,
         updatedAt: "2026-09-15T12:00:00.000Z",
@@ -142,7 +160,7 @@ describe("BoothWebSocketProvider", () => {
     );
     expect(await screen.findByText("Recording")).toBeDefined();
     await act(() =>
-      client.setQueryData(apiQueryKeys.status, {
+      client.setQueryData(apiQueryKeys.statusReconciliation, {
         state: "idle",
         updatedAt: "1970-01-01T00:00:00.000Z",
         isSynthetic: true,
@@ -165,7 +183,7 @@ describe("BoothWebSocketProvider", () => {
       installationState: "between_exhibitions",
     });
     await act(() =>
-      client.setQueryData(apiQueryKeys.status, {
+      client.setQueryData(apiQueryKeys.statusReconciliation, {
         state: "idle",
         updatedAt: "1970-01-01T00:00:00.000Z",
         isSynthetic: true,
@@ -174,7 +192,7 @@ describe("BoothWebSocketProvider", () => {
     );
     await waitFor(() => expect(screen.queryByText("Between exhibitions")).toBeNull());
     await act(() =>
-      client.setQueryData(apiQueryKeys.status, {
+      client.setQueryData(apiQueryKeys.statusReconciliation, {
         state: "recording",
         id: 2,
         updatedAt: new Date().toISOString(),
@@ -489,6 +507,53 @@ describe("BoothWebSocketProvider", () => {
       updatedAt: "2026-05-01T00:10:00.000Z",
     });
     expect(screen.getByText("Recording")).toBeDefined();
+  });
+
+  it("reconciles a delayed exhibition end despite intervening heartbeats", async () => {
+    let resolveFetch: ((response: Response) => void) | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveFetch = resolve;
+          }),
+      ),
+    );
+    const client = renderProvider();
+    await waitFor(() => expect(FakeSocket.instances).toHaveLength(1));
+    const socket = FakeSocket.instances[0]!;
+    for (const state of ["recording", "idle"]) {
+      act(() =>
+        socket.emit("message", {
+          data: JSON.stringify({
+            kind: "status",
+            status: {
+              state,
+              updatedAt: new Date().toISOString(),
+            },
+          }),
+        }),
+      );
+    }
+    expect(client.getQueryState(apiQueryKeys.statusReconciliation)?.fetchStatus).toBe("fetching");
+    if (!resolveFetch) throw new Error("status request did not start");
+    const complete = resolveFetch;
+    act(() => {
+      complete(
+        jsonResponse({
+          state: "idle",
+          updatedAt: "1970-01-01T00:00:00.000Z",
+          isSynthetic: true,
+          installationState: "between_exhibitions",
+        }),
+      );
+    });
+    expect(await screen.findByText("Between exhibitions")).toBeDefined();
+    expect(client.getQueryData(apiQueryKeys.status)).toMatchObject({
+      isSynthetic: true,
+      installationState: "between_exhibitions",
+    });
   });
 
   it("does not let a delayed history request erase a live frame", async () => {
