@@ -123,6 +123,7 @@ let updatedQuestionWeight: number | undefined;
 let deletedMessages: string[] = [];
 let revokedToken = false;
 let lastCreatedTokenScope: string | undefined;
+let lastCreatedTokenTelemetrySource: unknown;
 let lastMessageUrl = "";
 let messageUrls: string[] = [];
 let questionMessageUrls: string[] = [];
@@ -256,8 +257,9 @@ const server = setupServer(
     HttpResponse.json([{ ...token, revokedAt: revokedToken ? "2026-01-05T00:00:00.000Z" : null }]),
   ),
   http.post("http://localhost/v1/api-tokens", async ({ request }) => {
-    const body = (await request.json()) as { scope?: string };
+    const body = (await request.json()) as { scope?: string; telemetrySource?: unknown };
     lastCreatedTokenScope = body.scope;
+    lastCreatedTokenTelemetrySource = body.telemetrySource;
     return HttpResponse.json(
       {
         ...token,
@@ -408,6 +410,7 @@ beforeEach(() => {
   deletedMessages = [];
   revokedToken = false;
   lastCreatedTokenScope = undefined;
+  lastCreatedTokenTelemetrySource = undefined;
   lastMessageUrl = "";
   messageUrls = [];
   questionMessageUrls = [];
@@ -1207,6 +1210,38 @@ describe("Tokens feature", () => {
     fireEvent.click(screen.getByText("Issue token"));
     expect(await screen.findByText("booth-token-plaintext")).toBeTruthy();
     expect(lastCreatedTokenScope).toBe("monitor");
+  });
+
+  it("issues a telemetry-scoped token with source metadata", async () => {
+    renderPath("/tokens");
+    fireEvent.click(await screen.findByText("New token"));
+    fireEvent.change(screen.getByLabelText("Token name"), {
+      target: { value: "telephone router" },
+    });
+    fireEvent.change(screen.getByLabelText("Scope"), { target: { value: "telemetry" } });
+    fireEvent.change(screen.getByLabelText("Booth ID"), { target: { value: "booth-01" } });
+    fireEvent.change(screen.getByLabelText("Component ID"), { target: { value: "router" } });
+    fireEvent.change(screen.getByLabelText("Display name"), {
+      target: { value: "Telephone Router" },
+    });
+    fireEvent.change(screen.getByLabelText("Component kind"), { target: { value: "router" } });
+    fireEvent.change(screen.getByLabelText("Prometheus job"), {
+      target: { value: "TelephoneRouter" },
+    });
+    fireEvent.change(screen.getByLabelText("Prometheus instance"), {
+      target: { value: "telephone-router.example.ts.net:9100" },
+    });
+    fireEvent.click(screen.getByText("Issue token"));
+    expect(await screen.findByText("booth-token-plaintext")).toBeTruthy();
+    expect(lastCreatedTokenScope).toBe("telemetry");
+    expect(lastCreatedTokenTelemetrySource).toEqual({
+      boothId: "booth-01",
+      componentId: "router",
+      displayName: "Telephone Router",
+      kind: "router",
+      prometheusJob: "TelephoneRouter",
+      prometheusInstance: "telephone-router.example.ts.net:9100",
+    });
   });
 
   it("opens the new token dialog", async () => {
