@@ -1,6 +1,10 @@
 import { useState } from "react";
 import type { FormEvent, JSX } from "react";
-import type { ApiToken, ApiTokenScope } from "@telephone-booth-operator/shared";
+import type {
+  ApiToken,
+  ApiTokenScope,
+  TelemetrySourceMetadata,
+} from "@telephone-booth-operator/shared";
 import { GlassPanel } from "../../components/booth/index.js";
 import {
   useApiTokenUsage,
@@ -12,6 +16,17 @@ import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureSt
 
 function date(value: string | null): string {
   return value === null ? "Never" : new Date(value).toLocaleDateString();
+}
+
+function emptyTelemetrySource(): TelemetrySourceMetadata {
+  return {
+    boothId: "",
+    componentId: "",
+    displayName: "",
+    kind: "",
+    prometheusJob: "",
+    prometheusInstance: "",
+  };
 }
 
 function UsageSparkline({ tokenId }: { readonly tokenId: string }): JSX.Element {
@@ -50,6 +65,8 @@ export function NewTokenDialog({
   const [name, setName] = useState("");
   const [scope, setScope] = useState<ApiTokenScope>("operator");
   const [expiresInDays, setExpiresInDays] = useState("");
+  const [telemetrySource, setTelemetrySource] =
+    useState<TelemetrySourceMetadata>(emptyTelemetrySource);
   const [plaintext, setPlaintext] = useState<string | null>(null);
   if (!open) return null;
 
@@ -59,15 +76,21 @@ export function NewTokenDialog({
       name,
       scope,
       ...(expiresInDays.trim() ? { expiresInDays: Number(expiresInDays) } : {}),
+      ...(scope === "telemetry" ? { telemetrySource } : {}),
     });
     setPlaintext(created.plaintext);
     setName("");
     setScope("operator");
     setExpiresInDays("");
+    setTelemetrySource(emptyTelemetrySource());
   }
 
   async function copy(): Promise<void> {
     if (plaintext !== null) await navigator.clipboard.writeText(plaintext);
+  }
+
+  function updateTelemetrySource(field: keyof TelemetrySourceMetadata, value: string): void {
+    setTelemetrySource((current) => ({ ...current, [field]: value }));
   }
 
   return (
@@ -95,7 +118,12 @@ export function NewTokenDialog({
               value={scope}
               onChange={(event) => {
                 const value = event.currentTarget.value;
-                if (value === "operator" || value === "worker" || value === "monitor") {
+                if (
+                  value === "operator" ||
+                  value === "worker" ||
+                  value === "monitor" ||
+                  value === "telemetry"
+                ) {
                   setScope(value);
                 }
               }}
@@ -103,8 +131,75 @@ export function NewTokenDialog({
               <option value="operator">Operator (booth / phone / operator clients)</option>
               <option value="worker">Worker (push-worker callbacks only)</option>
               <option value="monitor">Monitor (read-only status / system)</option>
+              <option value="telemetry">Telemetry (component snapshots only)</option>
             </select>
           </label>
+          {scope === "telemetry" ? (
+            <>
+              <label>
+                Booth ID
+                <input
+                  value={telemetrySource.boothId}
+                  onChange={(event) => updateTelemetrySource("boothId", event.currentTarget.value)}
+                  required
+                  maxLength={128}
+                />
+              </label>
+              <label>
+                Component ID
+                <input
+                  value={telemetrySource.componentId}
+                  onChange={(event) =>
+                    updateTelemetrySource("componentId", event.currentTarget.value)
+                  }
+                  required
+                  maxLength={128}
+                />
+              </label>
+              <label>
+                Display name
+                <input
+                  value={telemetrySource.displayName}
+                  onChange={(event) =>
+                    updateTelemetrySource("displayName", event.currentTarget.value)
+                  }
+                  required
+                  maxLength={128}
+                />
+              </label>
+              <label>
+                Component kind
+                <input
+                  value={telemetrySource.kind}
+                  onChange={(event) => updateTelemetrySource("kind", event.currentTarget.value)}
+                  required
+                  maxLength={64}
+                />
+              </label>
+              <label>
+                Prometheus job
+                <input
+                  value={telemetrySource.prometheusJob}
+                  onChange={(event) =>
+                    updateTelemetrySource("prometheusJob", event.currentTarget.value)
+                  }
+                  required
+                  maxLength={256}
+                />
+              </label>
+              <label>
+                Prometheus instance
+                <input
+                  value={telemetrySource.prometheusInstance}
+                  onChange={(event) =>
+                    updateTelemetrySource("prometheusInstance", event.currentTarget.value)
+                  }
+                  required
+                  maxLength={256}
+                />
+              </label>
+            </>
+          ) : null}
           <label>
             Expires in days (optional)
             <input
@@ -181,8 +276,8 @@ export function TokensScreen(): JSX.Element {
       <p className="screen-kicker">Digit 4</p>
       <h1>Tokens</h1>
       <p>
-        Issue and revoke phone-client tokens. Plaintext tokens are displayed once, just like a call
-        you cannot un-place.
+        Issue and revoke least-privilege API tokens. Plaintext tokens are displayed once, just like
+        a call you cannot un-place.
       </p>
       <div className="feature-actions">
         <button
@@ -197,7 +292,7 @@ export function TokensScreen(): JSX.Element {
       {tokens.error ? <FeatureError message="Could not load API tokens." /> : null}
       {!tokens.isLoading && rows.length === 0 ? (
         <FeatureEmpty title="No tokens issued">
-          Create a token before connecting the phone client.
+          Create a token before connecting a client or telemetry source.
         </FeatureEmpty>
       ) : null}
       {rows.length === 0 ? null : (
@@ -232,10 +327,7 @@ export function TokensScreen(): JSX.Element {
           aria-labelledby="revoke-token-heading"
         >
           <h2 id="revoke-token-heading">Revoke {revokeToken.name}?</h2>
-          <p>
-            The phone client using this token will hear a busy signal on its next authenticated
-            request.
-          </p>
+          <p>The client using this token will lose access on its next authenticated request.</p>
           <div className="debug-button-row">
             <button
               type="button"
