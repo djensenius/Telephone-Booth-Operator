@@ -38,7 +38,6 @@ export const updateActiveModerationPolicy = async (
   instructions: string,
   updatedById: string | null,
 ): Promise<ModerationPolicy> => {
-  const existing = await db.moderationPolicy.findUnique({ where: { key: MODERATION_POLICY_KEY } });
   const row = await db.moderationPolicy.upsert({
     where: { key: MODERATION_POLICY_KEY },
     create: {
@@ -48,7 +47,7 @@ export const updateActiveModerationPolicy = async (
       updatedById,
     },
     update: {
-      version: (existing?.version ?? 0) + 1,
+      version: { increment: 1 },
       instructions,
       updatedById,
     },
