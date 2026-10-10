@@ -5,6 +5,7 @@ import { LogoutButton } from "../auth/LogoutButton.js";
 import { useCurrentUser } from "../auth/useCurrentUser.js";
 import { AdminBackupPanel } from "./AdminBackupPanel.js";
 import { AdminInstallationPurgePanel } from "./AdminInstallationPurgePanel.js";
+import { AdminModerationPolicyPanel } from "./AdminModerationPolicyPanel.js";
 import { PhoneClientConnection } from "./PhoneClientConnection.js";
 
 const fontSizeKey = "booth.theme.fontSize";
@@ -151,6 +152,7 @@ export function SettingsScreen(): JSX.Element {
           </label>
         </div>
       </section>
+      {user?.isAdmin ? <AdminModerationPolicyPanel /> : null}
       {user?.isAdmin ? <AdminBackupPanel /> : null}
       {user?.isAdmin ? <AdminInstallationPurgePanel /> : null}
       {user?.isAdmin ? <PhoneClientConnection userSub={user.id} /> : null}

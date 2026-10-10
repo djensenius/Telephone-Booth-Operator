@@ -35,6 +35,10 @@ import { installationsRouter } from "./routes/installations.js";
 import { instructionsRouter } from "./routes/instructions.js";
 import { messagesRouter } from "./routes/messages.js";
 import { messageProcessingRouter } from "./routes/message-processing.js";
+import {
+  adminModerationPolicyRouter,
+  moderationPolicyRouter,
+} from "./routes/moderation-policy.js";
 import { monitorRouter } from "./routes/monitor.js";
 import { questionsRouter } from "./routes/questions.js";
 import { sessionsRouter } from "./routes/sessions.js";
@@ -92,6 +96,7 @@ export const createApp = (): Hono<{ Variables: AuthVariables & AuditVariables }>
   app.route("/v1/instructions", instructionsRouter);
   app.route("/v1/messages", messagesRouter);
   app.route("/v1/message-processing", messageProcessingRouter);
+  app.route("/v1/moderation-policy", moderationPolicyRouter);
   app.route("/v1/monitor", monitorRouter);
   app.route("/v1/status", statusRouter);
   app.route("/v1/events", eventsRouter);
@@ -102,6 +107,7 @@ export const createApp = (): Hono<{ Variables: AuthVariables & AuditVariables }>
   app.route("/v1/uploads", uploadsRouter);
   app.route("/v1/devices", devicesRouter);
   app.route("/v1/admin/data", adminDataRouter);
+  app.route("/v1/admin/moderation-policy", adminModerationPolicyRouter);
   app.route("/v1/audit-logs", auditRouter);
   app.route("/v1/ws", wsRouter);
 

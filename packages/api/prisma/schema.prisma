@@ -352,6 +352,7 @@ model OperatorUser {
   sessions                OperatorSession[]
   requestedTranscriptions Transcription[]   @relation("TranscriptionRequester")
   requestedModerations    Moderation[]      @relation("ModerationRequester")
+  moderationPolicyUpdates ModerationPolicy[] @relation("ModerationPolicyUpdater")
   mobileDevices           MobileDevice[]
   metricFilters           MetricFilter[]
   endedInstallations      Installation[]    @relation("InstallationEnder")
@@ -534,6 +535,19 @@ model PushNotificationState {
   badgeLeaseToken       String?
   badgeLeaseExpiresAt   DateTime?
   updatedAt             DateTime  @updatedAt
+}
+
+// Active editable moderation instructions used by operator devices. The
+// singleton key keeps reads cheap while version preserves an audit-friendly
+// revision number. Code-bundled defaults remain the fallback when this row is
+// absent or unreachable.
+model ModerationPolicy {
+  key         String        @id
+  version     Int           @default(1)
+  instructions String
+  updatedAt   DateTime      @updatedAt
+  updatedById String?
+  updatedBy   OperatorUser? @relation("ModerationPolicyUpdater", fields: [updatedById], references: [id])
 }
 
 // Mobile device registered for APNs / push notifications. One row per

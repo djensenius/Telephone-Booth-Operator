@@ -36,6 +36,8 @@ import {
   MetricFilterCreateSchema,
   MetricFilterSchema,
   ModerationSchema,
+  ModerationPolicySchema,
+  ModerationPolicyUpdateSchema,
   OperatorMeSchema,
   QuestionCreateSchema,
   QuestionSchema,
@@ -85,6 +87,8 @@ import type {
   MetricFilter,
   MetricFilterCreate,
   Moderation,
+  ModerationPolicy,
+  ModerationPolicyUpdate,
   OperatorMe,
   Question,
   QuestionCreate,
@@ -357,6 +361,19 @@ export const questions = {
       schema: QuestionSchema,
     }),
   delete: (id: string) => apiFetch<void>(`/v1/questions/${id}`, { method: "DELETE" }),
+};
+
+export const moderationPolicy = {
+  get: () =>
+    apiFetch<ModerationPolicy>("/v1/admin/moderation-policy", {
+      schema: ModerationPolicySchema,
+    }),
+  update: (input: ModerationPolicyUpdate) =>
+    apiFetch<ModerationPolicy>("/v1/admin/moderation-policy", {
+      method: "PUT",
+      body: ModerationPolicyUpdateSchema.parse(input),
+      schema: ModerationPolicySchema,
+    }),
 };
 
 export const instructions = {
@@ -811,6 +828,7 @@ export const apiQueryKeys = {
   installations: ["installations", "list"] as const,
   installationCurrent: ["installations", "current"] as const,
   installation: (id: string) => ["installations", id] as const,
+  moderationPolicy: ["moderation-policy", "current"] as const,
 };
 
 export function useAuditLogs(params: AuditLogListParams = {}) {
@@ -1112,6 +1130,22 @@ export function useInstructionsList(filter: InstructionStatus | "all" = "all") {
         ...(statusFilter === undefined ? {} : { status: statusFilter }),
         limit: 100,
       }),
+  });
+}
+
+export function useModerationPolicy() {
+  return useQuery({
+    queryKey: apiQueryKeys.moderationPolicy,
+    queryFn: moderationPolicy.get,
+  });
+}
+
+export function useUpdateModerationPolicy() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: moderationPolicy.update,
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.moderationPolicy }),
   });
 }
 

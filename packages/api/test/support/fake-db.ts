@@ -258,6 +258,14 @@ export type FakeInstallation = {
 // Stable id so tests can assert on scoping without reading it back first.
 export const DEFAULT_INSTALLATION_ID = "00000000-0000-4000-8000-0000000000ff";
 
+export type FakeModerationPolicy = {
+  key: string;
+  version: number;
+  instructions: string;
+  updatedAt: Date;
+  updatedById: string | null;
+};
+
 export type FakeAuditLog = {
   id: string;
   action: string;
@@ -290,6 +298,7 @@ export const store = {
   callSessions: new Map<string, FakeCallSession>(),
   transcriptions: new Map<string, FakeTranscription>(),
   moderations: new Map<string, FakeModeration>(),
+  moderationPolicies: new Map<string, FakeModerationPolicy>(),
   pushNotificationStates: new Map<string, FakePushNotificationState>(),
   mobileDevices: new Map<string, FakeMobileDevice>(),
   metricFilters: new Map<string, FakeMetricFilter>(),
@@ -818,6 +827,7 @@ export const resetFakeDb = (): void => {
   store.callSessions.clear();
   store.transcriptions.clear();
   store.moderations.clear();
+  store.moderationPolicies.clear();
   store.pushNotificationStates.clear();
   store.mobileDevices.clear();
   store.metricFilters.clear();
@@ -2560,6 +2570,36 @@ export const fakeDb = {
       store.auditLogs.length = 0;
       store.auditLogs.push(...kept);
       return { count: removed };
+    },
+  },
+  moderationPolicy: {
+    findUnique: async ({ where }: { where: { key: string } }) =>
+      store.moderationPolicies.get(where.key) ?? null,
+    upsert: async ({
+      where,
+      create,
+      update,
+    }: {
+      where: { key: string };
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => {
+      const existing = store.moderationPolicies.get(where.key);
+      const row = existing
+        ? ({
+            ...applyUpdate(existing as unknown as Record<string, unknown>, update),
+            key: where.key,
+            updatedAt: new Date(),
+          } as FakeModerationPolicy)
+        : ({
+            key: where.key,
+            version: 1,
+            updatedAt: new Date(),
+            updatedById: null,
+            ...create,
+          } as FakeModerationPolicy);
+      store.moderationPolicies.set(where.key, row);
+      return row;
     },
   },
   pushNotificationState: {

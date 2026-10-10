@@ -90,6 +90,24 @@ export type Transcription = z.infer<typeof TranscriptionSchema>;
 export const TranscriptionListSchema = z.object({ items: z.array(TranscriptionSchema) });
 export type TranscriptionList = z.infer<typeof TranscriptionListSchema>;
 
+export const ModerationPolicySourceSchema = z.enum(["server", "fallback"]);
+export type ModerationPolicySource = z.infer<typeof ModerationPolicySourceSchema>;
+
+export const ModerationPolicySchema = z.object({
+  key: z.string().min(1),
+  version: z.number().int().nonnegative(),
+  instructions: z.string().min(1).max(20_000),
+  source: ModerationPolicySourceSchema,
+  updatedAt: z.string().datetime().nullable(),
+  updatedById: z.string().nullable(),
+});
+export type ModerationPolicy = z.infer<typeof ModerationPolicySchema>;
+
+export const ModerationPolicyUpdateSchema = z.object({
+  instructions: z.string().trim().min(50).max(20_000),
+});
+export type ModerationPolicyUpdate = z.infer<typeof ModerationPolicyUpdateSchema>;
+
 export const ModerationSchema = z.object({
   id: z.guid(),
   messageId: z.guid(),

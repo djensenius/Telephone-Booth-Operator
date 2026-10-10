@@ -1166,6 +1166,57 @@ paths:
         "401": { description: missing or invalid credentials }
         "404": { description: not found or not owned by the caller }
 
+  /v1/moderation-policy:
+    get:
+      summary: Get the active moderation policy for operator devices.
+      tags: [moderation]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      responses:
+        "200":
+          description: active policy, or bundled fallback when no editable policy exists
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModerationPolicy" }
+        "401": { description: missing or invalid credentials }
+
+  /v1/admin/moderation-policy:
+    get:
+      summary: Get the active moderation policy (admin only).
+      tags: [moderation]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      responses:
+        "200":
+          description: active policy, or bundled fallback when no editable policy exists
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModerationPolicy" }
+        "401": { description: missing or invalid credentials }
+        "403": { description: operator admin privileges required }
+    put:
+      summary: Update the active moderation policy (admin only).
+      tags: [moderation]
+      security:
+        - operatorSession: []
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ModerationPolicyUpdate" }
+      responses:
+        "200":
+          description: updated policy
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModerationPolicy" }
+        "400": { description: invalid policy }
+        "401": { description: missing or invalid credentials }
+        "403": { description: operator admin privileges required }
+
   /v1/audit-logs:
     get:
       summary: List audit-trail entries (admin only, cursor-paginated).
@@ -3453,6 +3504,24 @@ components:
     AiProvider:
       type: string
       enum: [openai, mac_app, push, on_device, disabled]
+    ModerationPolicySource:
+      type: string
+      enum: [server, fallback]
+    ModerationPolicy:
+      type: object
+      required: [key, version, instructions, source, updatedAt, updatedById]
+      properties:
+        key: { type: string }
+        version: { type: integer, minimum: 0 }
+        instructions: { type: string, minLength: 1, maxLength: 20000 }
+        source: { $ref: "#/components/schemas/ModerationPolicySource" }
+        updatedAt: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+        updatedById: { anyOf: [{ type: string }, { type: "null" }] }
+    ModerationPolicyUpdate:
+      type: object
+      required: [instructions]
+      properties:
+        instructions: { type: string, minLength: 50, maxLength: 20000 }
     Transcription:
       type: object
       required: [id, messageId, provider, status, createdAt]
