@@ -1,6 +1,7 @@
 // Mac-app moderation provider. POSTs OpenAI-shaped JSON to the Transcription
 // macOS app's OpenAI-compatible moderation endpoint.
 
+import { applyPublicPlaybackLanguagePolicy } from "./content-policy.js";
 import type { ModerationInput, ModerationProvider, ModerationResult } from "./types.js";
 import { ProviderError } from "./types.js";
 
@@ -125,12 +126,12 @@ export class MacAppModerationProvider implements ModerationProvider {
           ? "approve"
           : "review";
     const reasonSummary = readReasonSummary(first) ?? readReasonSummary(payload);
-    return {
+    return applyPublicPlaybackLanguagePolicy(input.text, {
       flagged: first.flagged,
       recommendation,
       maxScore,
       categories: scores,
       ...(reasonSummary === undefined ? {} : { reasonSummary }),
-    };
+    });
   }
 }

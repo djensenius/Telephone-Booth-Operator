@@ -1,6 +1,7 @@
 // OpenAI moderation provider. Maps the `omni-moderation-latest` response into
 // our normalized result shape.
 
+import { applyPublicPlaybackLanguagePolicy } from "./content-policy.js";
 import type { ModerationInput, ModerationProvider, ModerationResult } from "./types.js";
 import { ProviderError } from "./types.js";
 
@@ -104,12 +105,12 @@ export class OpenAiModerationProvider implements ModerationProvider {
         : topCategory && maxScore > 0
           ? `${topCategory} (${maxScore.toFixed(2)})`
           : undefined;
-    return {
+    return applyPublicPlaybackLanguagePolicy(input.text, {
       flagged: first.flagged,
       recommendation,
       maxScore,
       categories: scores,
       ...(reasonSummary === undefined ? {} : { reasonSummary }),
-    };
+    });
   }
 }
