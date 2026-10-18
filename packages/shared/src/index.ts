@@ -1202,6 +1202,25 @@ export const BoothFanStatsSchema = z
   .passthrough();
 export type BoothFanStats = z.infer<typeof BoothFanStatsSchema>;
 
+// Shelly Plug telemetry for auxiliary loads like the Vivosun heat mat. The
+// relay (`outputOn`) can be on while the mat draws 0 W, so consumers should use
+// `powerWatts > 0` for active heating / power-drain state.
+export const BoothShellyStatsSchema = z
+  .object({
+    device: z.string(),
+    endpoint: z.string(),
+    outputOn: z.boolean(),
+    powerWatts: z.number().nonnegative(),
+    voltageVolts: z.number().nonnegative(),
+    frequencyHertz: z.number().nonnegative(),
+    currentAmperes: z.number().nonnegative(),
+    energyWattHours: z.number().nonnegative(),
+    temperatureCelsius: z.number(),
+    fetchedAtUnixSeconds: z.number().int().nonnegative(),
+  })
+  .passthrough();
+export type BoothShellyStats = z.infer<typeof BoothShellyStatsSchema>;
+
 // Mirrors the six boolean Pi throttling flags reported by `vcgencmd
 // get_throttled`. Adapters that can't read these (non-Pi hosts) omit the
 // whole object.
@@ -1229,6 +1248,7 @@ export const BoothSystemSnapshotSchema = z
     audio: BoothAudioStatsSchema.nullable().optional(),
     tailscale: BoothTailscaleStatsSchema.nullable().optional(),
     fan: BoothFanStatsSchema.nullable().optional(),
+    shelly: z.array(BoothShellyStatsSchema).nullable().optional(),
     throttling: BoothThrottlingFlagsSchema.nullable().optional(),
     runtimeMode: RuntimeModeSchema.nullable().optional(),
   })

@@ -3405,6 +3405,9 @@ components:
           anyOf: [{ $ref: "#/components/schemas/BoothTailscaleStats" }, { type: "null" }]
         fan:
           anyOf: [{ $ref: "#/components/schemas/BoothFanStats" }, { type: "null" }]
+        shelly:
+          type: [array, "null"]
+          items: { $ref: "#/components/schemas/BoothShellyStats" }
         throttling:
           anyOf: [{ $ref: "#/components/schemas/BoothThrottlingFlags" }, { type: "null" }]
     BoothCpuStats:
@@ -3485,6 +3488,35 @@ components:
         rpm: { type: [integer, "null"], minimum: 0 }
         coolingState: { type: [integer, "null"], minimum: 0 }
         maxCoolingState: { type: [integer, "null"], minimum: 0 }
+    BoothShellyStats:
+      type: object
+      description: |
+        Shelly Plug telemetry for auxiliary loads like the Vivosun heat mat.
+        `outputOn` is relay state; `powerWatts > 0` indicates active heating /
+        power draw while 0 W means the heater is not drawing power.
+      additionalProperties: true
+      required:
+        - device
+        - endpoint
+        - outputOn
+        - powerWatts
+        - voltageVolts
+        - frequencyHertz
+        - currentAmperes
+        - energyWattHours
+        - temperatureCelsius
+        - fetchedAtUnixSeconds
+      properties:
+        device: { type: string }
+        endpoint: { type: string }
+        outputOn: { type: boolean }
+        powerWatts: { type: number, minimum: 0 }
+        voltageVolts: { type: number, minimum: 0 }
+        frequencyHertz: { type: number, minimum: 0 }
+        currentAmperes: { type: number, minimum: 0 }
+        energyWattHours: { type: number, minimum: 0 }
+        temperatureCelsius: { type: number }
+        fetchedAtUnixSeconds: { type: integer, minimum: 0 }
     BoothThrottlingFlags:
       type: object
       additionalProperties: true

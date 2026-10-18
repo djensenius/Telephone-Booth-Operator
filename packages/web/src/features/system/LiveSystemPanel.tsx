@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { useMemo } from "react";
-import type { BoothThrottlingFlags } from "@telephone-booth-operator/shared";
+import type { BoothShellyStats, BoothThrottlingFlags } from "@telephone-booth-operator/shared";
 import { GlassPanel, RuntimeModeBadge } from "../../components/booth/index.js";
 import { useSystemCurrent, useStatusCurrent } from "../../lib/api-client.js";
 import { FeatureEmpty, FeatureError, FeatureSkeleton } from "../common/FeatureStates.js";
@@ -21,6 +21,21 @@ function summarizeThrottling(flags: BoothThrottlingFlags | null | undefined): st
   if (flags.undervoltageOccurred) labels.push("under-voltage-occurred");
   if (flags.throttledOccurred) labels.push("throttled-occurred");
   return labels.length > 0 ? labels.join(", ") : "none";
+}
+
+function summarizeShellyRelay(entry: BoothShellyStats): string {
+  return entry.outputOn ? "relay on" : "relay off";
+}
+
+function summarizeShellyDraw(entry: BoothShellyStats): string {
+  const power = `${fmtNumber(entry.powerWatts, 1)} W`;
+  return entry.powerWatts > 0
+    ? `heating / drawing power (${power})`
+    : `heater off / no draw (${power})`;
+}
+
+function formatShellyFetchedAt(entry: BoothShellyStats): string {
+  return new Date(entry.fetchedAtUnixSeconds * 1000).toISOString();
 }
 
 interface LiveSystemPanelProps {
@@ -151,6 +166,27 @@ export function LiveSystemPanel({ boothId = DEFAULT_BOOTH_ID }: LiveSystemPanelP
               <dd>{row.value}</dd>
             </div>
           ))}
+          {snapshot.shelly?.length ? (
+            <div className="live-system-panel__row live-system-panel__row--wide">
+              <dt>Shelly / Vivosun heat mat</dt>
+              <dd>
+                <ul>
+                  {snapshot.shelly.map((entry) => (
+                    <li key={`${entry.device}:${entry.endpoint}:${entry.fetchedAtUnixSeconds}`}>
+                      <strong>{entry.device}</strong>
+                      {entry.endpoint ? ` (${entry.endpoint})` : ""} — {summarizeShellyRelay(entry)}
+                      ; {summarizeShellyDraw(entry)}; current {fmtNumber(entry.currentAmperes, 2)}{" "}
+                      A; voltage {fmtNumber(entry.voltageVolts, 1)} V; frequency{" "}
+                      {fmtNumber(entry.frequencyHertz, 1)} Hz; energy{" "}
+                      {fmtNumber(entry.energyWattHours, 1)} Wh; plug{" "}
+                      {fmtNumber(entry.temperatureCelsius, 1)} °C; fetched{" "}
+                      {formatShellyFetchedAt(entry)}
+                    </li>
+                  ))}
+                </ul>
+              </dd>
+            </div>
+          ) : null}
           {snapshot.disks?.length ? (
             <div className="live-system-panel__row live-system-panel__row--wide">
               <dt>Disks</dt>

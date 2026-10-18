@@ -201,6 +201,38 @@ describe("LiveSystemPanel", () => {
     expect(screen.getByText("67% PWM")).toBeDefined();
   });
 
+  it("renders Shelly heat mat relay state and current power draw", () => {
+    renderPanel({
+      boothId: "booth-01",
+      snapshot: {
+        ...baseSnapshot,
+        shelly: [
+          {
+            device: "vivosun-heat-mat",
+            endpoint: "switch:0",
+            outputOn: true,
+            powerWatts: 47.2,
+            voltageVolts: 121.1,
+            frequencyHertz: 60,
+            currentAmperes: 0.39,
+            energyWattHours: 1234.5,
+            temperatureCelsius: 28.4,
+            fetchedAtUnixSeconds: 1_780_000_000,
+          },
+        ],
+      },
+      receivedAt: "2026-05-27T00:00:05.000Z",
+    });
+
+    const heatMatRow = screen.getByText("Shelly / Vivosun heat mat").parentElement;
+    expect(heatMatRow).toBeDefined();
+    expect(heatMatRow!.textContent).toContain("vivosun-heat-mat");
+    expect(heatMatRow!.textContent).toContain("relay on");
+    expect(heatMatRow!.textContent).toContain("heating / drawing power (47.2 W)");
+    expect(heatMatRow!.textContent).toContain("current 0.39 A");
+    expect(heatMatRow!.textContent).toContain("voltage 121.1 V");
+  });
+
   it("renders disk entries from snapshot.disks with mountPoint and filesystem", () => {
     renderPanel({
       boothId: "booth-01",
