@@ -159,6 +159,20 @@ describe("BoothSystemSnapshotSchema", () => {
       process: { residentBytes: 14_426_112, virtualBytes: 922_062_848, uptimeSeconds: 5 },
       audio: { inputDevice: "USB Audio", outputDevice: "USB Audio" },
       tailscale: { connected: true, hostname: "telephone-booth" },
+      shelly: [
+        {
+          device: "vivosun-heat-mat",
+          endpoint: "switch:0",
+          outputOn: true,
+          powerWatts: 47.2,
+          voltageVolts: 121.1,
+          frequencyHertz: 60,
+          currentAmperes: 0.39,
+          energyWattHours: 1234.5,
+          temperatureCelsius: 28.4,
+          fetchedAtUnixSeconds: 1_780_000_000,
+        },
+      ],
       throttling: {
         undervoltage: false,
         armFreqCapped: false,
@@ -172,7 +186,50 @@ describe("BoothSystemSnapshotSchema", () => {
     expect(parsed.disks?.[0]?.mountPoint).toBe("/");
     expect(parsed.networks?.[0]?.interface).toBe("eth0");
     expect(parsed.cpu?.physicalCores).toBe(4);
+    expect(parsed.shelly?.[0]?.device).toBe("vivosun-heat-mat");
+    expect(parsed.shelly?.[0]?.powerWatts).toBe(47.2);
     expect(parsed.throttling?.undervoltage).toBe(false);
+  });
+
+  it("rejects shelly entries missing the device identifier", () => {
+    expect(() =>
+      BoothSystemSnapshotSchema.parse({
+        shelly: [
+          {
+            endpoint: "switch:0",
+            outputOn: true,
+            powerWatts: 47.2,
+            voltageVolts: 121.1,
+            frequencyHertz: 60,
+            currentAmperes: 0.39,
+            energyWattHours: 1234.5,
+            temperatureCelsius: 28.4,
+            fetchedAtUnixSeconds: 1_780_000_000,
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects negative shelly power readings", () => {
+    expect(() =>
+      BoothSystemSnapshotSchema.parse({
+        shelly: [
+          {
+            device: "vivosun-heat-mat",
+            endpoint: "switch:0",
+            outputOn: true,
+            powerWatts: -0.1,
+            voltageVolts: 121.1,
+            frequencyHertz: 60,
+            currentAmperes: 0.39,
+            energyWattHours: 1234.5,
+            temperatureCelsius: 28.4,
+            fetchedAtUnixSeconds: 1_780_000_000,
+          },
+        ],
+      }),
+    ).toThrow();
   });
 
   it("tolerates unknown forward-compat fields via passthrough", () => {
