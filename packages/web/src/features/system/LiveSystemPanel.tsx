@@ -35,7 +35,11 @@ function summarizeShellyDraw(entry: BoothShellyStats): string {
 }
 
 function formatShellyFetchedAt(entry: BoothShellyStats): string {
-  return new Date(entry.fetchedAtUnixSeconds * 1000).toISOString();
+  const fetchedAtMilliseconds = entry.fetchedAtUnixSeconds * 1000;
+  const fetchedAt = new Date(fetchedAtMilliseconds);
+  return Number.isFinite(fetchedAtMilliseconds) && Number.isFinite(fetchedAt.getTime())
+    ? fetchedAt.toISOString()
+    : "—";
 }
 
 interface LiveSystemPanelProps {

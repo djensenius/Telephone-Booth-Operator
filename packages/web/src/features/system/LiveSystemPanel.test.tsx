@@ -1,7 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, within, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vite-plus/test";
-import type { BoothSystemSnapshotEnvelope } from "@telephone-booth-operator/shared";
+import type {
+  BoothShellyStats,
+  BoothSystemSnapshotEnvelope,
+} from "@telephone-booth-operator/shared";
 import { apiQueryKeys } from "../../lib/api-client.js";
 import { BoothStatusProvider } from "../../components/booth/BoothStatusContext.js";
 import { LiveSystemPanel } from "./LiveSystemPanel.js";
@@ -69,6 +72,22 @@ const baseSnapshot = {
   },
   runtimeMode: "real" as const,
 };
+
+function shellyHeatMat(overrides: Partial<BoothShellyStats> = {}): BoothShellyStats {
+  return {
+    device: "vivosun-heat-mat",
+    endpoint: "switch:0",
+    outputOn: true,
+    powerWatts: 47.2,
+    voltageVolts: 121.1,
+    frequencyHertz: 60,
+    currentAmperes: 0.39,
+    energyWattHours: 1234.5,
+    temperatureCelsius: 28.4,
+    fetchedAtUnixSeconds: 1_780_000_000,
+    ...overrides,
+  };
+}
 
 describe("LiveSystemPanel", () => {
   it("shows expected downtime without hiding a real system error", async () => {
@@ -206,20 +225,7 @@ describe("LiveSystemPanel", () => {
       boothId: "booth-01",
       snapshot: {
         ...baseSnapshot,
-        shelly: [
-          {
-            device: "vivosun-heat-mat",
-            endpoint: "switch:0",
-            outputOn: true,
-            powerWatts: 47.2,
-            voltageVolts: 121.1,
-            frequencyHertz: 60,
-            currentAmperes: 0.39,
-            energyWattHours: 1234.5,
-            temperatureCelsius: 28.4,
-            fetchedAtUnixSeconds: 1_780_000_000,
-          },
-        ],
+        shelly: [shellyHeatMat()],
       },
       receivedAt: "2026-05-27T00:00:05.000Z",
     });
@@ -231,6 +237,53 @@ describe("LiveSystemPanel", () => {
     expect(heatMatRow!.textContent).toContain("heating / drawing power (47.2 W)");
     expect(heatMatRow!.textContent).toContain("current 0.39 A");
     expect(heatMatRow!.textContent).toContain("voltage 121.1 V");
+  });
+
+  it("keeps relay-on separate from no heater draw", () => {
+    renderPanel({
+      boothId: "booth-01",
+      snapshot: {
+        ...baseSnapshot,
+        shelly: [shellyHeatMat({ outputOn: true, powerWatts: 0 })],
+      },
+      receivedAt: "2026-05-27T00:00:05.000Z",
+    });
+
+    const heatMatRow = screen.getByText("Shelly / Vivosun heat mat").parentElement;
+    expect(heatMatRow).toBeDefined();
+    expect(heatMatRow!.textContent).toContain("relay on");
+    expect(heatMatRow!.textContent).toContain("heater off / no draw (0.0 W)");
+  });
+
+  it("keeps relay-off separate from no heater draw", () => {
+    renderPanel({
+      boothId: "booth-01",
+      snapshot: {
+        ...baseSnapshot,
+        shelly: [shellyHeatMat({ outputOn: false, powerWatts: 0 })],
+      },
+      receivedAt: "2026-05-27T00:00:05.000Z",
+    });
+
+    const heatMatRow = screen.getByText("Shelly / Vivosun heat mat").parentElement;
+    expect(heatMatRow).toBeDefined();
+    expect(heatMatRow!.textContent).toContain("relay off");
+    expect(heatMatRow!.textContent).toContain("heater off / no draw (0.0 W)");
+  });
+
+  it("renders an unavailable fetched marker for out-of-range Shelly timestamps", () => {
+    renderPanel({
+      boothId: "booth-01",
+      snapshot: {
+        ...baseSnapshot,
+        shelly: [shellyHeatMat({ fetchedAtUnixSeconds: Number.MAX_SAFE_INTEGER })],
+      },
+      receivedAt: "2026-05-27T00:00:05.000Z",
+    });
+
+    const heatMatRow = screen.getByText("Shelly / Vivosun heat mat").parentElement;
+    expect(heatMatRow).toBeDefined();
+    expect(heatMatRow!.textContent).toContain("fetched —");
   });
 
   it("renders disk entries from snapshot.disks with mountPoint and filesystem", () => {
