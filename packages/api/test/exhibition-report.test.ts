@@ -1178,6 +1178,10 @@ describe("exhibition report helpers", () => {
     expect(html).toContain("Average approved message");
     expect(html).toContain("Longest approved message");
     expect(html).toContain("Most listens in one interaction");
+    expect(html).toContain("<h2>Most active times of day</h2>");
+    expect(html).toContain("Peak one-hour windows are split between weekdays and weekends");
+    expect(html).toContain("10-11 a.m. (6 pickups)");
+    expect(html).toContain("2-3 p.m. (4 pickups)");
     expect(html).toContain("<h2>Selected answer transcriptions</h2>");
     expect(html).toContain(
       '<h3 class="transcript-group-prompt">What would you name this space?</h3>',
