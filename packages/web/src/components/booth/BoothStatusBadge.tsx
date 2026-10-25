@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { useEffect, useState } from "react";
+import { useNow } from "../../hooks/useNow.js";
 import { useBoothStatus } from "./BoothStatusContext.js";
 import type { BoothDisplayStatus } from "./BoothStatusContext.js";
 import { RuntimeModeBadge } from "./RuntimeModeBadge.js";
@@ -35,13 +35,8 @@ function computeStaleness(
 
 function useStaleness(): { level: StalenessLevel; label: string | null } {
   const { lastStatusAt } = useBoothStatus();
-  const [now, setNow] = useState(Date.now);
-
-  useEffect(() => {
-    if (lastStatusAt === null) return undefined;
-    const id = setInterval(() => setNow(Date.now()), 10_000);
-    return () => clearInterval(id);
-  }, [lastStatusAt]);
+  // Reports must not restart the clock: delayed reports can arrive frequently.
+  const now = useNow(10_000);
 
   return computeStaleness(lastStatusAt, now);
 }

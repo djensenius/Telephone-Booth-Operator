@@ -1,6 +1,6 @@
 import type { JSX } from "react";
-import { useMemo, useRef, useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState, useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { GlassPanel } from "../../components/booth/index.js";
 import { useCurrentUser } from "../auth/useCurrentUser.js";
 import { createDebugClient, readDebugConnectionPrefs } from "../../lib/debug-client.js";
@@ -25,6 +25,7 @@ import {
   polledIdentities,
   dbfsFromLinear,
   recordPolledSnapshot,
+  mergeMeterStates,
   recordSample,
   resolveMeter,
 } from "./audio-meters.js";
@@ -38,6 +39,13 @@ import { LogsPanel } from "./LogsPanel.js";
 import { SimulatePanel } from "./SimulatePanel.js";
 import { StateMachinePanel, transitionFromRecord } from "./StateMachinePanel.js";
 import type { StateTransitionRow } from "./StateMachinePanel.js";
+
+interface PolledAudioObservation {
+  readonly snapshot: Awaited<ReturnType<DebugClient["getAudio"]>>;
+  readonly receivedAt: number;
+  readonly identities: PolledMeterIdentities;
+  readonly meters: AudioMeterState;
+}
 
 const INITIAL_CONNECTION: DebugConnectionChange = {
   transport: "disconnected",
@@ -152,6 +160,7 @@ function allowControls(config: RedactedConfig | undefined): boolean {
 }
 
 export function DebugScreen(): JSX.Element {
+  const queryClient = useQueryClient();
   const { user } = useCurrentUser();
   // Settings persists under the operator's subject, so read the same key here
   // rather than the "anonymous" default.
@@ -160,11 +169,13 @@ export function DebugScreen(): JSX.Element {
   const [connection, setConnection] = useState<DebugConnectionChange>(INITIAL_CONNECTION);
   const [level, setLevel] = useState("info");
   const [liveStatus, setLiveStatus] = useState<BoothStatus | undefined>();
+  const [observedStatus, setObservedStatus] = useState<BoothStatus | undefined>();
   const [liveGpio, setLiveGpio] = useState<GpioSnapshot | undefined>();
+  const [observedGpio, setObservedGpio] = useState<GpioSnapshot | undefined>();
   const [liveAudio, setLiveAudio] = useState<AudioDeviceInfo | undefined>();
+  const [observedAudio, setObservedAudio] = useState<PolledAudioObservation | undefined>();
   const [audioMeters, setAudioMeters] = useState<AudioMeterState>(EMPTY_AUDIO_METERS);
   const [meterNow, setMeterNow] = useState<number>(() => Date.now());
-  const polledIdentitiesRef = useRef<PolledMeterIdentities>(NO_POLLED_IDENTITIES);
   const [liveLogs, setLiveLogs] = useState<readonly LogEntry[]>([]);
   const [observedLogs, setObservedLogs] = useState<readonly LogEntry[] | undefined>();
   const [transitions, setTransitions] = useState<readonly StateTransitionRow[]>([]);
@@ -191,21 +202,13 @@ export function DebugScreen(): JSX.Element {
   const wsConnected = connection.wsState === "open";
   const stateQuery = useQuery({
     queryKey: ["debug", "state"],
-    queryFn: async () => {
-      const snapshot = await client!.getState();
-      setLiveStatus(snapshot);
-      return snapshot;
-    },
+    queryFn: () => client!.getState(),
     enabled: client !== null,
     refetchInterval: wsConnected ? false : 2_000,
   });
   const gpioQuery = useQuery({
     queryKey: ["debug", "gpio"],
-    queryFn: async () => {
-      const snapshot = await client!.getGpio();
-      setLiveGpio(snapshot);
-      return snapshot;
-    },
+    queryFn: () => client!.getGpio(),
     enabled: client !== null,
     refetchInterval: wsConnected ? false : 2_000,
   });
@@ -213,18 +216,26 @@ export function DebugScreen(): JSX.Element {
     queryKey: ["debug", "audio"],
     queryFn: async () => {
       const snapshot = await client!.getAudio();
-      setLiveAudio(snapshot);
-      // Ring-buffer telemetry may repeat old samples. Only changed channels
-      // receive a new local freshness date; unchanged channels age out.
+      // Cache the original per-channel receive dates, not a remount's time.
+      // Query completions update the cache, never an old component instance.
       const receivedAt = Date.now();
-      setMeterNow(receivedAt);
+      const previous = queryClient.getQueryData<PolledAudioObservation>(["debug", "audio"]);
       const identities = polledIdentities(snapshot);
-      const changed = changedPolledChannels(polledIdentitiesRef.current, identities);
-      polledIdentitiesRef.current = identities;
-      if (changed.length > 0) {
-        setAudioMeters((current) => recordPolledSnapshot(current, snapshot, changed, receivedAt));
-      }
-      return snapshot;
+      const changed = changedPolledChannels(
+        previous?.identities ?? NO_POLLED_IDENTITIES,
+        identities,
+      );
+      return {
+        snapshot,
+        receivedAt,
+        identities,
+        meters: recordPolledSnapshot(
+          previous?.meters ?? EMPTY_AUDIO_METERS,
+          snapshot,
+          changed,
+          receivedAt,
+        ),
+      } satisfies PolledAudioObservation;
     },
     enabled: client !== null,
     refetchInterval: wsConnected ? false : 2_000,
@@ -251,6 +262,23 @@ export function DebugScreen(): JSX.Element {
   // Follow the active query observer, not individual request completions.
   // This handles cached mounts and ignores late results for an old log filter,
   // while preserving WebSocket additions until the observed baseline changes.
+  if (observedStatus !== stateQuery.data) {
+    setObservedStatus(stateQuery.data);
+    setLiveStatus(stateQuery.data);
+  }
+  if (observedGpio !== gpioQuery.data) {
+    setObservedGpio(gpioQuery.data);
+    setLiveGpio(gpioQuery.data);
+  }
+  if (observedAudio !== audioQuery.data) {
+    setObservedAudio(audioQuery.data);
+    setLiveAudio(audioQuery.data?.snapshot);
+    if (audioQuery.data) {
+      const { meters, receivedAt } = audioQuery.data;
+      setMeterNow((current) => Math.max(current, receivedAt));
+      setAudioMeters((current) => mergeMeterStates(current, meters));
+    }
+  }
   if (observedLogs !== logsQuery.data) {
     setObservedLogs(logsQuery.data);
     setLiveLogs(logsQuery.data ?? []);
@@ -386,7 +414,7 @@ export function DebugScreen(): JSX.Element {
           pinLabels={pinLabels}
         />
         <AudioPanel
-          audio={liveAudio ?? audioQuery.data}
+          audio={liveAudio ?? audioQuery.data?.snapshot}
           input={inputMeter}
           output={outputMeter}
           status={liveStatus ?? stateQuery.data}

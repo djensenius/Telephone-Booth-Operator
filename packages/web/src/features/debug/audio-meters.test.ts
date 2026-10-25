@@ -10,6 +10,7 @@ import {
   NO_POLLED_IDENTITIES,
   changedPolledChannels,
   meterPercent,
+  mergeMeterStates,
   nextMeterUpdateDelay,
   polledIdentities,
   recordPolledSnapshot,
@@ -20,6 +21,41 @@ import {
 const base = { staleAfterMs: LIVE_SAMPLE_STALE_AFTER_MS };
 
 describe("audio meter ballistics", () => {
+  it("restores cached samples without resetting their receive time or age", () => {
+    const cached = recordSample(EMPTY_AUDIO_METERS, "input", {
+      ...base,
+      levelDbfs: -24,
+      peakDbfs: -12,
+      receivedAt: 1_000,
+    });
+    const restored = mergeMeterStates(EMPTY_AUDIO_METERS, cached);
+    expect(restored).toEqual(cached);
+    expect(resolveMeter(restored, "input", 2_000).stale).toBe(true);
+  });
+
+  it("does not replace newer live samples with a cached baseline", () => {
+    const cached = recordSample(EMPTY_AUDIO_METERS, "input", {
+      ...base,
+      levelDbfs: -24,
+      peakDbfs: -12,
+      receivedAt: 1_000,
+    });
+    const live = recordSample(EMPTY_AUDIO_METERS, "input", {
+      ...base,
+      levelDbfs: -10,
+      peakDbfs: -3,
+      receivedAt: 2_000,
+    });
+    expect(mergeMeterStates(live, cached)).toBe(live);
+    const quietNewer = recordSample(EMPTY_AUDIO_METERS, "input", {
+      ...base,
+      levelDbfs: -40,
+      peakDbfs: -30,
+      receivedAt: 2_100,
+    });
+    expect(mergeMeterStates(live, quietNewer).input?.peakDbfs).toBe(-3);
+  });
+
   it("reports a channel with no samples as stale", () => {
     expect(resolveMeter(EMPTY_AUDIO_METERS, "input", 1_000)).toEqual({
       stale: true,

@@ -50,8 +50,13 @@ class MemoryStorage implements Storage {
 }
 
 class SilentWebSocket extends EventTarget {
-  constructor(_url: string, _protocols?: string | string[]) {
+  static instances: SilentWebSocket[] = [];
+  constructor(
+    readonly url: string,
+    _protocols?: string | string[],
+  ) {
     super();
+    SilentWebSocket.instances.push(this);
   }
   send(_data: string): void {}
   close(): void {}
@@ -92,6 +97,7 @@ function renderDebug(): ReturnType<typeof createAppRouter> {
 
 describe("DebugScreen", () => {
   beforeEach(() => {
+    SilentWebSocket.instances = [];
     installBrowserStubs();
     window.localStorage.clear();
     // Settings persists under the operator's subject, so the fixture must use
@@ -281,6 +287,85 @@ describe("DebugScreen", () => {
     await act(() => router.navigate({ to: "/debug" }));
     expect(await screen.findByText("hook_on")).toBeTruthy();
     expect(eventRequests()).toBe(1);
+  });
+
+  it("hydrates cached diagnostic baselines before live events when refetching fails", async () => {
+    const fallback = globalThis.fetch;
+    let failRefresh = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url =
+          input instanceof URL ? input.toString() : typeof input === "string" ? input : input.url;
+        if (failRefresh && /\/v1\/(state|gpio|audio)$/u.test(url)) {
+          return Promise.reject(new Error("Booth is offline"));
+        }
+        if (url.endsWith("/v1/state")) {
+          return Promise.resolve(
+            jsonResponse({
+              state: "idle",
+              updatedAt: "2026-01-01T00:00:00Z",
+              currentQuestionId: "cached-question",
+              currentMessageId: "cached-message",
+              lastError: "cached-error",
+            }),
+          );
+        }
+        return fallback(input, init);
+      }),
+    );
+    const router = renderDebug();
+    await screen.findByText("cached-question");
+    await screen.findByText("USB handset");
+    expect(await screen.findByRole("meter", { name: "Input RMS" })).toBeTruthy();
+    await act(() => router.navigate({ to: "/settings" }));
+    failRefresh = true;
+    await act(() => router.navigate({ to: "/debug" }));
+    await screen.findByText("cached-question");
+    expect(screen.getByRole("meter", { name: "Input RMS" })).toBeTruthy();
+    const socket = SilentWebSocket.instances
+      .filter((candidate) => candidate.url.includes("/ws/telemetry"))
+      .slice(-1)[0];
+    if (!socket) throw new Error("Telemetry socket was not created");
+    act(() => {
+      socket.dispatchEvent(new Event("open"));
+      for (const record of [
+        {
+          id: 100,
+          ts: "2026-01-01T00:00:10Z",
+          kind: "state_transition",
+          from: "idle",
+          to: "dial_tone",
+          cause: "hook_off",
+          at_monotonic_ns: 100,
+        },
+        {
+          id: 101,
+          ts: "2026-01-01T00:00:11Z",
+          kind: "gpio_edge",
+          role: "rotary_pulse",
+          level: true,
+          at_monotonic_ns: 101,
+        },
+        {
+          id: 102,
+          ts: "2026-01-01T00:00:12Z",
+          kind: "audio_level",
+          channel: "output",
+          rms: 0.5,
+          peak: 0.75,
+          at_monotonic_ns: 102,
+        },
+      ]) {
+        socket.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(record) }));
+      }
+    });
+    expect(screen.getByText("cached-question")).toBeTruthy();
+    expect(screen.getByText("cached-message")).toBeTruthy();
+    expect(screen.getByText("Last error: cached-error")).toBeTruthy();
+    expect(screen.getByText("Pin 17")).toBeTruthy();
+    expect(screen.getByText("USB handset")).toBeTruthy();
+    expect(screen.getByText("48000 Hz")).toBeTruthy();
   });
 
   it("has no critical axe violations", async () => {
