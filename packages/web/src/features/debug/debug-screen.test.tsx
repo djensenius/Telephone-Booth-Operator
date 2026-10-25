@@ -1,6 +1,6 @@
 import axe from "axe-core";
 import { createMemoryHistory } from "@tanstack/react-router";
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { App } from "../../app/App.js";
 import { createAppRouter } from "../../app/router.js";
@@ -9,6 +9,16 @@ import {
   getDebugConnectionStorageKey,
   writeDebugConnectionToken,
 } from "../../lib/debug-client.js";
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve: (value: T) => void = () => {
+    throw new Error("Deferred promise is not initialized");
+  };
+  const promise = new Promise<T>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -74,9 +84,10 @@ function installBrowserStubs(): void {
   vi.stubGlobal("WebSocket", SilentWebSocket);
 }
 
-function renderDebug(): void {
+function renderDebug(): ReturnType<typeof createAppRouter> {
   const router = createAppRouter({ history: createMemoryHistory({ initialEntries: ["/debug"] }) });
   render(<App router={router} />);
+  return router;
 }
 
 describe("DebugScreen", () => {
@@ -209,6 +220,67 @@ describe("DebugScreen", () => {
     expect(await screen.findByText("USB handset")).toBeTruthy();
     expect(await screen.findByText("Line is ready")).toBeTruthy();
     expect(await screen.findByText("Simulate hook-off")).toBeTruthy();
+  });
+
+  it("ignores a late log response from the previous level", async () => {
+    const fallback = globalThis.fetch;
+    const pending = deferred<Response>();
+    const started = deferred<void>();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url =
+          input instanceof URL ? input.toString() : typeof input === "string" ? input : input.url;
+        if (url.includes("/v1/logs")) {
+          if (new URL(url).searchParams.get("level") === "info") {
+            started.resolve();
+            return pending.promise;
+          }
+          return Promise.resolve(
+            jsonResponse([
+              {
+                ts: "2026-01-01T00:00:05Z",
+                level: "error",
+                target: "booth",
+                message: "Current error log",
+              },
+            ]),
+          );
+        }
+        return fallback(input, init);
+      }),
+    );
+    renderDebug();
+    await started.promise;
+    fireEvent.change(await screen.findByLabelText("Level"), { target: { value: "error" } });
+    await screen.findByText("Current error log");
+    await act(async () => {
+      pending.resolve(
+        jsonResponse([
+          { ts: "2026-01-01T00:00:03Z", level: "info", target: "booth", message: "Stale info log" },
+        ]),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await waitFor(() => expect(screen.queryByText("Stale info log")).toBeNull());
+    expect(screen.getByText("Current error log")).toBeTruthy();
+  });
+
+  it("restores cached transition history when returning before it becomes stale", async () => {
+    const router = renderDebug();
+    await screen.findByText("hook_on");
+    const eventRequests = (): number =>
+      vi.mocked(fetch).mock.calls.filter(([input]) => {
+        const url =
+          input instanceof URL ? input.toString() : typeof input === "string" ? input : input.url;
+        return url.endsWith("/v1/events");
+      }).length;
+    expect(eventRequests()).toBe(1);
+    await act(() => router.navigate({ to: "/settings" }));
+    await waitFor(() => expect(screen.queryByText("hook_on")).toBeNull());
+    await act(() => router.navigate({ to: "/debug" }));
+    expect(await screen.findByText("hook_on")).toBeTruthy();
+    expect(eventRequests()).toBe(1);
   });
 
   it("has no critical axe violations", async () => {

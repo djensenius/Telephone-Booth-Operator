@@ -166,7 +166,9 @@ export function DebugScreen(): JSX.Element {
   const [meterNow, setMeterNow] = useState<number>(() => Date.now());
   const polledIdentitiesRef = useRef<PolledMeterIdentities>(NO_POLLED_IDENTITIES);
   const [liveLogs, setLiveLogs] = useState<readonly LogEntry[]>([]);
+  const [observedLogs, setObservedLogs] = useState<readonly LogEntry[] | undefined>();
   const [transitions, setTransitions] = useState<readonly StateTransitionRow[]>([]);
+  const [observedEvents, setObservedEvents] = useState<readonly TelemetryRecord[] | undefined>();
   const [pulseAccumulator, setPulseAccumulator] = useState<PulseAccumulator>({
     currentCount: 0,
     lastDigit: null,
@@ -227,13 +229,9 @@ export function DebugScreen(): JSX.Element {
     enabled: client !== null,
     refetchInterval: wsConnected ? false : 2_000,
   });
-  useQuery({
+  const logsQuery = useQuery({
     queryKey: ["debug", "logs", level],
-    queryFn: async () => {
-      const logs = await client!.getLogs({ level, limit: 200 });
-      setLiveLogs(logs);
-      return logs;
-    },
+    queryFn: () => client!.getLogs({ level, limit: 200 }),
     enabled: client !== null,
     refetchInterval: wsConnected ? false : 2_000,
   });
@@ -243,21 +241,29 @@ export function DebugScreen(): JSX.Element {
     enabled: client !== null,
     staleTime: 30_000,
   });
-  useQuery({
+  const eventsQuery = useQuery({
     queryKey: ["debug", "events"],
-    queryFn: async () => {
-      const events = await client!.getEvents();
-      const rows = events
-        .map(transitionFromRecord)
-        .filter((row): row is StateTransitionRow => row !== null)
-        .slice(-50)
-        .reverse();
-      if (rows.length > 0) setTransitions(rows);
-      return events;
-    },
+    queryFn: () => client!.getEvents(),
     enabled: client !== null,
     staleTime: 10_000,
   });
+
+  // Follow the active query observer, not individual request completions.
+  // This handles cached mounts and ignores late results for an old log filter,
+  // while preserving WebSocket additions until the observed baseline changes.
+  if (observedLogs !== logsQuery.data) {
+    setObservedLogs(logsQuery.data);
+    setLiveLogs(logsQuery.data ?? []);
+  }
+  if (observedEvents !== eventsQuery.data) {
+    setObservedEvents(eventsQuery.data);
+    const rows = (eventsQuery.data ?? [])
+      .map(transitionFromRecord)
+      .filter((row): row is StateTransitionRow => row !== null)
+      .slice(-50)
+      .reverse();
+    if (rows.length > 0) setTransitions(rows);
+  }
 
   useEffect(() => {
     if (client === null) {
