@@ -519,6 +519,22 @@ const activityHourLine = (
   return null;
 };
 
+const peakHourTableCell = (
+  peak: ExhibitionPeakHour | null,
+  unit: { singular: string; plural: string },
+): string => peakHourSummary(peak, unit) ?? "No activity recorded";
+
+const activityPeakRow = (
+  label: string,
+  unit: { singular: string; plural: string },
+  highlights: ExhibitionTimeHighlights,
+): string => `
+            <tr>
+              <th scope="row">${escapeHtml(label)}</th>
+              <td>${escapeHtml(peakHourTableCell(highlights.weekdayPeak, unit))}</td>
+              <td>${escapeHtml(peakHourTableCell(highlights.weekendPeak, unit))}</td>
+            </tr>`;
+
 export const exhibitionEmailHighlightLines = (report: ExhibitionReportData): string[] => {
   const lines = [
     activityHourLine(
@@ -607,6 +623,24 @@ export const renderExhibitionReportHtml = (report: ExhibitionReportData): string
         </tr>`,
     )
     .join("");
+
+  const popularTimeRows = [
+    activityPeakRow(
+      "Handset pickups",
+      { singular: "pickup", plural: "pickups" },
+      report.emailHighlights.pickupHours,
+    ),
+    activityPeakRow(
+      "Messages left",
+      { singular: "message left", plural: "messages left" },
+      report.emailHighlights.messageLeavingHours,
+    ),
+    activityPeakRow(
+      "Messages listened to",
+      { singular: "listen", plural: "listens" },
+      report.emailHighlights.messageListeningHours,
+    ),
+  ].join("");
 
   const questionRows = report.questions
     .map((question) => {
@@ -1228,6 +1262,24 @@ export const renderExhibitionReportHtml = (report: ExhibitionReportData): string
           report.funFacts.maxMessagePlaybacksInInteraction,
           "Message playback starts during a single pickup",
         )}
+      </div>
+    </section>
+
+    <section>
+      <p class="section-kicker">Popular times</p>
+      <h2>Most active times of day</h2>
+      <p class="section-intro">Peak one-hour windows are split between weekdays and weekends in ${escapeHtml(report.timeZone)}.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Activity</th>
+              <th scope="col">Weekdays</th>
+              <th scope="col">Weekends</th>
+            </tr>
+          </thead>
+          <tbody>${popularTimeRows}</tbody>
+        </table>
       </div>
     </section>
 
