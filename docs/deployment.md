@@ -14,6 +14,36 @@ just docker-build
 docker images | grep telephone-booth
 ```
 
+CI builds both production Dockerfiles on every pull request without publishing
+images, and runs `node --version` inside the API image to check the runtime pin.
+The CI web build uses a placeholder API URL only for build validation; production
+images must use the deployment's actual API URL. `.dockerignore` excludes local
+credentials, dependency trees, and generated output from the build context.
+
+## Node security baseline
+
+The supported runtime is **Node 24.22.1 or a later patched Node 24 release**.
+Node 24.22.1 fixes the Brotli decoder remote-code-execution vulnerability
+[Node2Shell (CVE-2026-111497)](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases).
+Updating npm packages alone does not patch the Node runtime.
+
+`.node-version`, `mise.toml`, the development container, and every Node stage
+in the API and web Dockerfiles use the same exact version. Update those pins
+together; CI tests reject drift and versions older than this security baseline.
+The pnpm engine constraint intentionally excludes unsupported Node majors.
+
+After updating, rebuild and publish **both** images, redeploy the API, and
+verify the running container rather than just your development shell:
+
+```sh
+docker compose -f docker-compose.prod.yml exec api node --version
+```
+
+A pre-existing image or running container remains unpatched until it is replaced.
+The web runtime serves static files with nginx, but its Node build stage must
+also use a patched release. Use `pnpm audit` to check locked npm dependencies
+separately from the runtime version.
+
 ## Required external services
 
 | Service                      | What for                                                        |

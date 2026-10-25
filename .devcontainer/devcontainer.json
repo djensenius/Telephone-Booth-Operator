@@ -9,11 +9,11 @@
     "ghcr.io/devcontainers-extra/features/mise:1": {},
     "ghcr.io/devcontainers-extra/features/npm-package:1": {
       "package": "vite-plus",
-      "version": "0.1.22"
+      "version": "1.4.0"
     },
     "ghcr.io/devcontainers/features/node:1": {
-      "version": "24.16.0",
-      "pnpmVersion": "9.15.0"
+      "version": "24.22.1",
+      "pnpmVersion": "9.15.9"
     }
   },
   "postCreateCommand": "mise trust && mise install --jobs=1 && mise exec -- just setup",

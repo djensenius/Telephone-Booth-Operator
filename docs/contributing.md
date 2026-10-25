@@ -18,6 +18,21 @@ just docs-check     # markdownlint + lychee
 
 CI runs the same plus typedoc and an OpenAPI diff.
 
+## Toolchain updates
+
+Use the patched Node 24 version pinned in `.node-version` and `mise.toml`.
+Update the development container and all Docker build/runtime stages together;
+see the [Node security baseline](deployment.md#node-security-baseline).
+
+The Vite+ package and its Vite core alias share one version in
+`pnpm-workspace.yaml`. Keep the `@types/node` override aligned with Node 24
+across the workspace: mixed Node type versions create separate Vite+/Vitest
+peer instances and prevent test suites from sharing their runner context.
+Refresh dependencies with `pnpm update -r`, commit the lockfile, and run
+`pnpm audit` in addition to the checks above. Compatible updates intentionally
+stay on supported stable majors rather than adopting prerelease Prisma or
+unrelated breaking changes.
+
 ## Before merging
 
 - Wait for the Copilot PR review to complete.

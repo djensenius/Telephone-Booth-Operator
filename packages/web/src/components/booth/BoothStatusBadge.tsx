@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { useEffect, useState } from "react";
+import { useNow } from "../../hooks/useNow.js";
 import { useBoothStatus } from "./BoothStatusContext.js";
 import type { BoothDisplayStatus } from "./BoothStatusContext.js";
 import { RuntimeModeBadge } from "./RuntimeModeBadge.js";
@@ -16,12 +16,15 @@ type StalenessLevel = "fresh" | "warning" | "offline";
 const STALE_WARNING_MS = 60_000;
 const STALE_OFFLINE_MS = 300_000;
 
-function computeStaleness(lastStatusAt: Date | null): {
+function computeStaleness(
+  lastStatusAt: Date | null,
+  now: number,
+): {
   level: StalenessLevel;
   label: string | null;
 } {
   if (lastStatusAt === null) return { level: "fresh", label: null };
-  const elapsed = Date.now() - lastStatusAt.getTime();
+  const elapsed = now - lastStatusAt.getTime();
   if (elapsed < STALE_WARNING_MS) return { level: "fresh", label: null };
   if (elapsed < STALE_OFFLINE_MS) {
     const mins = Math.round(elapsed / 60_000);
@@ -32,18 +35,10 @@ function computeStaleness(lastStatusAt: Date | null): {
 
 function useStaleness(): { level: StalenessLevel; label: string | null } {
   const { lastStatusAt } = useBoothStatus();
-  const [staleness, setStaleness] = useState(() => computeStaleness(lastStatusAt));
+  // Reports must not restart the clock: delayed reports can arrive frequently.
+  const now = useNow(10_000);
 
-  useEffect(() => {
-    setStaleness(computeStaleness(lastStatusAt));
-    if (lastStatusAt === null) return undefined;
-    const id = setInterval(() => {
-      setStaleness(computeStaleness(lastStatusAt));
-    }, 10_000);
-    return () => clearInterval(id);
-  }, [lastStatusAt]);
-
-  return staleness;
+  return computeStaleness(lastStatusAt, now);
 }
 
 export function BoothStatusBadge(): JSX.Element {

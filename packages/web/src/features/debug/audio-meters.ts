@@ -113,6 +113,33 @@ export function recordSample(
   return { ...state, [channel]: sample };
 }
 
+/** Restore cached samples without refreshing their age or replacing newer live samples. */
+export function mergeMeterStates(
+  current: AudioMeterState,
+  cached: AudioMeterState,
+): AudioMeterState {
+  return AUDIO_CHANNELS.reduce((state, channel) => {
+    const incoming = cached[channel];
+    const previous = state[channel];
+    if (
+      incoming === undefined ||
+      (previous !== undefined && previous.receivedAt >= incoming.receivedAt)
+    ) {
+      return state;
+    }
+    if (previous === undefined) return { ...state, [channel]: incoming };
+    const next = recordSample(state, channel, incoming);
+    const merged = next[channel];
+    if (merged !== undefined && merged.peakDbfs === incoming.peakDbfs) {
+      return {
+        ...next,
+        [channel]: { ...merged, peakSetAt: Math.min(merged.peakSetAt, incoming.peakSetAt) },
+      };
+    }
+    return next;
+  }, current);
+}
+
 export type PolledMeterIdentities = {
   readonly [channel in AudioChannel]: string | null;
 };

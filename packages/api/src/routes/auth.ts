@@ -77,7 +77,7 @@ const auditAuthEvent = async (
   if (entry.statusCode >= 400 && !entry.actorUserId) {
     const suppressed = anonAllowance(ip);
     if (suppressed === null) return;
-    if (suppressed > 0) metadata = { ...(metadata ?? {}), suppressedSince: suppressed };
+    if (suppressed > 0) metadata = { ...metadata, suppressedSince: suppressed };
   }
   await writeAuditEntry({
     action: entry.action,

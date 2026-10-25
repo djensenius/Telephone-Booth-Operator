@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1.7
-FROM node:24-alpine AS base
+FROM node:24.22.1-alpine AS base
 WORKDIR /app
 RUN apk add --no-cache openssl
-RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 
 FROM base AS deps
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml* ./
@@ -18,11 +18,11 @@ COPY . .
 RUN pnpm --filter @telephone-booth-operator/api exec prisma generate \
  && pnpm --filter @telephone-booth-operator/api... build
 
-FROM node:24-alpine AS runtime
+FROM node:24.22.1-alpine AS runtime
 WORKDIR /app/packages/api
 ENV NODE_ENV=production
 RUN apk add --no-cache openssl
-RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 COPY --from=build /app/node_modules /app/node_modules
 COPY --from=build /app/packages/api/node_modules /app/packages/api/node_modules
 COPY --from=build /app/packages/api/dist /app/packages/api/dist

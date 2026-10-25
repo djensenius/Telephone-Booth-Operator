@@ -3,9 +3,9 @@
   "version": "0.5.2",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@9.15.0",
+  "packageManager": "pnpm@9.15.9",
   "engines": {
-    "node": ">=24.16.0"
+    "node": ">=24.22.1 <25"
   },
   "scripts": {
     "build": "vp run -r build",
@@ -16,13 +16,15 @@
     "typecheck": "vp run -r typecheck"
   },
   "devDependencies": {
-    "tsx": "^4.23.1",
+    "@types/node": "^24.19.2",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "catalog:",
     "vite-plus": "catalog:"
   },
   "pnpm": {
     "overrides": {
+      "@types/node": "^24.19.2",
       "deepmerge-ts@<8.0.0": "^8.0.0",
       "fast-uri@>=3.0.0 <3.1.6": "^3.1.6",
       "js-yaml@>=4.0.0 <=4.1.1": "^4.2.0",

@@ -1,7 +1,12 @@
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, fireEvent } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { BoothStatusProvider } from "./BoothStatusContext.js";
+import { BoothStatusProvider, useBoothStatus } from "./BoothStatusContext.js";
 import { BoothStatusBadge } from "./BoothStatusBadge.js";
+
+function DelayedReport({ at }: { readonly at: Date }) {
+  const { setLastStatusAt } = useBoothStatus();
+  return <button onClick={() => setLastStatusAt(new Date(at.getTime()))}>Replay report</button>;
+}
 
 describe("BoothStatusBadge", () => {
   beforeEach(() => {
@@ -104,6 +109,23 @@ describe("BoothStatusBadge", () => {
     expect(screen.getByText("Offline is expected")).toBeDefined();
     expect(screen.queryByText("Booth offline")).toBeNull();
     expect(screen.queryByText("Error")).toBeNull();
+  });
+
+  it("advances the clock even when delayed reports arrive every five seconds", () => {
+    const at = new Date();
+    render(
+      <BoothStatusProvider initialStatus="idle" initialLastStatusAt={at}>
+        <BoothStatusBadge />
+        <DelayedReport at={at} />
+      </BoothStatusProvider>,
+    );
+    for (let index = 0; index < 14; index += 1) {
+      act(() => {
+        vi.advanceTimersByTime(5_000);
+        fireEvent.click(screen.getByText("Replay report"));
+      });
+    }
+    expect(screen.getByText("Last seen 1m ago")).toBeDefined();
   });
 
   it("transitions from fresh to warning as time passes", () => {

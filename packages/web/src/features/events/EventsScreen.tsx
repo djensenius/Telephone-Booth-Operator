@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import type { BoothEventType } from "@telephone-booth-operator/shared";
 import { GlassPanel } from "../../components/booth/index.js";
@@ -86,9 +86,9 @@ export function EventsScreen(): JSX.Element {
   // A cursor only means something within the era it was issued for. Browser
   // history can change the scope without going through the picker, so reset
   // on the parsed value rather than on the interaction.
-  const scopeRef = useRef(scope);
-  if (scopeRef.current !== scope) {
-    scopeRef.current = scope;
+  const [previousScope, setPreviousScope] = useState(scope);
+  if (previousScope !== scope) {
+    setPreviousScope(scope);
     if (cursor !== undefined) setCursor(undefined);
   }
   const query = useEventsList({

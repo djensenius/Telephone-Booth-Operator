@@ -45,7 +45,7 @@ repository (`rust-client` branch). The two sides communicate over a versioned
 | `tools/`          | One-off scripts (seed, docs index generator)                       |
 | `docs/`           | Architecture, setup, theme, runbooks, ADRs, provider guides        |
 
-This is a **pnpm workspace** (`pnpm@9.15.0`) on **Node 24** with the **Vite+**
+This is a **pnpm workspace** (`pnpm@9.15.9`) on **Node 24** with the **Vite+**
 toolchain. Use `vp` for install/dev/build/test/lint/format workflows; use raw
 `pnpm` only for package-manager-specific operations. Tool versions are pinned in
 `mise.toml` and `.node-version` — run `mise install` to get them.

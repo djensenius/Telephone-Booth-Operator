@@ -35,10 +35,7 @@ import { installationsRouter } from "./routes/installations.js";
 import { instructionsRouter } from "./routes/instructions.js";
 import { messagesRouter } from "./routes/messages.js";
 import { messageProcessingRouter } from "./routes/message-processing.js";
-import {
-  adminModerationPolicyRouter,
-  moderationPolicyRouter,
-} from "./routes/moderation-policy.js";
+import { adminModerationPolicyRouter, moderationPolicyRouter } from "./routes/moderation-policy.js";
 import { monitorRouter } from "./routes/monitor.js";
 import { questionsRouter } from "./routes/questions.js";
 import { sessionsRouter } from "./routes/sessions.js";
