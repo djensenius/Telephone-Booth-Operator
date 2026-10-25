@@ -30,6 +30,14 @@ describe("patched Node runtime", () => {
     expect(node.version).toBe(pinned);
   });
 
+  it("excludes local credentials and dependencies from Docker build contexts", () => {
+    const ignored = read(".dockerignore").split("\n");
+    expect(ignored).toContain(".env");
+    expect(ignored).toContain(".env.*");
+    expect(ignored).toContain("**/node_modules");
+    expect(ignored).toContain(".git");
+  });
+
   it.each(["packages/api/Dockerfile", "packages/web/Dockerfile"])(
     "pins every Node image stage in %s",
     (path) => {

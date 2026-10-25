@@ -57,6 +57,32 @@ jobs:
       - run: vp run -r test
       - run: vp run -r build
 
+  docker:
+    name: Docker (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [api, web]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build production image
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          args=()
+          if [[ "$TARGET" == "web" ]]; then
+            args+=(--build-arg VITE_API_BASE_URL=https://operator.example.com)
+          fi
+          docker build --pull -f "packages/$TARGET/Dockerfile" \
+            -t "telephone-booth-operator-$TARGET:ci" "${args[@]}" .
+      - name: Verify patched runtime in API image
+        if: matrix.target == 'api'
+        run: |
+          expected=$(tr -d '[:space:]' < .node-version)
+          actual=$(docker run --rm --entrypoint node telephone-booth-operator-api:ci --version)
+          test "$actual" = "v$expected"
+
   docs:
     runs-on: ubuntu-latest
     steps:

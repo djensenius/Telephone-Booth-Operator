@@ -1,0 +1,12 @@
+.git
+**/node_modules
+**/dist
+**/coverage
+**/.vite
+**/.vite-plus
+**/.DS_Store
+.env
+.env.*
+!.env.example
+packages/api/src/generated
+reports

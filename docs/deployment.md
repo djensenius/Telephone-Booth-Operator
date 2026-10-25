@@ -14,6 +14,12 @@ just docker-build
 docker images | grep telephone-booth
 ```
 
+CI builds both production Dockerfiles on every pull request without publishing
+images, and runs `node --version` inside the API image to check the runtime pin.
+The CI web build uses a placeholder API URL only for build validation; production
+images must use the deployment's actual API URL. `.dockerignore` excludes local
+credentials, dependency trees, and generated output from the build context.
+
 ## Node security baseline
 
 The supported runtime is **Node 24.22.1 or a later patched Node 24 release**.
