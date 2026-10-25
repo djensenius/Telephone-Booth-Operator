@@ -484,7 +484,7 @@ export const auditWrites =
       if (statusCode >= 400 && !actor.actorUserId && !actor.actorTokenId) {
         const suppressed = anonAllowance(ip);
         if (suppressed === null) return;
-        if (suppressed > 0) metadata = { ...(metadata ?? {}), suppressedSince: suppressed };
+        if (suppressed > 0) metadata = { ...metadata, suppressedSince: suppressed };
       }
       await writeAuditEntry({
         action: draft.action ?? defaultAction(c.req.method, pattern),

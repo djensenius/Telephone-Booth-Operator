@@ -189,25 +189,51 @@ export function DebugScreen(): JSX.Element {
   const wsConnected = connection.wsState === "open";
   const stateQuery = useQuery({
     queryKey: ["debug", "state"],
-    queryFn: () => client!.getState(),
+    queryFn: async () => {
+      const snapshot = await client!.getState();
+      setLiveStatus(snapshot);
+      return snapshot;
+    },
     enabled: client !== null,
     refetchInterval: wsConnected ? false : 2_000,
   });
   const gpioQuery = useQuery({
     queryKey: ["debug", "gpio"],
-    queryFn: () => client!.getGpio(),
+    queryFn: async () => {
+      const snapshot = await client!.getGpio();
+      setLiveGpio(snapshot);
+      return snapshot;
+    },
     enabled: client !== null,
     refetchInterval: wsConnected ? false : 2_000,
   });
   const audioQuery = useQuery({
     queryKey: ["debug", "audio"],
-    queryFn: () => client!.getAudio(),
+    queryFn: async () => {
+      const snapshot = await client!.getAudio();
+      setLiveAudio(snapshot);
+      // Ring-buffer telemetry may repeat old samples. Only changed channels
+      // receive a new local freshness date; unchanged channels age out.
+      const receivedAt = Date.now();
+      setMeterNow(receivedAt);
+      const identities = polledIdentities(snapshot);
+      const changed = changedPolledChannels(polledIdentitiesRef.current, identities);
+      polledIdentitiesRef.current = identities;
+      if (changed.length > 0) {
+        setAudioMeters((current) => recordPolledSnapshot(current, snapshot, changed, receivedAt));
+      }
+      return snapshot;
+    },
     enabled: client !== null,
     refetchInterval: wsConnected ? false : 2_000,
   });
-  const logsQuery = useQuery({
+  useQuery({
     queryKey: ["debug", "logs", level],
-    queryFn: () => client!.getLogs({ level, limit: 200 }),
+    queryFn: async () => {
+      const logs = await client!.getLogs({ level, limit: 200 });
+      setLiveLogs(logs);
+      return logs;
+    },
     enabled: client !== null,
     refetchInterval: wsConnected ? false : 2_000,
   });
@@ -217,46 +243,21 @@ export function DebugScreen(): JSX.Element {
     enabled: client !== null,
     staleTime: 30_000,
   });
-  const eventsQuery = useQuery({
+  useQuery({
     queryKey: ["debug", "events"],
-    queryFn: () => client!.getEvents(),
+    queryFn: async () => {
+      const events = await client!.getEvents();
+      const rows = events
+        .map(transitionFromRecord)
+        .filter((row): row is StateTransitionRow => row !== null)
+        .slice(-50)
+        .reverse();
+      if (rows.length > 0) setTransitions(rows);
+      return events;
+    },
     enabled: client !== null,
     staleTime: 10_000,
   });
-
-  useEffect(() => setLiveStatus(stateQuery.data), [stateQuery.data]);
-  useEffect(() => setLiveGpio(gpioQuery.data), [gpioQuery.data]);
-  useEffect(() => {
-    const snapshot = audioQuery.data;
-    setLiveAudio(snapshot);
-    if (snapshot === undefined) {
-      return;
-    }
-    // The polled snapshot is replayed from the booth's telemetry ring buffer,
-    // so it can repeat an old sample. Age it from the local receive time and
-    // allow one missed poll before the meter is treated as stale. Channels
-    // whose values did not change are left to age out on their own.
-    const receivedAt = Date.now();
-    setMeterNow(receivedAt);
-    const identities = polledIdentities(snapshot);
-    const changed = changedPolledChannels(polledIdentitiesRef.current, identities);
-    polledIdentitiesRef.current = identities;
-    if (changed.length === 0) {
-      return;
-    }
-    setAudioMeters((current) => recordPolledSnapshot(current, snapshot, changed, receivedAt));
-  }, [audioQuery.data]);
-  useEffect(() => setLiveLogs(logsQuery.data ?? []), [logsQuery.data]);
-  useEffect(() => {
-    const rows = (eventsQuery.data ?? [])
-      .map(transitionFromRecord)
-      .filter((row): row is StateTransitionRow => row !== null)
-      .slice(-50)
-      .reverse();
-    if (rows.length > 0) {
-      setTransitions(rows);
-    }
-  }, [eventsQuery.data]);
 
   useEffect(() => {
     if (client === null) {
@@ -372,9 +373,18 @@ export function DebugScreen(): JSX.Element {
         </p>
       ) : null}
       <div className="debug-grid">
-        <StateMachinePanel status={liveStatus} transitions={transitions} />
-        <GpioPanel snapshot={liveGpio} pulseAccumulator={pulseAccumulator} pinLabels={pinLabels} />
-        <AudioPanel audio={liveAudio} input={inputMeter} output={outputMeter} status={liveStatus} />
+        <StateMachinePanel status={liveStatus ?? stateQuery.data} transitions={transitions} />
+        <GpioPanel
+          snapshot={liveGpio ?? gpioQuery.data}
+          pulseAccumulator={pulseAccumulator}
+          pinLabels={pinLabels}
+        />
+        <AudioPanel
+          audio={liveAudio ?? audioQuery.data}
+          input={inputMeter}
+          output={outputMeter}
+          status={liveStatus ?? stateQuery.data}
+        />
         <LogsPanel logs={liveLogs} level={level} onLevelChange={setLevel} />
         <ConfigPanel config={config} />
         <CertFingerprintCard fingerprint={prefs.pinnedFingerprint} />

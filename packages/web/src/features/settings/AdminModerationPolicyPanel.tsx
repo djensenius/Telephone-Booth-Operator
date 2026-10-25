@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ApiError, useModerationPolicy, useUpdateModerationPolicy } from "../../lib/api-client.js";
 import { FeatureError } from "../common/FeatureStates.js";
 
@@ -8,11 +8,12 @@ const minPolicyLength = 50;
 export function AdminModerationPolicyPanel(): JSX.Element {
   const policy = useModerationPolicy();
   const updatePolicy = useUpdateModerationPolicy();
-  const [instructions, setInstructions] = useState("");
-
-  useEffect(() => {
+  const [instructions, setInstructions] = useState(() => policy.data?.instructions ?? "");
+  const [previousPolicy, setPreviousPolicy] = useState(policy.data);
+  if (previousPolicy !== policy.data) {
+    setPreviousPolicy(policy.data);
     if (policy.data) setInstructions(policy.data.instructions);
-  }, [policy.data]);
+  }
 
   const trimmed = instructions.trim();
   const changed = policy.data ? trimmed !== policy.data.instructions : false;
